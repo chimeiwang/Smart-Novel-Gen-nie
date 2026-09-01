@@ -265,7 +265,7 @@ terminal/waiting_user 收敛或低频兜底到期时，对应连接才读取 Eve
 批量轮询恢复；它不能重新升级为事件权威。连接必须有心跳、关闭条件、订阅清理和全局/每用户上限。
 
 首版共享 observer 使用以下可执行资源边界：每个 Core 进程最多保留 256 条 V2 SSE 连接，同一用户最多 8 条；
-达到任一上限时必须在 `StreamingResponseBody` 建立前以稳定 429 拒绝。observer 每秒只对当前不同的订阅
+达到任一上限时必须在 `SseEmitter` 建立前以稳定 429 拒绝。observer 每秒只对当前不同的订阅
 `runId + userId` 做一次批量 `lastEventSequence/status` 查询；发生高水位变化或新订阅需要补齐 snapshot 后并发提交
 的 Event 时，再以每个 Run 最多 100 条的一次批量 tail 查询公平推进所有有积压 Run。同一 Run 的多条连接共享该次
 Event 读取并各自按自己的 `baseSequence` 去重，初始 snapshot/baseSequence 仍由每条连接独立在同一
@@ -282,10 +282,52 @@ V2 repository、observer 或 stream service，纯 V1 请求不得探测 V2 表�
 由 Run 的有界共享历史补齐；超过历史边界时统一回拨该 Run 的共享读取 cursor，既有连接按自身已发送 sequence 过滤
 重读前缀，新连接仍须收到从 baseSequence 开始的完整连续后继。
 
+写作 SSE 的 Java OpenAPI 生成类型固定映射为 Spring MVC `SseEmitter`；二进制文件下载继续映射为
+`StreamingResponseBody`，两者不得共用同一个生成类型。原因是 Spring Framework 7 已把
+`ServletServerHttpResponse#getBody()` 返回流的 `flush()` 改为无操作，而 `StreamingResponseBody` 的最终
+`ServerHttpResponse.flush()` 只在回调返回后执行；一个尚未终态的长连接因此不会提交 200 响应头或首帧。
+不得以全局 `spring.http.response.flush.enabled` 兼容开关恢复旧行为，因为它会同时改变全部响应和二进制流语义。
+
+`SseEmitter` 适配层必须继续发送当前协议的原始 UTF-8 frame，精确保留 `id: `、`event: `、`data: ` 与
+`: 心跳` 的现有字节形式；不能因使用框架 builder 改变空格、JSON 序列化或心跳。每次 frame 只能调用一次 emitter
+send，由 Spring 的 emitter handler 在该次 send 后执行真实 `ServerHttpResponse.flush()`。应用 service 只返回平台
+`ManagedSseEmitter`，不得读取 `RequestContextHolder` 或 Servlet 对象；Writing API 层必须把 emitter 显式 arm 到
+当前请求。平台 `AsyncHandlerInterceptor.afterConcurrentHandlingStarted` 只能在 Spring 已完成 emitter handler
+初始化后启动连接 worker，因此首次 send 返回即代表首帧已经经过真实 handler send/flush，随后才允许调用
+subscription `activate()`。不得在 Controller 返回 emitter 前启动 worker，也不得用 sleep、反射或全局 converter
+猜测 handler 是否已就绪。
+
+V2 的 snapshot、归属、engine 和 cursor 仍须在 Controller 返回 200 前同步校验并预留订阅；每条连接由独立
+Java 21 虚拟线程发送 `run_snapshot`。正常完成、timeout、异步错误、客户端断开、Spring 已完成态、worker 中断和
+应用停机必须共同经过一个幂等关闭门，精确注销 subscription、移除 live session 并停止连接 worker。启动 worker
+失败与本地停机必须显式完成已初始化的异步响应，不能依赖 interceptor 抛错；客户端断线则使用不再写响应正文的
+清理路径。发送引发的 `IOException` 视为连接断开；`IllegalStateException` 只有在 emitter/session 已可证明完成或
+中止时才可同类处理，仍处于可写态的 converter/handler 异常必须走受控错误完成。Spring
+`AsyncRequestNotUsableException` 由专用 no-body handler 安全分类，不得向已提交响应二次写错误 JSON。终态必须先
+成功发送其最后一帧，再调用 emitter `complete()`，不得先完成后补帧。service 必须登记全部已创建 session；bean
+关闭时无论 session 是否已 arm、handler 是否已初始化或 worker 是否已启动，都必须在有界时间内完成/中止响应并使
+subscription、session、worker 与共享虚拟线程 executor 全部归零。
+
 共享 PostgreSQL 查询的单轮暂时失败不立即制造全部客户端重连风暴：连接继续只发心跳，observer 按一秒兜底间隔
-重试；连续 3 轮 high-water/Event tail 查询失败后才注销受影响订阅并断开，使客户端重新走 snapshot。任一成功批量
-查询都清零连续失败计数。observer 循环的未知运行异常必须以稳定分类清理当前订阅并重新进入空闲观察循环，不能让
+重试；连续 3 轮 high-water/Event tail 查询失败后才注销受影响订阅并断开，使客户端重新走 snapshot。只有一轮完整
+观察（high-water 及该轮必需的 Event tail 均成功）才清零连续失败计数。observer 循环的未知运行异常必须以稳定分类清理当前订阅并重新进入空闲观察循环，不能让
 后台虚拟线程静默死亡或继续保留永远不会收到更新的连接。
+
+observer 的两类批量查询还必须使用同一个具名超时配置：PostgreSQL 只读事务的
+`statement_timeout=2s`，jOOQ/JDBC `Statement#setQueryTimeout=2s`，当前借用连接的
+`Connection.networkTimeout=3s`，observer 单轮 wall-clock 为 `4s`，语句取消和连接硬中止后的等待分别为
+`500ms` 和 `1s`，整个 observer 停机上限为 `5s`。该顺序必须满足
+`statement/query < network < wall-clock`；这些值不得散落在 repository 和 observer 中各自漂移。
+连接级 network timeout 只在该次查询的专用只读事务内设置，必须在连接归还 Hikari 前恢复原值；
+不得把 observer 的短超时泄漏给其他业务 SQL，也不得依赖全局 JDBC URL `socketTimeout` 修复本局部路径。
+
+墙钟门禁使用专用的单飞查询执行器。超时时必须先通过 repository 已注册的句柄显式调用
+`Statement.cancel()`，仍未退出再对该借用连接调用 `Connection.abort()`；`Future.cancel(true)` 只能作为
+辅助中断，不构成 JDBC 查询已取消或线程已退出的证明。必须以当前查询调用自身的完成门证明它已
+退出，之后才能开始下一轮；硬中止后仍未退出时，observer 必须停止接受新订阅、结束现有订阅并记录稳定
+错误分类，禁止继续叠加卡死查询。每次失败日志至少记录查询阶段、墙钟上限、实际耗时、取消/硬中止请求与连续失败轮数，
+不记录 SQL 绑定、用户正文或凭据。应用停机必须取消当前查询、关闭共享查询执行器并在 `5s` 内证明 observer worker、
+query worker 和活动查询全部归零；任一对象仍未退出必须以稳定错误明确失败停机，不得静默报告关闭成功。
 
 ### Evaluation
 
@@ -413,6 +455,47 @@ run_accepted
 
 只读问答在生成成功后直接 completed。质量检查保存报告后 completed。中短篇生成只创建一个候选，不自动进入
 下一文档阶段。视频继续服从开发环境门禁和独立正式版本链。
+
+### `long_serial.answer_question` 首个只读纵切
+
+长篇问答使用 Catalog 中已经保留的精确版本 `long_serial.answer_question`，不得在 Core 或 Agent 通过 Operation
+名称硬编码模型、Prompt、Schema 或预算旁路。该 Operation 只创建一个 `purpose=generation`、`lane=interactive`
+的模型 Step；不创建 Reviewer Step、ReviewArtifact、自动返工或用户决定 Step，也不进入 LangGraph 或开放工具循环。
+
+执行计划固定引用：
+
+- Evidence Policy：`evidence.long_serial.answer.v1`；
+- Model Profile：`editor.answer.v1`，`reasoningMode=disabled`；
+- Prompt Profile：`prompt.editor.answer.v1`；
+- Deployment Profile：`deployment.editor.answer.v1`；
+- Output Schema：`output.chat_answer.v1`；
+- Step Budget：`step_budget.long_serial.answer_question.generator.v1`；
+- Review Policy：`review.none.v1`，`mode=none`，Reviewer、rubric、Reviewer Schema 与 Reviewer Step Budget 均为空。
+
+Core 构造的 `ExecutionStepRequest` 继续复用通用 `2.0` wire，`input.userInstruction` 保存完整、非空白的作者问题，
+`artifactId/artifactRevision` 均为空。首切只接受 `targetKinds=[chapter] + scopeKinds=[chapter]`，并把目标章节
+完整正文冻结进不可变 Evidence bundle；小说级、章节范围和大纲节点问答仍由 V1 收敛，不得借首切 Catalog 宣称已迁移。
+创建 Run 还必须携带归属于同一用户、小说和章节的 `writingSessionId`；缺失时稳定返回
+`409 WRITING_SESSION_REQUIRED`，不得创建没有会话恢复位置的回答。`writingSessionId` 是 Core 的 Run/消息归属事实，
+不复制进只含 `userInstruction` 的模型 input，也不由 Agent 生成或修改。
+模型结果必须严格为
+`{"answer": string}`，`answer` 至少包含一个非空白 Unicode 字符，不允许额外字段、Markdown 控制信封、工具调用、
+日志或推理原文。Agent 必须先按冻结 Output Schema 校验，再用共享 `ChatAnswerOutput` 做同形语义复验；空串、纯空白、
+错误字段或不合法结构以稳定 `MODEL_OUTPUT_PROTOCOL_INVALID`/`MODEL_OUTPUT_SCHEMA_INVALID` 失败，不能保存半截回答或
+猜测修复。
+
+问答仍完整执行 resolved model/deployment 授权、Step/Run 预算、`preparing` 计费预留、累计 usage、AOF journal、
+fence、租约、取消、未送达终态回放和 callback 回执语义。成功回调后由 Core 在同一事务持久化完整 agent
+`WritingMessage`、完成 Step/Run 并写 `step_finished` 与 `completed(outcomeType=chat_answer,resultId=<messageId>)`
+Event；Agent 不生成消息 ID，也不直接写会话。问答失败或取消不得留下成功消息，普通下一条问题继续创建新 Run。
+消息元数据的规范化与 content hash 由 `workflows::workflow-domain` 的单一 codec 提供，V1/V2 写作消息复用该实现；
+Workflow callback 不得反向导入 writing 模块内部 helper，避免形成 `workflows -> writing -> workflows` 模块环。
+
+浏览器收到 `completed(outcomeType=chat_answer)` 后，必须按当前事件流绑定的精确 `writingSessionId` 重新读取
+PostgreSQL 权威会话消息，并保留已经收敛的 Run 终态；会话已切换时，迟到响应不得覆盖新会话。该终态不能只刷新
+会话摘要或依赖用户重新选择会话，也不得把 SSE payload、日志或本地拼接文本当作回答。`chat_answer` 不创建
+ReviewArtifact，因此完成事件不得为它触发待审核 Artifact 全量刷新。Web 对 `editor.answer.v1` 显示稳定业务标签
+“章节问答”，不暴露 deployment key、Prompt、指纹或内部端点。
 
 模型不再调用 `begin_artifact_output`、`submit_evaluation`、`submit_quality_report`、更新构建器或其他业务提交
 工具。Step 最终响应本身是严格 Schema；Core 验证后创建业务事实。
@@ -629,6 +712,10 @@ V2 的 input、request、manifest、output schema 与 result 哈希统一使用
 最短十进制定点形式，`-0` 归一为 `0`，拒绝 NaN、Infinity、非字符串对象键和未配对代理字符。Pydantic
 可空模型字段在进入哈希材料前统一省略；任意 JSON 值中的显式 `null` 不得省略。成功与失败的 `resultHash`
 都绑定完整 usage。Python 与 Java 必须共享字节级 golden vector，协议版本不允许隐式改变算法。
+进入 Evidence manifest 哈希的 aware datetime 必须先截到微秒，并使用跨语言唯一文本形式：秒位始终存在，
+零小数不输出 fraction，非零 fraction 固定六位，原 UTC offset 保留且 UTC 写作 `Z`。Core 构造 manifest 与持久化
+Evidence item 必须复用同一个规范化时间值；禁止直接使用 Java `OffsetDateTime.toString()` 等会省略零秒位的语言默认
+格式。Java `ObjectMapper` 生成的完整 `ExecutionStepRequest` 必须由 Python 严格模型通过跨语言 golden 验证。
 
 Operation Catalog 的 `runBudgetProfile` 是 Run 累计上限；Core 必须为每个 Step 分配独立、
 `maxModelCalls=1` 的 `StepBudget`，并同时执行 Run 累计与 Step 单次门禁，禁止把 Run 总量复制给每个 Step。
@@ -1024,7 +1111,8 @@ PostgreSQL 14.19 + pgvector 0.8.0 以当前 86 表契约重建、重复执行最
 
 ### 可执行迁移、备份与恢复门禁
 
-具名操作入口固定为 `scripts/durable-agent-execution-migration.sh`，完整步骤见
+具名操作入口固定为 `scripts/durable-agent-execution-migration.sh`，动作包括
+`status|active-v2-count|backup|forward|rollback|export-contract|verify-contract`，完整步骤见
 `docs/DURABLE_AGENT_V2_ROLLOUT.md`。入口必须把目标数据库显式限定为 `novelwriterdev` 或 `novelwriter`，并把
 实时状态判定为 `unmigrated`、`migrated-empty-v2`、`migrated-with-v2` 或 `partial`；`partial` 对所有写动作
 fail closed。结构对象状态只能决定迁移代次，forward/rollback 前还必须由已经运行的双 contract Java 镜像执行
@@ -1034,6 +1122,21 @@ fail closed。结构对象状态只能决定迁移代次，forward/rollback 前�
 密码不得进入 argv、stdout、stderr、shell trace 或备份元数据。forward/rollback 与两份 contract 文件 SHA 固定在
 helper 中，任何字节漂移都必须在连接数据库前拒绝。正式 forward 与空数据 rollback 还必须分别读取当前用户拥有的
 0600 确认文件，并精确匹配 SQL 已冻结的生产令牌；令牌正文不能作为命令参数。
+
+真实开发库和正式库完成 forward 后必须使用同一个具名 helper 导出结构证据，禁止调用会把含密码
+`DATABASE_URL` 放入 argv 的通用开发脚本。`export-contract` 只接受迁移后的两种完整状态，复用上述安全 URL
+解析与 0600 `PGPASSFILE`，把无密码的本机 URL 交给 `psql/pg_dump`，并在只读事务、固定 statement/lock timeout
+下同时取得数据库身份、schema-only dump 和正在运行的 Java 精确 schema guard 指纹。导出目录必须由操作者以
+`DURABLE_AGENT_CONTRACT_EVIDENCE_DIR` 显式指定为尚不存在的绝对路径；helper 只能在同父目录临时目录中完整生成
+`schema-contract.json`、`schema-only.sql`、`contract-verification.meta` 与 `SHA256SUMS`，全部校验后原子改名，
+不得覆盖仓库 canonical contract、既有证据目录或执行任何 DDL。
+
+证据中的结构正文使用已通过 Java guard 与实时数据库精确比较的冻结 post contract 按当前运行 Core schema profile
+生成的精确投影，并只替换从当前连接只读取得的 `source` 元数据；其结构 fingerprint 必须与该投影的 fingerprint
+精确一致。`verify-contract` 必须
+校验目录无符号链接、文件白名单、SHA、自洽 fingerprint、目标数据库、迁移状态和冻结 post contract 文件 SHA，
+随后重新执行实时 Java guard 与 schema-only dump 比较；任何漂移、凭据泄漏风险、非迁移后状态或原子目录残留都
+必须失败。该证据证明导出时和复验时的实时结构精确匹配冻结 contract，不授权把证据文件反向覆盖仓库或数据库。
 
 迁移备份必须同时包含可读的 PostgreSQL custom dump、当前独立 execution Redis 的一致 RDB、各自 SHA-256、
 迁移 SQL/contract 绑定和 `postgresRestoreRequiresExecutionQuarantine=true` 恢复边界。缺少 journal 快照、AOF

@@ -16,6 +16,7 @@ import tools.jackson.databind.node.ObjectNode;
 final class LongTaskCommands {
 
     private static final Set<String> OPERATIONS = Set.of(
+            "answer_question",
             "plan_chapter",
             "write_chapter",
             "review_chapter",
@@ -23,6 +24,18 @@ final class LongTaskCommands {
             "rewrite_outline_selection");
     private static final Set<String> SELECTION_OPERATIONS =
             Set.of("rewrite_chapter_selection", "rewrite_outline_selection");
+    private static final Set<String> START_FIELDS = Set.of(
+            "profile",
+            "clientRequestId",
+            "novelId",
+            "chapterId",
+            "operation",
+            "target",
+            "scope",
+            "userInstruction",
+            "writingSessionId",
+            "selectionTarget",
+            "targetWordCount");
     private static final Set<String> SELECTION_FIELDS = Set.of(
             "resourceType",
             "resourceId",
@@ -42,6 +55,7 @@ final class LongTaskCommands {
     }
 
     private static CommandResult start(CommandContext context, ObjectNode payload) {
+        rejectUnexpectedStartFields(payload);
         MutationPayloads.requireFields(
                 payload,
                 Set.of(
@@ -63,7 +77,8 @@ final class LongTaskCommands {
         if (!OPERATIONS.contains(operation)) {
             throw new CliInputException(
                     "INVALID_OPERATION",
-                    "operation 不是受支持的长篇 Agent 操作");
+                    "operation 只能是 answer_question、plan_chapter、write_chapter、"
+                            + "review_chapter、rewrite_chapter_selection 或 rewrite_outline_selection");
         }
         ObjectNode target = requireObject(payload, "target", "INVALID_TARGET");
         if (!textEquals(target, "type", "chapter")
@@ -75,9 +90,21 @@ final class LongTaskCommands {
         ObjectNode scope = requireObject(payload, "scope", "INVALID_SCOPE");
         validateScope(scope, operation, chapterId, selection);
         String instruction = MutationPayloads.requireString(payload, "userInstruction");
-        if (instruction.trim().isEmpty()) {
+        if (isUnicodeBlank(instruction)) {
             throw new CliInputException(
                     "INVALID_USER_INSTRUCTION", "userInstruction 不能为空白");
+        }
+        JsonNode writingSessionId = payload.get("writingSessionId");
+        if (operation.equals("answer_question")
+                && (writingSessionId == null
+                        || !writingSessionId.isTextual()
+                        || writingSessionId.textValue().isEmpty())) {
+            throw new CliInputException(
+                    "WRITING_SESSION_REQUIRED",
+                    "answer_question 必须提供 writingSessionId");
+        }
+        if (writingSessionId != null) {
+            writingSessionId = optionalNonEmptyStringOrNull(payload, "writingSessionId");
         }
 
         ObjectNode body = context.dependencies().json().createObjectNode();
@@ -90,11 +117,7 @@ final class LongTaskCommands {
         body.set("scope", scope.deepCopy());
         body.put("userInstruction", instruction);
         if (selection != null) body.set("selectionTarget", selection.deepCopy());
-        if (payload.has("writingSessionId")) {
-            body.set(
-                    "writingSessionId",
-                    optionalNonEmptyStringOrNull(payload, "writingSessionId"));
-        }
+        if (writingSessionId != null) body.set("writingSessionId", writingSessionId);
         if (payload.has("targetWordCount")) {
             body.set("targetWordCount", payload.get("targetWordCount").deepCopy());
         }
@@ -269,6 +292,26 @@ final class LongTaskCommands {
                     "INVALID_FIELD", field + " 必须是字符串或 null");
         }
         return value;
+    }
+
+    private static void rejectUnexpectedStartFields(ObjectNode payload) {
+        TreeSet<String> unexpected = new TreeSet<>();
+        payload.propertyNames().forEach(name -> {
+            if (!START_FIELDS.contains(name)) unexpected.add(name);
+        });
+        if (!unexpected.isEmpty()) {
+            throw new CliInputException(
+                    "UNEXPECTED_FIELD",
+                    "命令不接受字段：" + unexpected.getFirst());
+        }
+    }
+
+    private static boolean isUnicodeBlank(String value) {
+        // Python 公共 validator 的 str.strip() 还把 NEL(U+0085) 视为空白；JDK 两个 Unicode 判定均不包含它。
+        return value.codePoints().allMatch(
+                codePoint -> codePoint == 0x0085
+                        || Character.isWhitespace(codePoint)
+                        || Character.isSpaceChar(codePoint));
     }
 
     private static boolean textEquals(ObjectNode value, String field, String expected) {

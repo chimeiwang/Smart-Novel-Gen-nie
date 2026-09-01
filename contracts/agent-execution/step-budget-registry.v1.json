@@ -2,6 +2,23 @@
   "registryVersion": "1",
   "budgets": [
     {
+      "key": "step_budget.long_serial.answer_question.generator.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 40000,
+        "maxPromptCacheMissTokens": 20000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 8000,
+        "maxCostMicros": 300000,
+        "maxWallClockSeconds": 120,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.long_serial.rewrite_chapter_selection.generator.v1",
       "version": 1,
       "supported": true,

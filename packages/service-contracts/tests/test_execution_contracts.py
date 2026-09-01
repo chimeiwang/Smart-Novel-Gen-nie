@@ -13,6 +13,8 @@ from inkforge_contracts import (
     EXECUTION_PROTOCOL_VERSION,
     BillingReconciliationReceipt,
     BillingReconciliationRequest,
+    ChatAnswerInput,
+    ChatAnswerOutput,
     EvidenceBundle,
     EvidenceEvaluation,
     EvidenceExpansionRequest,
@@ -59,6 +61,27 @@ def test_execution_canonical_json_v1_has_stable_cross_language_bytes() -> None:
     assert hashlib.sha256(canonical).hexdigest() == (
         "8120300c6d33bc324976d7175a1311532a5f69f3a45775a3e6f8b94999fb134e"
     )
+
+
+def test_chat_answer_contract_preserves_complete_text_and_is_strict() -> None:
+    instruction = "  这个人物为什么选择离开？\n请只依据作品资料。  "
+    answer = "  他离开是为了保护同伴。\n现有证据没有说明他将去哪里。  "
+
+    assert ChatAnswerInput(userInstruction=instruction).userInstruction == instruction
+    assert ChatAnswerOutput(answer=answer).answer == answer
+
+    for value in ("", "   ", "\n\t", "\u3000"):
+        with pytest.raises(ValidationError):
+            ChatAnswerInput(userInstruction=value)
+        with pytest.raises(ValidationError):
+            ChatAnswerOutput(answer=value)
+
+    with pytest.raises(ValidationError):
+        ChatAnswerInput.model_validate(
+            {"userInstruction": "问题", "selectedAgents": ["编辑"]}
+        )
+    with pytest.raises(ValidationError):
+        ChatAnswerOutput.model_validate({"answer": "回答", "review": "禁止"})
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), {1: "非法"}, "\ud800"])

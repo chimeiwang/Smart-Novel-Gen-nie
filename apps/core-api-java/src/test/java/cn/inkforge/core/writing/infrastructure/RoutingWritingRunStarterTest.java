@@ -15,6 +15,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
+import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
 import cn.inkforge.core.writing.application.WritingRunStartRequestParser;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
@@ -29,11 +30,14 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import org.jooq.Record;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -115,7 +119,7 @@ class RoutingWritingRunStarterTest {
     @Test
     void V2路由冻结完整来源且开关关闭后仍幂等重放原引擎() {
         Fixture fixture = fixture("route-v2");
-        RoutingWritingRunStarter all = router("all");
+        RoutingWritingRunStarter all = router(fixture, "allowlist");
         ParsedWritingRunStartRequest request = request(
                 fixture, "request-route-v2-0001", "请让这句话更有压迫感");
         LocalDateTime sessionUpdatedBefore = sessionUpdatedAt(fixture.sessionId());
@@ -198,11 +202,172 @@ class RoutingWritingRunStarterTest {
     }
 
     @Test
+    void 只读问答按Catalog路由V2并冻结唯一章节证据且重放不重复消息() {
+        Fixture fixture = fixture("route-v2-answer");
+        ParsedWritingRunStartRequest request = longSerialRequest(
+                fixture,
+                "request-route-v2-answer-01",
+                "answer_question",
+                true);
+
+        WritingRunV2Response first = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(), request);
+        AtomicInteger replayProbes = new AtomicInteger();
+        WritingRunV2Response replay = (WritingRunV2Response) router(
+                        fixture,
+                        "allowlist",
+                        () -> {
+                            replayProbes.incrementAndGet();
+                            return false;
+                        })
+                .start(fixture.userId(), request);
+
+        assertThat(first.getOperation()).isEqualTo("answer_question");
+        assertThat(first.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.PENDING);
+        assertThat(first.getCurrentStep().getLane().getValue()).isEqualTo("interactive");
+        assertThat(first.getCurrentStep().getModelProfile().getProfile())
+                .isEqualTo("editor.answer.v1");
+        assertThat(replay.getRunId()).isEqualTo(first.getRunId());
+        assertThat(replayProbes).hasValue(0);
+        Record facts = database.dsl().fetchOne(
+                """
+                SELECT run.kind::text AS kind,
+                       bundle."policyVersion" AS policy,
+                       item."resourceType" AS resource_type,
+                       item."contentText" AS content_text,
+                       item."rangeJson" AS range_json,
+                       step.input::text AS step_input
+                FROM public."WorkflowRun" AS run
+                JOIN public."WorkflowEvidenceBundle" AS bundle ON bundle."runId" = run.id
+                JOIN public."WorkflowEvidenceItem" AS item ON item."bundleId" = bundle.id
+                JOIN public."WorkflowStep" AS step ON step."runId" = run.id
+                WHERE run.id = ?
+                """,
+                first.getRunId());
+        assertThat(facts.get("kind", String.class)).isEqualTo("chat");
+        assertThat(facts.get("policy", String.class))
+                .isEqualTo("evidence.long_serial.answer.v1");
+        assertThat(facts.get("resource_type", String.class)).isEqualTo("chapter_content");
+        assertThat(facts.get("content_text", String.class)).isEqualTo(fixture.content());
+        assertThat(facts.get("range_json", String.class)).isNull();
+        assertThat(json.readTree(facts.get("step_input", String.class)))
+                .isEqualTo(json.valueToTree(Map.of(
+                        "userInstruction", "请执行 answer_question")));
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND role = 'user'",
+                        fixture.sessionId()))
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?",
+                        first.getRunId()))
+                .isZero();
+    }
+
+    @Test
+    void 只读问答缺少会话时在创建Run前稳定拒绝() {
+        Fixture fixture = fixture("route-v2-answer-no-session");
+        ParsedWritingRunStartRequest request = longSerialRequest(
+                fixture,
+                "request-route-v2-answer-no-session-01",
+                "answer_question",
+                false);
+        AtomicInteger probes = new AtomicInteger();
+
+        assertThatThrownBy(() -> router(
+                                fixture,
+                                "allowlist",
+                                () -> {
+                                    probes.incrementAndGet();
+                                    return false;
+                                })
+                        .start(fixture.userId(), request))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(409);
+                    assertThat(error.code()).isEqualTo("WRITING_SESSION_REQUIRED");
+                });
+        assertThat(probes).hasValue(0);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"userId\" = ?",
+                        fixture.userId()))
+                .isZero();
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
+                        fixture.sessionId()))
+                .isZero();
+    }
+
+    @Test
+    void Catalog启用操作缺少Core启动Handler时装配立即失败() {
+        LongSerialDurableRunStarter incomplete = new LongSerialDurableRunStarter() {
+            @Override
+            public Set<String> supportedOperationKeys() {
+                return Set.of("long_serial.rewrite_chapter_selection");
+            }
+
+            @Override
+            public WritingRunV2Response replayExisting(
+                    String userId,
+                    cn.inkforge.contracts.api.LongSerialStartWritingRunRequest request) {
+                throw new AssertionError("装配失败前不应调用 handler");
+            }
+
+            @Override
+            public WritingRunV2Response startFresh(
+                    String userId,
+                    cn.inkforge.contracts.api.LongSerialStartWritingRunRequest request,
+                    Runnable finalFreshStartAuthorization) {
+                throw new AssertionError("装配失败前不应调用 handler");
+            }
+        };
+
+        assertThatThrownBy(() -> new RoutingWritingRunStarter(
+                        database,
+                        legacy,
+                        incomplete,
+                        new CommandIdempotencyStore(json, true),
+                        (userId, novelId) -> {},
+                        CoreSettings.from(Map.of(
+                                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "off")),
+                        () -> true,
+                        json,
+                        registry))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("long_serial.answer_question");
+    }
+
+    @Test
+    void 冻结为只读的问答不会伪装成章节写入互斥() {
+        Fixture fixture = fixture("route-v2-answer-read-only");
+        WritingRunV2Response answer = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(),
+                longSerialRequest(
+                        fixture,
+                        "request-answer-read-only-01",
+                        "answer_question",
+                        true));
+
+        WritingRunV2Response rewrite = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(),
+                requestWithoutSession(
+                        fixture,
+                        "request-rewrite-with-answer-01",
+                        "并行冻结选区改写"));
+
+        assertThat(answer.getOperation()).isEqualTo("answer_question");
+        assertThat(rewrite.getOperation()).isEqualTo("rewrite_chapter_selection");
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"chapterId\" = ?",
+                        fixture.chapterId()))
+                .isEqualTo(2);
+    }
+
+    @Test
     void V2重放返回按ordinal排序的全部活动Reviewer与冻结模型身份() {
         Fixture fixture = fixture("route-v2-active-reviewers");
         ParsedWritingRunStartRequest request = request(
                 fixture, "request-route-v2-reviewers-01", "请调整选区");
-        WritingRunV2Response started = (WritingRunV2Response) router("all").start(
+        WritingRunV2Response started = (WritingRunV2Response) router(fixture, "allowlist").start(
                 fixture.userId(), request);
         ExecutionPlanSnapshot executionPlan = registry.freezePlan(
                 "long_serial.rewrite_chapter_selection", false);
@@ -261,7 +426,8 @@ class RoutingWritingRunStarterTest {
                 legacyFixture, "request-route-v1-0001", "请调整选区");
 
         var first = router("off").start(legacyFixture.userId(), legacyRequest);
-        var replay = router("all").start(legacyFixture.userId(), legacyRequest);
+        var replay = router(legacyFixture, "allowlist")
+                .start(legacyFixture.userId(), legacyRequest);
 
         assertThat(first).isInstanceOf(WritingRunResponse.class);
         assertThat(((WritingRunResponse) first).getEngineVersion()).isEqualTo(1);
@@ -269,7 +435,7 @@ class RoutingWritingRunStarterTest {
                 .isEqualTo(((WritingRunResponse) first).getId());
 
         Fixture durableFixture = fixture("route-busy");
-        router("all").start(
+        router(durableFixture, "allowlist").start(
                 durableFixture.userId(),
                 requestWithoutSession(
                         durableFixture, "request-route-busy-01", "先创建 V2"));
@@ -287,7 +453,7 @@ class RoutingWritingRunStarterTest {
     @MethodSource("mutatingV1Operations")
     void 活动V2阻断所有已支持V1写操作与保守legacy入口(String operation) {
         Fixture fixture = fixture("route-v1-mutation-" + operation.replace('_', '-'));
-        router("all").start(
+        router(fixture, "allowlist").start(
                 fixture.userId(),
                 requestWithoutSession(
                         fixture,
@@ -316,25 +482,30 @@ class RoutingWritingRunStarterTest {
                 .isZero();
     }
 
-    @Test
-    void 无Session的只读V1审核与V2双向并存() {
-        Fixture fixture = fixture("route-v1-review-readable");
-        router("all").start(
+    @ParameterizedTest(name = "V1只读 operation={0}")
+    @MethodSource("readOnlyV1Operations")
+    void 不同WritingSession的只读V1与V2章节写入双向并存(String operation) {
+        String token = operation.equals("answer_question") ? "answer" : "review";
+        Fixture fixture = fixture("route-v1-" + token + "-durable-first");
+        String durableSessionId = additionalSession(fixture, "v2");
+        router(fixture, "allowlist").start(
                 fixture.userId(),
-                requestWithoutSession(
-                        fixture,
-                        "request-v2-review-readable-01",
-                        "先创建 V2 选区改写"));
+                withWritingSession(
+                        requestWithoutSession(
+                                fixture,
+                                "request-v2-before-" + token + "-01",
+                                "先创建 V2 选区改写"),
+                        durableSessionId));
 
-        WritingRunStartResponse review = router("off").start(
+        WritingRunStartResponse readOnly = router("off").start(
                 fixture.userId(),
                 longSerialRequest(
                         fixture,
-                        "request-v1-review-readable-01",
-                        "review_chapter",
-                        false));
+                        "request-v1-after-" + token + "-01",
+                        operation,
+                        true));
 
-        assertThat(review).isInstanceOf(WritingRunResponse.class);
+        assertThat(readOnly).isInstanceOf(WritingRunResponse.class);
         assertThat(count(
                         "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"chapterId\" = ?",
                         fixture.chapterId()))
@@ -344,35 +515,38 @@ class RoutingWritingRunStarterTest {
                         fixture.chapterId()))
                 .isEqualTo(1);
 
-        Fixture reviewFirst = fixture("route-v1-review-first");
+        Fixture readFirst = fixture("route-v1-" + token + "-read-first");
         router("off").start(
-                reviewFirst.userId(),
+                readFirst.userId(),
                 longSerialRequest(
-                        reviewFirst,
-                        "request-v1-review-first-01",
-                        "review_chapter",
-                        false));
-        WritingRunStartResponse durable = router("all").start(
-                reviewFirst.userId(),
-                requestWithoutSession(
-                        reviewFirst,
-                        "request-v2-after-review-01",
-                        "审核期间创建独立 V2 写任务"));
+                        readFirst,
+                        "request-v1-first-" + token + "-01",
+                        operation,
+                        true));
+        String reverseDurableSessionId = additionalSession(readFirst, "v2");
+        WritingRunStartResponse durable = router(readFirst, "allowlist").start(
+                readFirst.userId(),
+                withWritingSession(
+                        requestWithoutSession(
+                                readFirst,
+                                "request-v2-after-" + token + "-01",
+                                "只读运行期间创建独立 V2 写任务"),
+                        reverseDurableSessionId));
         assertThat(durable).isInstanceOf(WritingRunV2Response.class);
         assertThat(count(
                         "SELECT count(*) FROM public.\"WritingTask\" WHERE \"chapterId\" = ?",
-                        reviewFirst.chapterId()))
+                        readFirst.chapterId()))
                 .isEqualTo(1);
         assertThat(count(
                         "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"chapterId\" = ?",
-                        reviewFirst.chapterId()))
+                        readFirst.chapterId()))
                 .isEqualTo(1);
     }
 
     @Test
     void 同WritingSession跨引擎只允许一个foreground且只读审核也不豁免() {
         Fixture v2First = fixture("route-session-v2-first");
-        router("all").start(
+        router(v2First, "allowlist").start(
                 v2First.userId(),
                 request(v2First, "request-session-v2-first-01", "先创建 V2"));
         assertThatThrownBy(() -> router("off").start(
@@ -395,7 +569,7 @@ class RoutingWritingRunStarterTest {
                         "review_chapter",
                         true));
         assertThat(review).isInstanceOf(WritingRunResponse.class);
-        assertThatThrownBy(() -> router("all").start(
+        assertThatThrownBy(() -> router(v1First, "allowlist").start(
                         v1First.userId(),
                         request(v1First, "request-session-v2-after-01", "再创建 V2")))
                 .isInstanceOfSatisfying(ApiException.class, error ->
@@ -408,11 +582,12 @@ class RoutingWritingRunStarterTest {
         Fixture v2Fixture = fixture("route-replay-v2-offline");
         ParsedWritingRunStartRequest v2Request = request(
                 v2Fixture, "request-replay-v2-offline-01", "请调整选区");
-        WritingRunV2Response firstV2 = (WritingRunV2Response) router("all").start(
+        WritingRunV2Response firstV2 = (WritingRunV2Response) router(v2Fixture, "allowlist").start(
                 v2Fixture.userId(), v2Request);
         AtomicInteger v2Probes = new AtomicInteger();
         WritingRunV2Response replayV2 = (WritingRunV2Response) router(
-                        "all",
+                        v2Fixture,
+                        "allowlist",
                         () -> {
                             v2Probes.incrementAndGet();
                             return false;
@@ -429,7 +604,8 @@ class RoutingWritingRunStarterTest {
                 v1Fixture.userId(), v1Request);
         AtomicInteger v1Probes = new AtomicInteger();
         WritingRunResponse replayV1 = (WritingRunResponse) router(
-                        "all",
+                        v1Fixture,
+                        "allowlist",
                         () -> {
                             v1Probes.incrementAndGet();
                             return false;
@@ -441,6 +617,76 @@ class RoutingWritingRunStarterTest {
     }
 
     @Test
+    void V1新建门禁位于幂等重放之后且早于readiness锁和任何写入() {
+        Fixture existingFixture = fixture("route-v1-drain-replay");
+        ParsedWritingRunStartRequest existingRequest = request(
+                existingFixture, "request-v1-drain-replay-01", "先创建 V1");
+        WritingRunResponse first = (WritingRunResponse) router("off").start(
+                existingFixture.userId(), existingRequest);
+        AtomicInteger replayProbes = new AtomicInteger();
+
+        WritingRunResponse replay = (WritingRunResponse) router(
+                        "off",
+                        false,
+                        () -> {
+                            replayProbes.incrementAndGet();
+                            return false;
+                        })
+                .start(existingFixture.userId(), existingRequest);
+
+        assertThat(replay.getId()).isEqualTo(first.getId());
+        assertThat(replayProbes).hasValue(0);
+
+        Fixture freshFixture = fixture("route-v1-drain-fresh");
+        ParsedWritingRunStartRequest freshRequest = request(
+                freshFixture, "request-v1-drain-fresh-01", "不得创建 V1");
+        AtomicInteger freshProbes = new AtomicInteger();
+        long factsBefore = workflowFacts(freshFixture.userId());
+
+        assertThatThrownBy(() -> router(
+                                "off",
+                                false,
+                                () -> {
+                                    freshProbes.incrementAndGet();
+                                    return true;
+                                })
+                        .start(freshFixture.userId(), freshRequest))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(503);
+                    assertThat(error.code()).isEqualTo("AGENT_FRESH_STARTS_DRAINING");
+                });
+
+        assertThat(freshProbes).hasValue(0);
+        assertThat(workflowFacts(freshFixture.userId())).isEqualTo(factsBefore);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
+                        freshFixture.sessionId()))
+                .isZero();
+    }
+
+    @Test
+    void drain期间并发V1fresh请求全部封锁且不能留下幂等身份() throws Exception {
+        Fixture fixture = fixture("route-v1-drain-concurrent");
+        ParsedWritingRunStartRequest request = request(
+                fixture, "request-v1-drain-concurrent-01", "并发也不得创建");
+        RoutingWritingRunStarter draining = router("off", false, () -> {
+            throw new AssertionError("fresh V1 门禁之后不应探测 Agent");
+        });
+
+        CompletableFuture<Object> first = CompletableFuture.supplyAsync(() -> captureFailure(
+                () -> draining.start(fixture.userId(), request)));
+        CompletableFuture<Object> second = CompletableFuture.supplyAsync(() -> captureFailure(
+                () -> draining.start(fixture.userId(), request)));
+
+        assertThat(List.of(first.get(5, TimeUnit.SECONDS), second.get(5, TimeUnit.SECONDS)))
+                .allSatisfy(value -> assertThat(value)
+                        .isInstanceOfSatisfying(ApiException.class, error ->
+                                assertThat(error.code())
+                                        .isEqualTo("AGENT_FRESH_STARTS_DRAINING")));
+        assertThat(workflowFacts(fixture.userId())).isZero();
+    }
+
+    @Test
     void 新V2在manifest握手失败时以503拒绝且零持久工作流事实() {
         Fixture fixture = fixture("route-manifest-mismatch");
         ParsedWritingRunStartRequest request = request(
@@ -448,7 +694,8 @@ class RoutingWritingRunStarterTest {
         AtomicInteger probes = new AtomicInteger();
 
         assertThatThrownBy(() -> router(
-                                "all",
+                                fixture,
+                                "allowlist",
                                 () -> {
                                     probes.incrementAndGet();
                                     assertThat(workflowFacts(fixture.userId())).isZero();
@@ -475,6 +722,193 @@ class RoutingWritingRunStarterTest {
     }
 
     @Test
+    void freshV2发布Guard失败早于readiness且绝不回退V1() {
+        Fixture fixture = fixture("route-release-guard-closed");
+        ParsedWritingRunStartRequest request = request(
+                fixture, "request-release-guard-closed-01", "不得创建 V2");
+        AtomicInteger guardChecks = new AtomicInteger();
+        AtomicInteger readinessChecks = new AtomicInteger();
+        DurableAgentReleaseGuard missingGuard = new FileDurableAgentReleaseGuard(
+                null, CLOCK, registry.manifestFingerprint());
+
+        assertThatThrownBy(() -> router(
+                                fixture,
+                                "allowlist",
+                                true,
+                                () -> {
+                                    readinessChecks.incrementAndGet();
+                                    return true;
+                                },
+                                (userId, novelId) -> {
+                                    guardChecks.incrementAndGet();
+                                    missingGuard.requireFreshStart(userId, novelId);
+                                })
+                        .start(fixture.userId(), request))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(503);
+                    assertThat(error.code())
+                            .isEqualTo("DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE");
+                    assertThat(error.details()).isNull();
+                });
+
+        assertThat(guardChecks).hasValue(1);
+        assertThat(readinessChecks).hasValue(0);
+        assertThat(workflowFacts(fixture.userId())).isZero();
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?",
+                        fixture.novelId()))
+                .isZero();
+    }
+
+    @Test
+    void freshV2关键事务内二次Guard漂移时零写入() {
+        Fixture fixture = fixture("route-release-guard-drift");
+        ParsedWritingRunStartRequest request = request(
+                fixture, "request-release-guard-drift-01", "二检前替换 guard");
+        AtomicInteger guardChecks = new AtomicInteger();
+        AtomicInteger readinessChecks = new AtomicInteger();
+
+        assertThatThrownBy(() -> router(
+                                fixture,
+                                "allowlist",
+                                true,
+                                () -> {
+                                    readinessChecks.incrementAndGet();
+                                    return true;
+                                },
+                                (userId, novelId) -> {
+                                    if (guardChecks.incrementAndGet() == 2) {
+                                        throw releaseGuardUnavailable();
+                                    }
+                                })
+                        .start(fixture.userId(), request))
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code())
+                                .isEqualTo("DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE"));
+
+        assertThat(guardChecks).hasValue(2);
+        assertThat(readinessChecks).hasValue(1);
+        assertThat(workflowFacts(fixture.userId())).isZero();
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
+                        fixture.sessionId()))
+                .isZero();
+    }
+
+    @Test
+    void freshV2首检后等待数据库锁期间Guard关闭则最终校验零写入且不回退V1()
+            throws Exception {
+        Fixture fixture = fixture("route-release-guard-lock-wait");
+        String clientRequestId = "request-release-guard-lock-wait-01";
+        ParsedWritingRunStartRequest request = request(
+                fixture, clientRequestId, "锁等待后不得穿透 guard");
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        CountDownLatch readinessReached = new CountDownLatch(1);
+        AtomicBoolean guardOpen = new AtomicBoolean(true);
+        AtomicInteger guardChecks = new AtomicInteger();
+        CompletableFuture<Void> blocker = CompletableFuture.runAsync(() ->
+                database.transactionResult(transaction -> {
+                    transaction.fetchOne(
+                            "SELECT id FROM public.\"Novel\" WHERE id = ? FOR UPDATE",
+                            fixture.novelId());
+                    lockHeld.countDown();
+                    try {
+                        if (!releaseLock.await(2, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException("测试 advisory 锁未及时释放");
+                        }
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("测试 advisory 锁等待被中断", exception);
+                    }
+                    return null;
+                }));
+        assertThat(lockHeld.await(2, TimeUnit.SECONDS)).isTrue();
+
+        RoutingWritingRunStarter starter = router(
+                fixture,
+                "allowlist",
+                true,
+                () -> {
+                    readinessReached.countDown();
+                    return true;
+                },
+                (userId, novelId) -> {
+                    guardChecks.incrementAndGet();
+                    if (!guardOpen.get()) throw releaseGuardUnavailable();
+                });
+        CompletableFuture<Object> start = CompletableFuture.supplyAsync(() ->
+                captureFailure(() -> starter.start(fixture.userId(), request)));
+        assertThat(readinessReached.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(guardChecks).hasValue(1);
+        long waitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        boolean waitingOnOwnedResource = false;
+        while (System.nanoTime() < waitDeadline) {
+            int waiters = database.dsl()
+                    .fetchOne(
+                            """
+                            SELECT count(*) AS count
+                            FROM pg_catalog.pg_stat_activity
+                            WHERE datname = pg_catalog.current_database()
+                              AND wait_event_type = 'Lock'
+                              AND query LIKE '%SELECT id FROM public."Novel"%'
+                            """)
+                    .get("count", Integer.class);
+            if (waiters > 0) {
+                waitingOnOwnedResource = true;
+                break;
+            }
+            Thread.sleep(10);
+        }
+        assertThat(waitingOnOwnedResource).isTrue();
+        guardOpen.set(false);
+        releaseLock.countDown();
+
+        blocker.get(2, TimeUnit.SECONDS);
+        Object failure = start.get(2, TimeUnit.SECONDS);
+        assertThat(failure)
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code())
+                                .isEqualTo("DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE"));
+        assertThat(guardChecks).hasValue(2);
+        assertThat(workflowFacts(fixture.userId())).isZero();
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?",
+                        fixture.novelId()))
+                .isZero();
+    }
+
+    @Test
+    void 既有V2幂等重放早于失效发布Guard() {
+        Fixture fixture = fixture("route-release-guard-replay");
+        ParsedWritingRunStartRequest request = request(
+                fixture, "request-release-guard-replay-01", "先创建再重放");
+        WritingRunV2Response first = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(), request);
+        AtomicInteger guardChecks = new AtomicInteger();
+
+        WritingRunV2Response replay = (WritingRunV2Response) router(
+                        fixture,
+                        "allowlist",
+                        true,
+                        () -> {
+                            throw new AssertionError("幂等重放不应探测 Agent");
+                        },
+                        (userId, novelId) -> {
+                            guardChecks.incrementAndGet();
+                            throw releaseGuardUnavailable();
+                        })
+                .start(fixture.userId(), request);
+
+        assertThat(replay.getRunId()).isEqualTo(first.getRunId());
+        assertThat(guardChecks).hasValue(0);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"userId\" = ?",
+                        fixture.userId()))
+                .isEqualTo(1);
+    }
+
+    @Test
     void 并发同幂等标识均在无锁握手后仍只创建一个V2Run() throws Exception {
         Fixture fixture = fixture("route-concurrent-v2");
         ParsedWritingRunStartRequest request = request(
@@ -490,7 +924,7 @@ class RoutingWritingRunStarterTest {
                 return false;
             }
         };
-        RoutingWritingRunStarter router = router("all", readiness);
+        RoutingWritingRunStarter router = router(fixture, "allowlist", readiness);
 
         CompletableFuture<WritingRunV2Response> first = CompletableFuture.supplyAsync(
                 () -> (WritingRunV2Response) router.start(fixture.userId(), request));
@@ -518,7 +952,7 @@ class RoutingWritingRunStarterTest {
                 fixture, "request-v2-scope-busy-02", "第二次选区改写");
         CountDownLatch probesEntered = new CountDownLatch(2);
         CountDownLatch releaseProbes = new CountDownLatch(1);
-        RoutingWritingRunStarter all = router("all", () -> {
+        RoutingWritingRunStarter all = router(fixture, "allowlist", () -> {
             probesEntered.countDown();
             try {
                 return releaseProbes.await(2, TimeUnit.SECONDS);
@@ -574,7 +1008,12 @@ class RoutingWritingRunStarterTest {
         CompletableFuture<WritingRunStartResponse> v1Start = CompletableFuture.supplyAsync(
                 () -> startAfterGate(router("off"), fixture.userId(), v1, startersReady, releaseStart));
         CompletableFuture<WritingRunStartResponse> v2Start = CompletableFuture.supplyAsync(
-                () -> startAfterGate(router("all"), fixture.userId(), v2, startersReady, releaseStart));
+                () -> startAfterGate(
+                        router(fixture, "allowlist"),
+                        fixture.userId(),
+                        v2,
+                        startersReady,
+                        releaseStart));
         assertThat(startersReady.await(2, TimeUnit.SECONDS)).isTrue();
         releaseStart.countDown();
 
@@ -609,6 +1048,10 @@ class RoutingWritingRunStarterTest {
 
     private static RoutingWritingRunStarter router(String mode) {
         return router(mode, () -> true);
+    }
+
+    private static RoutingWritingRunStarter router(Fixture scope, String mode) {
+        return router(scope, mode, () -> true);
     }
 
     private static void insertPendingReviewer(
@@ -654,16 +1097,72 @@ class RoutingWritingRunStarterTest {
 
     private static RoutingWritingRunStarter router(
             String mode, DurableAgentExecutionReadiness readiness) {
+        return router(null, mode, true, readiness, (userId, novelId) -> {});
+    }
+
+    private static RoutingWritingRunStarter router(
+            Fixture scope,
+            String mode,
+            DurableAgentExecutionReadiness readiness) {
+        return router(scope, mode, true, readiness, (userId, novelId) -> {});
+    }
+
+    private static RoutingWritingRunStarter router(
+            String mode,
+            boolean freshStartsEnabled,
+            DurableAgentExecutionReadiness readiness) {
+        return router(
+                null,
+                mode,
+                freshStartsEnabled,
+                readiness,
+                (userId, novelId) -> {});
+    }
+
+    private static RoutingWritingRunStarter router(
+            Fixture scope,
+            String mode,
+            boolean freshStartsEnabled,
+            DurableAgentExecutionReadiness readiness,
+            DurableAgentReleaseGuard releaseGuard) {
+        Map<String, String> settings = new java.util.LinkedHashMap<>();
+        settings.put("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true");
+        settings.put("DURABLE_AGENT_EXECUTION_ROUTE_MODE", mode);
+        settings.put(
+                "V1_FRESH_AGENT_STARTS_ENABLED",
+                Boolean.toString(freshStartsEnabled));
+        if ("allowlist".equals(mode)) {
+            if (scope == null) throw new IllegalArgumentException("allowlist 测试必须提供精确 scope");
+            settings.put("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", scope.userId());
+            settings.put("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", scope.novelId());
+        }
         return new RoutingWritingRunStarter(
                 database,
                 legacy,
                 durable,
                 new CommandIdempotencyStore(json, true),
-                CoreSettings.from(Map.of(
-                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
-                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", mode)),
+                releaseGuard,
+                CoreSettings.from(settings),
                 readiness,
-                json);
+                json,
+                registry);
+    }
+
+    private static ApiException releaseGuardUnavailable() {
+        return new ApiException(
+                503,
+                "DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE",
+                "耐久 Agent 发布保护当前不可用");
+    }
+
+    private static Object captureFailure(java.util.concurrent.Callable<?> operation) {
+        try {
+            return operation.call();
+        } catch (RuntimeException exception) {
+            return exception;
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static ParsedWritingRunStartRequest request(
@@ -727,6 +1226,14 @@ class RoutingWritingRunStarterTest {
                 .request()
                 .setWritingSessionId(null);
         return parsed;
+    }
+
+    private static ParsedWritingRunStartRequest withWritingSession(
+            ParsedWritingRunStartRequest request, String writingSessionId) {
+        ((ParsedWritingRunStartRequest.LongSerial) request)
+                .request()
+                .writingSessionId(writingSessionId);
+        return request;
     }
 
     private static ParsedWritingRunStartRequest longSerialRequest(
@@ -814,6 +1321,28 @@ class RoutingWritingRunStarterTest {
                 Arguments.of("rewrite_chapter_selection"),
                 Arguments.of("rewrite_outline_selection"),
                 Arguments.of("legacy"));
+    }
+
+    private static Stream<Arguments> readOnlyV1Operations() {
+        return Stream.of(
+                Arguments.of("answer_question"),
+                Arguments.of("review_chapter"));
+    }
+
+    private static String additionalSession(Fixture fixture, String suffix) {
+        String sessionId = fixture.sessionId() + "-" + suffix;
+        database.dsl().execute(
+                """
+                INSERT INTO public."WritingSession" (
+                  id, "novelId", "chapterId", phase, "createdAt", "updatedAt"
+                ) VALUES (?, ?, ?, 'idle', ?, ?)
+                """,
+                sessionId,
+                fixture.novelId(),
+                fixture.chapterId(),
+                NOW,
+                NOW);
+        return sessionId;
     }
 
     private static Fixture fixture(String prefix) {

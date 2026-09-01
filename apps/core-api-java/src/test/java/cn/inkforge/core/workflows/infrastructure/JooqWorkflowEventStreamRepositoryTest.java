@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.DatabaseQueryCancellation;
 import cn.inkforge.core.platform.db.PostgresConnectionSettings;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
+import cn.inkforge.core.workflows.application.WorkflowEventObserverTimeouts;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository.EventTailRequest;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository.RunKey;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
@@ -18,6 +20,7 @@ import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.protocol.WorkflowEventPayloadCodec;
 import jakarta.validation.Validation;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -25,6 +28,12 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.jooq.exception.DataAccessException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -348,6 +357,108 @@ class JooqWorkflowEventStreamRepositoryTest {
                 assertThat(event.getSequence()).isEqualTo(3));
         assertThat(events.get(secondKey)).singleElement().satisfies(event ->
                 assertThat(event.getSequence()).isEqualTo(3));
+    }
+
+    @Test
+    void observer只读事务同时执行PostgreSQL和JDBC超时并恢复连接网络超时() {
+        WorkflowEventObserverTimeouts timeouts = new WorkflowEventObserverTimeouts(
+                Duration.ofMillis(100),
+                Duration.ofMillis(500),
+                Duration.ofSeconds(1),
+                Duration.ofMillis(100),
+                Duration.ofMillis(100),
+                Duration.ofSeconds(1));
+        AtomicInteger physicalConnectionIdentity = new AtomicInteger();
+        AtomicInteger configuredNetworkTimeout = new AtomicInteger();
+        AtomicInteger configuredJdbcQueryTimeout = new AtomicInteger();
+
+        try (CoreDatabase bounded =
+                CoreDatabase.connect(PostgresConnectionSettings.parse(databaseUrl()))) {
+            assertThatThrownBy(() -> bounded.timedReadOnlyTransactionResult(
+                            timeouts.statementTimeout(),
+                            timeouts.networkTimeout(),
+                            new DatabaseQueryCancellation(),
+                            transaction -> {
+                                configuredJdbcQueryTimeout.set(
+                                        transaction.configuration().settings().getQueryTimeout());
+                                transaction.connection(connection -> {
+                                    configuredNetworkTimeout.set(connection.getNetworkTimeout());
+                                    physicalConnectionIdentity.set(System.identityHashCode(
+                                            connection.unwrap(org.postgresql.jdbc.PgConnection.class)));
+                                });
+                                assertThat(transaction.fetchValue(
+                                                "SHOW statement_timeout", String.class))
+                                        .isEqualTo("100ms");
+                                assertThat(transaction.fetchValue(
+                                                "SHOW transaction_read_only", String.class))
+                                        .isEqualTo("on");
+                                transaction.execute("SELECT pg_sleep(10)");
+                                return null;
+                            }))
+                    .isInstanceOfSatisfying(DataAccessException.class, exception ->
+                            assertThat(exception.sqlState()).isEqualTo("57014"));
+
+            assertThat(configuredJdbcQueryTimeout).hasValue(1);
+            assertThat(configuredNetworkTimeout).hasValue(500);
+            try (var returned = bounded.connection()) {
+                assertThat(System.identityHashCode(
+                                returned.unwrap(org.postgresql.jdbc.PgConnection.class)))
+                        .isEqualTo(physicalConnectionIdentity.get());
+                assertThat(returned.getNetworkTimeout()).isZero();
+            } catch (java.sql.SQLException exception) {
+                throw new AssertionError("PostgreSQL 连接超时恢复证据读取失败", exception);
+            }
+        }
+    }
+
+    @Test
+    void observer显式取消会命中正在执行的JDBCStatement() throws Exception {
+        DatabaseQueryCancellation cancellation = new DatabaseQueryCancellation();
+        CountDownLatch transactionEntered = new CountDownLatch(1);
+        try (CoreDatabase bounded = CoreDatabase.connect(
+                        PostgresConnectionSettings.parse(databaseUrl()));
+                var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var query = executor.submit(() -> bounded.timedReadOnlyTransactionResult(
+                    Duration.ofSeconds(5),
+                    Duration.ofSeconds(6),
+                    cancellation,
+                    transaction -> {
+                        transactionEntered.countDown();
+                        transaction.execute(
+                                "SELECT pg_sleep(10) /* workflow-observer-explicit-cancel */");
+                        return null;
+                    }));
+            assertThat(transactionEntered.await(3, TimeUnit.SECONDS)).isTrue();
+            awaitActivePostgresQuery("workflow-observer-explicit-cancel");
+
+            assertThat(cancellation.requestStatementCancel().actionRegistered()).isTrue();
+            assertThatThrownBy(() -> query.get(3, TimeUnit.SECONDS))
+                    .isInstanceOfSatisfying(ExecutionException.class, exception -> {
+                        assertThat(exception.getCause()).isInstanceOf(DataAccessException.class);
+                        assertThat(((DataAccessException) exception.getCause()).sqlState())
+                                .isEqualTo("57014");
+                    });
+        }
+    }
+
+    private static void awaitActivePostgresQuery(String marker) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+        while (System.nanoTime() < deadline) {
+            int active = ((Number) database.dsl().fetchValue(
+                    """
+                    SELECT COUNT(*)::int
+                    FROM pg_stat_activity
+                    WHERE pid <> pg_backend_pid()
+                      AND datname = current_database()
+                      AND state = 'active'
+                      AND query LIKE ?
+                    """,
+                    "%" + marker + "%"))
+                    .intValue();
+            if (active == 1) return;
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("PostgreSQL 查询未进入可取消执行状态");
     }
 
     private static void insertQueuedEvent(

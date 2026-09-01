@@ -22,6 +22,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.UnrecognizedPropertyException;
 
@@ -151,6 +152,15 @@ public final class ApiExceptionHandler {
                 null,
                 headers,
                 request);
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void asyncClientDisconnected(HttpServletRequest request) {
+        // 响应在 Servlet 容器上报断线后已经不可再写；只做安全分类，禁止尝试追加 JSON 错误信封。
+        LOGGER.atDebug()
+                .addKeyValue("requestId", RequestIdFilter.requestId(request))
+                .addKeyValue("code", "ASYNC_CLIENT_DISCONNECTED")
+                .log("客户端在异步响应期间断开连接");
     }
 
     @ExceptionHandler(Exception.class)

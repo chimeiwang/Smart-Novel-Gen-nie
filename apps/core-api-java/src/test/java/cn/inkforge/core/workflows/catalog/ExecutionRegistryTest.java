@@ -23,6 +23,10 @@ class ExecutionRegistryTest {
     void 只解析目录中真实启用且依赖完整的首个纵切() {
         ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
 
+        assertThat(registry.enabledOperationKeys("long_serial", false))
+                .containsExactly(
+                        "long_serial.answer_question",
+                        "long_serial.rewrite_chapter_selection");
         ExecutionRegistry.ResolvedOperation resolved =
                 registry.resolve("long_serial.rewrite_chapter_selection", false);
 

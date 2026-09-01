@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 213,
+  "modelCount": 215,
   "models": [
     {
       "model": "AgentEvent",
@@ -43,6 +43,18 @@
       "module": "execution",
       "path": "execution/BillingReconciliationRequest.schema.json",
       "sha256": "ef106527fcbbc85cef5a7ceeb2c93600f0e8edb10fa56ae39bd55498ac7d1e49"
+    },
+    {
+      "model": "ChatAnswerInput",
+      "module": "execution",
+      "path": "execution/ChatAnswerInput.schema.json",
+      "sha256": "48cb1f80f388b65998e7dbe1a970a83cb4dee41f9ae4a2162fac49f588ef49b3"
+    },
+    {
+      "model": "ChatAnswerOutput",
+      "module": "execution",
+      "path": "execution/ChatAnswerOutput.schema.json",
+      "sha256": "4f021215bfacabb19a99b77971e4e11d4e26b662de41875e1a2d4d894d4da5dd"
     },
     {
       "model": "CommandClarification",

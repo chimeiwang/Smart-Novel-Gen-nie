@@ -126,6 +126,66 @@ def execution_cancel(request: ExecutionStepRequest) -> ExecutionCancelRequest:
     )
 
 
+def answer_question_request(
+    registry: ExecutionRegistry,
+    *,
+    job_id: str = "answer-job-1",
+    fencing_token: int = 1,
+    dispatch_mode: Literal["initial", "pending_recovery", "running_recovery"] = "initial",
+    user_instruction: str = "这个人物为什么选择离开？",
+) -> ExecutionStepRequest:
+    base = execution_request(
+        job_id=job_id,
+        fencing_token=fencing_token,
+        dispatch_mode=dispatch_mode,
+    )
+    operation = registry.resolve("long_serial", "answer_question")
+    profile = operation.generator_profile
+    budget = operation.generator_step_budget
+    schema = operation.output_schema
+    candidate = base.model_copy(
+        update={
+            "operation": "answer_question",
+            "purpose": "generation",
+            "lane": operation.operation.lane,
+            "input": {"userInstruction": user_instruction},
+            "evidenceBundle": base.evidenceBundle.model_copy(
+                update={"policyVersion": operation.operation.evidence_policy}
+            ),
+            "modelProfile": ModelProfileRef(
+                profile=profile.key,
+                version=profile.version,
+                reasoningMode=profile.reasoning_mode,
+                deploymentProfileKey=profile.deployment_profile_key,
+                promptProfile=PromptProfileRef(
+                    name=profile.prompt_profile.key,
+                    version=profile.prompt_profile.version,
+                    sha256=profile.prompt_profile.sha256,
+                ),
+            ),
+            "outputSchema": OutputSchemaRef(
+                name=schema.key,
+                version=schema.version,
+                sha256=schema.sha256,
+                jsonSchema=schema.json_schema_value(),
+            ),
+            "budget": StepBudget(
+                maxModelCalls=budget.max_model_calls,
+                maxInputTokens=budget.max_input_tokens,
+                maxPromptCacheMissTokens=budget.max_prompt_cache_miss_tokens,
+                maxCompletionTokens=budget.max_completion_tokens,
+                maxReasoningTokens=budget.max_reasoning_tokens,
+                maxVisibleOutputTokens=budget.max_visible_output_tokens,
+                maxCostMicros=budget.max_cost_micros,
+                maxWallClockSeconds=budget.max_wall_clock_seconds,
+                maxProviderRetries=budget.max_provider_retries,
+                maxProtocolCorrections=budget.max_protocol_corrections,
+            ),
+        }
+    )
+    return rehash_request(candidate)
+
+
 def review_request(
     registry: ExecutionRegistry,
     *,
@@ -143,6 +203,8 @@ def review_request(
     profile = registry.profiles[profile_key]
     budget = operation.reviewer_step_budgets[profile_key]
     schema = operation.reviewer_output_schema
+    if schema is None:
+        raise RuntimeError("测试 Registry 缺少 Reviewer Output Schema")
     candidate = base.model_copy(
         update={
             "purpose": "review",

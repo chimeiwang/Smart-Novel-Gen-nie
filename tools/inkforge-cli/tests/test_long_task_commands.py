@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import importlib
+import io
+import json
 from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any
 
 import pytest
 from inkforge_cli.api import CoreApiError
-from inkforge_cli.config import MemoryConfigStore
+from inkforge_cli.cli import run
+from inkforge_cli.config import MemoryConfigStore, ProfileConfig
 from inkforge_cli.credentials import MemoryCredentialStore
 from inkforge_cli.runtime import (
     CliDependencies,
@@ -56,6 +59,36 @@ def _runtime(spec: Any, api: RecordingApi) -> CliRuntime:
     )
 
 
+def _invoke_direct(
+    payload: dict[str, Any],
+    api: RecordingApi,
+) -> tuple[int, dict[str, Any]]:
+    profile = payload.get("profile", "default")
+    assert isinstance(profile, str)
+    config = MemoryConfigStore()
+    config.save(
+        profile,
+        ProfileConfig(origin="http://127.0.0.1:8000", username="tester"),
+    )
+    credentials = MemoryCredentialStore()
+    credentials.set(profile, "http://127.0.0.1:8000", "session-cookie")
+    stdout = io.StringIO()
+    exit_code = run(
+        ["long.agent.start"],
+        stdin=io.StringIO(json.dumps(payload, ensure_ascii=False)),
+        stdout=stdout,
+        stderr=io.StringIO(),
+        dependencies=CliDependencies(
+            api_factory=lambda origin, token=None: api,
+            config_store=config,
+            credential_store=credentials,
+            getpass_fn=lambda prompt: "unused",
+            stdin_isatty=lambda: False,
+        ),
+    )
+    return exit_code, json.loads(stdout.getvalue())
+
+
 def _start_payload(operation: str = "plan_chapter") -> dict[str, Any]:
     return {
         "clientRequestId": "long-start-20260806-0001",
@@ -86,7 +119,7 @@ def test_task_mutation_specs_require_identity_and_stable_request_ids() -> None:
 
 @pytest.mark.parametrize(
     "operation",
-    ["plan_chapter", "write_chapter", "review_chapter"],
+    ["answer_question", "plan_chapter", "write_chapter", "review_chapter"],
 )
 def test_agent_start_sends_exact_explicit_long_serial_contract(
     operation: str,
@@ -107,6 +140,123 @@ def test_agent_start_sends_exact_explicit_long_serial_contract(
     assert sent["target"] == payload["target"]
     assert sent["scope"] == payload["scope"]
     assert "selectedAgents" not in sent
+
+
+def test_answer_question_preserves_exact_business_body_and_instruction() -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("answer_question")
+    payload.pop("targetWordCount")
+    payload["clientRequestId"] = "long-answer-20260901-0001"
+    payload["userInstruction"] = "\u2003这一章的主要冲突是什么？\n请保留原格式。\u3000"
+    expected = {key: value for key, value in payload.items() if key != "profile"}
+    expected["workflow"] = "long_serial"
+
+    spec.handler(_runtime(spec, api), payload)
+
+    assert api.calls == [
+        ("POST", "/api/v1/writing/runs", {"json": expected})
+    ]
+    assert api.calls[0][2]["json"]["clientRequestId"] == payload["clientRequestId"]
+    assert api.calls[0][2]["json"]["userInstruction"] == payload["userInstruction"]
+
+
+@pytest.mark.parametrize("writing_session_id", [None, ""])
+def test_answer_question_requires_non_empty_writing_session_before_business_api(
+    writing_session_id: object,
+) -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("answer_question")
+    if writing_session_id is None:
+        payload.pop("writingSessionId")
+    else:
+        payload["writingSessionId"] = writing_session_id
+
+    with pytest.raises(CliInputError) as caught:
+        spec.handler(_runtime(spec, api), payload)
+
+    assert caught.value.code == "WRITING_SESSION_REQUIRED"
+    assert api.calls == []
+
+
+def test_answer_question_rejects_explicit_null_session_before_business_api() -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("answer_question")
+    payload["writingSessionId"] = None
+
+    with pytest.raises(CliInputError) as caught:
+        spec.handler(_runtime(spec, api), payload)
+
+    assert caught.value.code == "WRITING_SESSION_REQUIRED"
+    assert api.calls == []
+
+
+def test_answer_question_rejects_unicode_only_whitespace_before_business_api() -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("answer_question")
+    payload["userInstruction"] = "\u0085\u2003\u3000\n\t"
+
+    with pytest.raises(CliInputError) as caught:
+        spec.handler(_runtime(spec, api), payload)
+
+    assert caught.value.code == "INVALID_USER_INSTRUCTION"
+    assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_code"),
+    [
+        ("target", {"type": "chapter", "id": "chapter-2"}, "INVALID_TARGET"),
+        ("scope", {"kind": "chapter", "chapterId": "chapter-2"}, "INVALID_SCOPE"),
+        ("scope", {"kind": "novel"}, "INVALID_SCOPE"),
+    ],
+)
+def test_answer_question_rejects_non_matching_chapter_target_or_scope_locally(
+    field: str,
+    value: object,
+    expected_code: str,
+) -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("answer_question")
+    payload[field] = value
+
+    with pytest.raises(CliInputError) as caught:
+        spec.handler(_runtime(spec, api), payload)
+
+    assert caught.value.code == expected_code
+    assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ({"writingSessionId": None}, "WRITING_SESSION_REQUIRED"),
+        ({"scope": {"kind": "novel"}}, "INVALID_SCOPE"),
+        ({"userInstruction": "\u0085\u2003\u3000"}, "INVALID_USER_INSTRUCTION"),
+    ],
+)
+def test_direct_cli_rejects_invalid_answer_without_any_business_api_request(
+    mutation: dict[str, Any],
+    expected_code: str,
+) -> None:
+    api = RecordingApi()
+    payload = _start_payload("answer_question")
+    payload.update(mutation)
+
+    exit_code, frame = _invoke_direct(payload, api)
+
+    assert exit_code == 2
+    assert frame["error"]["code"] == expected_code
+    assert api.calls == []
 
 
 def test_agent_start_sends_selection_identity_without_selected_text() -> None:

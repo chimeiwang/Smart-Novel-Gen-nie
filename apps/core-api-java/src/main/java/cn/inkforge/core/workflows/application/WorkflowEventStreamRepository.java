@@ -2,6 +2,7 @@ package cn.inkforge.core.workflows.application;
 
 import cn.inkforge.contracts.api.RunSnapshot;
 import cn.inkforge.contracts.api.WorkflowEventEnvelope;
+import cn.inkforge.core.platform.db.DatabaseQueryCancellation;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,6 +20,12 @@ public interface WorkflowEventStreamRepository {
     /** 一次读取当前进程全部已订阅 Run 的关闭状态和事件高水位。 */
     Map<RunKey, TailState> readTails(List<RunKey> runs);
 
+    /** 与 {@link #readTails(List)} 同形，但必须把当前 JDBC 语句和连接注册到取消句柄。 */
+    default Map<RunKey, TailState> readTails(
+            List<RunKey> runs, DatabaseQueryCancellation cancellation) {
+        return readTails(runs);
+    }
+
     /**
      * 一次公平读取多个 Run 的 PostgreSQL 耐久事件；每个 Run 最多返回 {@code limitPerRun} 条。
      *
@@ -26,6 +33,14 @@ public interface WorkflowEventStreamRepository {
      */
     Map<RunKey, List<WorkflowEventEnvelope>> readEventTails(
             List<EventTailRequest> requests, int limitPerRun);
+
+    /** 与批量 Event tail 读取同形，但必须支持 observer 的分阶段显式取消。 */
+    default Map<RunKey, List<WorkflowEventEnvelope>> readEventTails(
+            List<EventTailRequest> requests,
+            int limitPerRun,
+            DatabaseQueryCancellation cancellation) {
+        return readEventTails(requests, limitPerRun);
+    }
 
     record RunKey(String userId, String runId) {
         public RunKey {

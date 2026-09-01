@@ -4,21 +4,36 @@ import cn.inkforge.contracts.api.WritingRunOutcome;
 import cn.inkforge.contracts.api.WritingRunStatusResponse;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.platform.http.ManagedSseEmitter;
+import cn.inkforge.core.platform.http.SseStream;
 import cn.inkforge.core.writing.domain.WritingEvent;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter.DataWithMediaType;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 /** 从 Redis Stream 与 PostgreSQL 统一结果投影生成浏览器 SSE。 */
-public final class WritingEventStreamService {
+public final class WritingEventStreamService implements AutoCloseable {
+
+    private static final MediaType RAW_SSE_FRAME_TYPE =
+            new MediaType("text", "plain", StandardCharsets.UTF_8);
+    private static final Duration WORKER_SHUTDOWN_TIMEOUT = Duration.ofSeconds(5);
 
     private final WritingRunQueryRepository queries;
     private final WritingEventStore events;
@@ -28,6 +43,11 @@ public final class WritingEventStreamService {
     private final Duration heartbeatInterval;
     private final cn.inkforge.core.workflows.application.WorkflowEventStreamService
             workflowStreams;
+    private final ExecutorService workers;
+    private final AtomicInteger activeWorkers = new AtomicInteger();
+    private final Set<EmitterSession> sessions = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean closing = new AtomicBoolean();
+    private final Object workerDrain = new Object();
 
     public WritingEventStreamService(
             WritingRunQueryRepository queries,
@@ -43,7 +63,8 @@ public final class WritingEventStreamService {
                 json,
                 pollInterval,
                 heartbeatInterval,
-                null);
+                null,
+                newWorkerExecutor());
     }
 
     public WritingEventStreamService(
@@ -55,11 +76,32 @@ public final class WritingEventStreamService {
             Duration heartbeatInterval,
             cn.inkforge.core.workflows.application.WorkflowEventStreamService
                     workflowStreams) {
+        this(
+                queries,
+                events,
+                outbox,
+                json,
+                pollInterval,
+                heartbeatInterval,
+                workflowStreams,
+                newWorkerExecutor());
+    }
+
+    WritingEventStreamService(
+            WritingRunQueryRepository queries,
+            WritingEventStore events,
+            WritingOutboxRepository outbox,
+            ObjectMapper json,
+            Duration pollInterval,
+            Duration heartbeatInterval,
+            cn.inkforge.core.workflows.application.WorkflowEventStreamService workflowStreams,
+            ExecutorService workers) {
         this.queries = Objects.requireNonNull(queries);
         this.events = events;
         this.outbox = Objects.requireNonNull(outbox);
         this.json = Objects.requireNonNull(json);
         this.workflowStreams = workflowStreams;
+        this.workers = Objects.requireNonNull(workers);
         if (pollInterval == null
                 || pollInterval.isZero()
                 || pollInterval.isNegative()
@@ -72,8 +114,12 @@ public final class WritingEventStreamService {
         this.heartbeatInterval = heartbeatInterval;
     }
 
-    public StreamingResponseBody stream(
+    public ManagedSseEmitter stream(
             String userId, String taskId, String lastEventId) {
+        return open(prepare(userId, taskId, lastEventId));
+    }
+
+    SseStream prepare(String userId, String taskId, String lastEventId) {
         if (workflowStreams != null) {
             var v2 = workflowStreams.streamIfV2(userId, taskId, lastEventId);
             if (v2.isPresent()) return v2.orElseThrow();
@@ -83,11 +129,11 @@ public final class WritingEventStreamService {
                     503, "WRITING_EVENTS_UNAVAILABLE", "写作事件流暂时不可用");
         }
         WritingRunStatusResponse initial = queries.get(userId, taskId);
-        return output -> writeLoop(output, userId, taskId, lastEventId, initial);
+        return sender -> writeLoop(sender, userId, taskId, lastEventId, initial);
     }
 
     private void writeLoop(
-            OutputStream output,
+            SseStream.FrameSender sender,
             String userId,
             String taskId,
             String lastEventId,
@@ -95,11 +141,11 @@ public final class WritingEventStreamService {
         String cursor = lastEventId;
         WritingRunOutcome outcome = initial.getOutcome();
         String fingerprint = fingerprint(outcome);
-        write(output, formatOutcome(outcome));
+        sender.send(formatOutcome(outcome));
         if (Boolean.TRUE.equals(outcome.getStreamShouldClose())) {
             VisibleReplay replay = replay(taskId, cursor);
-            for (WritingEvent event : replay.events()) write(output, formatEvent(event));
-            if (!replay.events().isEmpty()) write(output, formatOutcome(outcome));
+            for (WritingEvent event : replay.events()) sender.send(formatEvent(event));
+            if (!replay.events().isEmpty()) sender.send(formatOutcome(outcome));
             return;
         }
         long idleMillis = 0;
@@ -108,12 +154,12 @@ public final class WritingEventStreamService {
             cursor = replay.cursor();
             if (!replay.events().isEmpty()) {
                 idleMillis = 0;
-                for (WritingEvent event : replay.events()) write(output, formatEvent(event));
+                for (WritingEvent event : replay.events()) sender.send(formatEvent(event));
             }
             outcome = queries.get(userId, taskId).getOutcome();
             String currentFingerprint = fingerprint(outcome);
             if (!currentFingerprint.equals(fingerprint)) {
-                write(output, formatOutcome(outcome));
+                sender.send(formatOutcome(outcome));
                 fingerprint = currentFingerprint;
             }
             if (Boolean.TRUE.equals(outcome.getStreamShouldClose())) return;
@@ -126,7 +172,7 @@ public final class WritingEventStreamService {
             }
             idleMillis += pollInterval.toMillis();
             if (idleMillis >= heartbeatInterval.toMillis()) {
-                write(output, ": 心跳\n\n");
+                sender.send(": 心跳\n\n");
                 idleMillis = 0;
             }
         }
@@ -171,9 +217,162 @@ public final class WritingEventStreamService {
                 CommandIdempotency.canonicalJsonBytes(value, json));
     }
 
-    private static void write(OutputStream output, String value) throws IOException {
-        output.write(value.getBytes(StandardCharsets.UTF_8));
-        output.flush();
+    private ManagedSseEmitter open(SseStream stream) {
+        if (closing.get()) {
+            stream.close();
+            throw new IllegalStateException("写作 SSE 服务正在停止");
+        }
+        EmitterSession session = new EmitterSession(stream);
+        sessions.add(session);
+        if (closing.get()) {
+            session.shutdown();
+            throw new IllegalStateException("写作 SSE 服务正在停止");
+        }
+        return session;
+    }
+
+    static void sendRawFrame(ManagedSseEmitter emitter, String frame)
+            throws IOException {
+        try {
+            emitter.send(Set.of(new DataWithMediaType(frame, RAW_SSE_FRAME_TYPE)));
+        } catch (IOException exception) {
+            throw new ClientConnectionClosedException(exception);
+        } catch (IllegalStateException exception) {
+            if (!emitter.isNoLongerWritable()) throw exception;
+            throw new ClientConnectionClosedException(exception);
+        }
+    }
+
+    private static ExecutorService newWorkerExecutor() {
+        return Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("writing-sse-", 0).factory());
+    }
+
+    @Override
+    public void close() {
+        closing.set(true);
+        List.copyOf(sessions).forEach(EmitterSession::shutdown);
+        workers.shutdownNow();
+        try {
+            if (!workers.awaitTermination(
+                    WORKER_SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                workers.shutdownNow();
+            }
+            awaitWorkerDrain();
+        } catch (InterruptedException exception) {
+            workers.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void awaitWorkerDrain() throws InterruptedException {
+        long deadline = System.nanoTime() + WORKER_SHUTDOWN_TIMEOUT.toNanos();
+        synchronized (workerDrain) {
+            while (activeWorkers.get() > 0) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    throw new IllegalStateException("写作 SSE 连接 worker 未在关闭期限内退出");
+                }
+                TimeUnit.NANOSECONDS.timedWait(workerDrain, remaining);
+            }
+        }
+    }
+
+    int activeWorkerCount() {
+        return activeWorkers.get();
+    }
+
+    boolean workerExecutorTerminated() {
+        return workers.isTerminated();
+    }
+
+    int liveSessionCount() {
+        return sessions.size();
+    }
+
+    private final class EmitterSession extends ManagedSseEmitter {
+
+        private final SseStream stream;
+        private final AtomicBoolean closed = new AtomicBoolean();
+        private final AtomicReference<Future<?>> worker = new AtomicReference<>();
+
+        private EmitterSession(SseStream stream) {
+            super(0L);
+            this.stream = stream;
+            onCompletion(this::abort);
+            onTimeout(this::abort);
+            onError(ignored -> abort());
+        }
+
+        @Override
+        protected void startManagedSession() {
+            if (closed.get()) return;
+            final Future<?> submitted;
+            try {
+                submitted = workers.submit(this::run);
+            } catch (RuntimeException exception) {
+                closeResources();
+                throw exception;
+            }
+            worker.set(submitted);
+            // completion/error 可能在 Future 发布前到达；发布后必须再次收敛取消。
+            if (closed.get()) submitted.cancel(true);
+        }
+
+        @Override
+        protected void abortManagedSession() {
+            if (!closeResources()) return;
+            Future<?> running = worker.get();
+            if (running != null) running.cancel(true);
+        }
+
+        private void run() {
+            activeWorkers.incrementAndGet();
+            try {
+                stream.run(frame -> sendRawFrame(this, frame));
+                completeNormally();
+            } catch (ClientConnectionClosedException exception) {
+                closeResources();
+            } catch (IOException | RuntimeException exception) {
+                completeAbnormally(exception);
+            } finally {
+                try {
+                    closeResources();
+                } finally {
+                    activeWorkers.decrementAndGet();
+                    synchronized (workerDrain) {
+                        workerDrain.notifyAll();
+                    }
+                }
+            }
+        }
+
+        private void completeNormally() {
+            if (!closeResources()) return;
+            complete();
+        }
+
+        private void completeAbnormally(Throwable failure) {
+            if (!closeResources()) return;
+            super.completeWithError(failure);
+        }
+
+        private boolean closeResources() {
+            if (!closed.compareAndSet(false, true)) return false;
+            try {
+                stream.close();
+            } finally {
+                sessions.remove(this);
+            }
+            return true;
+        }
+    }
+
+    private static final class ClientConnectionClosedException extends IOException {
+
+        private ClientConnectionClosedException(Throwable cause) {
+            super("SSE 客户端连接已关闭", cause);
+        }
     }
 
     private record VisibleReplay(List<WritingEvent> events, String cursor) {}

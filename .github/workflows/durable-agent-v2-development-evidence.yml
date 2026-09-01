@@ -1,0 +1,39 @@
+name: Durable Agent V2 开发证据（当前 fail closed）
+
+"on":
+  workflow_dispatch:
+    inputs:
+      target_release_commit:
+        description: main HEAD 的精确 40 位提交
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  development_evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: development
+    concurrency:
+      group: durable-agent-v2-development-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: 可信 main context 门禁
+        shell: bash
+        env:
+          TARGET_RELEASE_COMMIT: ${{ inputs.target_release_commit }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          test "$TARGET_RELEASE_COMMIT" = "$GITHUB_SHA"
+
+      - name: 明确阻止伪造真实 provider canary
+        shell: bash
+        run: |
+          echo 'development-evidence:error:real-provider-identity-not-automated' >&2
+          echo '当前只能保存 providerCanary=pending 的离线记录；不得上传 production-grade artifact。' >&2
+          exit 1

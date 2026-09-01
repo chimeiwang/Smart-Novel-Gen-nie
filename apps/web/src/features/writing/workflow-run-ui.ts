@@ -51,6 +51,7 @@ export type WorkflowRunUiState = {
 };
 
 const MODEL_PROFILE_LABELS: Readonly<Record<string, string>> = {
+  "editor.answer.v1": "章节问答",
   "writer.chapter_selection.v1": "章节选区改写",
   "reviewer.consistency.v1": "一致性校验",
   "reviewer.editorial.v1": "编辑复审",
@@ -269,6 +270,10 @@ export function workflowRunIsForeground(state: WorkflowRunUiState | null): boole
 
 export function workflowRunShouldStopObservation(state: WorkflowRunUiState | null): boolean {
   return Boolean(state && ["waiting_user", "completed", "failed", "cancelled"].includes(state.status));
+}
+
+export function workflowEventRequiresSessionMessageRefresh(event: WorkflowEvent): boolean {
+  return event.eventType === "completed" && event.payload.outcomeType === "chat_answer";
 }
 
 export function workflowStepPurposeLabel(purpose: string): string {

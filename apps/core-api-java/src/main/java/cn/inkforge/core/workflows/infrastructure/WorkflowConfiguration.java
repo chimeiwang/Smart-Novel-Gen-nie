@@ -10,6 +10,7 @@ import cn.inkforge.core.workflows.application.WorkflowBillingReconciliationServi
 import cn.inkforge.core.workflows.application.WorkflowCallbackRepository;
 import cn.inkforge.core.workflows.application.WorkflowCancellationReconciler;
 import cn.inkforge.core.workflows.application.WorkflowDispatchRepository;
+import cn.inkforge.core.workflows.application.WorkflowEventObserverTimeouts;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamService;
 import cn.inkforge.core.workflows.application.WorkflowEventTailObserver;
@@ -126,19 +127,28 @@ class WorkflowConfiguration {
     }
 
     @Bean
+    WorkflowEventObserverTimeouts workflowEventObserverTimeouts() {
+        // 语句、TCP、observer 墙钟和停机只能从这一个配置源派生，禁止 repository 与 observer 各自漂移。
+        return WorkflowEventObserverTimeouts.productionDefaults();
+    }
+
+    @Bean
     WorkflowEventStreamRepository workflowEventStreamRepository(
             CoreDatabase database,
             ObjectMapper objectMapper,
-            Validator validator) {
+            Validator validator,
+            WorkflowEventObserverTimeouts timeouts) {
         return new JooqWorkflowEventStreamRepository(
                 database,
                 new WorkflowEventPayloadCodec(objectMapper, validator),
-                objectMapper);
+                objectMapper,
+                timeouts);
     }
 
     @Bean
     WorkflowEventTailObserver workflowEventTailObserver(
-            WorkflowEventStreamRepository repository) {
+            WorkflowEventStreamRepository repository,
+            WorkflowEventObserverTimeouts timeouts) {
         // 同一进程最多 256 条、每用户最多 8 条连接；每个慢连接只缓存 4 个共享事件批次。
         return new WorkflowEventTailObserver(
                 repository,
@@ -146,7 +156,8 @@ class WorkflowConfiguration {
                 100,
                 256,
                 8,
-                4);
+                4,
+                timeouts);
     }
 
     @Bean

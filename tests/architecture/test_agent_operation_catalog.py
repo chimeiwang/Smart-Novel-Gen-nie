@@ -217,7 +217,21 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         assert operation["labels"]["zh-CN"].strip(), "Operation 必须提供中文标签"
 
     enabled_keys = {operation["key"] for operation in operations if operation["v2Enabled"]}
-    assert enabled_keys == {"long_serial.rewrite_chapter_selection"}
+    assert enabled_keys == {
+        "long_serial.answer_question",
+        "long_serial.rewrite_chapter_selection",
+    }
+    answer = next(
+        operation
+        for operation in operations
+        if operation["key"] == "long_serial.answer_question"
+    )
+    assert answer["targetKinds"] == ["chapter"]
+    assert answer["scopeKinds"] == ["chapter"]
+    assert answer["reviewPolicy"]["mode"] == "none"
+    assert answer["reviewPolicy"]["reviewerProfiles"] == []
+    assert answer["reviewPolicy"].get("reviewerStepBudgetProfiles") is None
+    assert answer["reviewPolicy"].get("reviewerOutputSchema") is None
 
     development_only_keys = {
         operation["key"] for operation in operations if operation["developmentOnly"]
@@ -453,13 +467,21 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
     output_schemas = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
     enabled = [operation for operation in _operations() if operation["v2Enabled"]]
 
-    assert [operation["key"] for operation in enabled] == ["long_serial.rewrite_chapter_selection"]
+    assert [operation["key"] for operation in enabled] == [
+        "long_serial.answer_question",
+        "long_serial.rewrite_chapter_selection",
+    ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
         generator = profiles[operation["generatorProfile"]]
         assert generator["supported"] is True
         assert generator["purpose"] == "generation"
-        assert generator["reasoningMode"] == "bounded"
+        expected_reasoning = (
+            "disabled"
+            if operation["key"] == "long_serial.answer_question"
+            else "bounded"
+        )
+        assert generator["reasoningMode"] == expected_reasoning
         assert generator["deploymentProfileKey"]
         generator_deployment = deployments[generator["deploymentProfileKey"]]
         assert generator_deployment["supported"] is True
@@ -468,7 +490,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         }
 
         reviewers = [profiles[key] for key in operation["reviewPolicy"]["reviewerProfiles"]]
-        assert reviewers
+        if operation["key"] == "long_serial.answer_question":
+            assert reviewers == []
+        else:
+            assert reviewers
         assert all(profile["supported"] is True for profile in reviewers)
         assert all(profile["purpose"] == "review" for profile in reviewers)
         assert all(profile["reasoningMode"] == "disabled" for profile in reviewers)
@@ -478,41 +503,47 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             for profile in reviewers
         )
 
-        reviewer_output_schema = output_schemas[
-            operation["reviewPolicy"]["reviewerOutputSchema"]
-        ]
-        assert reviewer_output_schema["supported"] is True
-        assert reviewer_output_schema["purpose"] == "evaluation"
-        assert reviewer_output_schema["jsonSchema"]["properties"]
-        finding_schema = reviewer_output_schema["jsonSchema"]["properties"][
-            "findings"
-        ]["items"]
-        assert set(finding_schema["required"]) == {
-            "dimension",
-            "severity",
-            "claim",
-            "candidateRange",
-            "evidence",
-            "suggestion",
-            "confidence",
-        }
-        evidence_reference_schema = finding_schema["properties"]["evidence"]["items"]
-        assert set(evidence_reference_schema["required"]) == {
-            "evidenceItemId",
-            "contentSha256",
-            "range",
-        }
-        assert operation["reviewPolicy"]["rubricVersion"].endswith(".v1")
-        assert operation["reviewPolicy"]["evidencePolicy"].endswith(".v1")
-        assert operation["reviewPolicy"]["lane"] == "interactive"
+        if reviewers:
+            reviewer_output_schema = output_schemas[
+                operation["reviewPolicy"]["reviewerOutputSchema"]
+            ]
+            assert reviewer_output_schema["supported"] is True
+            assert reviewer_output_schema["purpose"] == "evaluation"
+            assert reviewer_output_schema["jsonSchema"]["properties"]
+            finding_schema = reviewer_output_schema["jsonSchema"]["properties"][
+                "findings"
+            ]["items"]
+            assert set(finding_schema["required"]) == {
+                "dimension",
+                "severity",
+                "claim",
+                "candidateRange",
+                "evidence",
+                "suggestion",
+                "confidence",
+            }
+            evidence_reference_schema = finding_schema["properties"]["evidence"]["items"]
+            assert set(evidence_reference_schema["required"]) == {
+                "evidenceItemId",
+                "contentSha256",
+                "range",
+            }
+            assert operation["reviewPolicy"]["rubricVersion"].endswith(".v1")
+            assert operation["reviewPolicy"]["evidencePolicy"].endswith(".v1")
+            assert operation["reviewPolicy"]["lane"] == "interactive"
 
         output_schema = output_schemas[operation["outputSchema"]]
         assert output_schema["supported"] is True
         assert output_schema["purpose"] == "generation"
         assert output_schema["jsonSchema"]["properties"]
-        assert output_schema["jsonSchema"]["required"] == ["replacement"]
-        assert set(output_schema["jsonSchema"]["properties"]) == {"replacement"}
-        assert output_schema["jsonSchema"]["properties"]["replacement"] == {
+        expected_output_field = (
+            "answer"
+            if operation["key"] == "long_serial.answer_question"
+            else "replacement"
+        )
+        assert output_schema["jsonSchema"]["required"] == [expected_output_field]
+        assert set(output_schema["jsonSchema"]["properties"]) == {expected_output_field}
+        assert output_schema["jsonSchema"]["properties"][expected_output_field] == {
             "type": "string",
             "minLength": 1,
             "pattern": r"\S",
@@ -529,8 +560,9 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 for profile_key in operation["reviewPolicy"]["reviewerProfiles"]
             },
         }
-        assert len(prompt_hashes) == 3
-        assert len(set(prompt_hashes.values())) == 3
+        expected_prompt_count = 1 if not reviewers else 3
+        assert len(prompt_hashes) == expected_prompt_count
+        assert len(set(prompt_hashes.values())) == expected_prompt_count
 
 
 def test_operation_catalog_budgets_are_explicit_and_bounded() -> None:
@@ -567,7 +599,7 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
 
     for operation in enabled:
         review_policy = operation["reviewPolicy"]
-        reviewer_budget_profiles = review_policy["reviewerStepBudgetProfiles"]
+        reviewer_budget_profiles = review_policy.get("reviewerStepBudgetProfiles", {})
         assert set(reviewer_budget_profiles) == set(review_policy["reviewerProfiles"])
 
         generator_budget_key = operation["generatorStepBudgetProfile"]

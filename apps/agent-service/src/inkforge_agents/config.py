@@ -4,7 +4,7 @@ from ipaddress import ip_network
 from typing import Annotated, Literal
 from urllib.parse import unquote, urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     execution_redis_url: SecretStr | None = None
     queue_terminal_retention_days: int = Field(default=7, ge=1)
     execution_terminal_retention_hours: int = Field(default=24, ge=24, le=168)
+    # 只供跨进程 E2E 注入现有 ModelProvider 接口的测试实现。生产与开发环境只要
+    # 出现任一控制面配置就必须在应用创建前失败，且服务本身不暴露测试路由。
+    e2e_execution_control_url: str | None = None
+    e2e_execution_control_token: SecretStr | None = None
     trusted_core_cidrs: Annotated[tuple[str, ...], NoDecode] = ()
     core_service_public_key_path: str | None = None
     agent_service_private_key_path: str | None = None
@@ -90,6 +94,39 @@ class Settings(BaseSettings):
         execution = _redis_endpoint_identity(self.execution_redis_url)
         if ordinary == execution:
             raise ValueError("生产环境的 REDIS_URL 与 EXECUTION_REDIS_URL 不能指向同一 Redis 实例")
+
+    @model_validator(mode="after")
+    def validate_e2e_execution_control(self) -> Settings:
+        url = (
+            self.e2e_execution_control_url.strip()
+            if self.e2e_execution_control_url is not None
+            else ""
+        )
+        token = (
+            self.e2e_execution_control_token.get_secret_value()
+            if self.e2e_execution_control_token is not None
+            else ""
+        )
+        if not url and not token:
+            return self
+        if self.environment != "test":
+            raise ValueError("E2E execution 控制面只允许 ENVIRONMENT=test")
+        if not url or not token:
+            raise ValueError("E2E execution 控制 URL 与令牌必须同时配置")
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("E2E execution 控制 URL 必须是无凭据的内部 HTTP 地址")
+        if len(token.encode("utf-8")) < 32:
+            raise ValueError("E2E execution 控制令牌至少需要 32 个 UTF-8 字节")
+        self.e2e_execution_control_url = url.rstrip("/")
+        return self
 
 
 def create_testing_settings() -> Settings:

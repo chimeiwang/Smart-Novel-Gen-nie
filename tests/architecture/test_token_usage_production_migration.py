@@ -178,25 +178,19 @@ def test_production_helper_keeps_password_out_of_argv_and_pins_artifacts() -> No
         assert hashlib.sha256(normalized).hexdigest().upper() == expected.group(1)
 
 
-def test_deploy_orders_conditional_migration_before_version_switch() -> None:
+def test_general_deploy_only_reads_completed_token_usage_migration_state() -> None:
     source = DEPLOY.read_text(encoding="utf-8")
 
-    state = source.index('"$migration_helper" status')
-    backup = source.index('"$migration_helper" backup')
-    first_up = source.index('"$migration_helper" up')
-    migration_flag = source.index('migration_applied_by_deploy="1"')
-    second_up = source.index(
-        '"$migration_helper" up', first_up + 1
-    )
-    switch_flag = source.index('version_switch_started="1"')
-    compose_up = source.index("compose up --no-build -d --wait", switch_flag)
-
-    assert state < backup < migration_flag < first_up < second_up < switch_flag < compose_up
-    rollback = source.index('"$migration_helper" down')
-    restore = source.index('INKFORGE_IMAGE_TAG="$previous_tag"')
-    assert rollback < restore
-    assert 'if [ "$migration_applied_by_deploy" = "1" ]' in source
-    assert 'if [ "$version_switch_started" != "1" ]' in source
+    assert 'migration_state="$(APP_DIR="$token_control" sh "$migration_helper" status)"' in source
+    assert 'unmigrated) echo "受保护 Durable Agent 发布禁止夹带 TokenUsage DDL"' in source
+    assert 'partial)' in source
+    for forbidden in (
+        'migration_applied_by_deploy="1"',
+        '"$migration_helper" backup',
+        '"$migration_helper" up',
+        '"$migration_helper" down',
+    ):
+        assert forbidden not in source
 
 
 def test_helper_uses_encoded_password_only_through_pgpass_and_cleans_temp(

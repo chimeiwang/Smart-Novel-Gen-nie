@@ -184,7 +184,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
     "answer_question": _definition(
         "answer_question",
         "回答问题",
-        "unknown",
+        "chapter",
         "编辑",
         (),
         "chat_answer",
@@ -192,6 +192,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "none",
         "直接回答用户问题，不生成待审核草案。",
         allowed_tools=_EDITOR_READ,
+        allowed_scope_kinds=("chapter",),
     ),
     "create_lore": _definition(
         "create_lore",

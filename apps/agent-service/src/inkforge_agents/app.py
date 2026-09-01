@@ -77,16 +77,25 @@ def create_app(
     workflow_log: HumanWorkflowLog | None = None,
     execution_service: ExecutionService | None = None,
     execution_redis: AsyncJournalRedis | None = None,
+    model_provider: ModelProvider | None = None,
 ) -> FastAPI:
     validate_public_operation_definitions()
     loaded_settings = settings or (create_testing_settings() if testing else Settings())
     execution_registry = load_execution_registry(environment=loaded_settings.environment)
-    provider: ModelProvider | None = None
+    provider: ModelProvider | None = model_provider
     provider_error: str | None = None
-    try:
-        provider = create_model_provider(loaded_settings)
-    except ValueError as exc:
-        provider_error = str(exc)
+    if model_provider is not None:
+        if (
+            loaded_settings.environment != "test"
+            or loaded_settings.e2e_execution_control_url is None
+            or loaded_settings.e2e_execution_control_token is None
+        ):
+            raise ValueError("外部 ModelProvider 注入只允许受双门禁的 E2E 测试")
+    else:
+        try:
+            provider = create_model_provider(loaded_settings)
+        except ValueError as exc:
+            provider_error = str(exc)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

@@ -293,6 +293,16 @@ LONG_SERIAL_RUN_PAYLOAD_ADAPTER: TypeAdapter[LongSerialRunPayload] = TypeAdapter
 )
 
 PUBLIC_LONG_SERIAL_OPERATIONS: dict[str, PublicOperationDefinition] = {
+    "answer_question": PublicOperationDefinition(
+        operation="answer_question",
+        workflow="long_serial",
+        targetKind="chapter",
+        allowedScopeKinds=("chapter",),
+        mutating=False,
+        principalAgent="编辑",
+        reviewers=(),
+        artifactKind=None,
+    ),
     "plan_chapter": PublicOperationDefinition(
         operation="plan_chapter",
         workflow="long_serial",

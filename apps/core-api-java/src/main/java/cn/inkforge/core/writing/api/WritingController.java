@@ -47,7 +47,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** 写作会话、耐久运行、受签名回调、工具网关与 SSE 的冻结 HTTP 入口。 */
 @RestController
@@ -176,11 +176,12 @@ public final class WritingController implements WritingApi {
     }
 
     @Override
-    public ResponseEntity<StreamingResponseBody>
+    public ResponseEntity<SseEmitter>
             streamWritingRunEventsApiV1WritingRunsTaskIdEventsGet(
                     String taskId, String lastEventID, String inkforgeToken) {
-        StreamingResponseBody body = streams().stream(
-                user(inkforgeToken).id(), taskId, lastEventID);
+        SseEmitter body = streams()
+                .stream(user(inkforgeToken).id(), taskId, lastEventID)
+                .armCurrentRequest();
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_EVENT_STREAM)
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")

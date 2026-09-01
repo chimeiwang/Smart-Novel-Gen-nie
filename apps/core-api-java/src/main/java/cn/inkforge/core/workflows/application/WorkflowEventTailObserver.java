@@ -1,6 +1,7 @@
 package cn.inkforge.core.workflows.application;
 
 import cn.inkforge.contracts.api.WorkflowEventEnvelope;
+import cn.inkforge.core.platform.db.DatabaseQueryCancellation;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository.EventTailRequest;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository.RunKey;
@@ -17,7 +18,20 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,12 +55,17 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
     private final int perUserConnectionLimit;
     private final int subscriberQueueCapacity;
     private final int historyLimit;
+    private final WorkflowEventObserverTimeouts timeouts;
     private final Object lock = new Object();
+    private final Object queryLock = new Object();
     private final Map<RunKey, RunState> runs = new LinkedHashMap<>();
     private final Map<String, Integer> userConnections = new HashMap<>();
+    private final ExecutorService queryExecutor;
+    private final AtomicInteger activeQueries = new AtomicInteger();
     private final Thread worker;
 
-    private boolean running = true;
+    private volatile boolean running = true;
+    private QueryExecution<?> currentQuery;
     private int connectionCount;
     private long wakeVersion;
     private int consecutiveQueryFailures;
@@ -58,6 +77,44 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
             int globalConnectionLimit,
             int perUserConnectionLimit,
             int subscriberQueueCapacity) {
+        this(
+                repository,
+                pollInterval,
+                eventBatchSize,
+                globalConnectionLimit,
+                perUserConnectionLimit,
+                subscriberQueueCapacity,
+                WorkflowEventObserverTimeouts.productionDefaults());
+    }
+
+    public WorkflowEventTailObserver(
+            WorkflowEventStreamRepository repository,
+            Duration pollInterval,
+            int eventBatchSize,
+            int globalConnectionLimit,
+            int perUserConnectionLimit,
+            int subscriberQueueCapacity,
+            WorkflowEventObserverTimeouts timeouts) {
+        this(
+                repository,
+                pollInterval,
+                eventBatchSize,
+                globalConnectionLimit,
+                perUserConnectionLimit,
+                subscriberQueueCapacity,
+                timeouts,
+                null);
+    }
+
+    WorkflowEventTailObserver(
+            WorkflowEventStreamRepository repository,
+            Duration pollInterval,
+            int eventBatchSize,
+            int globalConnectionLimit,
+            int perUserConnectionLimit,
+            int subscriberQueueCapacity,
+            WorkflowEventObserverTimeouts timeouts,
+            ExecutorService queryExecutor) {
         this.repository = Objects.requireNonNull(repository);
         if (pollInterval == null
                 || pollInterval.isZero()
@@ -78,6 +135,11 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
         this.perUserConnectionLimit = perUserConnectionLimit;
         this.subscriberQueueCapacity = subscriberQueueCapacity;
         this.historyLimit = Math.multiplyExact(eventBatchSize, subscriberQueueCapacity);
+        this.timeouts = Objects.requireNonNull(timeouts);
+        this.queryExecutor = queryExecutor == null
+                ? Executors.newSingleThreadExecutor(
+                        Thread.ofVirtual().name("workflow-sse-tail-query").factory())
+                : queryExecutor;
         this.worker = Thread.ofVirtual()
                 .name("workflow-sse-tail-observer")
                 .start(this::runSupervised);
@@ -122,7 +184,7 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
             }
             if (subscription.activated) return;
             subscription.activated = true;
-            // StreamingResponseBody 已经成功写出 snapshot 后才开始计入慢消费者背压，避免异步线程尚未
+            // SseEmitter 已经成功发送 snapshot 后才开始计入慢消费者背压，避免连接 worker 尚未
             // 获得执行机会时共享 observer 先填满队列并误判断线。
             prepareCatchupLocked(subscription.state, subscription);
             signalWorkerLocked();
@@ -146,6 +208,18 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
         synchronized (lock) {
             return runs.size();
         }
+    }
+
+    int activeQueryCount() {
+        return activeQueries.get();
+    }
+
+    boolean workerAlive() {
+        return worker.isAlive();
+    }
+
+    boolean queryExecutorTerminated() {
+        return queryExecutor.isTerminated();
     }
 
     private void prepareCatchupLocked(RunState state, Subscription subscription) {
@@ -208,6 +282,24 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
             try {
                 runLoop();
                 return;
+            } catch (ObserverStoppingException exception) {
+                return;
+            } catch (QueryTerminationFailedException exception) {
+                LOGGER.atError()
+                        .addKeyValue("errorCode", "WORKFLOW_TAIL_QUERY_UNCANCELLABLE")
+                        .addKeyValue("queryPhase", exception.queryPhase())
+                        .addKeyValue("elapsedMillis", exception.elapsedMillis())
+                        .addKeyValue("statementCancelRequested", true)
+                        .addKeyValue("connectionAbortRequested", true)
+                        .log("Workflow SSE 共享查询无法在硬中止后退出，永久停止 observer");
+                synchronized (lock) {
+                    running = false;
+                    failAllLocked("WORKFLOW_TAIL_QUERY_UNCANCELLABLE", exception);
+                    consecutiveQueryFailures = 0;
+                    lock.notifyAll();
+                }
+                queryExecutor.shutdownNow();
+                return;
             } catch (RuntimeException exception) {
                 LOGGER.atError()
                         .addKeyValue("errorCode", "WORKFLOW_TAIL_OBSERVER_FAILED")
@@ -261,8 +353,11 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
     private boolean observe(Cycle cycle) {
         final Map<RunKey, TailState> tails;
         try {
-            tails = repository.readTails(
-                    cycle.runs().stream().map(CycleRun::key).toList());
+            List<RunKey> keys = cycle.runs().stream().map(CycleRun::key).toList();
+            tails = executeQuery(
+                    "read_tails", cancellation -> repository.readTails(keys, cancellation));
+        } catch (QueryTerminationFailedException | ObserverStoppingException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             recordQueryFailure(cycle, "WORKFLOW_TAIL_QUERY_FAILED", exception);
             return false;
@@ -293,7 +388,12 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
         try {
             eventTails = requests.isEmpty()
                     ? Map.of()
-                    : repository.readEventTails(requests, eventBatchSize);
+                    : executeQuery(
+                            "read_event_tails",
+                            cancellation -> repository.readEventTails(
+                                    requests, eventBatchSize, cancellation));
+        } catch (QueryTerminationFailedException | ObserverStoppingException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             recordQueryFailure(cycle, "WORKFLOW_EVENT_TAIL_QUERY_FAILED", exception);
             return false;
@@ -334,6 +434,148 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
             consecutiveQueryFailures = 0;
         }
         return backlog;
+    }
+
+    private <T> T executeQuery(
+            String queryPhase,
+            Function<DatabaseQueryCancellation, T> operation) {
+        QueryExecution<T> execution = new QueryExecution<>(queryPhase);
+        synchronized (queryLock) {
+            if (!running) throw new ObserverStoppingException();
+            if (currentQuery != null) {
+                throw new IllegalStateException("Workflow SSE observer 查询不得重叠");
+            }
+            try {
+                QueryFutureTask<T> task = execution.newTask(() -> {
+                    activeQueries.incrementAndGet();
+                    try {
+                        return operation.apply(execution.cancellation);
+                    } finally {
+                        activeQueries.decrementAndGet();
+                    }
+                });
+                execution.future = task;
+                currentQuery = execution;
+                queryExecutor.execute(task);
+            } catch (RejectedExecutionException exception) {
+                execution.finishOnce();
+                if (currentQuery == execution) currentQuery = null;
+                if (!running) throw new ObserverStoppingException();
+                throw new IllegalStateException("Workflow SSE observer 查询执行器不可用", exception);
+            }
+        }
+
+        try {
+            return execution.future.get(
+                    timeouts.wallClockTimeout().toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException exception) {
+            CancellationOutcome outcome = cancelAndAwait(execution, false);
+            long elapsedMillis = execution.elapsedMillis();
+            if (!outcome.terminated()) {
+                throw new QueryTerminationFailedException(queryPhase, elapsedMillis, exception);
+            }
+            throw new BoundedQueryFailureException(
+                    queryPhase,
+                    elapsedMillis,
+                    true,
+                    outcome.connectionAbortRequested(),
+                    exception);
+        } catch (InterruptedException exception) {
+            CancellationOutcome outcome = cancelAndAwait(execution, true);
+            long elapsedMillis = execution.elapsedMillis();
+            if (!outcome.terminated()) {
+                throw new QueryTerminationFailedException(queryPhase, elapsedMillis, exception);
+            }
+            if (!running) throw new ObserverStoppingException();
+            throw new BoundedQueryFailureException(
+                    queryPhase,
+                    elapsedMillis,
+                    true,
+                    outcome.connectionAbortRequested(),
+                    exception);
+        } catch (CancellationException exception) {
+            CancellationOutcome outcome = cancelAndAwait(execution, false);
+            long elapsedMillis = execution.elapsedMillis();
+            if (!outcome.terminated()) {
+                throw new QueryTerminationFailedException(queryPhase, elapsedMillis, exception);
+            }
+            if (!running) throw new ObserverStoppingException();
+            throw new BoundedQueryFailureException(
+                    queryPhase,
+                    elapsedMillis,
+                    true,
+                    outcome.connectionAbortRequested(),
+                    exception);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof Error error) throw error;
+            throw new BoundedQueryFailureException(
+                    queryPhase,
+                    execution.elapsedMillis(),
+                    execution.cancellation.cancellationRequested(),
+                    false,
+                    cause);
+        } finally {
+            clearCompletedQuery(execution);
+        }
+    }
+
+    private CancellationOutcome cancelAndAwait(
+            QueryExecution<?> execution, boolean restoreInterrupt) {
+        execution.cancellation.requestStatementCancel();
+        execution.future.cancel(true);
+        logCancellationFailure(execution);
+        WaitResult statementWait = awaitFinished(
+                execution.finished, timeouts.statementCancelGrace());
+        boolean interrupted = restoreInterrupt || statementWait.interrupted();
+        if (statementWait.finished()) {
+            if (interrupted) Thread.currentThread().interrupt();
+            return new CancellationOutcome(true, false);
+        }
+
+        execution.cancellation.requestConnectionAbort();
+        logCancellationFailure(execution);
+        WaitResult abortWait = awaitFinished(
+                execution.finished, timeouts.connectionAbortGrace());
+        interrupted = interrupted || abortWait.interrupted();
+        if (interrupted) Thread.currentThread().interrupt();
+        return new CancellationOutcome(abortWait.finished(), true);
+    }
+
+    private void logCancellationFailure(QueryExecution<?> execution) {
+        execution.cancellation.cancellationFailure().ifPresent(exception -> {
+            if (!execution.cancellationFailureLogged.compareAndSet(false, true)) return;
+            LOGGER.atError()
+                    .addKeyValue("errorCode", "WORKFLOW_TAIL_QUERY_CANCEL_ACTION_FAILED")
+                    .addKeyValue("queryPhase", execution.queryPhase)
+                    .addKeyValue("exceptionType", exception.getClass().getName())
+                    .setCause(exception)
+                    .log("Workflow SSE observer 数据库取消动作失败");
+        });
+    }
+
+    private static WaitResult awaitFinished(CountDownLatch finished, Duration timeout) {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        boolean interrupted = false;
+        while (finished.getCount() != 0L) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) return new WaitResult(false, interrupted);
+            try {
+                if (finished.await(remaining, TimeUnit.NANOSECONDS)) {
+                    return new WaitResult(true, interrupted);
+                }
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        return new WaitResult(true, interrupted);
+    }
+
+    private void clearCompletedQuery(QueryExecution<?> execution) {
+        if (execution.finished.getCount() != 0L) return;
+        synchronized (queryLock) {
+            if (currentQuery == execution) currentQuery = null;
+        }
     }
 
     private static boolean validBatch(
@@ -405,8 +647,26 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
         synchronized (lock) {
             failures = ++consecutiveQueryFailures;
         }
+        BoundedQueryFailureException bounded = exception instanceof BoundedQueryFailureException value
+                ? value
+                : null;
         LOGGER.atWarn()
                 .addKeyValue("errorCode", errorCode)
+                .addKeyValue(
+                        "failureClass",
+                        bounded != null && bounded.wallClockExpired()
+                                ? "wall_clock_timeout"
+                                : "query_failed")
+                .addKeyValue("queryPhase", bounded == null ? "unknown" : bounded.queryPhase())
+                .addKeyValue(
+                        "wallClockTimeoutMillis", timeouts.wallClockTimeout().toMillis())
+                .addKeyValue("elapsedMillis", bounded == null ? -1L : bounded.elapsedMillis())
+                .addKeyValue(
+                        "statementCancelRequested",
+                        bounded != null && bounded.statementCancelRequested())
+                .addKeyValue(
+                        "connectionAbortRequested",
+                        bounded != null && bounded.connectionAbortRequested())
                 .addKeyValue("subscribedRuns", cycle.runs().size())
                 .addKeyValue("consecutiveFailures", failures)
                 .log("Workflow SSE 共享观察查询失败");
@@ -470,7 +730,6 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
     @Override
     public void close() {
         synchronized (lock) {
-            if (!running) return;
             running = false;
             IOException failure = new IOException("Workflow SSE 服务正在停止");
             runs.values().stream()
@@ -479,12 +738,58 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
                     .forEach(subscription -> detachLocked(subscription, failure));
             lock.notifyAll();
         }
-        worker.interrupt();
-        try {
-            worker.join(Duration.ofSeconds(5).toMillis());
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
+
+        synchronized (queryLock) {
+            if (currentQuery != null) {
+                currentQuery.cancellation.requestStatementCancel();
+                currentQuery.cancellation.requestConnectionAbort();
+                if (currentQuery.future != null) currentQuery.future.cancel(true);
+                logCancellationFailure(currentQuery);
+            }
+            queryExecutor.shutdownNow();
         }
+        worker.interrupt();
+
+        ShutdownResult shutdown = awaitShutdown();
+        if (shutdown.interrupted()) Thread.currentThread().interrupt();
+        if (shutdown.interrupted()
+                || worker.isAlive()
+                || !queryExecutor.isTerminated()
+                || activeQueries.get() != 0) {
+            LOGGER.atError()
+                    .addKeyValue("errorCode", "WORKFLOW_TAIL_OBSERVER_SHUTDOWN_INCOMPLETE")
+                    .addKeyValue("workerAlive", worker.isAlive())
+                    .addKeyValue("queryExecutorTerminated", queryExecutor.isTerminated())
+                    .addKeyValue("activeQueries", activeQueries.get())
+                    .addKeyValue("interrupted", shutdown.interrupted())
+                    .log("Workflow SSE observer 未在期限内停止");
+            throw new IllegalStateException("Workflow SSE observer 未在期限内停止");
+        }
+    }
+
+    private ShutdownResult awaitShutdown() {
+        long deadline = System.nanoTime() + timeouts.shutdownTimeout().toNanos();
+        boolean interrupted = false;
+        while (worker.isAlive()) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) break;
+            try {
+                long millis = Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remaining));
+                worker.join(millis);
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        while (!queryExecutor.isTerminated()) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) break;
+            try {
+                queryExecutor.awaitTermination(remaining, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        return new ShutdownResult(interrupted);
     }
 
     /** 单连接的有界观察句柄；关闭只停止观察，不取消远端 Run。 */
@@ -563,6 +868,122 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
     private record Cycle(long wakeVersion, List<CycleRun> runs) {}
 
     private record CycleRun(RunKey key, RunState state, long afterSequence) {}
+
+    private record CancellationOutcome(
+            boolean terminated, boolean connectionAbortRequested) {}
+
+    private record WaitResult(boolean finished, boolean interrupted) {}
+
+    private record ShutdownResult(boolean interrupted) {}
+
+    private static final class QueryExecution<T> {
+
+        private final String queryPhase;
+        private final long startedNanos = System.nanoTime();
+        private final DatabaseQueryCancellation cancellation = new DatabaseQueryCancellation();
+        private final CountDownLatch finished = new CountDownLatch(1);
+        private final AtomicBoolean finishedOnce = new AtomicBoolean();
+        private final AtomicBoolean cancellationFailureLogged = new AtomicBoolean();
+        private Future<T> future;
+
+        private QueryExecution(String queryPhase) {
+            this.queryPhase = queryPhase;
+        }
+
+        private long elapsedMillis() {
+            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        }
+
+        private QueryFutureTask<T> newTask(Callable<T> callable) {
+            return new QueryFutureTask<>(callable, this);
+        }
+
+        private void finishOnce() {
+            if (finishedOnce.compareAndSet(false, true)) finished.countDown();
+        }
+    }
+
+    /**
+     * Future.cancel 可能发生在 executor 真正调用 run 之前。done 只在任务尚未进入 run 时证明它不会再执行；
+     * 一旦 run 已进入，必须等 run finally，不能把 Future 的 cancelled 状态冒充原查询线程已退出。
+     */
+    private static final class QueryFutureTask<T> extends FutureTask<T> {
+
+        private final QueryExecution<T> execution;
+        private final AtomicBoolean runEntered = new AtomicBoolean();
+
+        private QueryFutureTask(Callable<T> callable, QueryExecution<T> execution) {
+            super(callable);
+            this.execution = execution;
+        }
+
+        @Override
+        public void run() {
+            runEntered.set(true);
+            try {
+                super.run();
+            } finally {
+                execution.finishOnce();
+            }
+        }
+
+        @Override
+        protected void done() {
+            if (!isCancelled() || !runEntered.get()) execution.finishOnce();
+        }
+    }
+
+    private static class BoundedQueryFailureException extends RuntimeException {
+
+        private final String queryPhase;
+        private final long elapsedMillis;
+        private final boolean statementCancelRequested;
+        private final boolean connectionAbortRequested;
+
+        private BoundedQueryFailureException(
+                String queryPhase,
+                long elapsedMillis,
+                boolean statementCancelRequested,
+                boolean connectionAbortRequested,
+                Throwable cause) {
+            super("工作流事件观察查询失败", cause);
+            this.queryPhase = queryPhase;
+            this.elapsedMillis = elapsedMillis;
+            this.statementCancelRequested = statementCancelRequested;
+            this.connectionAbortRequested = connectionAbortRequested;
+        }
+
+        final String queryPhase() {
+            return queryPhase;
+        }
+
+        final long elapsedMillis() {
+            return elapsedMillis;
+        }
+
+        private boolean statementCancelRequested() {
+            return statementCancelRequested;
+        }
+
+        private boolean connectionAbortRequested() {
+            return connectionAbortRequested;
+        }
+
+        private boolean wallClockExpired() {
+            return getCause() instanceof TimeoutException;
+        }
+    }
+
+    private static final class QueryTerminationFailedException
+            extends BoundedQueryFailureException {
+
+        private QueryTerminationFailedException(
+                String queryPhase, long elapsedMillis, Throwable cause) {
+            super(queryPhase, elapsedMillis, true, true, cause);
+        }
+    }
+
+    private static final class ObserverStoppingException extends RuntimeException {}
 
     private record Signal(Update update, IOException failure) {
         private static Signal update(Update value) {

@@ -28,8 +28,7 @@ public final class CoreSettings {
 
     public enum DurableAgentRouteMode {
         OFF,
-        ALLOWLIST,
-        ALL
+        ALLOWLIST
     }
 
     private final EnvironmentName environment;
@@ -61,8 +60,10 @@ public final class CoreSettings {
     private final boolean workflowEventDebugEnabled;
     private final boolean durableAgentExecutionSchemaReady;
     private final DurableAgentRouteMode durableAgentRouteMode;
+    private final boolean v1FreshAgentStartsEnabled;
     private final Set<String> durableAgentUserAllowlist;
     private final Set<String> durableAgentNovelAllowlist;
+    private final Path durableAgentReleaseGuardPath;
     private final Path uploadsRoot;
     private final boolean videoPreviewEnabled;
     private final boolean videoDispatchEnabled;
@@ -113,12 +114,16 @@ public final class CoreSettings {
                 value, "DURABLE_AGENT_EXECUTION_SCHEMA_READY", false);
         this.durableAgentRouteMode = durableAgentRouteMode(
                 value.apply("DURABLE_AGENT_EXECUTION_ROUTE_MODE"));
+        this.v1FreshAgentStartsEnabled = bool(
+                value, "V1_FRESH_AGENT_STARTS_ENABLED", true);
         this.durableAgentUserAllowlist = idAllowlist(
                 value.apply("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST"),
                 "耐久 Agent 用户 allowlist");
         this.durableAgentNovelAllowlist = idAllowlist(
                 value.apply("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST"),
                 "耐久 Agent 小说 allowlist");
+        this.durableAgentReleaseGuardPath = optionalPath(
+                value.apply("DURABLE_AGENT_RELEASE_GUARD_PATH"));
         this.uploadsRoot = absolutePath(nonBlankOrDefault(value.apply("UPLOADS_ROOT"), "/data/uploads"));
         this.videoPreviewEnabled = bool(value, "VIDEO_PREVIEW_ENABLED", false);
         this.videoDispatchEnabled = bool(value, "VIDEO_DISPATCH_ENABLED", false);
@@ -258,6 +263,11 @@ public final class CoreSettings {
         return durableAgentRouteMode;
     }
 
+    /** 只控制没有既有幂等身份、且最终会创建 V1 Task 的 fresh start。 */
+    public boolean v1FreshAgentStartsEnabled() {
+        return v1FreshAgentStartsEnabled;
+    }
+
     public Set<String> durableAgentUserAllowlist() {
         return durableAgentUserAllowlist;
     }
@@ -266,12 +276,16 @@ public final class CoreSettings {
         return durableAgentNovelAllowlist;
     }
 
+    /** 服务器发布事务持久 guard 的只读挂载路径；缺失时 fresh V2 必须关闭。 */
+    public Path durableAgentReleaseGuardPath() {
+        return durableAgentReleaseGuardPath;
+    }
+
     /** 开关只决定新 Run 的路由；既有 V2 Run 必须继续由 V2 引擎收敛。 */
     public boolean routesNewDurableAgentRun(String userId, String novelId) {
         if (!durableAgentExecutionSchemaReady) return false;
         return switch (durableAgentRouteMode) {
             case OFF -> false;
-            case ALL -> true;
             case ALLOWLIST -> durableAgentUserAllowlist.contains(userId)
                     && novelId != null
                     && durableAgentNovelAllowlist.contains(novelId);
@@ -441,9 +455,8 @@ public final class CoreSettings {
         return switch (normalized) {
             case "off" -> DurableAgentRouteMode.OFF;
             case "allowlist" -> DurableAgentRouteMode.ALLOWLIST;
-            case "all" -> DurableAgentRouteMode.ALL;
             default -> throw new IllegalArgumentException(
-                    "DURABLE_AGENT_EXECUTION_ROUTE_MODE 必须是 off、allowlist 或 all");
+                    "DURABLE_AGENT_EXECUTION_ROUTE_MODE 必须是 off 或 allowlist");
         };
     }
 

@@ -22,7 +22,9 @@ schema 表存在当作 V2 canary 成功。数据库目标必须显式为 `novelw
 具名迁移入口：
 
 ```text
-scripts/durable-agent-execution-migration.sh <status|active-v2-count|backup|forward|rollback> <novelwriterdev|novelwriter>
+scripts/durable-agent-execution-migration.sh \
+  <status|active-v2-count|backup|forward|rollback|export-contract|verify-contract> \
+  <novelwriterdev|novelwriter>
 ```
 
 只读 `status` 只允许以下四种输出：
@@ -39,11 +41,11 @@ scripts/durable-agent-execution-migration.sh <status|active-v2-count|backup|forw
 已经删除密码并固定连接本机 `127.0.0.1`，来源 URL 必须精确使用 `host.docker.internal`。命令行、stdout、
 stderr 和迁移元数据不得出现数据库密码。
 
-四个发布阶段门禁使用：
+分阶段发布门禁使用：
 
 ```text
 scripts/durable-agent-v2-rollout-gate.sh \
-  <pre-contract|post-contract-route-off|schema-ready-route-off|allowlist|route-off-drain|ddl-rollback> \
+  <pre-contract|post-contract-route-off|schema-ready-route-off|initialize-drain-indexes|allowlist|drain-status|verify-drain|route-off-drain|ddl-rollback> \
   <novelwriterdev|novelwriter>
 ```
 
@@ -97,6 +99,7 @@ DURABLE_AGENT_EXECUTION_SCHEMA_READY=false
 DURABLE_AGENT_EXECUTION_ROUTE_MODE=off
 DURABLE_AGENT_EXECUTION_USER_ALLOWLIST=
 DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST=
+V1_FRESH_AGENT_STARTS_ENABLED=true
 ```
 
 先部署同一套 V2-aware 三服务镜像，但不迁移数据库、不装配 V2 repository/worker、不创建新 V2 Run。部署后执行：
@@ -172,6 +175,46 @@ DURABLE_AGENT_MIGRATION_CONFIRM_FILE=/受保护临时目录/forward.confirm \
   sh scripts/durable-agent-execution-migration.sh forward novelwriter
 ```
 
+### 6.1 导出并复验真实迁移后 contract 证据
+
+两次 forward 和两次 `post-contract-route-off` 门禁通过后，必须在启用 `schemaReady` 前为当前目标库创建独立、
+不可覆盖的证据目录。目录路径不得位于仓库 canonical contract 位置，也不得预先存在：
+
+```sh
+APP_DIR=/srv/smart-novel-gen \
+DURABLE_AGENT_CONTRACT_EVIDENCE_DIR=/受保护证据根目录/novelwriterdev-20260831 \
+  sh scripts/durable-agent-execution-migration.sh export-contract novelwriterdev
+```
+
+成功只输出：
+
+```text
+contract-export-ok:/受保护证据根目录/novelwriterdev-20260831:<contractFingerprint>
+```
+
+目录必须只包含 `schema-contract.json`、`schema-only.sql`、`contract-verification.meta` 和 `SHA256SUMS`。
+`schema-contract.json` 的结构正文来自已由实时 Java guard 精确验证的冻结 post contract 按当前运行 Core schema
+profile 生成的精确投影，只允许 `source` 替换为当前安全连接读取的来源元数据；`schema-only.sql` 是同一数据库的
+只读结构导出，仅移除 PostgreSQL 每次随机生成、
+不描述结构的 `\\restrict/\\unrestrict` 控制行以获得稳定 SHA。随后必须立即独立复验：
+
+```sh
+APP_DIR=/srv/smart-novel-gen \
+DURABLE_AGENT_CONTRACT_EVIDENCE_DIR=/受保护证据根目录/novelwriterdev-20260831 \
+  sh scripts/durable-agent-execution-migration.sh verify-contract novelwriterdev
+```
+
+成功只输出：
+
+```text
+contract-verify-ok:/受保护证据根目录/novelwriterdev-20260831:<contractFingerprint>
+```
+
+两个动作都复用 helper 的唯一 `.env`、0600 `PGPASSFILE`、无密码 `127.0.0.1` URL、精确数据库名和只读超时；
+密码不得进入 argv、stdout、stderr、证据或 shell trace。`verify-contract` 会重新读取实时状态、Java guard 与
+schema-only dump；任何目录符号链接、额外文件、SHA/fingerprint/数据库身份/post contract 漂移都必须停止发布。
+证据只用于审计，helper 不会覆盖仓库 `schema-contract.json` 或执行 DDL。开发库和正式库必须分别导出，禁止复用。
+
 ## 7. 阶段 D：同一镜像启用 schemaReady，继续 route-off
 
 只有 `migrated-empty-v2` 和阶段 C 全部门禁通过后，才修改配置并重启同一已验证镜像：
@@ -193,6 +236,25 @@ APP_DIR=/srv/smart-novel-gen \
 该阶段验证 V2 repository、dispatcher、cancel、callback、SSE 和 manifest readiness 已装配，但新建路由仍关闭。
 回读数据库必须仍为 `migrated-empty-v2`。开发环境同形演练、故障注入和低额度真实供应商验证完成前，不得进入生产。
 
+进入 allowlist 前必须安排一个短暂的“双入口关闭”窗口，先修改并重启同一镜像：
+
+```dotenv
+DURABLE_AGENT_EXECUTION_SCHEMA_READY=true
+DURABLE_AGENT_EXECUTION_ROUTE_MODE=off
+V1_FRESH_AGENT_STARTS_ENABLED=false
+```
+
+运行中的 Core 必须实际读取到这三个值，且 JAR 必须包含 V1 fresh-start 门禁。随后执行：
+
+```sh
+APP_DIR=/srv/smart-novel-gen \
+  sh scripts/durable-agent-v2-rollout-gate.sh initialize-drain-indexes novelwriter
+```
+
+该 action 只在 PostgreSQL 全部 V2 Run 为零、普通 Redis 无 active V1 job 且 execution Redis 无任何执行 key 时，
+原子写入 V1/V2 drain index marker。已有 V2 数据而缺 marker 时会进入 quarantine/具名审计，绝不根据 callback
+集合猜测重建。初始化完成后才可重新开启 V1 fresh start 并进入 allowlist。
+
 ## 8. 阶段 E：账号与隔离小说交集 allowlist
 
 只配置服务端解析的稳定用户 ID 和新建隔离小说 ID；两者取交集，用户名、Cookie、展示名或用户提交 ID 均不能替代：
@@ -202,6 +264,7 @@ DURABLE_AGENT_EXECUTION_SCHEMA_READY=true
 DURABLE_AGENT_EXECUTION_ROUTE_MODE=allowlist
 DURABLE_AGENT_EXECUTION_USER_ALLOWLIST=<稳定用户ID>
 DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST=<新建隔离小说ID>
+V1_FRESH_AGENT_STARTS_ENABLED=true
 ```
 
 重启同一镜像后执行：
@@ -228,6 +291,7 @@ allowlist 门禁同时从当前发布检出计算预期 fingerprint，并让正�
 ```dotenv
 DURABLE_AGENT_EXECUTION_SCHEMA_READY=true
 DURABLE_AGENT_EXECUTION_ROUTE_MODE=off
+V1_FRESH_AGENT_STARTS_ENABLED=false
 ```
 
 并执行：
@@ -237,7 +301,22 @@ APP_DIR=/srv/smart-novel-gen \
   sh scripts/durable-agent-v2-rollout-gate.sh route-off-drain novelwriter
 ```
 
-route-off 只阻止新 V2 Run，不能中断已有 V2。回滚镜像必须同时满足：Core 和 Agent 均通过 V2-aware 内容探针，
+`route-off-drain` 同时关闭 V2 新建路由和 V1 fresh start；既有幂等重放、resume、cancel、Command/Outbox 重投、
+callback 与终态收敛继续允许。只有运行中 Core 容器实际证明两个入口均关闭，才可开始
+`PG1 -> 普通 Redis -> execution Redis -> PG2` 联合采样：
+
+```sh
+APP_DIR=/srv/smart-novel-gen \
+  sh scripts/durable-agent-v2-rollout-gate.sh drain-status novelwriter
+APP_DIR=/srv/smart-novel-gen \
+  sh scripts/durable-agent-v2-rollout-gate.sh verify-drain novelwriter
+```
+
+`drain-status` 对合法非零阻断项仍退出 0；`verify-drain` 只有 V1/V2 全部收敛且两轮 PostgreSQL 精确阻断集合、
+容器/镜像/Redis run_id、时间水位与两个索引版本均稳定时退出 0。任一 marker 缺失、孤儿、超限、quarantine、
+采样期间变化或身份漂移都失败，不能把多个来源中最晚时间冒充同一时刻。
+
+route-off 不能中断已有 V2。回滚镜像必须同时满足：Core 和 Agent 均通过 V2-aware 内容探针，
 Core 保持 `schemaReady=true`，能继续查询、取消、调度、接收 callback、结算并收敛既有 Run。目标与回滚 Agent
 fingerprint 不同时还必须先证明当前运行 Core 的实际 route 为 off，再通过 `active-v2-count` 证明 V2 非终态为 0；
 否则即使目标配置写着 route-off 也不能切换。生产部署脚本
@@ -255,6 +334,7 @@ DDL rollback 只服务“刚完成结构迁移、尚无任何 V2 事实”的短
 ```dotenv
 DURABLE_AGENT_EXECUTION_SCHEMA_READY=false
 DURABLE_AGENT_EXECUTION_ROUTE_MODE=off
+V1_FRESH_AGENT_STARTS_ENABLED=false
 ```
 
 再执行 `ddl-rollback` 门禁。正式 rollback 的 0600 令牌文件必须精确包含：

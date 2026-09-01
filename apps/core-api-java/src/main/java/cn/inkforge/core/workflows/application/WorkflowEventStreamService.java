@@ -3,15 +3,13 @@ package cn.inkforge.core.workflows.application;
 import cn.inkforge.contracts.api.RunSnapshot;
 import cn.inkforge.contracts.api.WorkflowEventEnvelope;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.platform.http.SseStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import tools.jackson.databind.ObjectMapper;
 
 /** 从 PostgreSQL snapshot 与 WorkflowEvent 生成 V2 写作运行 SSE。 */
@@ -42,9 +40,9 @@ public final class WorkflowEventStreamService {
     }
 
     /**
-     * 按持久化引擎身份准备流。cursor 在返回 StreamingResponseBody 前校验，确保错误仍能返回稳定 409。
+     * 按持久化引擎身份准备流。cursor 在返回 SseEmitter 前校验，确保错误仍能返回稳定 409。
      */
-    public Optional<StreamingResponseBody> streamIfV2(
+    public Optional<SseStream> streamIfV2(
             String userId, String runId, String lastEventId) {
         Optional<WorkflowEventStreamRepository.SnapshotRead> initial =
                 repository.readSnapshot(userId, runId);
@@ -56,24 +54,32 @@ public final class WorkflowEventStreamService {
         WorkflowEventTailObserver.Subscription subscription =
                 observer.subscribe(userId, runId, baseSequence);
         AtomicBoolean claimed = new AtomicBoolean();
-        return Optional.of(output -> {
-            if (!claimed.compareAndSet(false, true)) {
-                subscription.close();
-                throw new IOException("Workflow SSE 响应不能重复执行");
+        return Optional.of(new SseStream() {
+            @Override
+            public void run(FrameSender sender) throws IOException {
+                if (!claimed.compareAndSet(false, true)) {
+                    subscription.close();
+                    throw new IOException("Workflow SSE 响应不能重复执行");
+                }
+                try (subscription) {
+                    writeLoop(sender, runId, frame, subscription);
+                }
             }
-            try (subscription) {
-                writeLoop(output, runId, frame, subscription);
+
+            @Override
+            public void close() {
+                subscription.close();
             }
         });
     }
 
     private void writeLoop(
-            OutputStream output,
+            SseStream.FrameSender sender,
             String runId,
             RunSnapshot initial,
             WorkflowEventTailObserver.Subscription subscription) throws IOException {
         long cursor = initial.getBaseSequence().longValue();
-        write(output, formatSnapshot(runId, initial));
+        sender.send(formatSnapshot(runId, initial));
         subscription.activate();
         long heartbeatDeadline = System.nanoTime() + heartbeatInterval.toNanos();
         while (!Thread.currentThread().isInterrupted()) {
@@ -87,7 +93,7 @@ public final class WorkflowEventStreamService {
             }
 
             if (observed.isEmpty()) {
-                write(output, ": 心跳\n\n");
+                sender.send(": 心跳\n\n");
                 heartbeatDeadline = System.nanoTime() + heartbeatInterval.toNanos();
                 continue;
             }
@@ -101,7 +107,7 @@ public final class WorkflowEventStreamService {
                 if (sequence != Math.addExact(cursor, 1L)) {
                     throw new IllegalStateException("WorkflowEvent sequence 不连续");
                 }
-                write(output, formatEvent(runId, event));
+                sender.send(formatEvent(runId, event));
                 cursor = sequence;
                 subscription.markDelivered(sequence);
                 wroteEvent = true;
@@ -186,8 +192,4 @@ public final class WorkflowEventStreamService {
         return new ApiException(409, "WORKFLOW_CURSOR_INVALID", "工作流事件游标无效");
     }
 
-    private static void write(OutputStream output, String value) throws IOException {
-        output.write(value.getBytes(StandardCharsets.UTF_8));
-        output.flush();
-    }
 }

@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 class LongWorkflowMutationsTest {
 
@@ -46,6 +47,21 @@ class LongWorkflowMutationsTest {
                         + "\"chapterId\":\"c1\",\"operation\":\"write_chapter\",\"target\":{\"type\":\"chapter\",\"id\":\"c1\"},"
                         + "\"scope\":{\"kind\":\"chapter\",\"chapterId\":\"c1\"},\"userInstruction\":\"  保持悬念  \","
                         + "\"writingSessionId\":null,\"targetWordCount\":3000}");
+
+        assertLastRequest(
+                application,
+                api,
+                "long.agent.start",
+                "{\"novelId\":\"n1\",\"chapterId\":\"c1\",\"clientRequestId\":\"agent-answer-00001\","
+                        + "\"operation\":\"answer_question\",\"target\":{\"type\":\"chapter\",\"id\":\"c1\"},"
+                        + "\"scope\":{\"kind\":\"chapter\",\"chapterId\":\"c1\"},\"writingSessionId\":\"s1\","
+                        + "\"userInstruction\":\"这一章的主要冲突是什么？\"}",
+                "POST",
+                "/api/v1/writing/runs",
+                "{\"clientRequestId\":\"agent-answer-00001\",\"workflow\":\"long_serial\",\"novelId\":\"n1\","
+                        + "\"chapterId\":\"c1\",\"operation\":\"answer_question\",\"target\":{\"type\":\"chapter\",\"id\":\"c1\"},"
+                        + "\"scope\":{\"kind\":\"chapter\",\"chapterId\":\"c1\"},\"userInstruction\":\"这一章的主要冲突是什么？\","
+                        + "\"writingSessionId\":\"s1\"}");
 
         assertLastRequest(
                 application,
@@ -96,6 +112,64 @@ class LongWorkflowMutationsTest {
             assertThat(run(application, "long.agent.start", payload).exit()).isEqualTo(2);
             assertThat(api.calls).hasSize(before);
         }
+
+        for (String sessionField : List.of(
+                "",
+                "\"writingSessionId\":null,",
+                "\"writingSessionId\":\"\",",
+                "\"writingSessionId\":7,")) {
+            int beforeInvalidSession = api.calls.size();
+            Result invalidSession = run(
+                    application,
+                    "long.agent.start",
+                    "{\"novelId\":\"n1\",\"chapterId\":\"c1\",\"clientRequestId\":\"agent-invalid-0003\","
+                            + "\"operation\":\"answer_question\",\"target\":{\"type\":\"chapter\",\"id\":\"c1\"},"
+                            + "\"scope\":{\"kind\":\"chapter\",\"chapterId\":\"c1\"},"
+                            + sessionField
+                            + "\"userInstruction\":\"问\"}");
+            assertThat(invalidSession.exit()).as(sessionField).isEqualTo(2);
+            assertThat(invalidSession.stdout()).as(sessionField)
+                    .contains("WRITING_SESSION_REQUIRED");
+            assertThat(api.calls).as(sessionField).hasSize(beforeInvalidSession);
+        }
+    }
+
+    @Test
+    void Agent用户指令Unicode全空白在网络前拒绝且正常中文逐字发送() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        List<String> blankInstructions = List.of(
+                "\u3000",
+                "\u00a0",
+                "\u0085",
+                "\n\u3000\u00a0\t\r");
+
+        for (int index = 0; index < blankInstructions.size(); index++) {
+            int before = api.calls.size();
+            Result rejected = run(
+                    application,
+                    "long.agent.start",
+                    answerStartPayload(
+                                    "agent-blank-unicode-" + index,
+                                    blankInstructions.get(index))
+                            .toString());
+            assertThat(rejected.exit()).isEqualTo(2);
+            assertThat(rejected.stdout()).contains("INVALID_USER_INSTRUCTION");
+            assertThat(api.calls).hasSize(before);
+        }
+
+        String instruction = " \u3000正常中文\u00a0 ";
+        int beforeAccepted = api.calls.size();
+        Result accepted = run(
+                application,
+                "long.agent.start",
+                answerStartPayload("agent-unicode-normal-01", instruction).toString());
+        assertThat(accepted.exit()).as(accepted.stdout()).isZero();
+        assertThat(api.calls).hasSize(beforeAccepted + 1);
+        assertThat(api.calls.getLast().method()).isEqualTo("POST");
+        assertThat(api.calls.getLast().path()).isEqualTo("/api/v1/writing/runs");
+        assertThat(api.calls.getLast().body().get("userInstruction").textValue())
+                .isEqualTo(instruction);
     }
 
     @Test
@@ -341,6 +415,21 @@ class LongWorkflowMutationsTest {
                 + ",\"sourceBindingStatus\":" + json.writeValueAsString(sourceBindingStatus)
                 + ",\"payload\":{\"target\":{\"mode\":"
                 + json.writeValueAsString(targetMode) + "}}}");
+    }
+
+    private ObjectNode answerStartPayload(String clientRequestId, String instruction) {
+        ObjectNode payload = json.createObjectNode();
+        payload.put("novelId", "n1");
+        payload.put("chapterId", "c1");
+        payload.put("clientRequestId", clientRequestId);
+        payload.put("operation", "answer_question");
+        payload.set("target", json.valueToTree(Map.of("type", "chapter", "id", "c1")));
+        payload.set(
+                "scope",
+                json.valueToTree(Map.of("kind", "chapter", "chapterId", "c1")));
+        payload.put("writingSessionId", "s1");
+        payload.put("userInstruction", instruction);
+        return payload;
     }
 
     private void assertLastRequest(

@@ -23,6 +23,7 @@ TerminalPayload = ExecutionStepResult | ExecutionStepFailure
 
 _DEFAULT_RETENTION = timedelta(hours=24)
 _MIN_RETENTION = timedelta(hours=24)
+EXECUTION_DRAIN_INDEX_VERSION = "1"
 
 
 class AsyncJournalRedis(Protocol):
@@ -176,11 +177,13 @@ class RedisExecutionJournal:
         novel_id = cast(str | None, getattr(request, "novelId", None))
         result = await self._eval(
             _ACCEPT_SCRIPT,
-            4,
+            6,
             self._key(request.stepId),
             self._callback_pending,
             self._callback_rejected,
             self._callback_leased,
+            self._drain_active,
+            self._drain_index_version,
             request.requestHash,
             request.inputHash,
             request.runId,
@@ -192,8 +195,12 @@ class RedisExecutionJournal:
             _millis(current),
             self._retention_seconds,
             novel_id or "",
+            EXECUTION_DRAIN_INDEX_VERSION,
+            "1" if self._require_durability else "0",
         )
         code = _text(result[0])
+        if code in {"index_missing", "index_corrupt"}:
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if code == "conflict":
             raise ExecutionJournalConflictError("同一 Step 的 V2 requestHash 或资源身份冲突")
         if code == "stale_fence":
@@ -217,8 +224,10 @@ class RedisExecutionJournal:
     ) -> JournalEntry:
         result = await self._eval(
             _START_SCRIPT,
-            1,
+            3,
             self._key(request.stepId),
+            self._drain_active,
+            self._drain_index_version,
             request.requestHash,
             request.jobId,
             request.fencingToken,
@@ -226,6 +235,8 @@ class RedisExecutionJournal:
             self._retention_seconds,
         )
         code = _text(result)
+        if code == "index_corrupt":
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if code == "conflict":
             raise ExecutionJournalConflictError("V2 execution started 身份冲突")
         if code == "stale_fence":
@@ -245,8 +256,10 @@ class RedisExecutionJournal:
         result = int(
             await self._eval(
                 _ATTEMPT_SCRIPT,
-                1,
+                3,
                 self._key(request.stepId),
+                self._drain_active,
+                self._drain_index_version,
                 request.requestHash,
                 request.jobId,
                 request.fencingToken,
@@ -259,6 +272,8 @@ class RedisExecutionJournal:
             raise ExecutionJournalConflictError("供应商调用前 V2 execution 身份已变化")
         if result == -2:
             raise ExecutionJournalCancelledError("供应商调用前 V2 execution 已取消")
+        if result == -3:
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if result < 1:
             raise ExecutionJournalError("供应商尝试计数未能持久化")
         return result
@@ -276,11 +291,13 @@ class RedisExecutionJournal:
         )
         result = await self._eval(
             _TERMINAL_SCRIPT,
-            4,
+            6,
             self._key(request.stepId),
             self._callback_pending,
             self._callback_rejected,
             self._callback_leased,
+            self._drain_active,
+            self._drain_index_version,
             request.requestHash,
             request.jobId,
             request.fencingToken,
@@ -292,6 +309,8 @@ class RedisExecutionJournal:
             _millis(datetime.now(UTC)),
         )
         code = _text(result)
+        if code == "index_corrupt":
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if code == "conflict":
             raise ExecutionJournalConflictError("V2 execution 终态身份或结果冲突")
         if code == "stale_fence":
@@ -309,8 +328,10 @@ class RedisExecutionJournal:
         novel_id = cast(str | None, getattr(request, "novelId", None))
         result = await self._eval(
             _CANCEL_SCRIPT,
-            1,
+            3,
             self._key(request.stepId),
+            self._drain_active,
+            self._drain_index_version,
             request.requestHash,
             request.runId,
             request.stepId,
@@ -321,6 +342,8 @@ class RedisExecutionJournal:
             self._retention_seconds,
         )
         code = _text(result)
+        if code == "index_corrupt":
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if code == "conflict":
             raise ExecutionJournalConflictError("V2 execution cancelRequestId 冲突")
         if code not in {
@@ -343,16 +366,20 @@ class RedisExecutionJournal:
     ) -> JournalEntry:
         result = await self._eval(
             _CALLBACK_DELIVERED_SCRIPT,
-            4,
+            6,
             self._key(step_id),
             self._callback_pending,
             self._callback_rejected,
             self._callback_leased,
+            self._drain_active,
+            self._drain_index_version,
             request_hash,
             result_hash,
             self._retention_seconds,
             claim_token or "",
         )
+        if int(result) == -1:
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if int(result) != 1:
             raise ExecutionJournalConflictError("V2 execution callback 确认身份冲突")
         return await self.require(step_id)
@@ -368,17 +395,21 @@ class RedisExecutionJournal:
     ) -> JournalEntry:
         result = await self._eval(
             _CALLBACK_REJECTED_SCRIPT,
-            4,
+            6,
             self._key(step_id),
             self._callback_pending,
             self._callback_rejected,
             self._callback_leased,
+            self._drain_active,
+            self._drain_index_version,
             request_hash,
             result_hash,
             error_code,
             self._retention_seconds,
             claim_token or "",
         )
+        if int(result) == -1:
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if int(result) != 1:
             raise ExecutionJournalConflictError("V2 execution callback 拒绝身份冲突")
         return await self.require(step_id)
@@ -397,10 +428,12 @@ class RedisExecutionJournal:
         current = _utc(now)
         result = await self._eval(
             _CLAIM_DUE_CALLBACKS_SCRIPT,
-            3,
+            5,
             self._callback_pending,
             self._callback_leased,
             self._restore_quarantine,
+            self._drain_active,
+            self._drain_index_version,
             _millis(current),
             limit,
             _millis(current + lease),
@@ -421,11 +454,13 @@ class RedisExecutionJournal:
         current = _utc(now)
         result = await self._eval(
             _CLAIM_ONE_CALLBACK_SCRIPT,
-            4,
+            6,
             self._key(step_id),
             self._callback_pending,
             self._callback_leased,
             self._restore_quarantine,
+            self._drain_active,
+            self._drain_index_version,
             _millis(current),
             _millis(current + lease),
             uuid.uuid4().hex,
@@ -445,10 +480,12 @@ class RedisExecutionJournal:
         attempts = claim.attempts + 1
         result = await self._eval(
             _RESCHEDULE_CALLBACK_SCRIPT,
-            3,
+            5,
             self._key(claim.step_id),
             self._callback_pending,
             self._callback_leased,
+            self._drain_active,
+            self._drain_index_version,
             claim.request_hash,
             claim.result_hash,
             claim.claim_token,
@@ -456,6 +493,8 @@ class RedisExecutionJournal:
             _millis(next_attempt),
             error_code,
         )
+        if int(result) == -1:
+            raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
         if int(result) != 1:
             raise ExecutionJournalConflictError("V2 execution callback 重排身份冲突")
         return await self.require(claim.step_id)
@@ -631,6 +670,14 @@ class RedisExecutionJournal:
     def _restore_quarantine(self) -> str:
         return f"{self._prefix}:restore:quarantine"
 
+    @property
+    def _drain_active(self) -> str:
+        return f"{self._prefix}:drain:active"
+
+    @property
+    def _drain_index_version(self) -> str:
+        return f"{self._prefix}:drain:index-version"
+
 
 def _parse_entry(values: Mapping[str, str]) -> JournalEntry:
     try:
@@ -705,6 +752,8 @@ def _parse_entry(values: Mapping[str, str]) -> JournalEntry:
 def _parse_claims(value: object) -> tuple[CallbackClaim, ...]:
     if not isinstance(value, (list, tuple)):
         raise ExecutionJournalError("V2 execution callback claim 返回无效")
+    if len(value) == 1 and _text(value[0]) == "-1":
+        raise ExecutionJournalError("V2 execution drain 索引缺失或损坏")
     if len(value) % 5 != 0:
         raise ExecutionJournalError("V2 execution callback claim 字段不完整")
     claims: list[CallbackClaim] = []
@@ -761,6 +810,16 @@ def _text(value: object) -> str:
 
 _ACCEPT_SCRIPT = """
 local existing_hash = redis.call('HGET', KEYS[1], 'request_hash')
+local marker = redis.call('GET', KEYS[6])
+if not marker then
+  if ARGV[13] == '1' then return {'index_missing'} end
+  -- execution Redis 是独立 DB；非生产也只有真正全空时才能首次建立 marker。
+  -- 只检查当前 step/callback 集合会漏掉另一个孤立 execution hash。
+  if redis.call('DBSIZE') ~= 0 then return {'index_missing'} end
+  redis.call('SET', KEYS[6], ARGV[12])
+elseif marker ~= ARGV[12] then
+  return {'index_corrupt'}
+end
 if not existing_hash then
   redis.call('HSET', KEYS[1],
     'state', 'accepted',
@@ -777,6 +836,7 @@ if not existing_hash then
     'callback_delivery', 'pending',
     'novel_id', ARGV[11])
   redis.call('PERSIST', KEYS[1])
+  redis.call('ZADD', KEYS[5], ARGV[9], KEYS[1])
   return {'ok', 'accepted', 'created'}
 end
 if existing_hash ~= ARGV[1]
@@ -792,6 +852,20 @@ local new_fence = tonumber(ARGV[6])
 if new_fence < old_fence then return {'stale_fence'} end
 if new_fence == old_fence and redis.call('HGET', KEYS[1], 'job_id') ~= ARGV[5] then
   return {'conflict'}
+end
+local indexed = redis.call('ZSCORE', KEYS[5], KEYS[1])
+local current_state = redis.call('HGET', KEYS[1], 'state')
+local current_delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+local should_index = current_state == 'accepted' or current_state == 'started'
+    or ((current_state == 'result' or current_state == 'failure')
+      and current_delivery ~= 'delivered')
+if should_index then
+  if not indexed
+      or tonumber(indexed) ~= tonumber(redis.call('HGET', KEYS[1], 'accepted_ms')) then
+    return {'index_corrupt'}
+  end
+elseif indexed then
+  return {'index_corrupt'}
 end
 if new_fence > old_fence then
   redis.call('HSET', KEYS[1],
@@ -817,6 +891,7 @@ local final_state = redis.call('HGET', KEYS[1], 'state')
 local final_delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
 if (final_state == 'result' or final_state == 'failure')
     and final_delivery == 'delivered' then
+  redis.call('ZREM', KEYS[5], KEYS[1])
   redis.call('EXPIRE', KEYS[1], ARGV[10])
 else
   redis.call('PERSIST', KEYS[1])
@@ -827,6 +902,7 @@ return {'ok', redis.call('HGET', KEYS[1], 'state'), disposition}
 """
 
 _START_SCRIPT = """
+if redis.call('GET', KEYS[3]) ~= '1' then return 'index_corrupt' end
 if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1] then return 'conflict' end
 local old_fence = tonumber(redis.call('HGET', KEYS[1], 'fencing_token'))
 local new_fence = tonumber(ARGV[3])
@@ -835,7 +911,17 @@ if new_fence ~= old_fence or redis.call('HGET', KEYS[1], 'job_id') ~= ARGV[2] th
   return 'conflict'
 end
 local state = redis.call('HGET', KEYS[1], 'state')
-if state == 'result' or state == 'failure' then return state end
+local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+local indexed = redis.call('ZSCORE', KEYS[2], KEYS[1])
+if state == 'result' or state == 'failure' then
+  if (delivery == 'delivered' and indexed)
+      or (delivery ~= 'delivered' and not indexed) then return 'index_corrupt' end
+  return state
+end
+if not indexed
+    or tonumber(indexed) ~= tonumber(redis.call('HGET', KEYS[1], 'accepted_ms')) then
+  return 'index_corrupt'
+end
 if redis.call('HEXISTS', KEYS[1], 'cancel_request_id') == 1 then return 'cancelled' end
 if state == 'accepted' then
   redis.call('HSET', KEYS[1], 'state', 'started', 'started_ms', ARGV[4])
@@ -845,11 +931,17 @@ return 'started'
 """
 
 _ATTEMPT_SCRIPT = """
+if redis.call('GET', KEYS[3]) ~= '1' then return -3 end
 if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1]
     or redis.call('HGET', KEYS[1], 'job_id') ~= ARGV[2]
     or tonumber(redis.call('HGET', KEYS[1], 'fencing_token')) ~= tonumber(ARGV[3])
     or redis.call('HGET', KEYS[1], 'state') ~= 'started' then
   return -1
+end
+local indexed = redis.call('ZSCORE', KEYS[2], KEYS[1])
+if not indexed
+    or tonumber(indexed) ~= tonumber(redis.call('HGET', KEYS[1], 'accepted_ms')) then
+  return -3
 end
 if redis.call('HEXISTS', KEYS[1], 'cancel_request_id') == 1 then return -2 end
 local provider_key = redis.call('HGET', KEYS[1], 'provider_idempotency_key')
@@ -864,6 +956,7 @@ return attempts
 """
 
 _TERMINAL_SCRIPT = """
+if redis.call('GET', KEYS[6]) ~= '1' then return 'index_corrupt' end
 if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1] then return 'conflict' end
 local old_fence = tonumber(redis.call('HGET', KEYS[1], 'fencing_token'))
 local new_fence = tonumber(ARGV[3])
@@ -873,9 +966,18 @@ if new_fence ~= old_fence or redis.call('HGET', KEYS[1], 'job_id') ~= ARGV[2] th
 end
 local state = redis.call('HGET', KEYS[1], 'state')
 if state == 'result' or state == 'failure' then
+  local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+  local indexed = redis.call('ZSCORE', KEYS[5], KEYS[1])
+  if (delivery == 'delivered' and indexed)
+      or (delivery ~= 'delivered' and not indexed) then return 'index_corrupt' end
   if redis.call('HGET', KEYS[1], 'result_hash') == ARGV[6]
       and state == ARGV[4] then return 'existing' end
   return 'conflict'
+end
+local indexed = redis.call('ZSCORE', KEYS[5], KEYS[1])
+if not indexed
+    or tonumber(indexed) ~= tonumber(redis.call('HGET', KEYS[1], 'accepted_ms')) then
+  return 'index_corrupt'
 end
 local existing_cancel = redis.call('HGET', KEYS[1], 'cancel_request_id')
 if existing_cancel then
@@ -897,6 +999,7 @@ redis.call('HDEL', KEYS[1],
 redis.call('ZADD', KEYS[2], ARGV[9], KEYS[1])
 redis.call('ZREM', KEYS[3], KEYS[1])
 redis.call('ZREM', KEYS[4], KEYS[1])
+redis.call('ZADD', KEYS[5], redis.call('HGET', KEYS[1], 'accepted_ms'), KEYS[1])
 redis.call('PERSIST', KEYS[1])
 return 'stored'
 """
@@ -910,14 +1013,24 @@ if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1]
     or (redis.call('HGET', KEYS[1], 'novel_id') or '') ~= ARGV[7] then
   return 'not_found'
 end
+if redis.call('GET', KEYS[3]) ~= '1' then return 'index_corrupt' end
 local state = redis.call('HGET', KEYS[1], 'state')
-if state == 'result' then return 'already_terminal' end
+local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+local indexed = redis.call('ZSCORE', KEYS[2], KEYS[1])
+if state == 'result' then
+  if (delivery == 'delivered' and indexed)
+      or (delivery ~= 'delivered' and not indexed) then return 'index_corrupt' end
+  return 'already_terminal'
+end
 if state == 'failure' then
+  if (delivery == 'delivered' and indexed)
+      or (delivery ~= 'delivered' and not indexed) then return 'index_corrupt' end
   if redis.call('HEXISTS', KEYS[1], 'cancel_request_id') == 1 then
     return 'already_cancelled'
   end
   return 'already_terminal'
 end
+if not indexed then return 'index_corrupt' end
 local existing = redis.call('HGET', KEYS[1], 'cancel_request_id')
 if existing then
   if existing == ARGV[6] then return 'already_cancelled' end
@@ -929,12 +1042,20 @@ return 'accepted'
 """
 
 _CALLBACK_DELIVERED_SCRIPT = """
+if redis.call('GET', KEYS[6]) ~= '1' then return -1 end
 if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1]
     or redis.call('HGET', KEYS[1], 'result_hash') ~= ARGV[2] then
   return 0
 end
 local state = redis.call('HGET', KEYS[1], 'state')
 if state ~= 'result' and state ~= 'failure' then return 0 end
+local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+local indexed = redis.call('ZSCORE', KEYS[5], KEYS[1])
+if delivery == 'delivered' then
+  if indexed then return -1 end
+else
+  if not indexed then return -1 end
+end
 local active_claim = redis.call('HGET', KEYS[1], 'callback_claim_token')
 if active_claim and (ARGV[4] == '' or active_claim ~= ARGV[4]) then return 0 end
 redis.call('HSET', KEYS[1], 'callback_delivery', 'delivered')
@@ -971,17 +1092,20 @@ redis.call('HSET', KEYS[1], 'callback_delivery', 'delivered')
 redis.call('ZREM', KEYS[2], KEYS[1])
 redis.call('ZREM', KEYS[3], KEYS[1])
 redis.call('ZREM', KEYS[4], KEYS[1])
+redis.call('ZREM', KEYS[5], KEYS[1])
 redis.call('EXPIRE', KEYS[1], ARGV[3])
 return 1
 """
 
 _CALLBACK_REJECTED_SCRIPT = """
+if redis.call('GET', KEYS[6]) ~= '1' then return -1 end
 if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1]
     or redis.call('HGET', KEYS[1], 'result_hash') ~= ARGV[2] then
   return 0
 end
 local state = redis.call('HGET', KEYS[1], 'state')
 if state ~= 'result' and state ~= 'failure' then return 0 end
+if not redis.call('ZSCORE', KEYS[5], KEYS[1]) then return -1 end
 local active_claim = redis.call('HGET', KEYS[1], 'callback_claim_token')
 if active_claim and (ARGV[5] == '' or active_claim ~= ARGV[5]) then return 0 end
 redis.call('HSET', KEYS[1],
@@ -994,14 +1118,17 @@ redis.call('HDEL', KEYS[1],
 redis.call('ZREM', KEYS[2], KEYS[1])
 redis.call('ZADD', KEYS[3], 0, KEYS[1])
 redis.call('ZREM', KEYS[4], KEYS[1])
+redis.call('ZADD', KEYS[5], redis.call('HGET', KEYS[1], 'accepted_ms'), KEYS[1])
 redis.call('PERSIST', KEYS[1])
 return 1
 """
 
 _CLAIM_DUE_CALLBACKS_SCRIPT = """
+if redis.call('GET', KEYS[5]) ~= '1' then return {-1} end
 if redis.call('EXISTS', KEYS[3]) == 1 then return {} end
 local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
 for _, key in ipairs(expired) do
+  if not redis.call('ZSCORE', KEYS[4], key) then return {-1} end
   redis.call('ZREM', KEYS[2], key)
   if redis.call('HGET', key, 'callback_delivery') == 'pending' then
     redis.call('HDEL', key, 'callback_claim_token', 'callback_lease_until_ms')
@@ -1012,6 +1139,7 @@ local due = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, AR
 local result = {}
 local index = 0
 for _, key in ipairs(due) do
+  if not redis.call('ZSCORE', KEYS[4], key) then return {-1} end
   local state = redis.call('HGET', key, 'state')
   local delivery = redis.call('HGET', key, 'callback_delivery')
   local result_hash = redis.call('HGET', key, 'result_hash')
@@ -1031,16 +1159,18 @@ for _, key in ipairs(due) do
     table.insert(result, token)
     table.insert(result, redis.call('HGET', key, 'callback_attempts') or '0')
   else
-    redis.call('ZREM', KEYS[1], key)
+    return {-1}
   end
 end
 return result
 """
 
 _CLAIM_ONE_CALLBACK_SCRIPT = """
+if redis.call('GET', KEYS[6]) ~= '1' then return {-1} end
 if redis.call('EXISTS', KEYS[4]) == 1 then return {} end
 local leased_until = redis.call('ZSCORE', KEYS[3], KEYS[1])
 if leased_until then
+  if not redis.call('ZSCORE', KEYS[5], KEYS[1]) then return {-1} end
   if tonumber(leased_until) > tonumber(ARGV[1]) then return {} end
   redis.call('ZREM', KEYS[3], KEYS[1])
   redis.call('HDEL', KEYS[1], 'callback_claim_token', 'callback_lease_until_ms')
@@ -1049,7 +1179,19 @@ if leased_until then
   end
 end
 local due = redis.call('ZSCORE', KEYS[2], KEYS[1])
-if not due then return {} end
+if not due then
+  local state = redis.call('HGET', KEYS[1], 'state')
+  local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+  local indexed = redis.call('ZSCORE', KEYS[5], KEYS[1])
+  if state == 'result' or state == 'failure' then
+    if delivery == 'delivered' and not indexed then return {} end
+    if delivery == 'rejected' and indexed then return {} end
+    return {-1}
+  end
+  if (state == 'accepted' or state == 'started') and indexed then return {} end
+  return {-1}
+end
+if not redis.call('ZSCORE', KEYS[5], KEYS[1]) then return {-1} end
 if ARGV[4] ~= '1' and tonumber(due) > tonumber(ARGV[1]) then return {} end
 local state = redis.call('HGET', KEYS[1], 'state')
 local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
@@ -1057,8 +1199,7 @@ local result_hash = redis.call('HGET', KEYS[1], 'result_hash')
 if (state ~= 'result' and state ~= 'failure')
     or delivery ~= 'pending'
     or not result_hash then
-  redis.call('ZREM', KEYS[2], KEYS[1])
-  return {}
+  return {-1}
 end
 redis.call('ZREM', KEYS[2], KEYS[1])
 redis.call('ZADD', KEYS[3], ARGV[2], KEYS[1])
@@ -1075,6 +1216,14 @@ return {
 """
 
 _RESCHEDULE_CALLBACK_SCRIPT = """
+if redis.call('GET', KEYS[5]) ~= '1' then return -1 end
+local delivery = redis.call('HGET', KEYS[1], 'callback_delivery')
+local indexed = redis.call('ZSCORE', KEYS[4], KEYS[1])
+if delivery == 'delivered' then
+  if indexed then return -1 end
+  return 0
+end
+if not indexed then return -1 end
 if redis.call('HGET', KEYS[1], 'request_hash') ~= ARGV[1]
     or redis.call('HGET', KEYS[1], 'result_hash') ~= ARGV[2]
     or redis.call('HGET', KEYS[1], 'callback_claim_token') ~= ARGV[3]

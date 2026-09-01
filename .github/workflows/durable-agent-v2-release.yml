@@ -1,0 +1,1172 @@
+name: Durable Agent V2 受保护发布与回滚
+
+"on":
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 选择受保护发布、回滚或具名失败锁清理
+        required: true
+        type: choice
+        options:
+          - route_off_release
+          - allowlist_release
+          - rollback
+          - cleanup_failed_transaction
+      workflow_trusted_commit:
+        description: dispatch 时 main HEAD 的精确 40 位提交
+        required: true
+        type: string
+      canary_user_id:
+        description: 发布时精确单一稳定用户 ID；rollback/cleanup 留空
+        required: false
+        default: ""
+        type: string
+      canary_novel_id:
+        description: 发布时精确单一隔离小说 ID；rollback/cleanup 留空
+        required: false
+        default: ""
+        type: string
+      development_evidence_run_id:
+        description: 发布时独立 development environment 证据 run ID
+        required: false
+        default: ""
+        type: string
+      development_evidence_sha256:
+        description: 发布时 development-evidence.json 的 SHA-256
+        required: false
+        default: ""
+        type: string
+      release_manifest_run_id:
+        description: rollback 时原 release manifest artifact 的 run ID
+        required: false
+        default: ""
+        type: string
+      release_manifest_sha256:
+        description: rollback 时原 release-manifest.json 的 SHA-256
+        required: false
+        default: ""
+        type: string
+      failed_lock_id:
+        description: cleanup 时精确 64 位失败锁 ID
+        required: false
+        default: ""
+        type: string
+      failed_lock_owner_run_id:
+        description: cleanup 时原 owner GitHub run ID
+        required: false
+        default: ""
+        type: string
+      failed_lock_owner_run_attempt:
+        description: cleanup 时原 owner GitHub run attempt
+        required: false
+        default: ""
+        type: string
+      failed_lock_owner_action:
+        description: cleanup 时原 owner action
+        required: false
+        default: ""
+        type: string
+      failed_lock_owner_workflow_commit:
+        description: cleanup 时原 owner workflow trusted commit
+        required: false
+        default: ""
+        type: string
+      failed_lock_owner_target_commit:
+        description: cleanup 时原 owner target release commit
+        required: false
+        default: ""
+        type: string
+      failed_lock_owner_control_bundle_sha256:
+        description: cleanup 时原 owner control bundle SHA-256
+        required: false
+        default: ""
+        type: string
+      failed_lock_cleanup_confirm:
+        description: cleanup-failed-release:<lockId>
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      workflow_commit: ${{ steps.validate.outputs.workflow_commit }}
+      canary_scope_sha256: ${{ steps.scope.outputs.canary_scope_sha256 }}
+    steps:
+      - name: 可信 context 前置门禁（禁止 checkout 与仓库脚本）
+        id: validate
+        shell: bash
+        env:
+          INPUT_WORKFLOW_COMMIT: ${{ inputs.workflow_trusted_commit }}
+          RELEASE_ACTION: ${{ inputs.action }}
+          DEVELOPMENT_EVIDENCE_RUN_ID: ${{ inputs.development_evidence_run_id }}
+          DEVELOPMENT_EVIDENCE_SHA256: ${{ inputs.development_evidence_sha256 }}
+          RELEASE_MANIFEST_RUN_ID: ${{ inputs.release_manifest_run_id }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+          CANARY_USER_ID: ${{ inputs.canary_user_id }}
+          CANARY_NOVEL_ID: ${{ inputs.canary_novel_id }}
+          FAILED_LOCK_ID: ${{ inputs.failed_lock_id }}
+          FAILED_LOCK_CLEANUP_CONFIRM: ${{ inputs.failed_lock_cleanup_confirm }}
+          FAILED_LOCK_OWNER_RUN_ID: ${{ inputs.failed_lock_owner_run_id }}
+          FAILED_LOCK_OWNER_RUN_ATTEMPT: ${{ inputs.failed_lock_owner_run_attempt }}
+          FAILED_LOCK_OWNER_ACTION: ${{ inputs.failed_lock_owner_action }}
+          FAILED_LOCK_OWNER_WORKFLOW_COMMIT: ${{ inputs.failed_lock_owner_workflow_commit }}
+          FAILED_LOCK_OWNER_TARGET_COMMIT: ${{ inputs.failed_lock_owner_target_commit }}
+          FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256: ${{ inputs.failed_lock_owner_control_bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          case "$INPUT_WORKFLOW_COMMIT" in
+            ""|*[!0-9a-f]*) exit 1 ;;
+          esac
+          test "${#INPUT_WORKFLOW_COMMIT}" -eq 40
+          test "$INPUT_WORKFLOW_COMMIT" = "$GITHUB_SHA"
+          case "$RELEASE_ACTION" in
+            route_off_release|allowlist_release)
+              case "$DEVELOPMENT_EVIDENCE_RUN_ID" in
+                ""|0|*[!0-9]*) exit 1 ;;
+              esac
+              case "$DEVELOPMENT_EVIDENCE_SHA256" in
+                ""|*[!0-9a-f]*) exit 1 ;;
+              esac
+              test "${#DEVELOPMENT_EVIDENCE_SHA256}" -eq 64
+              test -n "$CANARY_USER_ID"
+              test -n "$CANARY_NOVEL_ID"
+              test -z "$RELEASE_MANIFEST_RUN_ID"
+              test -z "$RELEASE_MANIFEST_SHA256"
+              ;;
+            rollback)
+              case "$RELEASE_MANIFEST_RUN_ID" in
+                ""|0|*[!0-9]*) exit 1 ;;
+              esac
+              case "$RELEASE_MANIFEST_SHA256" in
+                ""|*[!0-9a-f]*) exit 1 ;;
+              esac
+              test "${#RELEASE_MANIFEST_SHA256}" -eq 64
+              test -z "$DEVELOPMENT_EVIDENCE_RUN_ID"
+              test -z "$DEVELOPMENT_EVIDENCE_SHA256"
+              test -z "$CANARY_USER_ID"
+              test -z "$CANARY_NOVEL_ID"
+              ;;
+            cleanup_failed_transaction)
+              case "$FAILED_LOCK_ID" in
+                ""|*[!0-9a-f]*) exit 1 ;;
+              esac
+              test "${#FAILED_LOCK_ID}" -eq 64
+              test "$FAILED_LOCK_CLEANUP_CONFIRM" = \
+                "cleanup-failed-release:$FAILED_LOCK_ID"
+              case "$FAILED_LOCK_OWNER_RUN_ID" in
+                ""|0|*[!0-9]*) exit 1 ;;
+              esac
+              case "$FAILED_LOCK_OWNER_RUN_ATTEMPT" in
+                ""|0|*[!0-9]*) exit 1 ;;
+              esac
+              case "$FAILED_LOCK_OWNER_ACTION" in
+                route_off_release|allowlist_release|rollback) ;;
+                *) exit 1 ;;
+              esac
+              for owner_commit in "$FAILED_LOCK_OWNER_WORKFLOW_COMMIT" \
+                "$FAILED_LOCK_OWNER_TARGET_COMMIT"
+              do
+                case "$owner_commit" in ""|*[!0-9a-f]*) exit 1 ;; esac
+                test "${#owner_commit}" -eq 40
+              done
+              case "$FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256" in
+                ""|*[!0-9a-f]*) exit 1 ;;
+              esac
+              test "${#FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256}" -eq 64
+              ;;
+            *) exit 1 ;;
+          esac
+          printf 'workflow_commit=%s\n' "$INPUT_WORKFLOW_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trusted main HEAD
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: 复验 checkout、origin/main 与 CLI commit
+        env:
+          WORKFLOW_TRUSTED_COMMIT: ${{ steps.validate.outputs.workflow_commit }}
+          TARGET_RELEASE_COMMIT: ${{ steps.validate.outputs.workflow_commit }}
+          CLI_COMMIT: ${{ steps.validate.outputs.workflow_commit }}
+        run: sh scripts/durable-agent-v2-release.sh source-guard
+
+      - name: 读取 GitHub production environment 外部策略
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_ENVIRONMENT_POLICY_AUDIT_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$GH_TOKEN"
+          evidence_dir="$RUNNER_TEMP/github-production-policy"
+          mkdir "$evidence_dir"
+          gh api --method GET \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/environments/production" \
+            > "$evidence_dir/environment.json"
+          gh api --method GET \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/environments/production/deployment-branch-policies?per_page=100" \
+            > "$evidence_dir/branch-policies.json"
+          gh api --method GET \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/environments/production/secrets?per_page=100" \
+            > "$evidence_dir/secrets.json"
+          gh api --method GET \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/environments/production/variables?per_page=100" \
+            > "$evidence_dir/variables.json"
+          chmod 600 "$evidence_dir/environment.json" \
+            "$evidence_dir/branch-policies.json" "$evidence_dir/secrets.json" \
+            "$evidence_dir/variables.json"
+          python3 scripts/verify_github_environment_policy.py \
+            --environment-json "$evidence_dir/environment.json" \
+            --branch-policies-json "$evidence_dir/branch-policies.json" \
+            --secrets-json "$evidence_dir/secrets.json" \
+            --variables-json "$evidence_dir/variables.json"
+
+      - name: 计算精确 canary 交集 scope
+        id: scope
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        shell: bash
+        env:
+          CANARY_USER_ID: ${{ inputs.canary_user_id }}
+          CANARY_NOVEL_ID: ${{ inputs.canary_novel_id }}
+        run: |
+          set -euo pipefail
+          scope="$(python3 scripts/durable_agent_v2_development_evidence.py \
+            scope-fingerprint --user-id "$CANARY_USER_ID" \
+            --novel-id "$CANARY_NOVEL_ID")"
+          printf 'canary_scope_sha256=%s\n' "$scope" >> "$GITHUB_OUTPUT"
+
+  candidate_validation:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --all-packages --group dev
+      - name: 受保护发布控制面本地验证
+        shell: bash
+        env:
+          WORKFLOW_TRUSTED_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+          TARGET_RELEASE_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+          CLI_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+        run: |
+          set -euo pipefail
+          sh scripts/durable-agent-v2-release.sh source-guard
+          sh -n scripts/durable-agent-v2-release.sh
+          sh -n scripts/deploy-production.sh
+          sh -n scripts/upload-durable-agent-v2-release-manifest.sh
+          bash -n scripts/upload-durable-agent-v2-control-bundle.sh
+          uv run ruff check \
+            scripts/durable_agent_v2_control_bundle.py \
+            scripts/durable_agent_v2_release_manifest.py \
+            scripts/durable_agent_v2_release_receipt.py \
+            scripts/durable_agent_v2_development_evidence.py \
+            scripts/verify_github_environment_policy.py \
+            scripts/verify_github_workflow_run_provenance.py \
+            tests/architecture/test_durable_agent_v2_release_workflow.py
+          uv run pytest -q tests/architecture/test_durable_agent_v2_release_workflow.py
+
+  development_evidence:
+    if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+    needs:
+      - source
+      - candidate_validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: development
+    concurrency:
+      group: durable-agent-v2-development-${{ needs.source.outputs.workflow_commit }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: 复验 development artifact producer 的外部 GitHub run 来源
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN_ID: ${{ inputs.development_evidence_run_id }}
+          TARGET_RELEASE_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+        run: |
+          set -euo pipefail
+          umask 077
+          run_json="$RUNNER_TEMP/development-evidence-run.json"
+          gh api --method GET \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID" > "$run_json"
+          chmod 600 "$run_json"
+          python3 scripts/verify_github_workflow_run_provenance.py \
+            --run-json "$run_json" --expected-run-id "$EVIDENCE_RUN_ID" \
+            --expected-head-sha "$TARGET_RELEASE_COMMIT" \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-workflow-path \
+              '.github/workflows/durable-agent-v2-development-evidence.yml'
+      - name: 下载独立 development evidence
+        uses: actions/download-artifact@v5
+        with:
+          name: durable-agent-v2-development-evidence
+          path: ${{ runner.temp }}/durable-agent-v2-development-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.development_evidence_run_id }}
+      - name: 下载开发环境验证过的目标镜像
+        uses: actions/download-artifact@v5
+        with:
+          name: durable-agent-v2-target-images
+          path: ${{ runner.temp }}/durable-agent-v2-target-images
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.development_evidence_run_id }}
+      - name: 下载开发环境 canonical reports
+        uses: actions/download-artifact@v5
+        with:
+          name: durable-agent-v2-development-reports
+          path: ${{ runner.temp }}/durable-agent-v2-development-reports
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.development_evidence_run_id }}
+      - name: 复验镜像 artifact 与 production-grade development evidence
+        shell: bash
+        env:
+          WORKFLOW_TRUSTED_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+          TARGET_RELEASE_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+          CLI_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+          EVIDENCE_RUN_ID: ${{ inputs.development_evidence_run_id }}
+          EVIDENCE_SHA256: ${{ inputs.development_evidence_sha256 }}
+          CANARY_SCOPE_SHA256: ${{ needs.source.outputs.canary_scope_sha256 }}
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/durable-agent-v2-development-evidence"
+          images_dir="$RUNNER_TEMP/durable-agent-v2-target-images"
+          reports_dir="$RUNNER_TEMP/durable-agent-v2-development-reports"
+          chmod 700 "$evidence_dir" "$images_dir" "$reports_dir"
+          chmod 600 "$evidence_dir/development-evidence.json" \
+            "$evidence_dir/SHA256SUMS" "$images_dir/target-images.snapshot" \
+            "$images_dir/target-images.tar.gz" "$images_dir/SHA256SUMS"
+          find "$reports_dir" -type f -exec chmod 600 {} +
+          (cd "$images_dir" && sha256sum --check SHA256SUMS)
+          gzip -dc "$images_dir/target-images.tar.gz" | docker load
+          sh scripts/durable-agent-v2-release.sh target-snapshot \
+            > "$images_dir/target-images.current"
+          cmp "$images_dir/target-images.snapshot" "$images_dir/target-images.current"
+          web="$(sed -n 's/^targetWebDigest=//p' "$images_dir/target-images.current")"
+          core="$(sed -n 's/^targetCoreDigest=//p' "$images_dir/target-images.current")"
+          agent="$(sed -n 's/^targetAgentDigest=//p' "$images_dir/target-images.current")"
+          fingerprint="$(sed -n 's/^targetManifestFingerprint=//p' \
+            "$images_dir/target-images.current")"
+          python3 scripts/durable_agent_v2_development_evidence.py \
+            verify-production --evidence-dir "$evidence_dir" \
+            --expected-sha256 "$EVIDENCE_SHA256" \
+            --expected-run-id "$EVIDENCE_RUN_ID" \
+            --expected-target-commit "$TARGET_RELEASE_COMMIT" \
+            --expected-canary-scope-sha256 "$CANARY_SCOPE_SHA256" \
+            --expected-execution-fingerprint "$fingerprint" \
+            --expected-web-digest "$web" --expected-core-digest "$core" \
+            --expected-agent-digest "$agent" --reports-dir "$reports_dir"
+      - name: 转存本次 production workflow 的已复验证据
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-agent-v2-verified-development-input
+          path: |
+            ${{ runner.temp }}/durable-agent-v2-development-evidence
+            ${{ runner.temp }}/durable-agent-v2-development-reports
+            ${{ runner.temp }}/durable-agent-v2-target-images
+          if-no-files-found: error
+          retention-days: 7
+
+  rollback_manifest:
+    if: inputs.action == 'rollback'
+    needs:
+      - source
+      - candidate_validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      target_release_commit: ${{ steps.manifest.outputs.target_release_commit }}
+      rollback_source_release_commit: ${{ steps.manifest.outputs.rollback_source_release_commit }}
+      canary_scope_sha256: ${{ steps.manifest.outputs.canary_scope_sha256 }}
+      producer_workflow_commit: ${{ steps.manifest.outputs.producer_workflow_commit }}
+      producer_run_attempt: ${{ steps.manifest.outputs.producer_run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v5
+        with:
+          name: durable-agent-v2-release-manifest
+          path: ${{ runner.temp }}/durable-agent-v2-rollback-manifest
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release_manifest_run_id }}
+      - name: 先按 artifact 自身 SHA 做 root-independent 复验
+        id: manifest
+        shell: bash
+        env:
+          MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          manifest_dir="$RUNNER_TEMP/durable-agent-v2-rollback-manifest"
+          chmod 700 "$manifest_dir"
+          chmod 600 "$manifest_dir/release-manifest.json" "$manifest_dir/SHA256SUMS"
+          python3 scripts/durable_agent_v2_release_manifest.py verify \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256"
+          target="$(python3 scripts/durable_agent_v2_release_manifest.py read \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256" \
+            --field target-release-commit)"
+          rollback_source="$(python3 scripts/durable_agent_v2_release_manifest.py read \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256" \
+            --field rollback-source-release-commit)"
+          scope="$(python3 scripts/durable_agent_v2_release_manifest.py read \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256" \
+            --field canary-scope-sha256)"
+          producer_workflow_commit="$(python3 scripts/durable_agent_v2_release_manifest.py read \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256" \
+            --field workflow-trusted-commit)"
+          producer_run_id="$(python3 scripts/durable_agent_v2_release_manifest.py read \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256" \
+            --field producer-run-id)"
+          producer_run_attempt="$(python3 scripts/durable_agent_v2_release_manifest.py read \
+            --manifest-dir "$manifest_dir" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256" \
+            --field producer-run-attempt)"
+          test "$producer_run_id" = "${{ inputs.release_manifest_run_id }}"
+          printf 'target_release_commit=%s\n' "$target" >> "$GITHUB_OUTPUT"
+          printf 'rollback_source_release_commit=%s\n' "$rollback_source" >> "$GITHUB_OUTPUT"
+          printf 'canary_scope_sha256=%s\n' "$scope" >> "$GITHUB_OUTPUT"
+          printf 'producer_workflow_commit=%s\n' "$producer_workflow_commit" >> "$GITHUB_OUTPUT"
+          printf 'producer_run_attempt=%s\n' "$producer_run_attempt" >> "$GITHUB_OUTPUT"
+      - name: 复验 rollback artifact producer run 外部来源
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCER_RUN_ID: ${{ inputs.release_manifest_run_id }}
+          PRODUCER_RUN_ATTEMPT: ${{ steps.manifest.outputs.producer_run_attempt }}
+          PRODUCER_WORKFLOW_COMMIT: ${{ steps.manifest.outputs.producer_workflow_commit }}
+        run: |
+          set -euo pipefail
+          umask 077
+          run_json="$RUNNER_TEMP/rollback-manifest-producer-run.json"
+          gh api --method GET -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$PRODUCER_RUN_ID" > "$run_json"
+          chmod 600 "$run_json"
+          python3 scripts/verify_github_workflow_run_provenance.py \
+            --run-json "$run_json" --expected-run-id "$PRODUCER_RUN_ID" \
+            --expected-run-attempt "$PRODUCER_RUN_ATTEMPT" \
+            --expected-head-sha "$PRODUCER_WORKFLOW_COMMIT" \
+            --expected-repository "$GITHUB_REPOSITORY" \
+            --expected-workflow-path '.github/workflows/durable-agent-v2-release.yml'
+      - name: Checkout manifest 自身 target commit（只读事实）
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.manifest.outputs.target_release_commit }}
+          path: manifest-target-source
+          fetch-depth: 1
+      - name: 按旧 manifest 自身 target commit 复验冻结事实
+        env:
+          MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+        run: |
+          python3 scripts/durable_agent_v2_release_manifest.py verify \
+            --repository-root "$GITHUB_WORKSPACE/manifest-target-source" \
+            --manifest-dir "$RUNNER_TEMP/durable-agent-v2-rollback-manifest" \
+            --expected-target-commit "${{ steps.manifest.outputs.target_release_commit }}" \
+            --expected-artifact-sha256 "$MANIFEST_SHA256"
+      - name: 转存已复验旧 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-agent-v2-rollback-input
+          path: ${{ runner.temp }}/durable-agent-v2-rollback-manifest
+          if-no-files-found: error
+          retention-days: 7
+
+  production:
+    if: >-
+      always() &&
+      needs.source.result == 'success' &&
+      needs.candidate_validation.result == 'success' &&
+      (
+        inputs.action == 'cleanup_failed_transaction' ||
+        ((inputs.action == 'route_off_release' || inputs.action == 'allowlist_release') && needs.development_evidence.result == 'success') ||
+        (inputs.action == 'rollback' && needs.rollback_manifest.result == 'success')
+      )
+    needs:
+      - source
+      - candidate_validation
+      - development_evidence
+      - rollback_manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment:
+      name: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    env:
+      APP_DIR: ${{ vars.APP_DIR }}
+      WORKFLOW_TRUSTED_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+      CLI_COMMIT: ${{ needs.source.outputs.workflow_commit }}
+      INKFORGE_RELEASE_APPROVED_ENVIRONMENT: production
+      RELEASE_ACTION: ${{ inputs.action }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: 冻结本次 target/deploy/scope 元数据
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RELEASE_ACTION" in
+            route_off_release|allowlist_release)
+              target="$WORKFLOW_TRUSTED_COMMIT"
+              deploy="$WORKFLOW_TRUSTED_COMMIT"
+              scope="${{ needs.source.outputs.canary_scope_sha256 }}"
+              ;;
+            rollback)
+              target="${{ needs.rollback_manifest.outputs.target_release_commit }}"
+              deploy="${{ needs.rollback_manifest.outputs.rollback_source_release_commit }}"
+              scope="${{ needs.rollback_manifest.outputs.canary_scope_sha256 }}"
+              ;;
+            cleanup_failed_transaction)
+              target="$WORKFLOW_TRUSTED_COMMIT"
+              deploy="$WORKFLOW_TRUSTED_COMMIT"
+              scope=""
+              ;;
+          esac
+          printf 'target_release_commit=%s\n' "$target" >> "$GITHUB_OUTPUT"
+          printf 'deploy_commit=%s\n' "$deploy" >> "$GITHUB_OUTPUT"
+          printf 'canary_scope_sha256=%s\n' "$scope" >> "$GITHUB_OUTPUT"
+
+      - name: 下载并再次复验 development evidence（必须先于 SSH）
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        uses: actions/download-artifact@v5
+        with:
+          name: durable-agent-v2-verified-development-input
+          path: ${{ runner.temp }}/verified-development-input
+
+      - name: 加载开发环境验证过的同一目标镜像（必须先于 SSH）
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        shell: bash
+        env:
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          DEVELOPMENT_EVIDENCE_SHA256: ${{ inputs.development_evidence_sha256 }}
+          DEVELOPMENT_EVIDENCE_RUN_ID: ${{ inputs.development_evidence_run_id }}
+          CANARY_SCOPE_SHA256: ${{ steps.metadata.outputs.canary_scope_sha256 }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/verified-development-input"
+          evidence_dir="$root/durable-agent-v2-development-evidence"
+          images_dir="$root/durable-agent-v2-target-images"
+          reports_dir="$root/durable-agent-v2-development-reports"
+          chmod 700 "$evidence_dir" "$images_dir" "$reports_dir"
+          chmod 600 "$evidence_dir/development-evidence.json" \
+            "$evidence_dir/SHA256SUMS" "$images_dir/target-images.snapshot" \
+            "$images_dir/target-images.tar.gz" "$images_dir/SHA256SUMS"
+          find "$reports_dir" -type f -exec chmod 600 {} +
+          (cd "$images_dir" && sha256sum --check SHA256SUMS)
+          gzip -dc "$images_dir/target-images.tar.gz" | docker load
+          sh scripts/durable-agent-v2-release.sh target-snapshot \
+            > "$images_dir/target-images.production"
+          cmp "$images_dir/target-images.snapshot" "$images_dir/target-images.production"
+          web="$(sed -n 's/^targetWebDigest=//p' "$images_dir/target-images.production")"
+          core="$(sed -n 's/^targetCoreDigest=//p' "$images_dir/target-images.production")"
+          agent="$(sed -n 's/^targetAgentDigest=//p' "$images_dir/target-images.production")"
+          fingerprint="$(sed -n 's/^targetManifestFingerprint=//p' \
+            "$images_dir/target-images.production")"
+          python3 scripts/durable_agent_v2_development_evidence.py \
+            verify-production --evidence-dir "$evidence_dir" \
+            --expected-sha256 "$DEVELOPMENT_EVIDENCE_SHA256" \
+            --expected-run-id "$DEVELOPMENT_EVIDENCE_RUN_ID" \
+            --expected-target-commit "$TARGET_RELEASE_COMMIT" \
+            --expected-canary-scope-sha256 "$CANARY_SCOPE_SHA256" \
+            --expected-execution-fingerprint "$fingerprint" \
+            --expected-web-digest "$web" --expected-core-digest "$core" \
+            --expected-agent-digest "$agent" --reports-dir "$reports_dir"
+
+      - name: 下载已复验 rollback manifest（必须先于 SSH）
+        if: inputs.action == 'rollback'
+        uses: actions/download-artifact@v5
+        with:
+          name: durable-agent-v2-rollback-input
+          path: ${{ runner.temp }}/durable-agent-v2-release-manifest
+
+      - name: rollback 再次复验 artifact SHA（必须先于 SSH）
+        if: inputs.action == 'rollback'
+        env:
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+        run: |
+          chmod 700 "$RUNNER_TEMP/durable-agent-v2-release-manifest"
+          chmod 600 "$RUNNER_TEMP/durable-agent-v2-release-manifest/release-manifest.json" \
+            "$RUNNER_TEMP/durable-agent-v2-release-manifest/SHA256SUMS"
+          python3 scripts/durable_agent_v2_release_manifest.py verify \
+            --manifest-dir "$RUNNER_TEMP/durable-agent-v2-release-manifest" \
+            --expected-target-commit "$TARGET_RELEASE_COMMIT" \
+            --expected-artifact-sha256 "$RELEASE_MANIFEST_SHA256"
+
+      - name: Checkout rollback manifest target facts
+        if: inputs.action == 'rollback'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.metadata.outputs.target_release_commit }}
+          path: rollback-manifest-target
+          fetch-depth: 1
+
+      - name: Checkout rollback source commit（不执行旧脚本）
+        if: inputs.action == 'rollback'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.metadata.outputs.deploy_commit }}
+          path: rollback-deploy-source
+          fetch-depth: 1
+
+      - name: 组装并本地复验当前 trusted control bundle（必须先于 SSH）
+        id: control_bundle
+        shell: bash
+        env:
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+        run: |
+          set -euo pipefail
+          bundle_dir="$RUNNER_TEMP/durable-agent-v2-control-bundle"
+          output="$(python3 scripts/durable_agent_v2_control_bundle.py create \
+            --repository-root "$GITHUB_WORKSPACE" --output-dir "$bundle_dir" \
+            --workflow-trusted-commit "$WORKFLOW_TRUSTED_COMMIT" \
+            --target-release-commit "$TARGET_RELEASE_COMMIT" \
+            --producer-run-id "$GITHUB_RUN_ID" \
+            --producer-run-attempt "$GITHUB_RUN_ATTEMPT")"
+          case "$output" in
+            control-bundle-created:*) sha="${output#control-bundle-created:}" ;;
+            *) exit 1 ;;
+          esac
+          python3 scripts/durable_agent_v2_control_bundle.py verify \
+            --bundle-dir "$bundle_dir" --expected-sha256 "$sha" >/dev/null
+          printf 'bundle_sha256=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
+      - name: 准备严格 SSH（所有证据复验之后）
+        shell: bash
+        env:
+          RELEASE_SSH_PRIVATE_KEY: ${{ secrets.DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY }}
+          RELEASE_SSH_KNOWN_HOSTS: ${{ secrets.DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          mkdir -p "$ssh_dir"
+          chmod 700 "$ssh_dir"
+          test -n "$RELEASE_SSH_PRIVATE_KEY"
+          test -n "$RELEASE_SSH_KNOWN_HOSTS"
+          printf '%s\n' "$RELEASE_SSH_PRIVATE_KEY" > "$ssh_dir/deploy_key"
+          printf '%s\n' "$RELEASE_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/deploy_key" "$ssh_dir/known_hosts"
+
+      - name: 事务前上传并复验不可变 trusted control bundle
+        id: upload_control_bundle
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: ${{ runner.temp }}/inkforge-durable-v2-ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/inkforge-durable-v2-ssh/known_hosts
+          CONTROL_BUNDLE_DIR: ${{ runner.temp }}/durable-agent-v2-control-bundle
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+        run: |
+          output="$(scripts/upload-durable-agent-v2-control-bundle.sh)"
+          remote_dir="${output#control-bundle-upload-ok:}"
+          test "$remote_dir" != "$output"
+          printf 'remote_dir=%s\n' "$remote_dir" >> "$GITHUB_OUTPUT"
+
+      - name: 生成本次 release transaction lock ID
+        id: lock
+        if: inputs.action != 'cleanup_failed_transaction'
+        run: |
+          lock_id="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+          printf 'lock_id=%s\n' "$lock_id" >> "$GITHUB_OUTPUT"
+
+      - name: route-off/allowlist 建锁并冻结回滚起点
+        id: begin_release
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          CANARY_SCOPE_SHA256: ${{ steps.metadata.outputs.canary_scope_sha256 }}
+          RELEASE_ROUTE_MODE: ${{ inputs.action == 'allowlist_release' && 'allowlist' || 'off' }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          snapshot="$RUNNER_TEMP/rollback-images.snapshot"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=%q RELEASE_ROUTE_MODE=%q CANARY_SCOPE_SHA256=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q begin-snapshot' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_ACTION" "$RELEASE_ROUTE_MODE" "$CANARY_SCOPE_SHA256" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" "$WORKFLOW_TRUSTED_COMMIT" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command" > "$snapshot"
+          chmod 600 "$snapshot"
+          printf 'started=true\n' >> "$GITHUB_OUTPUT"
+
+      - name: 生成并复验 canonical release manifest
+        id: create_manifest
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        shell: bash
+        env:
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          CANARY_SCOPE_SHA256: ${{ steps.metadata.outputs.canary_scope_sha256 }}
+          DEVELOPMENT_EVIDENCE_SHA256: ${{ inputs.development_evidence_sha256 }}
+          RELEASE_ROUTE_MODE: ${{ inputs.action == 'allowlist_release' && 'allowlist' || 'off' }}
+          TARGET_IMAGE_SNAPSHOT_FILE: ${{ runner.temp }}/verified-development-input/durable-agent-v2-target-images/target-images.snapshot
+          ROLLBACK_IMAGE_SNAPSHOT_FILE: ${{ runner.temp }}/rollback-images.snapshot
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/durable-agent-v2-release-manifest
+          DURABLE_AGENT_CONTROL_BUNDLE_DIR: ${{ runner.temp }}/durable-agent-v2-control-bundle
+          DURABLE_AGENT_CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          output="$(sh scripts/durable-agent-v2-release.sh create-manifest)"
+          case "$output" in
+            release-manifest-created:*) sha="${output#release-manifest-created:}" ;;
+            *) exit 1 ;;
+          esac
+          RELEASE_MANIFEST_SHA256="$sha" sh \
+            scripts/durable-agent-v2-release.sh verify-manifest
+          printf 'manifest_sha256=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
+      - name: 上传新 release manifest artifact
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-agent-v2-release-manifest
+          path: ${{ runner.temp }}/durable-agent-v2-release-manifest
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: 上传 rollback manifest 到服务器（snapshot 前只写不可变证据）
+        id: upload_rollback_manifest
+        if: inputs.action == 'rollback'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: ${{ runner.temp }}/inkforge-durable-v2-ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/inkforge-durable-v2-ssh/known_hosts
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/durable-agent-v2-release-manifest
+          MANIFEST_FACTS_ROOT: ${{ github.workspace }}/rollback-manifest-target
+        run: |
+          output="$(scripts/upload-durable-agent-v2-release-manifest.sh)"
+          remote_dir="${output#release-manifest-upload-ok:}"
+          test "$remote_dir" != "$output"
+          printf 'remote_dir=%s\n' "$remote_dir" >> "$GITHUB_OUTPUT"
+
+      - name: rollback 建锁并按 current receipt 复验当前 target
+        id: begin_rollback
+        if: inputs.action == 'rollback'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          ROLLBACK_SOURCE_RELEASE_COMMIT: ${{ steps.metadata.outputs.deploy_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ steps.upload_rollback_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q ROLLBACK_SOURCE_RELEASE_COMMIT=%q RELEASE_ACTION=rollback RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q begin-rollback' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$ROLLBACK_SOURCE_RELEASE_COMMIT" "$RELEASE_MANIFEST_SHA256" \
+            "$RELEASE_MANIFEST_DIR" "$DURABLE_AGENT_RELEASE_LOCK_ID" \
+            "$CONTROL_BUNDLE_DIR" "$CONTROL_BUNDLE_SHA256" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          output="$(ssh -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 \
+            -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command")"
+          case "$output" in begin-rollback-ok:*) receipt="${output#begin-rollback-ok:}" ;; *) exit 1 ;; esac
+          printf 'started=true\ncurrent_receipt_sha256=%s\n' "$receipt" >> "$GITHUB_OUTPUT"
+
+      - name: 上传目标镜像（release transaction 已建锁）
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        env:
+          DEPLOY_SHA: ${{ steps.metadata.outputs.target_release_commit }}
+          INKFORGE_IMAGE_TAG: ${{ steps.metadata.outputs.target_release_commit }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: ${{ runner.temp }}/inkforge-durable-v2-ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/inkforge-durable-v2-ssh/known_hosts
+        run: scripts/upload-docker-images.sh
+
+      - name: 上传精确部署源码 bundle（release transaction 已建锁）
+        if: inputs.action != 'cleanup_failed_transaction'
+        env:
+          DEPLOY_SHA: ${{ steps.metadata.outputs.deploy_commit }}
+          DEPLOY_SOURCE_ROOT: ${{ inputs.action == 'rollback' && format('{0}/rollback-deploy-source', github.workspace) || github.workspace }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: ${{ runner.temp }}/inkforge-durable-v2-ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/inkforge-durable-v2-ssh/known_hosts
+        run: scripts/upload-deploy-source.sh
+
+      - name: 上传新 release manifest 到服务器
+        id: upload_release_manifest
+        if: inputs.action == 'route_off_release' || inputs.action == 'allowlist_release'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: ${{ runner.temp }}/inkforge-durable-v2-ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/inkforge-durable-v2-ssh/known_hosts
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ runner.temp }}/durable-agent-v2-release-manifest
+        run: |
+          output="$(scripts/upload-durable-agent-v2-release-manifest.sh)"
+          remote_dir="${output#release-manifest-upload-ok:}"
+          test "$remote_dir" != "$output"
+          printf 'remote_dir=%s\n' "$remote_dir" >> "$GITHUB_OUTPUT"
+
+      - name: 锁内原子转换为 route-off drain 并重启复验 Core
+        if: inputs.action != 'cleanup_failed_transaction'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.action == 'rollback' && inputs.release_manifest_sha256 || steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ inputs.action == 'rollback' && steps.upload_rollback_manifest.outputs.remote_dir || steps.upload_release_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+          CANARY_USER_ID: ${{ inputs.canary_user_id }}
+          CANARY_NOVEL_ID: ${{ inputs.canary_novel_id }}
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=%q RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q CANARY_USER_ID=%q CANARY_NOVEL_ID=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q transition-runtime-config off' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_ACTION" "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" "$CANARY_USER_ID" "$CANARY_NOVEL_ID" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: release 切换前复验起点并按需生成 verifiedDrain
+        id: prepare_release
+        if: inputs.action != 'cleanup_failed_transaction'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.action == 'rollback' && inputs.release_manifest_sha256 || steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ inputs.action == 'rollback' && steps.upload_rollback_manifest.outputs.remote_dir || steps.upload_release_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=%q RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q prepare-release' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_ACTION" "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" "$WORKFLOW_TRUSTED_COMMIT" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          output="$(ssh -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 \
+            -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command")"
+          case "$output" in
+            prepare-release-ok:verifiedDrain:*) drain="${output#prepare-release-ok:verifiedDrain:}" ;;
+            *) exit 1 ;;
+          esac
+          printf 'verified_drain_sha256=%s\n' "$drain" >> "$GITHUB_OUTPUT"
+
+      - name: 按 manifest 与服务器锁部署冻结 digest
+        if: inputs.action != 'cleanup_failed_transaction'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          DEPLOY_COMMIT: ${{ steps.metadata.outputs.deploy_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.action == 'rollback' && inputs.release_manifest_sha256 || steps.create_manifest.outputs.manifest_sha256 }}
+          REMOTE_MANIFEST_DIR: ${{ inputs.action == 'rollback' && steps.upload_rollback_manifest.outputs.remote_dir || steps.upload_release_manifest.outputs.remote_dir }}
+          RELEASE_OPERATION: ${{ inputs.action == 'rollback' && 'rollback' || 'release' }}
+          RELEASE_IMAGE_TAG: ${{ inputs.action == 'rollback' && format('protected-rollback-{0}-{1}', github.run_id, github.run_attempt) || steps.metadata.outputs.target_release_commit }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          VERIFIED_DRAIN_SHA256: ${{ steps.prepare_release.outputs.verified_drain_sha256 }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+          DEPLOY_RUNTIME_ROUTE_MODE: off
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q REPO_URL=%q BRANCH=main DEPLOY_SHA=%q DEPLOY_BUNDLE_PATH=%q INKFORGE_IMAGE_TAG=%q DURABLE_AGENT_RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_OPERATION=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_MANIFEST_SHA256=%q RELEASE_ACTION=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q VERIFIED_DRAIN_SHA256=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q DEPLOY_RUNTIME_ROUTE_MODE=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q' \
+            "$APP_DIR" 'https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' \
+            "$DEPLOY_COMMIT" "/tmp/inkforge-deploy-$DEPLOY_COMMIT.bundle" \
+            "$RELEASE_IMAGE_TAG" "$REMOTE_MANIFEST_DIR" "$RELEASE_OPERATION" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_MANIFEST_SHA256" "$RELEASE_ACTION" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$VERIFIED_DRAIN_SHA256" \
+            "$CONTROL_BUNDLE_DIR" "$CONTROL_BUNDLE_SHA256" \
+            "$DEPLOY_RUNTIME_ROUTE_MODE" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/deploy-production.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: 正式库 route-off 迁移与证据（禁止补做 development）
+        if: inputs.action == 'route_off_release'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ steps.upload_release_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          DURABLE_AGENT_PRODUCTION_EVIDENCE_DIR: ${{ vars.DURABLE_AGENT_PRODUCTION_EVIDENCE_DIR }}
+          DURABLE_AGENT_PRODUCTION_CONFIRM_FILE: ${{ vars.DURABLE_AGENT_PRODUCTION_CONFIRM_FILE }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+          VERIFIED_DRAIN_SHA256: ${{ steps.prepare_release.outputs.verified_drain_sha256 }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=route_off_release RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q DURABLE_AGENT_PRODUCTION_EVIDENCE_DIR=%q DURABLE_AGENT_PRODUCTION_CONFIRM_FILE=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q VERIFIED_DRAIN_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q release-database novelwriter' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$DURABLE_AGENT_PRODUCTION_EVIDENCE_DIR" \
+            "$DURABLE_AGENT_PRODUCTION_CONFIRM_FILE" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" "$VERIFIED_DRAIN_SHA256" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: 单服务器进程完成 allowlist、receipt commit point 与 finalize
+        if: inputs.action == 'allowlist_release'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ steps.upload_release_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+          VERIFIED_DRAIN_SHA256: ${{ steps.prepare_release.outputs.verified_drain_sha256 }}
+          CANARY_USER_ID: ${{ inputs.canary_user_id }}
+          CANARY_NOVEL_ID: ${{ inputs.canary_novel_id }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=allowlist_release RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q VERIFIED_DRAIN_SHA256=%q CANARY_USER_ID=%q CANARY_NOVEL_ID=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q finalize-allowlist-transaction' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" "$VERIFIED_DRAIN_SHA256" \
+            "$CANARY_USER_ID" "$CANARY_NOVEL_ID" "$WORKFLOW_TRUSTED_COMMIT" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: rollback 后 V2-aware route-off 门禁
+        if: inputs.action == 'rollback'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ steps.upload_rollback_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          VERIFIED_DRAIN_SHA256: ${{ steps.prepare_release.outputs.verified_drain_sha256 }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=rollback RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q VERIFIED_DRAIN_SHA256=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q rollback-postflight' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$VERIFIED_DRAIN_SHA256" \
+            "$CONTROL_BUNDLE_DIR" "$CONTROL_BUNDLE_SHA256" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: 统一 runtime postflight
+        if: inputs.action != 'cleanup_failed_transaction' && inputs.action != 'allowlist_release'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.action == 'rollback' && inputs.release_manifest_sha256 || steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ inputs.action == 'rollback' && steps.upload_rollback_manifest.outputs.remote_dir || steps.upload_release_manifest.outputs.remote_dir }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          VERIFIED_DRAIN_SHA256: ${{ steps.prepare_release.outputs.verified_drain_sha256 }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=%q RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q VERIFIED_DRAIN_SHA256=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q transaction-postflight' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_ACTION" "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$DURABLE_AGENT_RELEASE_LOCK_ID" "$VERIFIED_DRAIN_SHA256" \
+            "$CONTROL_BUNDLE_DIR" "$CONTROL_BUNDLE_SHA256" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: 全部 postflight 通过后提交并释放服务器锁
+        if: inputs.action != 'cleanup_failed_transaction' && inputs.action != 'allowlist_release'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.action == 'rollback' && inputs.release_manifest_sha256 || steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ inputs.action == 'rollback' && steps.upload_rollback_manifest.outputs.remote_dir || steps.upload_release_manifest.outputs.remote_dir }}
+          VERIFIED_DRAIN_SHA256: ${{ steps.prepare_release.outputs.verified_drain_sha256 }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q VERIFIED_DRAIN_SHA256=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q commit-transaction' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_ACTION" "$DURABLE_AGENT_RELEASE_LOCK_ID" \
+            "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$VERIFIED_DRAIN_SHA256" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" "$WORKFLOW_TRUSTED_COMMIT" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: 失败时保留并标记服务器锁
+        if: failure() && inputs.action != 'cleanup_failed_transaction'
+        continue-on-error: true
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          TARGET_RELEASE_COMMIT: ${{ steps.metadata.outputs.target_release_commit }}
+          DURABLE_AGENT_RELEASE_LOCK_ID: ${{ steps.lock.outputs.lock_id }}
+          RELEASE_MANIFEST_SHA256: ${{ inputs.action == 'rollback' && inputs.release_manifest_sha256 || steps.create_manifest.outputs.manifest_sha256 }}
+          RELEASE_MANIFEST_DIR: ${{ inputs.action == 'rollback' && steps.upload_rollback_manifest.outputs.remote_dir || steps.upload_release_manifest.outputs.remote_dir }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+          CANARY_USER_ID: ${{ inputs.canary_user_id }}
+          CANARY_NOVEL_ID: ${{ inputs.canary_novel_id }}
+        run: |
+          test -n "$DURABLE_AGENT_RELEASE_LOCK_ID" || exit 0
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q RELEASE_ACTION=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q RELEASE_MANIFEST_SHA256=%q RELEASE_MANIFEST_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q CANARY_USER_ID=%q CANARY_NOVEL_ID=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q mark-transaction-failed' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$TARGET_RELEASE_COMMIT" \
+            "$RELEASE_ACTION" "$DURABLE_AGENT_RELEASE_LOCK_ID" \
+            "$RELEASE_MANIFEST_SHA256" "$RELEASE_MANIFEST_DIR" \
+            "$CONTROL_BUNDLE_DIR" "$CONTROL_BUNDLE_SHA256" \
+            "$CANARY_USER_ID" "$CANARY_NOVEL_ID" \
+            "$WORKFLOW_TRUSTED_COMMIT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"
+
+      - name: 具名清理精确失败锁
+        if: inputs.action == 'cleanup_failed_transaction'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          FAILED_LOCK_ID: ${{ inputs.failed_lock_id }}
+          FAILED_LOCK_OWNER_RUN_ID: ${{ inputs.failed_lock_owner_run_id }}
+          FAILED_LOCK_OWNER_RUN_ATTEMPT: ${{ inputs.failed_lock_owner_run_attempt }}
+          FAILED_LOCK_OWNER_ACTION: ${{ inputs.failed_lock_owner_action }}
+          FAILED_LOCK_OWNER_WORKFLOW_COMMIT: ${{ inputs.failed_lock_owner_workflow_commit }}
+          FAILED_LOCK_OWNER_TARGET_COMMIT: ${{ inputs.failed_lock_owner_target_commit }}
+          FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256: ${{ inputs.failed_lock_owner_control_bundle_sha256 }}
+          FAILED_LOCK_CLEANUP_CONFIRM: ${{ inputs.failed_lock_cleanup_confirm }}
+          CONTROL_BUNDLE_DIR: ${{ steps.upload_control_bundle.outputs.remote_dir }}
+          CONTROL_BUNDLE_SHA256: ${{ steps.control_bundle.outputs.bundle_sha256 }}
+        run: |
+          ssh_dir="$RUNNER_TEMP/inkforge-durable-v2-ssh"
+          printf -v remote_command \
+            'APP_DIR=%q WORKFLOW_TRUSTED_COMMIT=%q TARGET_RELEASE_COMMIT=%q DURABLE_AGENT_RELEASE_LOCK_ID=%q RELEASE_LOCK_OWNER_RUN_ID=%q RELEASE_LOCK_OWNER_RUN_ATTEMPT=%q RELEASE_LOCK_OWNER_ACTION=%q RELEASE_LOCK_OWNER_WORKFLOW_COMMIT=%q RELEASE_LOCK_OWNER_TARGET_COMMIT=%q RELEASE_LOCK_OWNER_CONTROL_BUNDLE_SHA256=%q INKFORGE_RELEASE_CLEANUP_CONFIRM=%q DURABLE_AGENT_CONTROL_BUNDLE_DIR=%q DURABLE_AGENT_CONTROL_BUNDLE_SHA256=%q GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF=refs/heads/main GITHUB_SHA=%q GITHUB_RUN_ID=%q GITHUB_RUN_ATTEMPT=%q INKFORGE_RELEASE_APPROVED_ENVIRONMENT=production sh %q cleanup-failed-transaction' \
+            "$APP_DIR" "$WORKFLOW_TRUSTED_COMMIT" "$WORKFLOW_TRUSTED_COMMIT" \
+            "$FAILED_LOCK_ID" "$FAILED_LOCK_OWNER_RUN_ID" \
+            "$FAILED_LOCK_OWNER_RUN_ATTEMPT" "$FAILED_LOCK_OWNER_ACTION" \
+            "$FAILED_LOCK_OWNER_WORKFLOW_COMMIT" \
+            "$FAILED_LOCK_OWNER_TARGET_COMMIT" \
+            "$FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256" \
+            "$FAILED_LOCK_CLEANUP_CONFIRM" "$CONTROL_BUNDLE_DIR" \
+            "$CONTROL_BUNDLE_SHA256" \
+            "$WORKFLOW_TRUSTED_COMMIT" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$CONTROL_BUNDLE_DIR/scripts/durable-agent-v2-release.sh"
+          ssh -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o BatchMode=yes -i "$ssh_dir/deploy_key" \
+            "${SERVER_USER}@${SERVER_HOST}" "$remote_command"

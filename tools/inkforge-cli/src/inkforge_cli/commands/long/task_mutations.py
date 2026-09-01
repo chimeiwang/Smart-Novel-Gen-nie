@@ -8,6 +8,7 @@ from ...registry import CommandSpec, FileOutputSpec
 from ...runtime import CliInputError, CliRuntime, ensure_command_json_result
 
 _OPERATIONS = {
+    "answer_question",
     "plan_chapter",
     "write_chapter",
     "review_chapter",
@@ -149,8 +150,8 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     if operation not in _OPERATIONS:
         raise CliInputError(
             "INVALID_OPERATION",
-            "operation 只能是 plan_chapter、write_chapter、review_chapter、"
-            "rewrite_chapter_selection 或 rewrite_outline_selection",
+            "operation 只能是 answer_question、plan_chapter、write_chapter、"
+            "review_chapter、rewrite_chapter_selection 或 rewrite_outline_selection",
         )
 
     target = payload.get("target")
@@ -202,6 +203,17 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     if not user_instruction.strip():
         raise CliInputError("INVALID_USER_INSTRUCTION", "userInstruction 不能为空白")
 
+    writing_session_id = payload.get("writingSessionId")
+    if operation == "answer_question" and (
+        not isinstance(writing_session_id, str) or not writing_session_id
+    ):
+        raise CliInputError(
+            "WRITING_SESSION_REQUIRED",
+            "answer_question 必须提供 writingSessionId",
+        )
+    if "writingSessionId" in payload:
+        _optional_string(payload, "writingSessionId")
+
     body: JsonObject = {
         "clientRequestId": client_request_id,
         "workflow": "long_serial",
@@ -217,8 +229,6 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     for name in ("writingSessionId", "targetWordCount"):
         if name in payload:
             body[name] = payload[name]
-    if "writingSessionId" in body:
-        _optional_string(body, "writingSessionId")
 
     response = runtime.require_api().request(
         "POST",

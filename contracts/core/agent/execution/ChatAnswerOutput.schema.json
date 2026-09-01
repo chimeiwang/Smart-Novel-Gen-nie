@@ -1,0 +1,20 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/ChatAnswerOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "只读问答 Step 的严格语义结果；保留原始段落与换行。",
+  "properties": {
+    "answer": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Answer",
+      "type": "string"
+    }
+  },
+  "required": [
+    "answer"
+  ],
+  "title": "ChatAnswerOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChatAnswerOutput"
+}

@@ -78,6 +78,8 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
     if "replacement" in properties:
         replacement = "模拟选区替换文本"
         return {"replacement": replacement}
+    if "answer" in properties:
+        return {"answer": "模拟模型已依据冻结章节证据回答问题。"}
     if {"contentVerdict", "findings"} <= set(properties):
         return {"contentVerdict": "pass", "findings": []}
     raise ValueError("模拟 Provider 不支持该结构化输出 Schema")

@@ -13,6 +13,8 @@ from typing import Literal, Protocol
 
 import jsonschema_rs
 from inkforge_contracts.execution import (
+    ChatAnswerInput,
+    ChatAnswerOutput,
     EvidenceEvaluation,
     ExecutionStepFailure,
     ExecutionStepRequest,
@@ -38,6 +40,7 @@ from ..providers.base import (
 )
 from .registry import (
     ExecutionRegistry,
+    ExecutionRegistryError,
     ExecutionRegistryReferenceError,
     OutputSchemaDefinition,
     ProfileDefinition,
@@ -56,6 +59,12 @@ FailureCategory = Literal[
     "internal",
 ]
 BeginAttempt = Callable[[], Awaitable[int]]
+_SUPPORTED_OPERATION_HANDLERS = frozenset(
+    {
+        ("long_serial", "answer_question"),
+        ("long_serial", "rewrite_chapter_selection"),
+    }
+)
 
 
 class ExecutionModelPort(Protocol):
@@ -167,40 +176,66 @@ class StatelessExecutionStepExecutor:
         request: ExecutionStepRequest,
         registry: ExecutionRegistry,
     ) -> ResolvedExecutionStep:
-        if (request.workflow, request.operation) != (
-            "long_serial",
-            "rewrite_chapter_selection",
-        ):
+        operation_key = (request.workflow, request.operation)
+        if operation_key not in _SUPPORTED_OPERATION_HANDLERS:
             raise ExecutionCapabilityError("当前执行器尚未实现该 Operation handler")
-        profile = registry.profiles.get(request.modelProfile.profile)
-        if profile is None:
-            raise ExecutionCapabilityError("Execution Model Profile 未保留在 Registry")
-        output_schema = registry.output_schemas.get(request.outputSchema.name)
-        if output_schema is None:
-            raise ExecutionCapabilityError("Execution Output Schema 未保留在 Registry")
-        matching_budgets = tuple(
-            budget
-            for budget in registry.step_budgets.values()
-            if budget.supported and _step_budget_matches(request, budget)
-        )
-        if not matching_budgets:
-            raise ExecutionCapabilityError("Execution Step Budget 未保留在 Registry")
-        budget = sorted(matching_budgets, key=lambda value: value.key)[0]
+        if request.dispatchMode != "initial":
+            return self._resolve_retained_request(request, registry)
+        try:
+            operation = registry.resolve(request.workflow, request.operation)
+        except ExecutionRegistryError as exc:
+            raise ExecutionCapabilityError(
+                "当前 Operation 未被 Catalog 精确授权"
+            ) from exc
+
         rubric_version: str | None = None
         if request.purpose == "generation":
             purpose: ExecutionPurpose = "generation"
+            profile = operation.generator_profile
+            output_schema = operation.output_schema
+            budget = operation.generator_step_budget
             if profile.purpose != "generation" or output_schema.purpose != "generation":
                 raise ExecutionCapabilityError("generation Step 的 Profile/Output 用途不一致")
+            if request.lane != operation.operation.lane:
+                raise ExecutionCapabilityError("generation Step 的 lane 与 Catalog 不一致")
+            if request.evidenceBundle.policyVersion != operation.operation.evidence_policy:
+                raise ExecutionCapabilityError(
+                    "generation Step 的 Evidence Policy 与 Catalog 不一致"
+                )
         elif request.purpose == "review":
             purpose = "review"
+            reviewer_profile = next(
+                (
+                    candidate
+                    for candidate in operation.reviewer_profiles
+                    if candidate.key == request.modelProfile.profile
+                ),
+                None,
+            )
+            if reviewer_profile is None:
+                raise ExecutionCapabilityError("当前 Operation 未授权该 Reviewer Profile")
+            profile = reviewer_profile
+            reviewer_schema = operation.reviewer_output_schema
+            if reviewer_schema is None:
+                raise ExecutionCapabilityError("当前 Operation 未配置 Reviewer Output Schema")
+            output_schema = reviewer_schema
+            budget = operation.reviewer_step_budgets[profile.key]
             if profile.purpose != "review" or output_schema.purpose != "evaluation":
                 raise ExecutionCapabilityError("review Step 的 Profile/Output 用途不一致")
             if request.artifactId is None or request.artifactRevision is None:
                 raise ExecutionCapabilityError("Reviewer Step 必须绑定 Artifact revision")
+            review_policy = operation.operation.review_policy
+            if request.lane != review_policy.lane:
+                raise ExecutionCapabilityError("review Step 的 lane 与 Catalog 不一致")
+            if request.evidenceBundle.policyVersion != review_policy.evidence_policy:
+                raise ExecutionCapabilityError("review Step 的 Evidence Policy 与 Catalog 不一致")
             rubric_version = _frozen_rubric_version(request)
+            if rubric_version != review_policy.rubric_version:
+                raise ExecutionCapabilityError("Reviewer rubricVersion 与 Catalog 不一致")
         else:
             raise ExecutionCapabilityError("当前执行器只支持 generation/review Step")
 
+        _validate_operation_input(request)
         _validate_profile_ref(request, profile)
         _validate_prompt_profile_ref(request, profile.prompt_profile)
         _validate_output_schema_ref(request, output_schema)
@@ -226,6 +261,88 @@ class StatelessExecutionStepExecutor:
         except ExecutionRegistryReferenceError as exc:
             raise ExecutionCapabilityError("当前部署模型未被 Deployment Profile 授权") from exc
 
+        resolved_model = _resolved_model(
+            profile,
+            provider=self._model.provider_name,
+            model=self._model.model_name,
+            transport_profile=self._model.transport_profile,
+            endpoint_profile=self._model.endpoint_profile,
+            structured_output_route=structured_output_route,
+            capability_version=self._model.capability_version,
+            supports_request_idempotency=self._model.supports_request_idempotency,
+        )
+        return ResolvedExecutionStep(
+            purpose=purpose,
+            profile=profile,
+            prompt_profile=profile.prompt_profile,
+            output_schema=output_schema,
+            budget=budget,
+            rubric_version=rubric_version,
+            structured_output_route=structured_output_route,
+            resolved_model=resolved_model,
+        )
+
+    def _resolve_retained_request(
+        self,
+        request: ExecutionStepRequest,
+        registry: ExecutionRegistry,
+    ) -> ResolvedExecutionStep:
+        """仅供 recovery 使用冻结引用收敛已受理 Step，不给新请求开旁路。"""
+
+        profile = registry.profiles.get(request.modelProfile.profile)
+        if profile is None:
+            raise ExecutionCapabilityError("Execution Model Profile 未保留在 Registry")
+        output_schema = registry.output_schemas.get(request.outputSchema.name)
+        if output_schema is None:
+            raise ExecutionCapabilityError("Execution Output Schema 未保留在 Registry")
+        matching_budgets = tuple(
+            budget
+            for budget in registry.step_budgets.values()
+            if budget.supported and _step_budget_matches(request, budget)
+        )
+        if not matching_budgets:
+            raise ExecutionCapabilityError("Execution Step Budget 未保留在 Registry")
+        budget = sorted(matching_budgets, key=lambda value: value.key)[0]
+        if request.purpose == "generation":
+            purpose: ExecutionPurpose = "generation"
+            if profile.purpose != "generation" or output_schema.purpose != "generation":
+                raise ExecutionCapabilityError("generation Step 的 Profile/Output 用途不一致")
+            rubric_version = None
+        elif request.purpose == "review":
+            purpose = "review"
+            if profile.purpose != "review" or output_schema.purpose != "evaluation":
+                raise ExecutionCapabilityError("review Step 的 Profile/Output 用途不一致")
+            if request.artifactId is None or request.artifactRevision is None:
+                raise ExecutionCapabilityError("Reviewer Step 必须绑定 Artifact revision")
+            rubric_version = _frozen_rubric_version(request)
+        else:
+            raise ExecutionCapabilityError("当前执行器只支持 generation/review Step")
+        _validate_operation_input(request)
+        _validate_profile_ref(request, profile)
+        _validate_prompt_profile_ref(request, profile.prompt_profile)
+        _validate_output_schema_ref(request, output_schema)
+        _validate_step_budget(request, budget)
+        if request.budget.maxCompletionTokens < 1:
+            raise ExecutionCapabilityError("模型 Step 必须具有正 completion 预算")
+        if request.budget.maxCompletionTokens > self._max_output_tokens:
+            raise ExecutionCapabilityError("Step completion 预算超过当前部署模型能力")
+        structured_output_route = self._structured_output_route()
+        try:
+            registry.require_authorized_deployment(
+                deployment_profile_key=profile.deployment_profile_key,
+                provider=self._model.provider_name,
+                model=self._model.model_name,
+                transport_profile=self._model.transport_profile,
+                endpoint_profile=self._model.endpoint_profile,
+                structured_output_route=structured_output_route,
+                capability_version=self._model.capability_version,
+                reasoning_mode=profile.reasoning_mode,
+                supports_request_idempotency=self._model.supports_request_idempotency,
+            )
+        except ExecutionRegistryReferenceError as exc:
+            raise ExecutionCapabilityError(
+                "当前部署模型未被 Deployment Profile 授权"
+            ) from exc
         resolved_model = _resolved_model(
             profile,
             provider=self._model.provider_name,
@@ -904,6 +1021,53 @@ def _structured_output_name(value: str) -> str:
     return normalized[:128]
 
 
+def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if (request.workflow, request.operation) != (
+        "long_serial",
+        "answer_question",
+    ):
+        return
+    expected = (
+        "generation",
+        "interactive",
+        "editor.answer.v1",
+        "output.chat_answer.v1",
+        "evidence.long_serial.answer.v1",
+    )
+    actual = (
+        request.purpose,
+        request.lane,
+        request.modelProfile.profile,
+        request.outputSchema.name,
+        request.evidenceBundle.policyVersion,
+    )
+    if actual != expected:
+        raise ExecutionCapabilityError("长篇问答 Step 与冻结 handler 身份不一致")
+    if request.novelId is None:
+        raise ExecutionCapabilityError("长篇问答必须绑定 novelId")
+    if request.artifactId is not None or request.artifactRevision is not None:
+        raise ExecutionCapabilityError("长篇问答不能绑定 ReviewArtifact")
+    try:
+        ChatAnswerInput.model_validate(request.input)
+    except ValidationError as exc:
+        raise ExecutionCapabilityError("长篇问答 input 必须只含完整 userInstruction") from exc
+    chapter_items = tuple(
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType == "chapter_content"
+    )
+    if len(chapter_items) != 1:
+        raise ExecutionCapabilityError("长篇问答必须冻结唯一目标章节正文 Evidence")
+    chapter = chapter_items[0]
+    if (
+        not chapter.exists
+        or chapter.contentType != "text"
+        or chapter.contentText is None
+        or chapter.range is not None
+    ):
+        raise ExecutionCapabilityError("长篇问答章节 Evidence 必须是完整 text 快照")
+
+
 def _retry_delay_seconds(base_seconds: float, attempt: int, request_hash: str) -> float:
     """按 requestHash 与 attempt 生成稳定抖动，重启可复现且不同请求不会惊群。"""
 
@@ -974,7 +1138,7 @@ def _usage(
     cache_miss_tokens = input_tokens - cached_tokens
     completion_tokens = result.usage.completionTokens
     reasoning_tokens = result.diagnostics.reasoningTokens
-    if reasoning_mode == "disabled":
+    if reasoning_mode == "disabled" and reasoning_tokens is None:
         reasoning_tokens = 0
     visible_tokens = (
         completion_tokens - reasoning_tokens
@@ -1030,15 +1194,25 @@ def _validate_provider_result(
     if result.structuredOutputDiagnostic is not None or result.structuredOutput is None:
         return "protocol", "MODEL_STRUCTURED_OUTPUT_INVALID"
     if request.purpose == "generation":
-        replacement = result.structuredOutput.get("replacement")
-        if not isinstance(replacement, str) or not replacement.strip():
-            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+        if request.operation == "rewrite_chapter_selection":
+            replacement = result.structuredOutput.get("replacement")
+            if isinstance(replacement, str) and not replacement.strip():
+                return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+        elif request.operation == "answer_question":
+            answer = result.structuredOutput.get("answer")
+            if isinstance(answer, str) and not answer.strip():
+                return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     try:
         jsonschema_rs.validator_for(request.outputSchema.jsonSchema).validate(
             result.structuredOutput
         )
     except Exception:
         return "validation", "MODEL_OUTPUT_SCHEMA_INVALID"
+    if request.purpose == "generation" and request.operation == "answer_question":
+        try:
+            ChatAnswerOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
 
@@ -1076,6 +1250,9 @@ def _derive_generation_output(
         if not isinstance(replacement, str) or not replacement.strip():
             raise ExecutionCapabilityError("章节选区改写结果缺少 replacement")
         output["contentSha256"] = hashlib.sha256(replacement.encode("utf-8")).hexdigest()
+    elif request.workflow == "long_serial" and request.operation == "answer_question":
+        answer = ChatAnswerOutput.model_validate(output)
+        output = answer.model_dump(mode="json")
     return output
 
 

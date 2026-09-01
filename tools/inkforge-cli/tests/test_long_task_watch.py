@@ -96,6 +96,58 @@ def _status(
     }
 
 
+def _v2_status(
+    status: str,
+    *,
+    artifact_id: str | None = None,
+    sequence: int = 0,
+    operation: str = "rewrite_chapter_selection",
+    **extra: Any,
+) -> dict[str, Any]:
+    artifact = (
+        {
+            "artifactId": artifact_id,
+            "artifactRevision": 2,
+            "status": "awaiting_user",
+            "actionable": True,
+        }
+        if artifact_id is not None
+        else None
+    )
+    active_steps = (
+        [
+            {
+                "stepId": "step-1",
+                "ordinal": 1,
+                "kind": "generator",
+                "status": "running",
+            }
+        ]
+        if status in {"pending", "running"}
+        else []
+    )
+    error = (
+        {"code": "RUN_FAILED", "message": "任务失败"}
+        if status == "failed"
+        else None
+    )
+    return {
+        "engineVersion": 2,
+        "runId": TASK_ID,
+        "taskId": TASK_ID,
+        "workflow": "long_serial",
+        "operation": operation,
+        "status": status,
+        "activeSteps": active_steps,
+        "currentStep": active_steps[0] if active_steps else None,
+        "artifact": artifact,
+        "error": error,
+        "lastEventSequence": sequence,
+        "revision": 3,
+        **extra,
+    }
+
+
 def _dependencies(api: WatchApi, clock: FakeClock) -> CliDependencies:
     config = MemoryConfigStore()
     config.save(
@@ -205,6 +257,177 @@ def test_watch_accepts_legacy_v1_snapshot_without_engine_version() -> None:
             "data": legacy,
         },
     ]
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 3, True, 1.5, "1"])
+def test_watch_rejects_explicit_invalid_engine_version(invalid: object) -> None:
+    status = _status("waiting_user", artifact_id="artifact-1")
+    status["engineVersion"] = invalid
+    api = WatchApi(snapshots=[status])
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 5
+    assert len(frames) == 1
+    assert frames[0]["error"]["code"] == "CORE_RESPONSE_CONTRACT_ERROR"
+    assert api.calls == [("GET", TASK_PATH, {})]
+
+
+def test_watch_missing_engine_version_never_guesses_v2_from_status_fields() -> None:
+    v2_without_discriminator = _v2_status("completed")
+    v2_without_discriminator.pop("engineVersion")
+    api = WatchApi(snapshots=[v2_without_discriminator])
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 5
+    assert frames[0]["error"]["code"] == "CORE_RESPONSE_CONTRACT_ERROR"
+    assert api.calls == [("GET", TASK_PATH, {})]
+
+
+def test_watch_explicit_v2_never_uses_contradictory_v1_outcome() -> None:
+    running = _v2_status(
+        "running",
+        outcome={"state": "succeeded", "result": {"kind": "none", "id": None}},
+    )
+    completed = _v2_status(
+        "completed",
+        sequence=1,
+        outcome={"state": "failed", "result": {"kind": "none", "id": None}},
+    )
+    api = WatchApi(snapshots=[running, completed], streams=[[]])
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 0
+    assert frames == [
+        {"type": "snapshot", "data": running},
+        {"type": "terminal", "data": completed},
+    ]
+    assert api.calls[1] == ("SSE", TASK_ID, {"lastEventId": None})
+
+
+def test_watch_rejects_engine_version_changes_during_reconciliation() -> None:
+    first = _v2_status("running")
+    changed = _status("succeeded")
+    api = WatchApi(snapshots=[first, changed], streams=[[]])
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 5
+    assert frames[0] == {"type": "snapshot", "data": first}
+    assert frames[-1]["error"]["code"] == "CORE_RESPONSE_CONTRACT_ERROR"
+
+
+def test_watch_v2_reconnects_with_numeric_run_snapshot_cursor() -> None:
+    initial = _v2_status("running", sequence=4)
+    after_disconnect = _v2_status("running", sequence=4)
+    terminal = _v2_status("completed", sequence=5)
+    run_snapshot = {
+        "id": 4,
+        "event": "run_snapshot",
+        "data": {
+            "protocolVersion": "2.0",
+            "engineVersion": 2,
+            "runId": TASK_ID,
+            "baseSequence": 4,
+            "snapshot": {
+                "status": "running",
+                "activeSteps": initial["activeSteps"],
+                "artifact": None,
+                "error": None,
+            },
+        },
+    }
+    api = WatchApi(
+        snapshots=[initial, after_disconnect, terminal],
+        streams=[
+            [run_snapshot, SseConnectionError("断线")],
+            [
+                {
+                    "id": 5,
+                    "event": "step_progress",
+                    "data": {"engineVersion": 2, "sequence": 5},
+                }
+            ],
+        ],
+    )
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 0
+    assert frames == [
+        {"type": "snapshot", "data": initial},
+        {
+            "type": "event",
+            "id": 4,
+            "event": "run_snapshot",
+            "data": run_snapshot["data"],
+        },
+        {
+            "type": "event",
+            "id": 5,
+            "event": "step_progress",
+            "data": {"engineVersion": 2, "sequence": 5},
+        },
+        {"type": "terminal", "data": terminal},
+    ]
+    assert api.calls == [
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": None}),
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": "4"}),
+        ("GET", TASK_PATH, {}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "artifact_id", "expected_exit_code", "expected_frame_type"),
+    [
+        ("waiting_user", "artifact-v2", 0, "waiting_user"),
+        ("completed", None, 0, "terminal"),
+        ("failed", None, 5, "terminal"),
+        ("cancelled", None, 5, "terminal"),
+    ],
+)
+def test_watch_v2_uses_status_and_artifact_for_terminal_result(
+    status: str,
+    artifact_id: str | None,
+    expected_exit_code: int,
+    expected_frame_type: str,
+) -> None:
+    snapshot = _v2_status(status, artifact_id=artifact_id, sequence=9)
+    api = WatchApi(snapshots=[snapshot])
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == expected_exit_code
+    assert frames[0] == {"type": "snapshot", "data": snapshot}
+    assert frames[-1]["type"] == expected_frame_type
+    assert frames[-1]["data"] == snapshot
+    if status == "waiting_user":
+        assert frames[-1]["artifactId"] == artifact_id
+    assert api.calls == [("GET", TASK_PATH, {})]
+
+
+def test_watch_completed_answer_question_does_not_invent_answer_or_outcome() -> None:
+    completed = _v2_status(
+        "completed",
+        sequence=7,
+        operation="answer_question",
+    )
+    api = WatchApi(snapshots=[completed])
+
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 0
+    assert frames == [
+        {"type": "snapshot", "data": completed},
+        {"type": "terminal", "data": completed},
+    ]
+    assert "answer" not in frames[-1]
+    assert "answer" not in frames[-1]["data"]
+    assert "outcome" not in frames[-1]["data"]
 
 
 def test_watch_does_not_timeout_when_core_is_reachable_without_sse_events() -> None:

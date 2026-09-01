@@ -32,7 +32,7 @@ import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
 import cn.inkforge.core.writing.application.WritingCommandRepository;
 import cn.inkforge.core.writing.domain.WritingRecoverability;
-import cn.inkforge.core.writing.domain.WritingMessageMetadata;
+import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import java.time.Clock;
@@ -589,7 +589,7 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
             String content,
             Map<String, Object> selectionAttachment) {
         LocalDateTime now = DatabaseTimestamp.now(clock);
-        String metadata = WritingMessageMetadata.serialize(
+        String metadata = WorkflowMessageMetadata.serialize(
                 taskId,
                 "user",
                 content,

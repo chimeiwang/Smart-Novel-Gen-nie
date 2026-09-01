@@ -225,15 +225,23 @@
     {
       "key": "output.chat_answer.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "purpose": "generation",
-      "sha256": "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5",
+      "sha256": "aa3eb62823c66c739cbee6227e67c099c170b99478358e0003003816f87eed70",
       "jsonSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": false,
-        "required": [],
-        "properties": {}
+        "required": [
+          "answer"
+        ],
+        "properties": {
+          "answer": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
       }
     },
     {

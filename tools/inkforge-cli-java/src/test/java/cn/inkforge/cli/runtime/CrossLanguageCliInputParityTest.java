@@ -100,7 +100,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 五个观察命令的JSONL帧请求顺序和终态退出码必须和Python一致() throws Exception {
+    void 五个观察命令的七条JSONL场景请求顺序和终态退出码必须和Python一致() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-watch-cases.json")) {
@@ -110,7 +110,7 @@ class CrossLanguageCliInputParityTest {
         assertThat(fixture.get("schemaVersion").textValue())
                 .isEqualTo("inkforge-cli-parity-watch/1.0");
         ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
-        assertThat(sourceCases.size()).isEqualTo(5);
+        assertThat(sourceCases.size()).isEqualTo(7);
 
         ArrayNode probeCases = json.createArrayNode();
         sourceCases.forEach(value -> {
@@ -126,6 +126,50 @@ class CrossLanguageCliInputParityTest {
             ObjectNode item = (ObjectNode) probeCases.get(index);
             String command = item.get("command").textValue();
             assertThat(runJavaCase(item)).as(command).isEqualTo(python.get(index));
+        }
+    }
+
+    @Test
+    void V2非法问答与观察响应的退出帧和API调用必须和Python一致() throws Exception {
+        ObjectNode fixture;
+        try (InputStream source = getClass().getResourceAsStream(
+                "/cli-contracts/parity-v2-contract-error-cases.json")) {
+            if (source == null) throw new IllegalStateException("缺少 CLI V2 契约错误差异 fixture");
+            fixture = (ObjectNode) json.readTree(source);
+        }
+        assertThat(fixture.get("schemaVersion").textValue())
+                .isEqualTo("inkforge-cli-parity-v2-contract-errors/1.0");
+        ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
+        assertThat(sourceCases.size()).isEqualTo(16);
+
+        ArrayNode probeCases = json.createArrayNode();
+        sourceCases.forEach(value -> {
+            ObjectNode item = (ObjectNode) value.deepCopy();
+            item.put("mode", "scripted");
+            item.put("captureCalls", true);
+            probeCases.add(item);
+        });
+        JsonNode python = runPythonProbe(probeCases);
+        assertThat(python.isArray()).isTrue();
+        assertThat(python.size()).isEqualTo(probeCases.size());
+
+        for (int index = 0; index < probeCases.size(); index++) {
+            ObjectNode item = (ObjectNode) probeCases.get(index);
+            String caseId = item.get("caseId").textValue();
+            ObjectNode javaResult = runJavaCase(item);
+            assertThat(javaResult).as(caseId).isEqualTo(python.get(index));
+            assertThat(javaResult.get("exitCode").intValue())
+                    .as(caseId)
+                    .isEqualTo(item.get("expectedExitCode").intValue());
+            JsonNode frames = javaResult.get("frames");
+            assertThat(frames.isArray()).as(caseId).isTrue();
+            assertThat(frames.size()).as(caseId).isEqualTo(1);
+            assertThat(frames.get(0).at("/error/code").textValue())
+                    .as(caseId)
+                    .isEqualTo(item.get("expectedErrorCode").textValue());
+            assertThat(javaResult.get("calls"))
+                    .as(caseId)
+                    .isEqualTo(item.get("expectedCalls"));
         }
     }
 

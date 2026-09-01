@@ -136,6 +136,15 @@ class WritingConfiguration {
     }
 
     @Bean
+    DurableAgentReleaseGuard durableAgentReleaseGuard(
+            CoreSettings settings, Clock coreClock, ExecutionRegistry registry) {
+        return new FileDurableAgentReleaseGuard(
+                settings.durableAgentReleaseGuardPath(),
+                coreClock,
+                registry.manifestFingerprint());
+    }
+
+    @Bean
     @ConditionalOnProperty(
             name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
             havingValue = "true")
@@ -158,9 +167,17 @@ class WritingConfiguration {
             ObjectProvider<LongSerialDurableRunStarter> durableStarters,
             ObjectProvider<DurableAgentExecutionReadiness> agentReadinessChecks,
             CommandIdempotencyStore writingCommandIdempotencyStore,
+            DurableAgentReleaseGuard durableAgentReleaseGuard,
             CoreSettings settings,
-            ObjectMapper objectMapper) {
-        if (!settings.durableAgentExecutionSchemaReady()) return legacy::start;
+            ObjectMapper objectMapper,
+            ExecutionRegistry registry) {
+        if (!settings.durableAgentExecutionSchemaReady()) {
+            return new V1FreshWritingRunStarter(
+                    database,
+                    legacy,
+                    writingCommandIdempotencyStore,
+                    settings.v1FreshAgentStartsEnabled());
+        }
         LongSerialDurableRunStarter durable = durableStarters.getIfAvailable();
         if (durable == null) {
             throw new IllegalStateException("耐久 Agent 数据库结构已就绪但 V2 启动器未装配");
@@ -170,13 +187,15 @@ class WritingConfiguration {
                 legacy,
                 durable,
                 writingCommandIdempotencyStore,
+                durableAgentReleaseGuard,
                 settings,
                 () -> {
                     DurableAgentExecutionReadiness readiness =
                             agentReadinessChecks.getIfAvailable();
                     return readiness != null && readiness.check();
                 },
-                objectMapper);
+                objectMapper,
+                registry);
     }
 
     @Bean

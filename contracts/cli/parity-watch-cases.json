@@ -19,11 +19,123 @@
       "payload": {"taskId": "t/1"},
       "responses": [
         {
+          "engineVersion": 2,
+          "runId": "t/1",
           "taskId": "t/1",
-          "outcome": {
-            "state": "waiting_user",
-            "result": {"kind": "review_artifact", "ready": true, "id": "artifact-1"}
+          "workflow": "long_serial",
+          "operation": "answer_question",
+          "status": "running",
+          "activeSteps": [{"stepId": "step-1", "ordinal": 1, "kind": "generator", "status": "running"}],
+          "currentStep": {"stepId": "step-1", "ordinal": 1, "kind": "generator", "status": "running"},
+          "artifact": null,
+          "error": null,
+          "lastEventSequence": 4,
+          "revision": 2
+        },
+        {
+          "engineVersion": 2,
+          "runId": "t/1",
+          "taskId": "t/1",
+          "workflow": "long_serial",
+          "operation": "answer_question",
+          "status": "running",
+          "activeSteps": [{"stepId": "step-1", "ordinal": 1, "kind": "generator", "status": "running"}],
+          "currentStep": {"stepId": "step-1", "ordinal": 1, "kind": "generator", "status": "running"},
+          "artifact": null,
+          "error": null,
+          "lastEventSequence": 4,
+          "revision": 2
+        },
+        {
+          "engineVersion": 2,
+          "runId": "t/1",
+          "taskId": "t/1",
+          "workflow": "long_serial",
+          "operation": "answer_question",
+          "status": "completed",
+          "activeSteps": [],
+          "currentStep": null,
+          "artifact": null,
+          "error": null,
+          "lastEventSequence": 5,
+          "revision": 3
+        }
+      ],
+      "streams": [
+        [
+          {
+            "id": 4,
+            "event": "run_snapshot",
+            "data": {
+              "protocolVersion": "2.0",
+              "engineVersion": 2,
+              "runId": "t/1",
+              "baseSequence": 4,
+              "snapshot": {
+                "workflow": "long_serial",
+                "operation": "answer_question",
+                "status": "running",
+                "activeSteps": [{"stepId": "step-1", "ordinal": 1, "kind": "generator", "status": "running"}],
+                "currentStep": {"stepId": "step-1", "ordinal": 1, "kind": "generator", "status": "running"},
+                "artifact": null,
+                "error": null,
+                "lastEventSequence": 4,
+                "revision": 2
+              }
+            }
           }
+        ],
+        [
+          {"id": 5, "event": "step_progress", "data": {"engineVersion": 2, "sequence": 5}}
+        ]
+      ],
+      "fakeClock": true
+    },
+    {
+      "caseId": "long-v2-waiting-artifact-object",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {
+          "engineVersion": 2,
+          "runId": "t/1",
+          "taskId": "t/1",
+          "workflow": "long_serial",
+          "operation": "rewrite_chapter_selection",
+          "status": "waiting_user",
+          "activeSteps": [],
+          "currentStep": null,
+          "artifact": {
+            "artifactId": "artifact-1",
+            "artifactRevision": 2,
+            "status": "awaiting_user",
+            "actionable": true
+          },
+          "error": null,
+          "lastEventSequence": 8,
+          "revision": 4
+        }
+      ],
+      "fakeClock": true
+    },
+    {
+      "caseId": "long-v2-failed-error-object",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {
+          "engineVersion": 2,
+          "runId": "t/1",
+          "taskId": "t/1",
+          "workflow": "long_serial",
+          "operation": "answer_question",
+          "status": "failed",
+          "activeSteps": [],
+          "currentStep": null,
+          "artifact": null,
+          "error": {"code": "RUN_FAILED", "message": "任务失败"},
+          "lastEventSequence": 9,
+          "revision": 5
         }
       ],
       "fakeClock": true

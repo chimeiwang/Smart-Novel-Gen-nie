@@ -8,7 +8,7 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
-import cn.inkforge.core.writing.domain.WritingMessageMetadata;
+import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
@@ -24,12 +24,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.databind.ObjectMapper;
 
-/** 长篇章节选区改写的确定性 Evidence Planner 与 V2 Run 入口。 */
+/** 按 Catalog key 分派长篇确定性 Evidence Planner 的 V2 Run 入口。 */
 final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStarter {
 
     private final CoreDatabase database;
@@ -40,6 +41,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
     private final Clock clock;
     private final ObjectMapper json;
     private final WorkflowStepSnapshotFactory stepSnapshots;
+    private final Map<String, EvidencePlanner> planners;
 
     JooqLongSerialDurableRunStarter(
             CoreDatabase database,
@@ -57,13 +59,41 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
+        this.planners = Map.of(
+                "long_serial.answer_question", this::planAnswerQuestion,
+                "long_serial.rewrite_chapter_selection", this::planChapterSelectionRewrite);
     }
 
     @Override
-    public WritingRunV2Response start(
+    public Set<String> supportedOperationKeys() {
+        return planners.keySet();
+    }
+
+    @Override
+    public WritingRunV2Response replayExisting(
             String userId, LongSerialStartWritingRunRequest request) {
-        if (request.getOperation()
-                != LongSerialStartWritingRunRequest.OperationEnum.REWRITE_CHAPTER_SELECTION) {
+        LongSerialRunAssembler.Normalized normalized = assembler.normalize(request);
+        return database.transactionResult(transaction -> {
+            WritingRunV2Response replay = replay(
+                    transaction,
+                    userId,
+                    request.getClientRequestId(),
+                    normalized.fingerprint());
+            if (replay == null) {
+                throw new IllegalStateException("既有 V2 幂等身份不可见，拒绝绕过 fresh guard");
+            }
+            return replay;
+        });
+    }
+
+    @Override
+    public WritingRunV2Response startFresh(
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            Runnable finalFreshStartAuthorization) {
+        String operationKey = operationKey(request);
+        EvidencePlanner planner = planners.get(operationKey);
+        if (planner == null) {
             throw new ApiException(
                     409,
                     "DURABLE_OPERATION_NOT_ENABLED",
@@ -78,31 +108,10 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     normalized.fingerprint());
             if (replay != null) return replay;
             requireLongSerialOwner(transaction, userId, request);
-            LongSerialRunAssembler.Assembled assembled = assembler.assemble(
-                    transaction, userId, request, normalized.definition());
-            Map<String, Object> snapshot = object(
-                    assembled.job().get("selectionSnapshot"), "选区快照");
-            Map<String, Object> source = object(
-                    snapshot.get("sourceSnapshot"), "选区完整来源");
-            String content = string(source, "content");
-            String resourceType = string(snapshot, "resourceType");
-            String resourceId = string(snapshot, "resourceId");
-            OffsetDateTime updatedAt = OffsetDateTime.parse(string(source, "updatedAt"));
-            int selectionStart = integer(snapshot, "selectionStart");
-            int selectionEnd = integer(snapshot, "selectionEnd");
-
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("target", normalized.body().get("target"));
-            input.put("selectionTarget", normalized.body().get("selectionTarget"));
-            input.put("selectedText", snapshot.get("selectedText"));
-            input.put("contextBefore", snapshot.get("contextBefore"));
-            input.put("contextAfter", snapshot.get("contextAfter"));
-            input.put("userInstruction", request.getUserInstruction());
-
-            ExecutionRegistry.ResolvedOperation operation = registry.resolve(
-                    "long_serial.rewrite_chapter_selection", false);
-            ExecutionPlanSnapshot executionPlan = registry.freezePlan(
-                    "long_serial.rewrite_chapter_selection", false);
+            ExecutionRegistry.ResolvedOperation operation = registry.resolve(operationKey, false);
+            ExecutionPlanSnapshot executionPlan = registry.freezePlan(operationKey, false);
+            PreparedStart prepared = planner.prepare(
+                    transaction, userId, request, normalized);
 
             WorkflowStartPlan plan = new WorkflowStartPlan(
                     userId,
@@ -111,38 +120,26 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     operation.operation().workflow(),
                     operation.operation().operation(),
                     registry.catalogVersion(),
-                    "chapter_generation",
+                    prepared.runKind(),
                     request.getNovelId(),
                     request.getChapterId(),
                     nullable(request.getWritingSessionId()),
-                    resourceType,
-                    resourceId,
+                    prepared.targetType(),
+                    prepared.targetId(),
                     normalized.body(),
                     operation.operation().evidencePolicy(),
-                    List.of(new WorkflowEvidenceItemPlan(
-                            resourceType,
-                            resourceId,
-                            true,
-                            null,
-                            updatedAt,
-                            content,
-                            null,
-                            selectionStart,
-                            selectionEnd,
-                            Map.of(
-                                    "role", "selection_source",
-                                    "baseContentHash", string(snapshot, "baseContentHash"),
-                                    "selectedTextHash", string(snapshot, "selectedTextHash")))),
+                    prepared.evidenceItems(),
                     operation.operation().runBudget(),
                     executionPlan,
                     new WorkflowInitialStepPlan(
                             "generation",
                             operation.operation().lane(),
-                            input,
+                            prepared.input(),
                             operation.generatorProfile(),
                             operation.generatorStepBudget(),
                             operation.outputSchema()));
-            WorkflowRunStartResult result = workflows.start(plan);
+            WorkflowRunStartResult result = workflows.startFresh(
+                    plan, finalFreshStartAuthorization);
             if (result.replayed()) {
                 WritingRunV2Response concurrentReplay = replay(
                         transaction,
@@ -158,9 +155,108 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     transaction,
                     result,
                     request.getUserInstruction(),
-                    assembled.selectionAttachmentMetadata());
+                    prepared.userMessageSource());
             return response(result, executionPlan);
         });
+    }
+
+    private PreparedStart planChapterSelectionRewrite(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        LongSerialRunAssembler.Assembled assembled = assembler.assemble(
+                transaction, userId, request, normalized.definition());
+        Map<String, Object> snapshot = object(
+                assembled.job().get("selectionSnapshot"), "选区快照");
+        Map<String, Object> source = object(
+                snapshot.get("sourceSnapshot"), "选区完整来源");
+        String content = string(source, "content");
+        String resourceType = string(snapshot, "resourceType");
+        String resourceId = string(snapshot, "resourceId");
+        OffsetDateTime updatedAt = OffsetDateTime.parse(string(source, "updatedAt"));
+        int selectionStart = integer(snapshot, "selectionStart");
+        int selectionEnd = integer(snapshot, "selectionEnd");
+
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("target", normalized.body().get("target"));
+        input.put("selectionTarget", normalized.body().get("selectionTarget"));
+        input.put("selectedText", snapshot.get("selectedText"));
+        input.put("contextBefore", snapshot.get("contextBefore"));
+        input.put("contextAfter", snapshot.get("contextAfter"));
+        input.put("userInstruction", request.getUserInstruction());
+        return new PreparedStart(
+                "chapter_generation",
+                resourceType,
+                resourceId,
+                input,
+                List.of(new WorkflowEvidenceItemPlan(
+                        resourceType,
+                        resourceId,
+                        true,
+                        null,
+                        updatedAt,
+                        content,
+                        null,
+                        selectionStart,
+                        selectionEnd,
+                        Map.of(
+                                "role", "selection_source",
+                                "baseContentHash", string(snapshot, "baseContentHash"),
+                                "selectedTextHash", string(snapshot, "selectedTextHash")))),
+                assembled.selectionAttachmentMetadata());
+    }
+
+    private PreparedStart planAnswerQuestion(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        String sessionId = nullable(request.getWritingSessionId());
+        if (sessionId == null) {
+            throw new ApiException(
+                    409,
+                    "WRITING_SESSION_REQUIRED",
+                    "长篇问答必须绑定写作会话");
+        }
+        Record chapter = transaction.fetchOne(
+                """
+                SELECT id, content, "updatedAt"
+                FROM public."Chapter"
+                WHERE id = ? AND "novelId" = ?
+                FOR UPDATE
+                """,
+                request.getChapterId(),
+                request.getNovelId());
+        if (chapter == null) {
+            throw new ApiException(404, "CHAPTER_NOT_FOUND", "章节不存在");
+        }
+        String content = chapter.get("content", String.class);
+        LocalDateTime updatedAt = chapter.get("updatedAt", LocalDateTime.class);
+        if (content == null || updatedAt == null) {
+            throw new IllegalStateException("长篇问答的章节证据不完整");
+        }
+        return new PreparedStart(
+                "chat",
+                "chapter",
+                request.getChapterId(),
+                Map.of("userInstruction", request.getUserInstruction()),
+                List.of(new WorkflowEvidenceItemPlan(
+                        "chapter_content",
+                        request.getChapterId(),
+                        true,
+                        null,
+                        DatabaseTimestamp.api(updatedAt),
+                        content,
+                        null,
+                        null,
+                        null,
+                        Map.of("role", "answer_context"))),
+                null);
+    }
+
+    private static String operationKey(LongSerialStartWritingRunRequest request) {
+        return "long_serial." + request.getOperation().getValue();
     }
 
     private void persistUserMessage(
@@ -177,7 +273,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         source.put("engineVersion", 2);
         source.put("runId", result.runId());
         source.put("operation", result.operation());
-        String metadata = WritingMessageMetadata.serialize(
+        String metadata = WorkflowMessageMetadata.serialize(
                 result.runId(),
                 "user",
                 userInstruction,
@@ -468,5 +564,33 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
 
     private static <T> T nullable(JsonNullable<T> value) {
         return value != null && value.isPresent() ? value.orElse(null) : null;
+    }
+
+    @FunctionalInterface
+    private interface EvidencePlanner {
+
+        PreparedStart prepare(
+                DSLContext transaction,
+                String userId,
+                LongSerialStartWritingRunRequest request,
+                LongSerialRunAssembler.Normalized normalized);
+    }
+
+    private record PreparedStart(
+            String runKind,
+            String targetType,
+            String targetId,
+            Map<String, Object> input,
+            List<WorkflowEvidenceItemPlan> evidenceItems,
+            Map<String, Object> userMessageSource) {
+
+        private PreparedStart {
+            runKind = Objects.requireNonNull(runKind);
+            targetType = Objects.requireNonNull(targetType);
+            targetId = Objects.requireNonNull(targetId);
+            input = Map.copyOf(input);
+            evidenceItems = List.copyOf(evidenceItems);
+            userMessageSource = userMessageSource == null ? null : Map.copyOf(userMessageSource);
+        }
     }
 }

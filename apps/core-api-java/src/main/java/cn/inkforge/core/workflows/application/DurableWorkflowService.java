@@ -11,7 +11,8 @@ public final class DurableWorkflowService {
         this.starts = Objects.requireNonNull(starts);
     }
 
-    public WorkflowRunStartResult start(WorkflowStartPlan plan) {
-        return starts.start(plan);
+    public WorkflowRunStartResult startFresh(
+            WorkflowStartPlan plan, Runnable finalFreshStartAuthorization) {
+        return starts.start(plan, finalFreshStartAuthorization);
     }
 }

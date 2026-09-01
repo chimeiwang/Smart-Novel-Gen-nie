@@ -37,6 +37,8 @@ printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.w
 Java 候选在 macOS 只使用 Keychain，在 Windows 只使用 Credential Manager；其他系统明确失败，不会把
 Cookie 降级写入普通文件。其配置路径和命令 stdin/stdout 契约与现有 CLI 相同。逐命令 Python/Java
 差异矩阵、真实开发环境验收和生产 Skill 切换完成前，不得删除或替换上面的 Python 入口。
+现有两个生产 wrapper 仍实际调用 Python CLI，因此新增 Operation 必须先在 Python 与 Java 两端通过
+同契约和跨语言差异测试，不能只更新 Java 候选或只修改 Skill 文档。
 
 除登录外，命令都从 stdin 读取一个 UTF-8 JSON 对象，stdout 返回 JSON；`short.agent.watch`、
 `long.task.watch` 和 `long.video.adaptation.watch` 返回 JSONL。例如：
@@ -68,6 +70,12 @@ Codex 的完整操作规程位于用户 Skill：
 
 `long.agent.start` 的 `rewrite_chapter_selection`/`rewrite_outline_selection` 必须携带 `selectionTarget`（资源身份、`baseUpdatedAt`、正文 hash、Unicode 码点范围和选区 hash）。CLI 不接受 `selectedText`，也不把选区正文作为权威输入；正文由 Core 按来源绑定冻结。选区操作仍走 proposal → ReviewArtifact → 用户确认 → Core 应用。
 
+`long.agent.start` 的 `answer_question` 只接受同一个 `chapterId` 的 chapter target/scope，并要求非空
+`writingSessionId`、稳定 `clientRequestId` 和包含非空白字符的完整 `userInstruction`。它不创建
+ReviewArtifact；`long.task.watch` 返回 V2 `completed` 后，使用 `long.session.get` 回读该会话中的权威
+Agent 消息，不能把 SSE 或任务状态拼成回答。问答的 `writingSessionId` 缺失、为 `null`、为空字符串或
+使用非字符串类型时，两种 CLI 都在业务 POST 前以 `WRITING_SESSION_REQUIRED` 和退出码 2 拒绝。
+
 `long.artifact.approve` 对选区 Artifact 使用 `editedReplacement` 或 `editedReplacementFile`，对全文草案继续使用 `editedContent`。每次决定前先 GET Artifact 并查看完整 Diff，独立确认后提交稳定幂等请求，完成后再次 GET 回读；CLI 会执行 sourceBinding preflight 并拒绝错误的全文/选区编辑字段。
 
 - 长篇命令只通过 `/api/v1/**` 访问 Core，不连接数据库、Agent Service 或内部接口。
@@ -83,8 +91,10 @@ Codex 的完整操作规程位于用户 Skill：
   完整 JSON；不会按大小自动截断或切换输出形式。
 - 人工章节保存使用 `expectedUpdatedAt` 做并发检查。Agent 产物只能通过 ReviewArtifact 的
   approve、revise 或 discard 流程处理，不能直接写入正式内容。
-- `long.task.watch` 只观察权威 `outcome`，停止 watcher 不会取消服务端任务；真正取消必须显式执行
-  `long.task.cancel`。
+- `long.task.watch` 按显式 `engineVersion` 分派：历史缺字段响应兼容 V1 并只读取 `outcome`；V2 只读取
+  `status/activeSteps/artifact/error`，其中 `activeSteps` 必须存在且为数组，出现的 `artifact/error` 必须为
+  `null` 或对象；显式类型错误时失败关闭。V2 支持数字 SSE cursor 和 `run_snapshot` 重连。停止 watcher 不会取消
+  服务端任务；真正取消必须显式执行 `long.task.cancel`。
 - 本规格列出的整份大纲正文、大纲节点、设定、参考资料和小说文风应用命令已实现；伏笔和用户级文风资产写入仍未开放。
   任何调用都不能用读接口或批量请求绕过幂等、CAS、Diff 确认和来源绑定门槛。
 

@@ -92,6 +92,7 @@ import {
   isWorkflowRunV2,
   selectForegroundWorkflowRun,
   workflowEventLabel,
+  workflowEventRequiresSessionMessageRefresh,
   workflowModelRoleLabel,
   workflowProgressPhaseLabel,
   workflowResolvedModelLabel,
@@ -1064,6 +1065,8 @@ export function WritingConversation({
     sessionId: string,
     options: { preserveWorkspaceState?: boolean } = {},
   ) => {
+    // 同一会话也可能同时存在初始化、终态对账和人工刷新；只允许最后发起的权威读取落地。
+    sessionLoadVersionRef.current += 1;
     const requestVersion = sessionLoadVersionRef.current;
     try {
       const [session, runList] = await Promise.all([
@@ -1829,7 +1832,15 @@ export function WritingConversation({
           void loadSessions();
         } else if (event.eventType === "completed") {
           setPhase("completed");
-          void loadReviewArtifacts();
+          if (event.payload.artifactId) {
+            void loadReviewArtifacts();
+          }
+          if (
+            scope.mode === "session"
+            && workflowEventRequiresSessionMessageRefresh(event)
+          ) {
+            void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
+          }
           void loadSessions();
           onComplete?.();
         } else if (event.eventType === "failed") {

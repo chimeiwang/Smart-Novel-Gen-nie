@@ -30,6 +30,8 @@ case "$component" in
       "grep -aFq 'pre-durable-agent-v2/schema-contract.json' /app/inkforge-core-api.jar && \
        grep -aFq 'post-durable-agent-v2/schema-contract.json' /app/inkforge-core-api.jar && \
        grep -aFq 'DurableAgentSchemaGate.class' /app/inkforge-core-api.jar && \
+       grep -aFq 'FileDurableAgentReleaseGuard.class' /app/inkforge-core-api.jar && \
+       grep -aFq 'DURABLE_AGENT_RELEASE_GUARD_PATH' /app/inkforge-core-api.jar && \
        grep -aFq 'WorkflowsController.class' /app/inkforge-core-api.jar && \
        grep -aFq 'JooqWorkflowCallbackRepository.class' /app/inkforge-core-api.jar" \
       >/dev/null || {

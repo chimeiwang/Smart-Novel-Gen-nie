@@ -1,4 +1,4 @@
-package cn.inkforge.core.writing.domain;
+package cn.inkforge.core.workflows.domain;
 
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import java.nio.charset.StandardCharsets;
@@ -7,10 +7,10 @@ import java.util.Map;
 import java.util.Objects;
 import tools.jackson.databind.ObjectMapper;
 
-/** 写作流程消息的稳定元数据；启动命令与终态回调必须复用同一规范化实现。 */
-public final class WritingMessageMetadata {
+/** Agent 工作流消息的稳定元数据；启动命令与终态回调必须复用同一规范化实现。 */
+public final class WorkflowMessageMetadata {
 
-    private WritingMessageMetadata() {}
+    private WorkflowMessageMetadata() {}
 
     public static String serialize(
             String taskId,

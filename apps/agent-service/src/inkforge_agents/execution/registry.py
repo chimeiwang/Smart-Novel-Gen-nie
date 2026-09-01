@@ -423,7 +423,7 @@ class ResolvedExecutionOperation:
     reviewer_profiles: tuple[ProfileDefinition, ...]
     reviewer_step_budgets: Mapping[str, StepBudgetDefinition]
     output_schema: OutputSchemaDefinition
-    reviewer_output_schema: OutputSchemaDefinition
+    reviewer_output_schema: OutputSchemaDefinition | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,8 +489,13 @@ class ExecutionRegistry:
         output_schema = self.output_schemas[definition.output_schema_key]
         generator_budget_key = definition.generator_step_budget_key
         reviewer_schema_key = definition.review_policy.reviewer_output_schema_key
-        if generator_budget_key is None or reviewer_schema_key is None:
+        if generator_budget_key is None:
             raise ExecutionRegistryReferenceError(f"V2 Operation 执行引用不完整：{key}")
+        reviewer_output_schema = (
+            None
+            if reviewer_schema_key is None
+            else self.output_schemas[reviewer_schema_key]
+        )
         return ResolvedExecutionOperation(
             operation=definition,
             generator_profile=generator,
@@ -505,7 +510,7 @@ class ExecutionRegistry:
                 }
             ),
             output_schema=output_schema,
-            reviewer_output_schema=self.output_schemas[reviewer_schema_key],
+            reviewer_output_schema=reviewer_output_schema,
         )
 
 
@@ -968,20 +973,37 @@ def _validate_references(
         output_schema = output_schemas[operation.output_schema_key]
         generator_budget_key = operation.generator_step_budget_key
         reviewer_schema_key = operation.review_policy.reviewer_output_schema_key
-        if generator_budget_key is None or reviewer_schema_key is None:
+        if generator_budget_key is None:
             raise ExecutionRegistryReferenceError(
-                f"启用的 Operation {operation.key} 缺少 Step Budget 或 Reviewer Schema"
-            )
-        if (
-            operation.review_policy.rubric_version is None
-            or operation.review_policy.evidence_policy is None
-            or operation.review_policy.lane is None
-        ):
-            raise ExecutionRegistryReferenceError(
-                f"启用的 Operation {operation.key} 缺少 Reviewer 执行语义"
+                f"启用的 Operation {operation.key} 缺少 Generator Step Budget"
             )
         generator_budget = step_budgets[generator_budget_key]
-        reviewer_schema = output_schemas[reviewer_schema_key]
+        review_policy = operation.review_policy
+        review_enabled = review_policy.mode != "none"
+        if review_enabled:
+            if (
+                not reviewers
+                or set(review_policy.reviewer_step_budget_keys)
+                != set(review_policy.reviewer_profile_keys)
+                or reviewer_schema_key is None
+                or review_policy.rubric_version is None
+                or review_policy.evidence_policy is None
+                or review_policy.lane is None
+            ):
+                raise ExecutionRegistryReferenceError(
+                    f"启用的 Operation {operation.key} 缺少 Reviewer 执行语义"
+                )
+        elif (
+            reviewers
+            or review_policy.reviewer_step_budget_keys
+            or reviewer_schema_key is not None
+            or review_policy.rubric_version is not None
+            or review_policy.evidence_policy is not None
+            or review_policy.lane is not None
+        ):
+            raise ExecutionRegistryReferenceError(
+                f"无 Reviewer 的 Operation {operation.key} 不能冻结 Reviewer 执行引用"
+            )
         if not generator.supported or generator.purpose not in {
             "generation",
             "evaluation",
@@ -1003,10 +1025,12 @@ def _validate_references(
             raise ExecutionRegistryReferenceError(
                 f"启用的 Operation {operation.key} 使用了未支持 Generator Step Budget"
             )
-        if not reviewer_schema.supported or reviewer_schema.purpose != "evaluation":
-            raise ExecutionRegistryReferenceError(
-                f"启用的 Operation {operation.key} 没有可执行 Reviewer Output Schema"
-            )
+        if reviewer_schema_key is not None:
+            reviewer_schema = output_schemas[reviewer_schema_key]
+            if not reviewer_schema.supported or reviewer_schema.purpose != "evaluation":
+                raise ExecutionRegistryReferenceError(
+                    f"启用的 Operation {operation.key} 没有可执行 Reviewer Output Schema"
+                )
         for reviewer in reviewers:
             budget_key = operation.review_policy.reviewer_step_budget_keys[reviewer.key]
             budget = step_budgets[budget_key]

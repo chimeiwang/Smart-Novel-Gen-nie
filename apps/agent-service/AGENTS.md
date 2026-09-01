@@ -155,15 +155,28 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 图稳定结束为 completed/error 时仍先保存可恢复快照，但该 checkpoint 不能提前结束数据库任务；任务、命令终态和 terminal Outbox 只由随后 complete/fail 回调的同一 Core 事务提交。
 - 图稳定结束于 `phase=error` 时必须保存错误快照并调用 Core 失败回调，禁止用完成回调表达失败终态。
 - Core 强制对账只允许修复 Redis 中缺失的 queued 索引或完全丢失的运行键；Redis 已记录为 completed、failed 或 cancelled 的运行不得被 `force` 重新打开。
+- 普通 V1 队列必须在既有状态迁移 Lua 内原子维护版本为 `1` 的 drain `queued/running` 最小 ZSET；索引只保存
+  `jobId` 与原始 `createdAt`，不得复制或解析正文 payload。缺 marker、旧 marker、集合双向不一致或 active 超过
+  256 项时联合 drain 必须封闭失败；具名空索引初始化也不得扫描超过 256 个历史 status。
 - V2 execution journal 只使用独立 `EXECUTION_REDIS_URL`，生产必须与普通 `REDIS_URL` 分离。该 Redis 固定
   `appendonly yes + appendfsync always + aof-load-truncated no + noeviction`；普通队列 Redis 继续关闭 AOF。
   `accepted`、供应商尝试和未送达终态在 Core 回执前不设 TTL。独立 callback replayer 使用 Redis 原子
   claim/lease 和到期时间重放同一 `resultHash`；合法 `accepted/duplicate/stale` 回执才进入保留期，确定性 4xx
   隔离为 rejected 并阻断 readiness，网络、5xx 和损坏回执按稳定抖动退避。
+- V2 journal 的每个 accept/start/provider-attempt/terminal/refence/cancel/callback claim/reschedule/reject/deliver
+  Lua 必须同时校验版本为 `1` 的 drain marker，并原子维护包含全部 accepted/started 与未送达 terminal 的 active
+  ZSET。生产缺 marker 时禁止开始 provider；只有 PostgreSQL 全部 V2 Run 为零且独立 Redis 无任何 key 时才允许
+  具名初始化空 marker，已有数据不得猜测重建，必须 quarantine 后审计。
 - 已送达终态删除完整模型输出，只按独立 `EXECUTION_TERMINAL_RETENTION_HOURS` 保留幂等 tombstone，默认/最少
   24 小时；pending/rejected 的完整终态永不过期。
   `used_memory` 达到 `maxmemory` 90%、出现历史 eviction 或 callback backlog 越界时，不得继续开始新 provider 调用；
   终态 replay 和精确取消仍保持可用。
+- V2 `long_serial.answer_question` 只接受 Catalog 已启用的 `chapter` scope：通用 `ExecutionStepRequest.input`
+  必须只含完整非空白 `userInstruction`，Evidence bundle 必须有且只有一个完整、无 range 的
+  `chapter_content` text 快照。执行器使用 `editor.answer.v1`、`output.chat_answer.v1` 和精确单 Step 预算，
+  只返回严格 `{"answer": string}`；不创建 Reviewer、Artifact、工具循环或 LangGraph 状态。问答仍完整经过
+  deployment 授权、`preparing` 预留、累计 usage、journal、fence、取消和终态回放；会话消息 ID 与持久化只由
+  Core 负责。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

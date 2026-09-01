@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import subprocess
 import uuid
@@ -21,6 +22,11 @@ from .support import (
     execution_result,
     rehash_request,
 )
+
+SNAPSHOT_SCRIPT = (
+    Path(__file__).resolve().parents[4]
+    / "scripts/durable_agent_v2_execution_snapshot.lua"
+).read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -76,19 +82,43 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
 
         journal = RedisExecutionJournal(
             cast(AsyncJournalRedis, redis),
-            prefix="real:executions",
+            prefix="inkforge:executions",
             require_durability=True,
         )
         assert (await journal.health()).ready is True
         request = execution_request()
+        with pytest.raises(ExecutionJournalError, match="drain 索引"):
+            await journal.accept(request, {"provider": "fake"})
+        assert await redis.exists(f"inkforge:executions:{request.stepId}") == 0
+        nonproduction_journal = RedisExecutionJournal(
+            cast(AsyncJournalRedis, redis),
+            prefix="inkforge:executions",
+        )
+        orphan_key = "inkforge:executions:orphan-without-marker"
+        await redis.hset(orphan_key, mapping={"state": "accepted"})
+        with pytest.raises(ExecutionJournalError, match="drain 索引"):
+            await nonproduction_journal.accept(request, {"provider": "fake"})
+        assert await redis.exists("inkforge:executions:drain:index-version") == 0
+        assert await redis.exists(f"inkforge:executions:{request.stepId}") == 0
+        await redis.delete(orphan_key)
+        await redis.set("inkforge:executions:drain:index-version", "1")
+        snapshot_script = SNAPSHOT_SCRIPT
         # 先持久化远大于正常 canary 输出的完整终态，随后证明 delivered 会压成小型 tombstone。
         result = execution_result(request, replacement="改" * 262_144)
         await journal.accept(request, result.resolvedModel.model_dump(mode="json"))
+        accepted_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert [entry["id"] for entry in accepted_snapshot["active"]] == [
+            request.stepId
+        ]
         await journal.mark_started(request)
         assert await journal.begin_provider_attempt(request) == 1
         await journal.record_terminal(request, result)
+        pending_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert [entry["id"] for entry in pending_snapshot["pending"]] == [
+            request.stepId
+        ]
 
-        quarantine_key = "real:executions:restore:quarantine"
+        quarantine_key = "inkforge:executions:restore:quarantine"
         await redis.set(quarantine_key, "restore-epoch")
         assert await journal.is_restore_quarantined() is True
         assert await journal.claim_callback(request.stepId, force=True) is None
@@ -97,17 +127,27 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
         assert quarantined.ready is False
         assert quarantined.quarantined is True
         assert quarantined.error_code == "EXECUTION_JOURNAL_RESTORE_QUARANTINED"
+        quarantine_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert quarantine_snapshot == {"error": "execution_restore_quarantine_present"}
         await redis.delete(quarantine_key)
         assert await journal.is_restore_quarantined() is False
 
         claim = await journal.claim_callback(request.stepId)
         assert claim is not None
+        leased_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert [entry["id"] for entry in leased_snapshot["leased"]] == [
+            request.stepId
+        ]
         due_at = datetime.now(UTC) + timedelta(seconds=2)
         await journal.reschedule_callback(
             claim,
             error_code="EXECUTION_CALLBACK_UNAVAILABLE",
             next_attempt_at=due_at,
         )
+        rescheduled_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert [entry["id"] for entry in rescheduled_snapshot["pending"]] == [
+            request.stepId
+        ]
         assert await journal.claim_due_callbacks(now=due_at - timedelta(seconds=1)) == ()
         reclaimed = await journal.claim_due_callbacks(now=due_at)
         assert len(reclaimed) == 1
@@ -118,7 +158,11 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
             error_code="EXECUTION_CALLBACK_REJECTED",
             claim_token=reclaimed[0].claim_token,
         )
-        key = f"real:executions:{request.stepId}"
+        rejected_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert [entry["id"] for entry in rejected_snapshot["rejected"]] == [
+            request.stepId
+        ]
+        key = f"inkforge:executions:{request.stepId}"
         pending_memory = await redis.memory_usage(key, samples=0)
         assert pending_memory is not None
         assert await redis.hstrlen(key, "terminal_payload") > 512 * 1024
@@ -131,6 +175,11 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
         assert delivered_memory is not None
         assert delivered_memory <= 2 * 1024
         assert delivered_memory * 50 < pending_memory
+        delivered_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert delivered_snapshot["active"] == []
+        assert delivered_snapshot["pending"] == []
+        assert delivered_snapshot["leased"] == []
+        assert delivered_snapshot["rejected"] == []
 
         refenced = request.model_copy(update={"jobId": "job-2", "fencingToken": 2})
         rebound = await journal.accept(
@@ -153,6 +202,16 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
             second_result.resolvedModel.model_dump(mode="json"),
         )
         await journal.record_terminal(second, second_result)
+        second_key = f"inkforge:executions:{second.stepId}"
+        await redis.zrem("inkforge:executions:drain:active", second_key)
+        corrupted_snapshot = json.loads(await redis.eval(snapshot_script, 0))
+        assert corrupted_snapshot == {
+            "error": "execution_callback_without_active_member"
+        }
+        await redis.zadd(
+            "inkforge:executions:drain:active",
+            {second_key: int((await redis.hget(second_key, "accepted_ms")) or 0)},
+        )
         expired = await journal.claim_callback(
             second.stepId,
             now=datetime.now(UTC) - timedelta(seconds=10),
@@ -162,6 +221,13 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
         assert expired is not None
         recovered = await journal.claim_due_callbacks()
         assert len(recovered) == 1
+
+        await redis.set("inkforge:executions:drain:index-version", "0")
+        old_marker = json.loads(await redis.eval(snapshot_script, 0))
+        assert old_marker == {
+            "error": "execution_drain_index_version_missing_or_invalid"
+        }
+        await redis.set("inkforge:executions:drain:index-version", "1")
 
         await redis.config_set("appendfsync", "everysec")
         unsafe = await journal.health()

@@ -25,6 +25,7 @@ import java.util.NoSuchElementException;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 class WatchCommandsTest {
 
@@ -142,6 +143,36 @@ class WatchCommandsTest {
     }
 
     @Test
+    void 长篇V2观察拒绝缺失或类型错误的结构字段() {
+        ObjectNode missingActiveSteps = (ObjectNode) v2Status("running", null, 1);
+        missingActiveSteps.remove("activeSteps");
+        ObjectNode invalidActiveSteps = (ObjectNode) v2Status("running", null, 1);
+        invalidActiveSteps.putNull("activeSteps");
+        ObjectNode invalidArtifact = (ObjectNode) v2Status("completed", null, 1);
+        invalidArtifact.put("artifact", "artifact-1");
+        ObjectNode invalidError = (ObjectNode) v2Status("failed", null, 1);
+        invalidError.set("error", json.createArrayNode());
+
+        for (JsonNode invalid : List.of(
+                missingActiveSteps,
+                invalidActiveSteps,
+                invalidArtifact,
+                invalidError)) {
+            WatchApi api = new WatchApi(json);
+            api.response(invalid);
+
+            Invocation result = invoke(
+                    "long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+
+            assertThat(result.exit()).as(invalid.toString()).isEqualTo(5);
+            assertThat(result.frames()).as(invalid.toString()).hasSize(1);
+            assertThat(result.frames().getFirst().at("/error/code").textValue())
+                    .isEqualTo("CORE_RESPONSE_CONTRACT_ERROR");
+            assertThat(api.sseCursors).isEmpty();
+        }
+    }
+
+    @Test
     void 改编观察仅在签名变化时输出进度并由任务状态决定退出码() {
         WatchApi api = new WatchApi(json);
         api.response(adaptation("pending", "none", "v1", "task-1"));
@@ -207,10 +238,17 @@ class WatchCommandsTest {
                 ? "null"
                 : "{\"artifactId\":\"" + artifactId
                         + "\",\"artifactRevision\":2,\"status\":\"awaiting_user\",\"actionable\":true}";
+        String activeSteps = status.equals("pending") || status.equals("running")
+                ? "[{\"stepId\":\"step-1\",\"ordinal\":1,\"kind\":\"generator\",\"status\":\"running\"}]"
+                : "[]";
+        String error = status.equals("failed")
+                ? "{\"code\":\"RUN_FAILED\",\"message\":\"任务失败\"}"
+                : "null";
         return json.readTree("{\"engineVersion\":2,\"runId\":\"t/1\",\"taskId\":\"t/1\","
                 + "\"workflow\":\"long_serial\",\"operation\":\"rewrite_chapter_selection\","
                 + "\"status\":\"" + status + "\",\"lastEventSequence\":" + sequence
-                + ",\"revision\":3,\"artifact\":" + artifact + "}");
+                + ",\"revision\":3,\"activeSteps\":" + activeSteps
+                + ",\"currentStep\":null,\"artifact\":" + artifact + ",\"error\":" + error + "}");
     }
 
     private JsonNode v2RunSnapshot(int sequence, String status) {

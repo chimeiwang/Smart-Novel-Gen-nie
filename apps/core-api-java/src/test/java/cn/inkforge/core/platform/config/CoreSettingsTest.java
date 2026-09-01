@@ -28,6 +28,8 @@ class CoreSettingsTest {
         assertThat(settings.durableAgentRouteMode())
                 .isEqualTo(CoreSettings.DurableAgentRouteMode.OFF);
         assertThat(settings.durableAgentExecutionSchemaReady()).isFalse();
+        assertThat(settings.v1FreshAgentStartsEnabled()).isTrue();
+        assertThat(settings.durableAgentReleaseGuardPath()).isNull();
         assertThat(settings.agentMaxConcurrency()).isEqualTo(3);
         assertThat(settings.routesNewDurableAgentRun("user-1", "novel-1")).isFalse();
     }
@@ -135,7 +137,7 @@ class CoreSettingsTest {
     }
 
     @Test
-    void 耐久Agent新建路由支持关闭白名单和全量且不猜测空白名单() {
+    void 耐久Agent新建路由只支持关闭和精确白名单() {
         CoreSettings allowlist = CoreSettings.from(Map.of(
                 "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
                 "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
@@ -147,11 +149,10 @@ class CoreSettingsTest {
         assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-1")).isFalse();
         assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-x")).isFalse();
         assertThat(allowlist.routesNewDurableAgentRun("user-1", null)).isFalse();
-        assertThat(CoreSettings.from(Map.of(
-                                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
-                                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all"))
-                        .routesNewDurableAgentRun("any-user", null))
-                .isTrue();
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
+                .hasMessageContaining("off 或 allowlist");
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist")))
@@ -168,12 +169,36 @@ class CoreSettingsTest {
                 .hasMessageContaining("无效 ID");
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
-                .hasMessageContaining("数据库结构未就绪");
+                .hasMessageContaining("off 或 allowlist");
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
                         "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1",
                         "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "novel-1")))
                 .hasMessageContaining("数据库结构未就绪");
+    }
+
+    @Test
+    void V1新建入口门禁默认兼容且只能显式关闭() {
+        assertThat(CoreSettings.from(Map.of()).v1FreshAgentStartsEnabled()).isTrue();
+        assertThat(CoreSettings.from(Map.of("V1_FRESH_AGENT_STARTS_ENABLED", "false"))
+                        .v1FreshAgentStartsEnabled())
+                .isFalse();
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "V1_FRESH_AGENT_STARTS_ENABLED", "draining")))
+                .hasMessageContaining("V1_FRESH_AGENT_STARTS_ENABLED");
+    }
+
+    @Test
+    void 发布Guard路径只能使用绝对路径且缺失不阻断Core启动() {
+        assertThat(CoreSettings.from(Map.of(
+                                "DURABLE_AGENT_RELEASE_GUARD_PATH",
+                                "/run/inkforge-release-guard/guard.json"))
+                        .durableAgentReleaseGuardPath())
+                .isEqualTo(java.nio.file.Path.of(
+                        "/run/inkforge-release-guard/guard.json"));
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_RELEASE_GUARD_PATH", "relative/guard.json")))
+                .hasMessageContaining("绝对路径");
     }
 
     @Test

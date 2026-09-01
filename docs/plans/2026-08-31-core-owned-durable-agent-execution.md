@@ -58,6 +58,9 @@
   partial、错误 hash/token、重复 forward、缺 journal 和 V2 数据拒绝 rollback；
 - [x] 新增 PostgreSQL restore 前 execution quarantine 具名步骤，要求 database dump SHA、epoch 和本地
   `WAITAOF=1`，但不提供未经授权的数据库覆盖恢复入口；
+- [x] 在同一具名 helper 增加安全 `export-contract/verify-contract`：复用 0600 PGPASS 和无密码本机 URL，
+  原子输出真实来源 contract 证据、schema-only dump、元数据及 SHA，并以运行中 Java guard 与冻结 post contract
+  精确复验；不得覆盖 canonical contract、泄露密码或执行 DDL；
 - [ ] 备份后在 `novelwriterdev` 两次执行并导出权威 contract；
 - [ ] 正式迁移保持待发布门禁，不提前执行。
 
@@ -107,7 +110,15 @@
 
 ## Task 5：迁移全部长篇 Operation
 
-- [ ] answer_question / review_chapter；
+- [x] `answer_question` 的语言中立 Catalog/Profile/Prompt/Deployment/Output Schema/Step Budget 与 Python 单
+  generation Step 执行侧纵切；严格 `chat_answer`、无 Reviewer、无 LangGraph/工具循环，继续复用通用 journal、
+  fence、取消、完整 usage 与 callback 语义；
+- [x] `answer_question` 的 Core Evidence Planner、Run/Step 创建、成功消息事务物化、终态 Event、公共查询/SSE；
+  首切强制同用户/小说/章节 `writingSessionId`，缺失返回 `WRITING_SESSION_REQUIRED`；
+- [x] Web 在 `completed(outcomeType=chat_answer)` 后按事件流绑定的当前会话回读权威 `WritingMessage`、保留终态并
+  拒绝迟到会话响应；问答完成不刷新 ReviewArtifact，活动项显示“章节问答”；
+- [ ] `answer_question` 通过跨进程故障注入、真实供应商低额度预发布与生产交集 allowlist canary；
+- [ ] review_chapter；
 - [ ] plan_chapter；
 - [ ] write_chapter / rewrite_scene；
 - [ ] rewrite_outline_selection；
@@ -152,6 +163,10 @@
   V2 必须显式发送 2；approve/revise 按精确 revision 读取并核对详情，discard 为兼容 V1 物理删除后的
   幂等重放而直接 POST；Artifact 列表统一读取有界 summary，详情支持可选精确 revision 且保留无 revision 的
   V1 兼容读取；任务观察按引擎读取权威状态并保留 V2 数字 cursor 与 `run_snapshot` 重连语义；
+- [x] Java CLI 的 `long.agent.start` 开放 chapter-only `answer_question`，强制非空 `writingSessionId`、稳定
+  `clientRequestId`，完成后通过 `long.session.get` 回读权威消息，并冻结
+  `2026-09-01-durable-agent-v2-operator-skill-update.md`；
+- [ ] 发布提交进入 `main` 后，按更新契约升级本地/生产 Skill 运行副本并通过离线 wrapper 测试；
 - [ ] 公共 OpenAPI、生成客户端、Web/CLI 测试和文档同步。
 
 ## Task 8：V1 排空与代码删除

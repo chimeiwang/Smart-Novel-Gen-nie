@@ -143,11 +143,23 @@ test("当前会话收到权威终态后重新读取持久化消息但不覆盖�
   assert.match(source, /preserveWorkspaceState/);
   assert.match(
     source,
+    /const loadSessionMessages[\s\S]{0,320}sessionLoadVersionRef\.current \+= 1[\s\S]{0,160}const requestVersion = sessionLoadVersionRef\.current/,
+  );
+  assert.match(
+    source,
     /decision\.kind === "waiting_user"[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
   );
   assert.match(
     source,
     /decision\.kind === "succeeded"[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
+  );
+  assert.match(
+    source,
+    /event\.eventType === "completed"[\s\S]*workflowEventRequiresSessionMessageRefresh\(event\)[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
+  );
+  assert.match(
+    source,
+    /event\.payload\.artifactId[\s\S]*loadReviewArtifacts\(\)/,
   );
 });
 

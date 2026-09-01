@@ -47,6 +47,7 @@ from inkforge_contracts.execution import (
 from pydantic import JsonValue
 
 from .support import (
+    answer_question_request,
     execution_cancel,
     execution_request,
     execution_result,
@@ -384,6 +385,37 @@ async def test_duplicate_submit_does_not_repeat_model_call() -> None:
     assert len(model.requests) == 1
     assert len(callbacks.results) == 1
     assert (await journal.require(request.stepId)).callback_delivery == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_answer_question_runs_through_journal_progress_and_terminal_callback() -> None:
+    journal = _journal(prefix="test:service:answer")
+    model = RecordingModel()
+    callbacks = RecordingCallbacks()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    registry = load_execution_registry(environment="test")
+    request = answer_question_request(registry)
+
+    accepted = await service.submit(request)
+    await service.wait_idle()
+
+    assert accepted.resolvedModel.reasoningMode == "disabled"
+    assert [item.phase for item in callbacks.progress] == [
+        "preparing",
+        "waiting_provider",
+        "validating",
+        "reporting",
+    ]
+    assert len(callbacks.results) == 1
+    result = callbacks.results[0]
+    assert result.output == {"answer": "模拟模型已依据冻结章节证据回答问题。"}
+    assert result.usage.providerAttempts == 1
+    assert result.usage.reasoningTokens == 0
+    assert len(model.requests) == 1
+    assert model.requests[0].tools == []
+    entry = await journal.require(request.stepId)
+    assert entry.callback_delivery == "delivered"
+    assert entry.terminal is None
 
 
 @pytest.mark.asyncio

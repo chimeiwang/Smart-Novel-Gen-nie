@@ -1,0 +1,288 @@
+{
+  "schemaVersion": "inkforge-cli-parity-v2-contract-errors/1.0",
+  "cases": [
+    {
+      "caseId": "answer-session-missing",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0001",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "userInstruction": "这一章的主要冲突是什么？"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "WRITING_SESSION_REQUIRED",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-session-null",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0002",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": null,
+        "userInstruction": "这一章的主要冲突是什么？"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "WRITING_SESSION_REQUIRED",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-session-empty",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0003",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": "",
+        "userInstruction": "这一章的主要冲突是什么？"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "WRITING_SESSION_REQUIRED",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-target-wrong-chapter",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0004",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c2"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": "s1",
+        "userInstruction": "这一章的主要冲突是什么？"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "INVALID_TARGET",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-session-number",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0007",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": 7,
+        "userInstruction": "这一章的主要冲突是什么？"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "WRITING_SESSION_REQUIRED",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-scope-wrong-chapter",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0005",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c2"},
+        "writingSessionId": "s1",
+        "userInstruction": "这一章的主要冲突是什么？"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "INVALID_SCOPE",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-operation-unsupported",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0008",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "rewrite_scene",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": "s1",
+        "userInstruction": "改写"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "INVALID_OPERATION",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-top-level-unexpected-field",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0009",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": "s1",
+        "userInstruction": "这一章的主要冲突是什么？",
+        "selectedAgents": ["writer"]
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "UNEXPECTED_FIELD",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "answer-instruction-unicode-blank",
+      "command": "long.agent.start",
+      "payload": {
+        "clientRequestId": "agent-answer-invalid-0006",
+        "novelId": "n1",
+        "chapterId": "c1",
+        "operation": "answer_question",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": "s1",
+        "userInstruction": "\u0085\u2003\u3000\n\t"
+      },
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "INVALID_USER_INSTRUCTION",
+      "expectedCalls": []
+    },
+    {
+      "caseId": "watch-active-steps-missing",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "completed", "artifact": null, "error": null}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    },
+    {
+      "caseId": "watch-active-steps-null",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "completed", "activeSteps": null, "artifact": null, "error": null}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    },
+    {
+      "caseId": "watch-active-steps-object",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "completed", "activeSteps": {}, "artifact": null, "error": null}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    },
+    {
+      "caseId": "watch-artifact-array",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "completed", "activeSteps": [], "artifact": [], "error": null}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    },
+    {
+      "caseId": "watch-artifact-string",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "completed", "activeSteps": [], "artifact": "artifact-1", "error": null}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    },
+    {
+      "caseId": "watch-error-array",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "failed", "activeSteps": [], "artifact": null, "error": []}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    },
+    {
+      "caseId": "watch-error-string",
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"engineVersion": 2, "status": "failed", "activeSteps": [], "artifact": null, "error": "RUN_FAILED"}
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "fakeClock": true,
+      "expectedExitCode": 5,
+      "expectedErrorCode": "CORE_RESPONSE_CONTRACT_ERROR",
+      "expectedCalls": [
+        {"kind": "request", "method": "GET", "path": "/api/v1/writing/runs/t%2F1", "query": {}, "body": null}
+      ]
+    }
+  ]
+}

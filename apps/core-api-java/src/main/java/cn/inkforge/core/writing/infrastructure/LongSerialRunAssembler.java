@@ -39,6 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 final class LongSerialRunAssembler {
 
     private static final Map<String, Definition> DEFINITIONS = Map.of(
+            "answer_question", new Definition("编辑", List.of(), false, "chapter"),
             "plan_chapter", new Definition("剧情", List.of("编辑"), true, "chapter"),
             "rewrite_scene", new Definition("写作", List.of("校验", "编辑"), true, "chapter"),
             "rewrite_chapter_selection",

@@ -12,7 +12,7 @@ image_verifier="$app_dir/scripts/verify-durable-agent-v2-image.sh"
 execution_manifest_path="$app_dir/contracts/agent-execution/manifest.json"
 
 case "$stage" in
-  pre-contract|post-contract-route-off|schema-ready-route-off|allowlist|route-off-drain|ddl-rollback) ;;
+  pre-contract|post-contract-route-off|schema-ready-route-off|initialize-drain-indexes|allowlist|drain-status|verify-drain|route-off-drain|ddl-rollback) ;;
   *) echo "耐久 Agent 发布门禁阶段无效" >&2; exit 2 ;;
 esac
 case "$target_database" in
@@ -94,6 +94,7 @@ allowed = {
     "DURABLE_AGENT_EXECUTION_ROUTE_MODE",
     "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST",
     "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST",
+    "V1_FRESH_AGENT_STARTS_ENABLED",
 }
 values: dict[str, str] = {}
 for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
@@ -115,15 +116,17 @@ schema_ready = values.get("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "false").lower
 route_mode = values.get("DURABLE_AGENT_EXECUTION_ROUTE_MODE", "off").lower()
 user_allowlist = values.get("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "").strip()
 novel_allowlist = values.get("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "").strip()
+v1_fresh_starts = values.get("V1_FRESH_AGENT_STARTS_ENABLED", "true").lower()
 if schema_ready not in {"true", "false"} or route_mode not in {
     "off", "allowlist", "all"
-}:
+} or v1_fresh_starts not in {"true", "false"}:
     print("rollout-config:invalid", file=sys.stderr)
     raise SystemExit(1)
 print(schema_ready)
 print(route_mode)
 print("present" if user_allowlist else "absent")
 print("present" if novel_allowlist else "absent")
+print(v1_fresh_starts)
 PY
 }
 
@@ -132,6 +135,7 @@ schema_ready="$(printf '%s\n' "$config" | sed -n '1p')"
 route_mode="$(printf '%s\n' "$config" | sed -n '2p')"
 user_allowlist="$(printf '%s\n' "$config" | sed -n '3p')"
 novel_allowlist="$(printf '%s\n' "$config" | sed -n '4p')"
+v1_fresh_starts="$(printf '%s\n' "$config" | sed -n '5p')"
 
 migration_state="$(
   APP_DIR="$app_dir" DURABLE_AGENT_MIGRATION_ENV_FILE="$env_file" \
@@ -145,10 +149,29 @@ migration_state="$(
 require_config() {
   expected_schema_ready=$1
   expected_route_mode=$2
-  [ "$schema_ready" = "$expected_schema_ready" ] && [ "$route_mode" = "$expected_route_mode" ] || {
-    echo "当前 schemaReady/route 组合不符合发布阶段" >&2
+  expected_v1_fresh_starts=$3
+  [ "$schema_ready" = "$expected_schema_ready" ] \
+    && [ "$route_mode" = "$expected_route_mode" ] \
+    && [ "$v1_fresh_starts" = "$expected_v1_fresh_starts" ] || {
+    echo "当前 schemaReady/route/V1 fresh start 组合不符合发布阶段" >&2
     exit 1
   }
+}
+
+require_runtime_route_off() {
+  compose exec -T core-api /bin/sh -ec \
+    'test "${DURABLE_AGENT_EXECUTION_ROUTE_MODE:-}" = off' || {
+      echo "当前运行 Core 未精确证明 route=off" >&2
+      exit 1
+    }
+}
+
+require_runtime_drain_closed() {
+  compose exec -T core-api /bin/sh -ec \
+    'test "${DURABLE_AGENT_EXECUTION_SCHEMA_READY:-}" = true && test "${DURABLE_AGENT_EXECUTION_ROUTE_MODE:-}" = off && test "${V1_FRESH_AGENT_STARTS_ENABLED:-}" = false && grep -aFq "V1FreshAgentStartGate.class" /app/inkforge-core-api.jar' || {
+      echo "当前运行 Core 未精确证明 V1/V2 新建入口同时关闭" >&2
+      exit 1
+    }
 }
 
 require_compatible_core() {
@@ -338,13 +361,24 @@ require_execution_journal_ready() {
   }
 }
 
+require_drain_indexes_ready() {
+  v1_index="$(compose exec -T redis redis-cli --raw GET \
+    inkforge:runs:drain:index-version | tr -d '\r')"
+  v2_index="$(compose exec -T execution-redis redis-cli --raw GET \
+    inkforge:executions:drain:index-version | tr -d '\r')"
+  [ "$v1_index" = "1" ] && [ "$v2_index" = "1" ] || {
+    echo "V1/V2 drain 索引 marker 尚未安全初始化" >&2
+    exit 1
+  }
+}
+
 case "$stage" in
   pre-contract)
     [ "$migration_state" = "unmigrated" ] || {
       echo "pre-contract 阶段必须仍为完整迁移前结构" >&2
       exit 1
     }
-    require_config false off
+    require_config false off false
     require_v2_aware_images
     require_exact_contract
     require_services_ready
@@ -355,7 +389,7 @@ case "$stage" in
       echo "在线迁移后首次门禁必须是完整、空 V2 结构" >&2
       exit 1
     }
-    require_config false off
+    require_config false off false
     require_v2_aware_images
     require_route_off_execution_manifest
     require_exact_contract
@@ -367,16 +401,32 @@ case "$stage" in
       echo "schema-ready 首次重启前不得已有 V2 数据" >&2
       exit 1
     }
-    require_config true off
+    require_config true off false
     require_v2_aware_images
     require_route_off_execution_manifest
     require_exact_contract
     require_services_ready
     require_execution_journal_ready
     ;;
+  initialize-drain-indexes)
+    [ "$migration_state" = "migrated-empty-v2" ] || {
+      echo "drain 索引首次初始化要求迁移后且 V2 数据为空" >&2
+      exit 1
+    }
+    require_config true off false
+    require_runtime_drain_closed
+    require_v2_aware_images
+    require_route_off_execution_manifest
+    require_exact_contract
+    require_services_ready
+    require_execution_journal_ready
+    APP_DIR="$app_dir" DURABLE_AGENT_MIGRATION_ENV_FILE="$env_file" \
+      sh "$migration_helper" initialize-drain-indexes "$target_database"
+    exit 0
+    ;;
   allowlist)
     case "$migration_state" in migrated-empty-v2|migrated-with-v2) ;; *) exit 1 ;; esac
-    require_config true allowlist
+    require_config true allowlist true
     [ "$user_allowlist" = "present" ] && [ "$novel_allowlist" = "present" ] || {
       echo "allowlist 阶段必须同时配置用户与隔离小说 ID" >&2
       exit 1
@@ -386,22 +436,48 @@ case "$stage" in
     require_exact_contract
     require_services_ready
     require_execution_journal_ready
+    require_drain_indexes_ready
     ;;
-  route-off-drain)
+  drain-status)
     case "$migration_state" in migrated-empty-v2|migrated-with-v2) ;; *) exit 1 ;; esac
-    require_config true off
+    require_config true off false
+    require_runtime_drain_closed
+    require_drain_indexes_ready
+    APP_DIR="$app_dir" DURABLE_AGENT_MIGRATION_ENV_FILE="$env_file" \
+      sh "$migration_helper" drain-status "$target_database"
+    exit 0
+    ;;
+  verify-drain)
+    case "$migration_state" in migrated-empty-v2|migrated-with-v2) ;; *) exit 1 ;; esac
+    require_config true off false
+    require_runtime_drain_closed
     require_v2_aware_images
     require_route_off_execution_manifest
     require_exact_contract
     require_services_ready
     require_execution_journal_ready
+    require_drain_indexes_ready
+    APP_DIR="$app_dir" DURABLE_AGENT_MIGRATION_ENV_FILE="$env_file" \
+      sh "$migration_helper" verify-drain "$target_database"
+    exit 0
+    ;;
+  route-off-drain)
+    case "$migration_state" in migrated-empty-v2|migrated-with-v2) ;; *) exit 1 ;; esac
+    require_config true off false
+    require_runtime_drain_closed
+    require_v2_aware_images
+    require_route_off_execution_manifest
+    require_exact_contract
+    require_services_ready
+    require_execution_journal_ready
+    require_drain_indexes_ready
     ;;
   ddl-rollback)
     [ "$migration_state" = "migrated-empty-v2" ] || {
       echo "DDL rollback 只允许完整迁移后且 V2 数据为空" >&2
       exit 1
     }
-    require_config false off
+    require_config false off false
     require_compatible_core
     require_exact_contract
     require_execution_journal_ready

@@ -8,7 +8,6 @@ import cn.inkforge.contracts.api.RunSnapshot;
 import cn.inkforge.contracts.api.WorkflowEventEnvelope;
 import cn.inkforge.contracts.api.WorkflowRunSnapshot;
 import cn.inkforge.core.platform.http.ApiException;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -54,13 +53,13 @@ class WorkflowEventStreamServiceTest {
                 List.of(event),
                 new WorkflowEventStreamRepository.TailState("waiting_user", 3));
         WorkflowEventStreamService service = service(repository);
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        StringBuilder output = new StringBuilder();
 
         service.streamIfV2("user-1", "run-1", "1")
                 .orElseThrow()
-                .writeTo(output);
+                .run(output::append);
 
-        String text = output.toString(java.nio.charset.StandardCharsets.UTF_8);
+        String text = output.toString();
         assertThat(text).startsWith("id: 2\nevent: run_snapshot\n");
         assertThat(text).contains("\"baseSequence\":2");
         assertThat(text).contains("id: 3\nevent: awaiting_user\n");
@@ -76,14 +75,14 @@ class WorkflowEventStreamServiceTest {
                         snapshot("run-zero", 0, "completed"))),
                 List.of(),
                 new WorkflowEventStreamRepository.TailState("completed", 0));
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        StringBuilder output = new StringBuilder();
 
         service(repository)
                 .streamIfV2("user-1", "run-zero", null)
                 .orElseThrow()
-                .writeTo(output);
+                .run(output::append);
 
-        assertThat(output.toString(java.nio.charset.StandardCharsets.UTF_8))
+        assertThat(output)
                 .startsWith("event: run_snapshot\n")
                 .doesNotContain("id: 0");
     }
@@ -149,7 +148,7 @@ class WorkflowEventStreamServiceTest {
                 .streamIfV2("user-1", "run-1", null)
                 .orElseThrow();
 
-        assertThatThrownBy(() -> body.writeTo(new ByteArrayOutputStream()))
+        assertThatThrownBy(() -> body.run(ignored -> {}))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("WORKFLOW_EVENT_TAIL_INCONSISTENT");
     }
@@ -177,7 +176,7 @@ class WorkflowEventStreamServiceTest {
                 .streamIfV2("user-1", "run-1", null)
                 .orElseThrow();
 
-        assertThatThrownBy(() -> body.writeTo(new ByteArrayOutputStream()))
+        assertThatThrownBy(() -> body.run(ignored -> {}))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("WORKFLOW_EVENT_TAIL_INCONSISTENT");
     }

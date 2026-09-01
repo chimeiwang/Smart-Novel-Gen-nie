@@ -7,6 +7,7 @@ import {
   applyWorkflowStreamEvent,
   createWorkflowRunUiState,
   selectForegroundWorkflowRun,
+  workflowEventRequiresSessionMessageRefresh,
   workflowModelRoleLabel,
   workflowResolvedModelLabel,
   workflowRunShouldStopObservation,
@@ -498,8 +499,25 @@ test("逻辑角色与解析模型只展示允许公开的信息", () => {
   const profile = modelProfile("reviewer.editorial.v1");
   const resolved = resolvedModel(profile, "deepseek-chat");
   assert.equal(workflowModelRoleLabel(profile, "review"), "编辑复审");
+  assert.equal(workflowModelRoleLabel(modelProfile("editor.answer.v1"), "generation"), "章节问答");
   assert.equal(workflowResolvedModelLabel(resolved), "DeepSeek · deepseek-chat");
   assert.doesNotMatch(workflowResolvedModelLabel(resolved) ?? "", /deployment|endpoint|fingerprint/i);
+});
+
+test("只有 chat_answer 完成事件要求回读当前会话权威消息", () => {
+  const answerCompleted = workflowEvent(envelope(3, "completed", {
+    outcomeType: "chat_answer",
+    resultId: "message-1",
+  }));
+  const artifactCompleted = workflowEvent(envelope(4, "completed", {
+    outcomeType: "artifact_applied",
+    artifactId: "artifact-1",
+    artifactRevision: 1,
+    resultId: "artifact-1",
+  }));
+
+  assert.equal(workflowEventRequiresSessionMessageRefresh(answerCompleted), true);
+  assert.equal(workflowEventRequiresSessionMessageRefresh(artifactCompleted), false);
 });
 
 test("状态卡逐项渲染 activeSteps，currentStep 不再充当并行活动权威", async () => {

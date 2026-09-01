@@ -4,6 +4,7 @@ import inkforge_agents.app as app_module
 import pytest
 from inkforge_agents.app import create_app
 from inkforge_agents.config import Settings
+from inkforge_agents.providers.fake import FakeModelProvider
 from pydantic import ValidationError
 
 
@@ -76,6 +77,51 @@ def test_agent_parallel_limit_defaults_to_three_and_accepts_lower_fallback(
     for invalid_value in (0, 4):
         with pytest.raises(ValidationError):
             Settings.model_validate({"agent_max_concurrency": invalid_value})
+
+
+def test_e2e_execution_control_requires_test_environment_complete_pair_and_long_token() -> None:
+    valid = {
+        "environment": "test",
+        "e2e_execution_control_url": "http://e2e-control:8090",
+        "e2e_execution_control_token": "x" * 32,
+    }
+    settings = Settings.model_validate(valid)
+    assert settings.e2e_execution_control_url == "http://e2e-control:8090"
+
+    for invalid in (
+        {**valid, "environment": "dev"},
+        {**valid, "environment": "production"},
+        {key: value for key, value in valid.items() if key != "e2e_execution_control_url"},
+        {key: value for key, value in valid.items() if key != "e2e_execution_control_token"},
+        {**valid, "e2e_execution_control_token": "too-short"},
+        {**valid, "e2e_execution_control_url": "https://e2e-control:8090"},
+        {**valid, "e2e_execution_control_url": "http://user@e2e-control:8090"},
+    ):
+        with pytest.raises(ValidationError):
+            Settings.model_validate(invalid)
+
+
+def test_external_model_provider_injection_requires_e2e_double_gate() -> None:
+    with pytest.raises(ValueError, match="双门禁"):
+        create_app(
+            testing=True,
+            settings=Settings.model_validate({"environment": "test"}),
+            model_provider=FakeModelProvider(),
+        )
+
+    settings = Settings.model_validate(
+        {
+            "environment": "test",
+            "e2e_execution_control_url": "http://e2e-control:8090",
+            "e2e_execution_control_token": "x" * 32,
+        }
+    )
+    app = create_app(
+        testing=True,
+        settings=settings,
+        model_provider=FakeModelProvider(),
+    )
+    assert isinstance(app.state.model_provider, FakeModelProvider)
 
 
 def test_模型最大输出预算默认值与边界() -> None:

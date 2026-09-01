@@ -1,0 +1,9 @@
+services:
+  core-api:
+    environment:
+      DURABLE_AGENT_RELEASE_GUARD_PATH: /run/inkforge-release-guard/guard.json
+    volumes:
+      - type: bind
+        source: ${DURABLE_AGENT_RELEASE_GUARD_HOST_DIR:?必须设置 release guard 宿主目录}
+        target: /run/inkforge-release-guard
+        read_only: true

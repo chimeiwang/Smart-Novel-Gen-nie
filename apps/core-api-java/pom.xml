@@ -180,11 +180,12 @@
               -->
               <schemaMappings>
                 <schemaMapping>Body=WritingRunStartBody</schemaMapping>
-                <schemaMapping>WritingEventStream=StreamingResponseBody</schemaMapping>
+                <schemaMapping>WritingEventStream=SseEmitter</schemaMapping>
                 <schemaMapping>BinaryFileStream=StreamingResponseBody</schemaMapping>
               </schemaMappings>
               <importMappings>
                 <importMapping>WritingRunStartBody=cn.inkforge.core.generated.model.WritingRunStartBody</importMapping>
+                <importMapping>SseEmitter=org.springframework.web.servlet.mvc.method.annotation.SseEmitter</importMapping>
                 <importMapping>StreamingResponseBody=org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody</importMapping>
               </importMappings>
               <configOptions>

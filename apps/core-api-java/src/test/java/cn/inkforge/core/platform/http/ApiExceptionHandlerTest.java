@@ -3,12 +3,15 @@ package cn.inkforge.core.platform.http;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.inkforge.core.CoreApplication;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -17,9 +20,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @SpringBootTest(
         classes = CoreApplication.class,
@@ -82,12 +87,34 @@ class ApiExceptionHandlerTest {
         assertThat(unexpected.body()).doesNotContain("数据库密码");
     }
 
+    @Test
+    void 异步客户端断线在响应提交前后都不得追加Json错误正文() throws Exception {
+        HttpResponse<String> uncommitted = get("/test/errors/async-disconnected");
+        HttpResponse<String> committed = get("/test/errors/async-disconnected-committed");
+
+        assertThat(uncommitted.statusCode()).isEqualTo(200);
+        assertThat(uncommitted.body()).isEmpty();
+        assertThat(committed.statusCode()).isEqualTo(200);
+        assertThat(committed.headers().firstValue("content-type"))
+                .contains(MediaType.TEXT_EVENT_STREAM_VALUE);
+        assertThat(committed.body()).isEqualTo("event: ready\n\n");
+        assertThat(committed.body()).doesNotContain("INTERNAL_SERVER_ERROR");
+    }
+
     private HttpResponse<String> post(String path, String body, String requestId) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://127.0.0.1:" + port + path))
                 .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
                 .header("X-Request-ID", requestId)
                 .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> get(String path) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + path))
+                .GET()
                 .build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
@@ -122,6 +149,21 @@ class ApiExceptionHandlerTest {
         @PostMapping("/test/errors/unexpected")
         void unexpected() {
             throw new IllegalStateException("数据库密码=绝密");
+        }
+
+        @GetMapping("/test/errors/async-disconnected")
+        void asyncDisconnected() throws IOException {
+            throw new AsyncRequestNotUsableException("测试断线");
+        }
+
+        @GetMapping(
+                value = "/test/errors/async-disconnected-committed",
+                produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+        void committedAsyncDisconnected(HttpServletResponse response) throws IOException {
+            response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
+            response.getOutputStream().write("event: ready\n\n".getBytes(StandardCharsets.UTF_8));
+            response.flushBuffer();
+            throw new AsyncRequestNotUsableException("测试已提交断线");
         }
     }
 

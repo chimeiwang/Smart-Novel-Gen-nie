@@ -12,6 +12,8 @@ import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
 import cn.inkforge.core.writing.application.WritingCommandRepository;
 import cn.inkforge.core.writing.application.WritingRunStarter;
+import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,29 +29,46 @@ import tools.jackson.databind.ObjectMapper;
 /** 先无锁预解析并握手，再在用户级锁内冻结引擎身份；开关变化不迁移既有请求。 */
 final class RoutingWritingRunStarter implements WritingRunStarter {
 
+    private static final Set<String> PROVABLY_READ_ONLY_LEGACY_OPERATIONS =
+            Set.of("answer_question", "review_chapter");
+
     private final CoreDatabase database;
     private final WritingCommandRepository legacy;
     private final LongSerialDurableRunStarter durable;
     private final CommandIdempotencyStore idempotency;
+    private final DurableAgentReleaseGuard releaseGuard;
     private final CoreSettings settings;
     private final DurableAgentExecutionReadiness agentReadiness;
     private final ObjectMapper json;
+    private final ExecutionRegistry registry;
+    private final Set<String> routableOperationKeys;
 
     RoutingWritingRunStarter(
             CoreDatabase database,
             WritingCommandRepository legacy,
             LongSerialDurableRunStarter durable,
             CommandIdempotencyStore idempotency,
+            DurableAgentReleaseGuard releaseGuard,
             CoreSettings settings,
             DurableAgentExecutionReadiness agentReadiness,
-            ObjectMapper json) {
+            ObjectMapper json,
+            ExecutionRegistry registry) {
         this.database = Objects.requireNonNull(database);
         this.legacy = Objects.requireNonNull(legacy);
         this.durable = Objects.requireNonNull(durable);
         this.idempotency = Objects.requireNonNull(idempotency);
+        this.releaseGuard = Objects.requireNonNull(releaseGuard);
         this.settings = Objects.requireNonNull(settings);
         this.agentReadiness = Objects.requireNonNull(agentReadiness);
         this.json = Objects.requireNonNull(json);
+        this.registry = Objects.requireNonNull(registry);
+        this.routableOperationKeys = registry.enabledOperationKeys("long_serial", false);
+        Set<String> missingHandlers = new HashSet<>(routableOperationKeys);
+        missingHandlers.removeAll(durable.supportedOperationKeys());
+        if (!missingHandlers.isEmpty()) {
+            throw new IllegalStateException(
+                    "Operation Catalog 已启用但 Core 未装配 V2 handler：" + missingHandlers);
+        }
     }
 
     @Override
@@ -65,6 +84,29 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         }
 
         boolean routeDurable = routesDurable(userId, request);
+        if (!routeDurable && !settings.v1FreshAgentStartsEnabled()) {
+            // 必须位于既有幂等身份重放之后、任何 Agent readiness、业务锁或新写入之前。
+            throw V1FreshAgentStartGate.draining();
+        }
+        if (isDurableAnswerWithoutSession(routeDurable, request)) {
+            // 缺会话是 answer_question 的确定性结构错误，不能被外部 Agent readiness 覆盖。
+            // 仍要在用户级幂等锁内二次解析，保证首轮只读检查后的并发创建优先按原引擎重放。
+            return database.transactionResult(transaction -> {
+                transaction.execute(
+                        "SELECT pg_catalog.pg_advisory_xact_lock(?)",
+                        CommandIdempotency.advisoryLockKey(userId, clientRequestId));
+                CommandIdempotencyStore.Resolution existing = idempotency.resolve(
+                        transaction, userId, clientRequestId, null);
+                if (existing != null) {
+                    return replayExisting(userId, request, clientRequestId, existing);
+                }
+                throw writingSessionRequired();
+            });
+        }
+        if (routeDurable) {
+            releaseGuard.requireFreshStart(
+                    userId, durableRequest(request).getNovelId());
+        }
         // 网络握手必须发生在 advisory/Run/章节锁之外。稍后会在原用户事务内二次解析，
         // 因此并发同标识即使同时通过握手，也只会创建一个 Run。
         boolean agentCompatible = !routeDurable || agentReadiness.check();
@@ -84,11 +126,16 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 requireNoActiveForegroundRun(transaction, scope.writingSessionId());
             }
             if (routeDurable) {
-                if (locked) {
+                if (locked && isDurableMutation(request)) {
                     requireNoActiveLegacyMutation(transaction, scope.chapterId());
                     requireNoActiveDurableMutation(transaction, scope.chapterId());
                 }
-                return durable.start(userId, durableRequest(request));
+                LongSerialStartWritingRunRequest durableRequest = durableRequest(request);
+                return durable.startFresh(
+                        userId,
+                        durableRequest,
+                        () -> releaseGuard.requireFreshStart(
+                                userId, durableRequest.getNovelId()));
             }
             if (locked && isLegacyMutation(request)) {
                 requireNoActiveDurableMutation(transaction, scope.chapterId());
@@ -112,10 +159,11 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             String userId,
             ParsedWritingRunStartRequest request,
             String clientRequestId) {
-        if (!isDurableOperation(request)) {
+        if (!(request instanceof ParsedWritingRunStartRequest.LongSerial value)
+                || !durable.supportedOperationKeys().contains(operationKey(value.request()))) {
             throw CommandIdempotencyStore.reused(clientRequestId);
         }
-        return durable.start(userId, durableRequest(request));
+        return durable.replayExisting(userId, value.request());
     }
 
     private boolean routesDurable(
@@ -125,22 +173,43 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                         userId, durableRequest(request).getNovelId());
     }
 
-    private static boolean isDurableOperation(ParsedWritingRunStartRequest request) {
+    private boolean isDurableOperation(ParsedWritingRunStartRequest request) {
         return request instanceof ParsedWritingRunStartRequest.LongSerial value
-                && value.request().getOperation()
-                        == LongSerialStartWritingRunRequest.OperationEnum.REWRITE_CHAPTER_SELECTION;
+                && routableOperationKeys.contains(operationKey(value.request()));
+    }
+
+    private boolean isDurableMutation(ParsedWritingRunStartRequest request) {
+        if (!(request instanceof ParsedWritingRunStartRequest.LongSerial value)) return false;
+        return registry.requireKnownOperation(operationKey(value.request())).mutating();
+    }
+
+    private boolean isDurableAnswerWithoutSession(
+            boolean routeDurable, ParsedWritingRunStartRequest request) {
+        if (!routeDurable
+                || !(request instanceof ParsedWritingRunStartRequest.LongSerial value)) {
+            return false;
+        }
+        LongSerialStartWritingRunRequest body = value.request();
+        ExecutionRegistry.Operation definition =
+                registry.requireKnownOperation(operationKey(body));
+        return "long_serial".equals(definition.workflow())
+                && "answer_question".equals(definition.operation())
+                && nullable(body.getWritingSessionId()) == null;
     }
 
     private static LongSerialStartWritingRunRequest durableRequest(
             ParsedWritingRunStartRequest request) {
-        if (request instanceof ParsedWritingRunStartRequest.LongSerial value
-                && isDurableOperation(request)) {
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
             return value.request();
         }
         throw new IllegalArgumentException("当前请求不是已启用的 V2 长篇操作");
     }
 
-    private static String clientRequestId(ParsedWritingRunStartRequest request) {
+    private static String operationKey(LongSerialStartWritingRunRequest request) {
+        return "long_serial." + request.getOperation().getValue();
+    }
+
+    static String clientRequestId(ParsedWritingRunStartRequest request) {
         if (request instanceof ParsedWritingRunStartRequest.Legacy value) {
             return value.request().getClientRequestId();
         }
@@ -228,17 +297,34 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         }
     }
 
-    private static void requireNoActiveDurableMutation(
+    private void requireNoActiveDurableMutation(
             DSLContext transaction, String chapterId) {
-        var active = transaction.fetchOne(
+        List<Record> active = transaction.fetch(
                 """
-                SELECT id FROM public."WorkflowRun"
+                SELECT id, "modelPolicyJson" FROM public."WorkflowRun"
                 WHERE "engineVersion" = 2 AND "chapterId" = ?
                   AND status IN ('pending', 'running', 'waiting_user')
-                LIMIT 1
+                ORDER BY "createdAt", id
+                FOR UPDATE
                 """,
                 chapterId);
-        if (active != null) throw busy();
+        for (Record run : active) {
+            if (executionPlan(run.get("modelPolicyJson", String.class))
+                    .operation()
+                    .mutating()) {
+                throw busy();
+            }
+        }
+    }
+
+    private ExecutionPlanSnapshot executionPlan(String serialized) {
+        try {
+            Map<String, Object> stored = json.readValue(
+                    serialized, new TypeReference<Map<String, Object>>() {});
+            return ExecutionPlanSnapshot.fromStored(stored);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("活动 V2 Run 的冻结执行计划无法解析", exception);
+        }
     }
 
     private static void requireNoActiveForegroundRun(
@@ -302,7 +388,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 || !(value.get("operation") instanceof String operation)) {
             return true;
         }
-        return !"review_chapter".equals(operation);
+        return !PROVABLY_READ_ONLY_LEGACY_OPERATIONS.contains(operation);
     }
 
     private static ApiException busy() {
@@ -322,6 +408,13 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 503,
                 "DURABLE_AGENT_EXECUTION_UNAVAILABLE",
                 "耐久 Agent 执行器当前不可用");
+    }
+
+    private static ApiException writingSessionRequired() {
+        return new ApiException(
+                409,
+                "WRITING_SESSION_REQUIRED",
+                "长篇问答必须绑定写作会话");
     }
 
     private static <T> T nullable(JsonNullable<T> value) {

@@ -14,6 +14,7 @@ _DEFAULT_TERMINAL_RETENTION = timedelta(days=7)
 _MIN_TERMINAL_RETENTION = timedelta(hours=24)
 _MAX_PURGE_BATCH = 1000
 _MAX_CORRUPT_CLEANUP = 100
+QUEUE_DRAIN_INDEX_VERSION = "1"
 
 
 class AsyncRedis(Protocol):
@@ -101,24 +102,42 @@ class RedisRunQueue:
     def _terminal(self) -> str:
         return f"{self._prefix}:terminal"
 
+    @property
+    def _drain_queued(self) -> str:
+        return f"{self._prefix}:drain:queued"
+
+    @property
+    def _drain_running(self) -> str:
+        return f"{self._prefix}:drain:running"
+
+    @property
+    def _drain_index_version(self) -> str:
+        return f"{self._prefix}:drain:index-version"
+
     async def enqueue(self, job: QueueJob, *, force: bool = False) -> bool:
         created_ms = int(job.createdAt.timestamp() * 1000)
         score = job.priority * _PRIORITY_FACTOR + created_ms
         result = await self._redis.eval(
             _ENQUEUE_SCRIPT,
-            6,
+            10,
             self._ready,
             self._processing,
             self._payloads,
             self._statuses,
             self._leases,
             self._scores,
+            self._attempts,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             job.jobId,
             job.model_dump_json(),
             score,
             "1" if force else "0",
+            created_ms,
+            QUEUE_DRAIN_INDEX_VERSION,
         )
-        return bool(result)
+        return _mutation_bool(result)
 
     async def claim(
         self,
@@ -131,7 +150,7 @@ class RedisRunQueue:
         deadline_ms = int((current + visibility_timeout).timestamp() * 1000)
         result = await self._redis.eval(
             _CLAIM_SCRIPT,
-            7,
+            10,
             self._ready,
             self._processing,
             self._payloads,
@@ -139,12 +158,17 @@ class RedisRunQueue:
             self._leases,
             self._attempts,
             self._scores,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             int(current.timestamp() * 1000),
             _PRIORITY_FACTOR,
             deadline_ms,
             lease_token,
             _MAX_CORRUPT_CLEANUP,
         )
+        if result == -1:
+            raise RuntimeError("V1 队列 drain 索引缺失或损坏")
         if not result:
             return None
         payload = _text(result[0])
@@ -165,15 +189,18 @@ class RedisRunQueue:
         deadline_ms = int((_utc(now) + visibility_timeout).timestamp() * 1000)
         result = await self._redis.eval(
             _EXTEND_SCRIPT,
-            3,
+            6,
             self._processing,
             self._statuses,
             self._leases,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             claim.job.jobId,
             claim.leaseToken,
             deadline_ms,
         )
-        return bool(result)
+        return _mutation_bool(result)
 
     async def acknowledge(
         self,
@@ -186,7 +213,7 @@ class RedisRunQueue:
             raise ValueError("确认任务必须使用终态")
         result = await self._redis.eval(
             _ACK_SCRIPT,
-            8,
+            11,
             self._processing,
             self._payloads,
             self._statuses,
@@ -195,12 +222,15 @@ class RedisRunQueue:
             self._scores,
             self._ready,
             self._terminal,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             claim.job.jobId,
             claim.leaseToken,
             status,
             int(_utc(now).timestamp() * 1000),
         )
-        return bool(result)
+        return _mutation_bool(result)
 
     async def retry(
         self,
@@ -213,17 +243,20 @@ class RedisRunQueue:
         score = claim.job.priority * _PRIORITY_FACTOR + ready_ms
         result = await self._redis.eval(
             _RETRY_SCRIPT,
-            5,
+            8,
             self._ready,
             self._processing,
             self._statuses,
             self._leases,
             self._scores,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             claim.job.jobId,
             claim.leaseToken,
             score,
         )
-        return bool(result)
+        return _mutation_bool(result)
 
     async def defer(
         self,
@@ -238,23 +271,26 @@ class RedisRunQueue:
         score = claim.job.priority * _PRIORITY_FACTOR + ready_ms
         result = await self._redis.eval(
             _DEFER_SCRIPT,
-            6,
+            9,
             self._ready,
             self._processing,
             self._statuses,
             self._leases,
             self._attempts,
             self._scores,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             claim.job.jobId,
             claim.leaseToken,
             score,
         )
-        return bool(result)
+        return _mutation_bool(result)
 
     async def recover_expired(self, *, now: datetime | None = None) -> int:
         result = await self._redis.eval(
             _RECOVER_SCRIPT,
-            8,
+            11,
             self._ready,
             self._processing,
             self._payloads,
@@ -263,14 +299,17 @@ class RedisRunQueue:
             self._attempts,
             self._scores,
             self._terminal,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             int(_utc(now).timestamp() * 1000),
         )
-        return int(result)
+        return _mutation_integer(result)
 
     async def cancel(self, job_id: str, *, now: datetime | None = None) -> bool:
         result = await self._redis.eval(
             _CANCEL_SCRIPT,
-            8,
+            11,
             self._ready,
             self._processing,
             self._payloads,
@@ -279,10 +318,13 @@ class RedisRunQueue:
             self._attempts,
             self._scores,
             self._terminal,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             job_id,
             int(_utc(now).timestamp() * 1000),
         )
-        return bool(result)
+        return _mutation_bool(result)
 
     async def purge_terminal(self, cutoff: datetime, *, limit: int = 100) -> int:
         if limit < 1 or limit > _MAX_PURGE_BATCH:
@@ -310,7 +352,7 @@ class RedisRunQueue:
             raise ValueError("终态回填批次必须在 1 到 1000 之间")
         result = await self._redis.eval(
             _BACKFILL_LEGACY_TERMINAL_SCRIPT,
-            8,
+            11,
             self._ready,
             self._processing,
             self._payloads,
@@ -319,11 +361,17 @@ class RedisRunQueue:
             self._attempts,
             self._scores,
             self._terminal,
+            self._drain_queued,
+            self._drain_running,
+            self._drain_index_version,
             cursor,
             int(_utc(now).timestamp() * 1000),
             limit,
         )
-        return int(result[0]), int(result[1])
+        next_cursor = int(result[0])
+        if next_cursor == -1:
+            raise RuntimeError("V1 队列 drain 索引版本损坏")
+        return next_cursor, int(result[1])
 
     async def status(self, job_id: str) -> JobStatus | None:
         value = await self._redis.hget(self._statuses, job_id)
@@ -348,14 +396,57 @@ def _text(value: object) -> str:
     return str(value)
 
 
+def _mutation_bool(value: object) -> bool:
+    if int(_text(value)) == -1:
+        raise RuntimeError("V1 队列 drain 索引缺失或损坏")
+    return bool(value)
+
+
+def _mutation_integer(value: object) -> int:
+    result = int(_text(value))
+    if result == -1:
+        raise RuntimeError("V1 队列 drain 索引缺失或损坏")
+    return result
+
+
 _ENQUEUE_SCRIPT = """
+local marker = redis.call('GET', KEYS[10])
+if not marker then
+  if redis.call('ZCARD', KEYS[1]) ~= 0
+      or redis.call('ZCARD', KEYS[2]) ~= 0
+      or redis.call('HLEN', KEYS[3]) ~= 0
+      or redis.call('HLEN', KEYS[5]) ~= 0
+      or redis.call('HLEN', KEYS[6]) ~= 0
+      or redis.call('HLEN', KEYS[7]) ~= 0
+      or redis.call('ZCARD', KEYS[8]) ~= 0
+      or redis.call('ZCARD', KEYS[9]) ~= 0 then
+    return -1
+  end
+  if redis.call('HLEN', KEYS[4]) > 256 then return -1 end
+  local legacy_statuses = redis.call('HGETALL', KEYS[4])
+  for offset = 2, #legacy_statuses, 2 do
+    local legacy_status = legacy_statuses[offset]
+    if legacy_status ~= 'completed'
+        and legacy_status ~= 'failed'
+        and legacy_status ~= 'cancelled' then return -1 end
+  end
+  redis.call('SET', KEYS[10], ARGV[6])
+elseif marker ~= ARGV[6] then
+  return -1
+end
 local status = redis.call('HGET', KEYS[4], ARGV[1])
 if status == 'running' then
+  if not redis.call('ZSCORE', KEYS[9], ARGV[1])
+      or redis.call('ZSCORE', KEYS[8], ARGV[1]) then return -1 end
   return 0
 end
 if status == 'completed' or status == 'failed' or status == 'cancelled' then
+  if redis.call('ZSCORE', KEYS[8], ARGV[1])
+      or redis.call('ZSCORE', KEYS[9], ARGV[1]) then return -1 end
   return 0
 end
+if status == 'queued' and (not redis.call('ZSCORE', KEYS[8], ARGV[1])
+    or redis.call('ZSCORE', KEYS[9], ARGV[1])) then return -1 end
 if status == 'queued' and ARGV[4] ~= '1' then
   return 0
 end
@@ -365,10 +456,17 @@ redis.call('HSET', KEYS[6], ARGV[1], ARGV[3])
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('HDEL', KEYS[5], ARGV[1])
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+redis.call('ZREM', KEYS[9], ARGV[1])
+redis.call('ZADD', KEYS[8], ARGV[5], ARGV[1])
 return 1
 """
 
 _CLAIM_SCRIPT = """
+if redis.call('GET', KEYS[10]) ~= '1' then
+  if redis.call('ZCARD', KEYS[1]) == 0
+      and redis.call('ZCARD', KEYS[2]) == 0 then return nil end
+  return -1
+end
 local factor = tonumber(ARGV[2])
 local now = tonumber(ARGV[1])
 local cleaned = 0
@@ -384,14 +482,20 @@ for priority = 0, 99 do
     local status = redis.call('HGET', KEYS[4], job_id)
     local payload = redis.call('HGET', KEYS[3], job_id)
     if status == 'queued' and payload then
+      local created_ms = redis.call('ZSCORE', KEYS[8], job_id)
+      if not created_ms or redis.call('ZSCORE', KEYS[9], job_id) then return -1 end
       redis.call('ZREM', KEYS[1], job_id)
       redis.call('ZADD', KEYS[2], ARGV[3], job_id)
       redis.call('HSET', KEYS[4], job_id, 'running')
       redis.call('HSET', KEYS[5], job_id, ARGV[4])
+      redis.call('ZREM', KEYS[8], job_id)
+      redis.call('ZADD', KEYS[9], created_ms, job_id)
       local attempts = redis.call('HINCRBY', KEYS[6], job_id, 1)
       return {payload, attempts}
     end
     redis.call('ZREM', KEYS[1], job_id)
+    redis.call('ZREM', KEYS[8], job_id)
+    redis.call('ZREM', KEYS[9], job_id)
     local terminal = status == 'completed' or status == 'failed' or status == 'cancelled'
     local active = status == 'queued' or status == 'running'
     if (not payload and not terminal) or (not terminal and not active) then
@@ -409,15 +513,21 @@ return nil
 """
 
 _EXTEND_SCRIPT = """
+if redis.call('GET', KEYS[6]) ~= '1' then return -1 end
 if redis.call('HGET', KEYS[2], ARGV[1]) ~= 'running' then return 0 end
 if redis.call('HGET', KEYS[3], ARGV[1]) ~= ARGV[2] then return 0 end
+if not redis.call('ZSCORE', KEYS[5], ARGV[1])
+    or redis.call('ZSCORE', KEYS[4], ARGV[1]) then return -1 end
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 return 1
 """
 
 _ACK_SCRIPT = """
+if redis.call('GET', KEYS[11]) ~= '1' then return -1 end
 if redis.call('HGET', KEYS[3], ARGV[1]) ~= 'running' then return 0 end
 if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[2] then return 0 end
+if not redis.call('ZSCORE', KEYS[10], ARGV[1])
+    or redis.call('ZSCORE', KEYS[9], ARGV[1]) then return -1 end
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('HSET', KEYS[3], ARGV[1], ARGV[3])
@@ -426,23 +536,33 @@ redis.call('HDEL', KEYS[5], ARGV[1])
 redis.call('HDEL', KEYS[6], ARGV[1])
 redis.call('ZREM', KEYS[7], ARGV[1])
 redis.call('ZADD', KEYS[8], ARGV[4], ARGV[1])
+redis.call('ZREM', KEYS[9], ARGV[1])
+redis.call('ZREM', KEYS[10], ARGV[1])
 return 1
 """
 
 _RETRY_SCRIPT = """
+if redis.call('GET', KEYS[8]) ~= '1' then return -1 end
 if redis.call('HGET', KEYS[3], ARGV[1]) ~= 'running' then return 0 end
 if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[2] then return 0 end
+local created_ms = redis.call('ZSCORE', KEYS[7], ARGV[1])
+if not created_ms or redis.call('ZSCORE', KEYS[6], ARGV[1]) then return -1 end
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('HSET', KEYS[3], ARGV[1], 'queued')
 redis.call('HDEL', KEYS[4], ARGV[1])
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 redis.call('HSET', KEYS[5], ARGV[1], ARGV[3])
+redis.call('ZREM', KEYS[7], ARGV[1])
+redis.call('ZADD', KEYS[6], created_ms, ARGV[1])
 return 1
 """
 
 _DEFER_SCRIPT = """
+if redis.call('GET', KEYS[9]) ~= '1' then return -1 end
 if redis.call('HGET', KEYS[3], ARGV[1]) ~= 'running' then return 0 end
 if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[2] then return 0 end
+local created_ms = redis.call('ZSCORE', KEYS[8], ARGV[1])
+if not created_ms or redis.call('ZSCORE', KEYS[7], ARGV[1]) then return -1 end
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('HSET', KEYS[3], ARGV[1], 'queued')
 redis.call('HDEL', KEYS[4], ARGV[1])
@@ -454,19 +574,29 @@ else
 end
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 redis.call('HSET', KEYS[6], ARGV[1], ARGV[3])
+redis.call('ZREM', KEYS[8], ARGV[1])
+redis.call('ZADD', KEYS[7], created_ms, ARGV[1])
 return 1
 """
 
 _RECOVER_SCRIPT = """
+if redis.call('GET', KEYS[11]) ~= '1' then
+  if redis.call('ZCARD', KEYS[2]) == 0 then return 0 end
+  return -1
+end
 local jobs = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1])
 local recovered = 0
 for _, job_id in ipairs(jobs) do
   if redis.call('HGET', KEYS[4], job_id) == 'running' then
+    local created_ms = redis.call('ZSCORE', KEYS[10], job_id)
+    if not created_ms or redis.call('ZSCORE', KEYS[9], job_id) then return -1 end
     local score = redis.call('HGET', KEYS[7], job_id)
     local payload = redis.call('HGET', KEYS[3], job_id)
     if score and payload then
       redis.call('ZADD', KEYS[1], score, job_id)
       redis.call('HSET', KEYS[4], job_id, 'queued')
+      redis.call('ZREM', KEYS[10], job_id)
+      redis.call('ZADD', KEYS[9], created_ms, job_id)
       recovered = recovered + 1
     else
       redis.call('ZREM', KEYS[1], job_id)
@@ -475,6 +605,8 @@ for _, job_id in ipairs(jobs) do
       redis.call('HDEL', KEYS[6], job_id)
       redis.call('HDEL', KEYS[7], job_id)
       redis.call('ZADD', KEYS[8], ARGV[1], job_id)
+      redis.call('ZREM', KEYS[9], job_id)
+      redis.call('ZREM', KEYS[10], job_id)
     end
   end
   redis.call('ZREM', KEYS[2], job_id)
@@ -484,8 +616,27 @@ return recovered
 """
 
 _CANCEL_SCRIPT = """
+local marker = redis.call('GET', KEYS[11])
+if not marker then
+  if redis.call('ZCARD', KEYS[1]) ~= 0
+      or redis.call('ZCARD', KEYS[2]) ~= 0
+      or redis.call('HLEN', KEYS[3]) ~= 0
+      or redis.call('HLEN', KEYS[4]) ~= 0
+      or redis.call('HLEN', KEYS[5]) ~= 0
+      or redis.call('HLEN', KEYS[6]) ~= 0
+      or redis.call('HLEN', KEYS[7]) ~= 0
+      or redis.call('ZCARD', KEYS[9]) ~= 0
+      or redis.call('ZCARD', KEYS[10]) ~= 0 then
+    return -1
+  end
+  redis.call('SET', KEYS[11], '1')
+elseif marker ~= '1' then
+  return -1
+end
 local status = redis.call('HGET', KEYS[4], ARGV[1])
 if status == 'completed' or status == 'failed' or status == 'cancelled' then
+  if redis.call('ZSCORE', KEYS[9], ARGV[1])
+      or redis.call('ZSCORE', KEYS[10], ARGV[1]) then return -1 end
   return 0
 end
 redis.call('ZREM', KEYS[1], ARGV[1])
@@ -496,6 +647,8 @@ redis.call('HDEL', KEYS[5], ARGV[1])
 redis.call('HDEL', KEYS[6], ARGV[1])
 redis.call('HDEL', KEYS[7], ARGV[1])
 redis.call('ZADD', KEYS[8], ARGV[2], ARGV[1])
+redis.call('ZREM', KEYS[9], ARGV[1])
+redis.call('ZREM', KEYS[10], ARGV[1])
 return 1
 """
 
@@ -508,6 +661,8 @@ return #jobs
 """
 
 _BACKFILL_LEGACY_TERMINAL_SCRIPT = """
+local marker = redis.call('GET', KEYS[11])
+if marker and marker ~= '1' then return {-1, 0} end
 local scan = redis.call('HSCAN', KEYS[4], ARGV[1], 'COUNT', ARGV[3])
 local next_cursor = scan[1]
 local entries = scan[2]
@@ -527,6 +682,10 @@ for index = 1, #entries, 2 do
     redis.call('HDEL', KEYS[5], job_id)
     redis.call('HDEL', KEYS[6], job_id)
     redis.call('HDEL', KEYS[7], job_id)
+    if marker then
+      redis.call('ZREM', KEYS[9], job_id)
+      redis.call('ZREM', KEYS[10], job_id)
+    end
   end
 end
 return {next_cursor, migrated}

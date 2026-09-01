@@ -457,6 +457,30 @@ class OutputSchemaRef(_StrictModel):
         return self
 
 
+class ChatAnswerInput(_StrictModel):
+    """`long_serial.answer_question` 冻结到通用 Step input 的完整任务。"""
+
+    userInstruction: Annotated[str, Field(strict=True, min_length=1, pattern=r"\S")]
+
+    @model_validator(mode="after")
+    def validate_non_blank_instruction(self) -> Self:
+        if not self.userInstruction.strip():
+            raise ValueError("长篇问答指令不能是空白文本")
+        return self
+
+
+class ChatAnswerOutput(_StrictModel):
+    """只读问答 Step 的严格语义结果；保留原始段落与换行。"""
+
+    answer: Annotated[str, Field(strict=True, min_length=1, pattern=r"\S")]
+
+    @model_validator(mode="after")
+    def validate_non_blank_answer(self) -> Self:
+        if not self.answer.strip():
+            raise ValueError("长篇问答结果不能是空白文本")
+        return self
+
+
 class StepUsage(_StrictModel):
     usageStatus: Literal["complete", "partial", "unknown"]
     providerAttempts: StrictNonNegativeInt = Field(le=3)

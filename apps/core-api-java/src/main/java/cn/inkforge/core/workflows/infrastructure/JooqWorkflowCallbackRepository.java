@@ -26,6 +26,7 @@ import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
 import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.protocol.WorkflowOutputValidator;
+import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -45,7 +46,7 @@ import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
-/** PostgreSQL 中单事务收敛 progress/result/failure，并物化首个选区改写纵切。 */
+/** PostgreSQL 中单事务收敛 progress/result/failure，并按冻结计划物化业务结果。 */
 final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository {
 
     private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() {};
@@ -70,12 +71,14 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
-        Objects.requireNonNull(registry);
+        ExecutionRegistry requiredRegistry = Objects.requireNonNull(registry);
+        WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
+                requiredRegistry.enabledOperationKeys("long_serial", false));
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow callback lease 必须为正数");
         }
         this.leaseDuration = leaseDuration;
-        this.billing = new WorkflowBillingCoordinator(ids, json, registry);
+        this.billing = new WorkflowBillingCoordinator(ids, json, requiredRegistry);
     }
 
     @Override
@@ -483,7 +486,30 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         if (output == null) throw invalid("generation output 不能为空");
         ExecutionPlanSnapshot executionPlan = executionPlan(locked.run());
         ExecutionPlanSnapshot.Step frozenStep = frozenStep(locked, executionPlan);
-        validateGenerationOutput(frozenStep.outputSchema(), output);
+        WorkflowResultMaterializerRegistry.Materializer materializer;
+        try {
+            materializer = WorkflowResultMaterializerRegistry.resolve(executionPlan);
+        } catch (IllegalArgumentException exception) {
+            throw invalid(exception.getMessage());
+        }
+        switch (materializer) {
+            case CHAT_ANSWER -> completeChatAnswer(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case CHAPTER_SELECTION_REVIEW_ARTIFACT -> completeSelectionGeneration(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+        }
+    }
+
+    private void completeSelectionGeneration(
+            DSLContext transaction,
+            Locked locked,
+            ExecutionPlanSnapshot executionPlan,
+            ExecutionPlanSnapshot.Step frozenStep,
+            ExecutionStepResult body,
+            WorkflowStepUsage usage,
+            Map<String, Object> output,
+            LocalDateTime now) {
+        validateSelectionGenerationOutput(frozenStep.outputSchema(), output);
         Artifact artifact = materializeSelection(
                 transaction,
                 locked,
@@ -534,7 +560,141 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         updateRun(transaction, body.getRunId(), "running", sequence, null, null, now);
     }
 
-    private static void validateGenerationOutput(
+    private void completeChatAnswer(
+            DSLContext transaction,
+            Locked locked,
+            ExecutionPlanSnapshot executionPlan,
+            ExecutionPlanSnapshot.Step frozenStep,
+            ExecutionStepResult body,
+            WorkflowStepUsage usage,
+            Map<String, Object> output,
+            LocalDateTime now) {
+        requireChatAnswerPlan(locked, executionPlan);
+        String answer = validateChatAnswerOutput(frozenStep.outputSchema(), output);
+        String messageId = persistChatAnswer(
+                transaction, locked, frozenStep, answer, body.getResultHash(), now);
+        completeStep(
+                transaction,
+                locked,
+                body.getResultHash(),
+                usage,
+                canonicalJson(output),
+                null,
+                null,
+                now);
+        long sequence = appendStepFinished(
+                transaction,
+                locked,
+                "completed",
+                null,
+                locked.run().get("lastEventSequence", Long.class),
+                now);
+        sequence = appendEvent(
+                transaction,
+                body.getRunId(),
+                sequence,
+                "completed",
+                Map.of("outcomeType", "chat_answer", "resultId", messageId),
+                "run:completed",
+                now);
+        updateRun(transaction, body.getRunId(), "completed", sequence, null, now, now);
+    }
+
+    private static void requireChatAnswerPlan(
+            Locked locked, ExecutionPlanSnapshot executionPlan) {
+        if (executionPlan.operation().mutating()
+                || !executionPlan.operation().deterministicValidators().containsAll(List.of(
+                        "validator.schema_strict.v1", "validator.complete_output.v1"))
+                || !"none".equals(executionPlan.reviewPolicy().mode())
+                || !executionPlan.reviewers().isEmpty()
+                || !executionPlan.systemSteps().isEmpty()
+                || locked.step().get("artifactId", String.class) != null
+                || locked.step().get("artifactRevision", Integer.class) != null) {
+            throw invalid("问答 Step 与冻结的只读无评审执行计划不一致");
+        }
+        String writingSessionId = locked.run().get("writingSessionId", String.class);
+        if (writingSessionId == null || writingSessionId.isBlank()) {
+            throw invalid("问答 Run 缺少写作会话归属");
+        }
+    }
+
+    private static String validateChatAnswerOutput(
+            ExecutionPlanSnapshot.OutputSchema providerSchema,
+            Map<String, Object> output) {
+        try {
+            WorkflowOutputValidator.validate(providerSchema.jsonSchema(), output);
+        } catch (IllegalArgumentException exception) {
+            throw invalid("问答 output 不符合冻结 Schema");
+        }
+        if (!output.keySet().equals(java.util.Set.of("answer"))) {
+            throw invalid("问答 output 必须精确包含 answer 字段");
+        }
+        Object answer = output.get("answer");
+        if (!(answer instanceof String text) || text.isBlank()) {
+            throw invalid("问答 answer 不能为空白文本");
+        }
+        return text;
+    }
+
+    private String persistChatAnswer(
+            DSLContext transaction,
+            Locked locked,
+            ExecutionPlanSnapshot.Step frozenStep,
+            String answer,
+            String resultHash,
+            LocalDateTime now) {
+        String sessionId = locked.run().get("writingSessionId", String.class);
+        Record session = transaction.fetchOne(
+                """
+                SELECT "updatedAt" FROM public."WritingSession"
+                WHERE id = ? AND "novelId" = ? AND "chapterId" = ?
+                FOR UPDATE
+                """,
+                sessionId,
+                locked.run().get("novelId", String.class),
+                locked.run().get("chapterId", String.class));
+        if (session == null) {
+            throw invalid("问答 Run 绑定的写作会话不存在或范围不一致");
+        }
+        String messageId = ids.next();
+        String agentId = "编辑";
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("engineVersion", 2);
+        source.put("runId", locked.run().get("id", String.class));
+        source.put("operation", locked.run().get("operation", String.class));
+        source.put("stepId", locked.step().get("id", String.class));
+        source.put("modelProfile", frozenStep.modelProfile().profile());
+        source.put("resultHash", resultHash);
+        source.put("outcomeType", "chat_answer");
+        String metadata = WorkflowMessageMetadata.serialize(
+                locked.run().get("id", String.class),
+                "done",
+                answer,
+                agentId,
+                Collections.unmodifiableMap(source),
+                json);
+        transaction.execute(
+                """
+                INSERT INTO public."WritingMessage" (
+                  id, "sessionId", role, "agentId", content, metadata, "createdAt"
+                ) VALUES (?, ?, 'agent', ?, ?, ?, ?)
+                """,
+                messageId,
+                sessionId,
+                agentId,
+                answer,
+                metadata,
+                now);
+        LocalDateTime sessionUpdatedAt = DatabaseTimestamp.next(
+                clock, session.get("updatedAt", LocalDateTime.class));
+        transaction.execute(
+                "UPDATE public.\"WritingSession\" SET \"updatedAt\" = ? WHERE id = ?",
+                sessionUpdatedAt,
+                sessionId);
+        return messageId;
+    }
+
+    private static void validateSelectionGenerationOutput(
             ExecutionPlanSnapshot.OutputSchema providerSchema,
             Map<String, Object> output) {
         Map<String, Object> providerOutput = new LinkedHashMap<>(output);
@@ -1272,7 +1432,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private Locked lock(DSLContext transaction, String runId, String stepId) {
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "novelId", "chapterId", input, workflow, operation,
+                SELECT id, "novelId", "chapterId", "writingSessionId", input, workflow, operation,
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "cancelRequestId", "cancelRequestedAt",
                        "lastEventSequence", revision

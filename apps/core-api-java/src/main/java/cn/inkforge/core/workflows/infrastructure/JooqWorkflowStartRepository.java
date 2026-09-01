@@ -12,11 +12,13 @@ import cn.inkforge.core.workflows.application.WorkflowStartPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import cn.inkforge.core.workflows.protocol.ExecutionProtocolDateTime;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
@@ -54,9 +56,17 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
 
     @Override
     public WorkflowRunStartResult start(WorkflowStartPlan plan) {
+        return start(plan, () -> {});
+    }
+
+    @Override
+    public WorkflowRunStartResult start(
+            WorkflowStartPlan plan, Runnable finalFreshStartAuthorization) {
         Objects.requireNonNull(plan, "Workflow start plan 不能为空");
+        Objects.requireNonNull(finalFreshStartAuthorization, "最终 fresh start 授权不能为空");
         try {
-            return database.transactionResult(transaction -> start(transaction, plan));
+            return database.transactionResult(
+                    transaction -> start(transaction, plan, finalFreshStartAuthorization));
         } catch (DataAccessException exception) {
             if (hasConstraint(exception, FOREGROUND_CONSTRAINT)) {
                 throw new ApiException(
@@ -68,7 +78,10 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
         }
     }
 
-    private WorkflowRunStartResult start(DSLContext transaction, WorkflowStartPlan plan) {
+    private WorkflowRunStartResult start(
+            DSLContext transaction,
+            WorkflowStartPlan plan,
+            Runnable finalFreshStartAuthorization) {
         transaction.execute(
                 "SELECT pg_catalog.pg_advisory_xact_lock(?)",
                 CommandIdempotency.advisoryLockKey(
@@ -122,6 +135,9 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                 outputSchema,
                 stepBudget));
 
+        // advisory/idempotency 与所有 Novel/Chapter/Session 锁均已取得，正文派生、canonical
+        // 与 hash 也已完成；此行到首条 INSERT 之间不再允许任何可阻塞或无界工作。
+        finalFreshStartAuthorization.run();
         insertRun(transaction, plan, runId, now);
         insertEvidence(
                 transaction,
@@ -309,7 +325,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                     item.plan().resourceId(),
                     item.plan().exists(),
                     item.plan().resourceRevision(),
-                    DatabaseTimestamp.database(item.plan().resourceUpdatedAt()),
+                    DatabaseTimestamp.database(item.resourceUpdatedAt()),
                     item.contentType(),
                     item.plan().contentText(),
                     item.contentJson(),
@@ -450,11 +466,14 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                     : Map.of(
                             "startCodePoint", plan.rangeStartCodePoint(),
                             "endCodePoint", plan.rangeEndCodePoint());
+            OffsetDateTime resourceUpdatedAt =
+                    ExecutionProtocolDateTime.normalize(plan.resourceUpdatedAt());
             result.add(new EvidenceValue(
                     ids.next(),
                     bundleId,
                     ordinal++,
                     plan,
+                    resourceUpdatedAt,
                     contentType,
                     contentJson,
                     contentHash,
@@ -479,8 +498,10 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
             if (plan.resourceRevision() != null) {
                 item.put("resourceRevision", plan.resourceRevision());
             }
-            if (plan.resourceUpdatedAt() != null) {
-                item.put("resourceUpdatedAt", plan.resourceUpdatedAt().toString());
+            if (value.resourceUpdatedAt() != null) {
+                item.put(
+                        "resourceUpdatedAt",
+                        ExecutionProtocolDateTime.format(value.resourceUpdatedAt()));
             }
             if (value.contentType() != null) item.put("contentType", value.contentType());
             if (value.contentSha256() != null) {
@@ -638,6 +659,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
             String bundleId,
             int ordinal,
             WorkflowEvidenceItemPlan plan,
+            OffsetDateTime resourceUpdatedAt,
             String contentType,
             String contentJson,
             String contentSha256,

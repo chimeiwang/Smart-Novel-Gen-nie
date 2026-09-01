@@ -4,6 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "durable-agent-v2-release.yml"
 DEPLOY_SCRIPT = ROOT / "scripts" / "deploy-production.sh"
 IMAGE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-docker-images.sh"
 SOURCE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-deploy-source.sh"
@@ -39,14 +40,20 @@ def test_ci_uses_current_node_python_and_openapi_gates() -> None:
         assert command in source
 
 
-def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
+def test_ci_has_no_production_delivery_and_protected_release_uploads_images() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
     assert "docker build -t inkforge:latest ." not in source
-    assert (
-        "docker compose --env-file .env.example -f infra/compose.yaml "
-        "build web core-api agent-service"
-    ) in source
+    for forbidden in (
+        "scripts/upload-docker-images.sh",
+        "scripts/upload-deploy-source.sh",
+        "scripts/deploy-production.sh",
+        "Deploy over SSH",
+        "environment: production",
+        "secrets.",
+    ):
+        assert forbidden not in source
     for obsolete in (
         "POSTGRES_DATA_VOLUME",
         "POSTGRES_USER: inkforge",
@@ -54,8 +61,9 @@ def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
         "POSTGRES_DB: inkforge",
     ):
         assert obsolete not in source
-    assert "scripts/upload-docker-images.sh" in source
-    assert "fetch-depth: 0" in source
+    assert "scripts/upload-docker-images.sh" in release
+    assert "上传目标镜像（release transaction 已建锁）" in release
+    assert "fetch-depth: 0" in release
     for image in (
         "inkforge-web:${INKFORGE_IMAGE_TAG}",
         "inkforge-core-api:${INKFORGE_IMAGE_TAG}",
@@ -78,22 +86,29 @@ def test_image_upload_reuses_matching_server_images() -> None:
 
 
 def test_image_upload_step_has_a_total_timeout() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
-    upload_step = source.split("      - name: Upload Docker images", maxsplit=1)[1]
-    upload_step = upload_step.split("      - name: Deploy over SSH", maxsplit=1)[0]
+    source = IMAGE_UPLOAD_SCRIPT.read_text(encoding="utf-8")
+    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "timeout-minutes: 30" in upload_step
+    assert 'IMAGE_ARCHIVE_TIMEOUT_SECONDS="${IMAGE_ARCHIVE_TIMEOUT_SECONDS:-600}"' in source
+    assert 'IMAGE_UPLOAD_TIMEOUT_SECONDS="${IMAGE_UPLOAD_TIMEOUT_SECONDS:-1200}"' in source
+    assert (
+        'validate_timeout IMAGE_UPLOAD_TIMEOUT_SECONDS '
+        '"$IMAGE_UPLOAD_TIMEOUT_SECONDS" 3600'
+    ) in source
+    assert 'timeout --kill-after=30s "$IMAGE_UPLOAD_TIMEOUT_SECONDS"' in source
+    assert "timeout-minutes: 120" in release
 
 
 def test_deploy_uploads_verified_source_bundle_before_remote_execution() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-    upload_name = "      - name: Upload deployment source bundle"
-    deploy_name = "      - name: Deploy over SSH"
+    upload_name = "      - name: 上传精确部署源码 bundle（release transaction 已建锁）"
+    deploy_name = "      - name: 按 manifest 与服务器锁部署冻结 digest"
     assert upload_name in source
     assert source.index(upload_name) < source.index(deploy_name)
     assert "scripts/upload-deploy-source.sh" in source
-    assert "DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${{ github.sha }}.bundle'" in source
+    assert "DEPLOY_BUNDLE_PATH=%q" in source
+    assert '"/tmp/inkforge-deploy-$DEPLOY_COMMIT.bundle"' in source
 
 
 def test_source_bundle_upload_is_sha_bound_atomic_and_pinned() -> None:
@@ -101,8 +116,8 @@ def test_source_bundle_upload_is_sha_bound_atomic_and_pinned() -> None:
 
     for contract in (
         'DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"',
-        'git rev-parse HEAD',
-        'git bundle create "$local_bundle" HEAD',
+        'git -C "$DEPLOY_SOURCE_ROOT" rev-parse HEAD',
+        'git -C "$DEPLOY_SOURCE_ROOT" bundle create "$local_bundle" HEAD --',
         'git bundle verify "$local_bundle"',
         'chmod 600 "$local_bundle"',
         'remote_bundle="/tmp/inkforge-deploy-${DEPLOY_SHA}.bundle"',
@@ -178,29 +193,24 @@ def test_ci_does_not_inject_optional_redis_dependency() -> None:
 
 
 def test_deploy_failures_are_published_to_the_workflow_summary() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "deploy.log" in source
-    assert "## 生产部署失败" in source
-    assert "::error title=生产部署失败::" in source
+    assert "      - name: 失败时保留并标记服务器锁" in source
+    assert "if: failure() && inputs.action != 'cleanup_failed_transaction'" in source
+    assert "continue-on-error: true" in source
+    assert "mark-transaction-failed" in source
 
 
 def test_production_deploy_uses_pinned_ssh_host_identity_and_non_cancelled_queue() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     workflow_header = source.split("\njobs:", maxsplit=1)[0]
 
     assert "StrictHostKeyChecking=no" not in source
-    assert "DEPLOY_SSH_KNOWN_HOSTS" in source
-    assert "SSH_KNOWN_HOSTS_FILE" in source
+    assert "DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS" in source
+    assert "DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY" in source
     assert "StrictHostKeyChecking=yes" in source
-    assert "UserKnownHostsFile=" in source
+    assert "UserKnownHostsFile=$ssh_dir/known_hosts" in source
     assert "\nconcurrency:" not in workflow_header
-    assert (
-        "  ci:\n"
-        "    concurrency:\n"
-        "      group: ci-${{ github.workflow }}-${{ github.ref }}\n"
-        "      cancel-in-progress: true"
-    ) in source
     assert 'group: production\n      cancel-in-progress: false' in source
 
 
@@ -210,7 +220,10 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     for contract in (
         'APP_DIR="${APP_DIR:-/srv/smart-novel-gen}"',
         'DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"',
-        'safe_git -c http.version=HTTP/1.1 fetch',
+        'DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:?必须设置部署源码 bundle}"',
+        'control_dir="${DURABLE_AGENT_CONTROL_BUNDLE_DIR:?必须设置不可变 control bundle 目录}"',
+        'safe_git bundle verify "$DEPLOY_BUNDLE_PATH"',
+        'safe_git fetch "$DEPLOY_BUNDLE_PATH" HEAD',
         'safe_git reset --hard "$DEPLOY_SHA"',
         "infra/compose.yaml",
         ".env",
@@ -228,9 +241,8 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     assert '部署用户无法读取 .env' in source
     assert '[ -x infra/secrets ]' in source
     assert "部署用户无法检查服务密钥目录" in source
-    assert 'max_fetch_attempts="3"' in source
-    assert '[ "$fetch_attempt" -lt "$max_fetch_attempts" ]' in source
-    assert "Git 获取连续失败" in source
+    assert "服务器不再保留 fetch 兼容旁路" in source
+    assert "fetch --depth=1 origin" not in source
     assert "host\\.docker\\.internal" in source
     assert 'stat -c %u "infra/secrets/$private_key"' in source
     assert 'stat -c %a "infra/secrets/$private_key"' in source
@@ -244,7 +256,7 @@ def test_remote_deploy_prefers_verified_bundle_and_always_cleans_it() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
     for contract in (
-        'DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:-}"',
+        'DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:?必须设置部署源码 bundle}"',
         'expected_bundle_path="/tmp/inkforge-deploy-${DEPLOY_SHA}.bundle"',
         'safe_git bundle verify "$DEPLOY_BUNDLE_PATH"',
         'safe_git fetch "$DEPLOY_BUNDLE_PATH" HEAD',
@@ -253,10 +265,7 @@ def test_remote_deploy_prefers_verified_bundle_and_always_cleans_it() -> None:
         'rm -f -- "$DEPLOY_BUNDLE_PATH"',
     ):
         assert contract in source
-
-    bundle_fetch = source.index('safe_git fetch "$DEPLOY_BUNDLE_PATH" HEAD')
-    origin_fetch = source.index("fetch --depth=1 origin")
-    assert bundle_fetch < origin_fetch
+    assert "fetch --depth=1 origin" not in source
 
 
 def test_remote_deploy_allows_only_its_app_directory_for_git_operations() -> None:

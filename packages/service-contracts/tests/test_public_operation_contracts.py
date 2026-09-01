@@ -11,6 +11,16 @@ def test_public_long_serial_operations_are_exact() -> None:
         key: value.model_dump()
         for key, value in PUBLIC_LONG_SERIAL_OPERATIONS.items()
     } == {
+        "answer_question": {
+            "operation": "answer_question",
+            "workflow": "long_serial",
+            "targetKind": "chapter",
+            "allowedScopeKinds": ("chapter",),
+            "mutating": False,
+            "principalAgent": "编辑",
+            "reviewers": (),
+            "artifactKind": None,
+        },
         "plan_chapter": {
             "operation": "plan_chapter",
             "workflow": "long_serial",

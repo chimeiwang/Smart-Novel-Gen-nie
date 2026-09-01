@@ -206,9 +206,49 @@ NovelScope
 
 | operation | target | scope | 结果 |
 | --- | --- | --- | --- |
+| `answer_question` | 已存在章节 | 当前章节 | 直接保存会话中的 Agent 回答；不创建 ReviewArtifact |
 | `plan_chapter` | 已存在章节 | 当前章节 | `beat_plan` ReviewArtifact |
 | `write_chapter` | 已存在章节 | 当前章节 | `chapter_draft` ReviewArtifact |
 | `review_chapter` | 已存在章节 | 当前章节 | 只读审核结果，不正式写入 |
+
+`answer_question` 的耐久 V2 首切额外要求非空 `writingSessionId`，并由 Core 校验其属于同一用户、小说和章节；
+字段缺失、显式 `null`、空字符串或其他非字符串类型时 CLI 在联网前返回 `WRITING_SESSION_REQUIRED`。
+CLI 仍使用同一个 `long.agent.start`，示例：
+
+```json
+{
+  "clientRequestId": "long-answer-20260901-0001",
+  "novelId": "novel-id",
+  "chapterId": "chapter-id",
+  "writingSessionId": "session-id",
+  "operation": "answer_question",
+  "target": {"type": "chapter", "id": "chapter-id"},
+  "scope": {"kind": "chapter", "chapterId": "chapter-id"},
+  "userInstruction": "这一章的主要冲突是什么？"
+}
+```
+
+Operator Skill 更新时必须把 `answer_question` 加入 `long.agent.start` 允许集合，但不能把预留的
+`novel/chapter_range/outline_node` scope 一并开放。启动返回可能是 V1 或 V2；Skill 必须按响应中的
+`engineVersion` 判别，随后复用 `long.task.watch`。V2 问答完成后从任务状态的 `artifact` 读取结果是错误的；
+权威回答位于绑定 WritingSession 的消息历史，`completed` 事件仅提供
+`outcomeType=chat_answer + resultId=<WritingMessage.id>`。重试必须复用原 `clientRequestId`，不得因超时创建新 ID。
+
+Java CLI 成为正式入口不等于 Python 兼容 CLI 可以提前失去契约能力。在 Python CLI 退役前，两种实现的
+`long.agent.start` 都必须显式允许 `answer_question`，并在任何目标业务请求前完成以下校验：
+
+- `target` 必须是当前 `chapterId` 的章节 target，`scope` 必须是同一 `chapterId` 的章节 scope；不能接受
+  预留 scope、错章 ID 或依靠 Core 静默缩小范围；
+- `writingSessionId` 必须存在且为非空字符串；字段缺失、显式 `null`、空字符串或其他非字符串类型固定返回
+  `WRITING_SESSION_REQUIRED`。这个专用错误只适用于 `answer_question`；其他 Operation 对可选
+  `writingSessionId` 的既有 `null`/类型校验语义保持不变；
+- `userInstruction` 必须包含至少一个非 Unicode 空白字符，但发送时逐字符保留原值，不做 trim、规范化或
+  截断；
+- `clientRequestId` 继续由调用方提供并在不确定重试时稳定复用；CLI 只增加固定
+  `workflow=long_serial`，其余合法业务字段和值按公共请求原样发送。
+
+底层 CLI 单元测试必须证明上述非法输入产生零业务 API 请求。生产 Skill wrapper 仍先执行固定
+`auth.whoami`，因此 wrapper 级“零业务请求”不等于整个进程零网络；两种口径不得混写。
 
 后续开放 `rewrite_scene`、大纲、设定和伏笔操作前，必须先为各自 target 增加严格判别模型、来源绑定
 和目标互斥规则；不能先接受无类型字典再依靠 Agent 猜测。
@@ -857,22 +897,36 @@ long.style.clear
 ### 生命周期
 
 ```text
-queued -> running -> waiting_user -> running -> succeeded
-                  \-> failed | cancelled | inconsistent
+V1: queued -> running -> waiting_user -> running -> succeeded
+                     \-> failed | cancelled | inconsistent
+V2: pending -> running -> waiting_user -> running -> completed
+                    \-> failed | cancelled
 ```
 
 `long.task.watch`：
 
-1. 建连前先 GET 持久 outcome，并输出 `snapshot` 帧。
-2. queued/running 时连接现有 SSE，保存本进程内最新 `Last-Event-ID`。
-3. 断线后立即 GET outcome；仍运行时按有上限退避携带 cursor 重连。
-4. Core 可达但暂时没有过程事件不算失败。
-5. Core 连续不可达默认超过 300 秒后退出 5，并在最后一行返回 taskId、最后 cursor 和当前已知状态；
+1. 建连前先 GET 持久任务状态，并输出 `snapshot` 帧。响应显式携带 `engineVersion` 时只能按该值分派；
+   只有字段完全缺失的历史响应兼容为 V1。显式 `null`、错误类型、未知版本或观察期间版本变化都按契约错误
+   失败，不能根据 `outcome`、`status` 或其他字段是否存在反猜引擎。
+2. V1 只使用 `outcome.state`：`queued/running` 继续观察，`waiting_user` 从
+   `outcome.result.id` 返回 Artifact，`succeeded` 成功，`failed/cancelled/inconsistent` 失败。
+3. V2 只使用顶层 `status`、`activeSteps`、`artifact` 和 `error`，不要求也不读取 `outcome`。
+   `activeSteps` 必须存在且是 JSON 数组；`artifact` 与 `error` 出现时必须是 `null` 或 JSON 对象，显式
+   标量/数组类型都按 `CORE_RESPONSE_CONTRACT_ERROR` 失败关闭，不能把畸形状态继续观察为正常任务：
+   `pending/running` 继续观察，`waiting_user` 从 `artifact.artifactId` 返回 Artifact，`completed` 成功，
+   `failed/cancelled` 失败。`completed` 只证明 Run 已成功，不得从状态或 SSE 虚构问答正文。
+4. 运行中连接现有 SSE，保存本进程内最新 `Last-Event-ID`。V1 文本游标与 V2 非负整数游标都必须支持；
+   JSONL `event` 帧保留服务端原始 ID 类型，重连请求统一发送其字符串形式。V2 `run_snapshot` 事件完整透传，
+   其 snapshot 仍只是观察投影，不替代下一次 PostgreSQL 状态回读。
+5. 断线后立即 GET 权威状态；仍运行时按有上限退避携带 cursor 重连。
+6. Core 可达但暂时没有过程事件不算失败。
+7. Core 连续不可达默认超过 300 秒后退出 5，并在最后一行返回 taskId、最后 cursor 和当前已知状态；
    任务继续运行。
-6. waiting_user 输出最终 `waiting_user` 帧和 artifactId，退出 0。
-7. succeeded 输出最终 `terminal` 帧，退出 0。
-8. failed、cancelled、inconsistent 输出最终 `terminal` 帧，退出 5。
-9. `Ctrl+C` 输出 `WATCH_INTERRUPTED`，说明只停止观察，退出 130；真正取消必须执行
+8. waiting_user 输出最终 `waiting_user` 帧和 artifactId，退出 0。
+9. V1 succeeded 或 V2 completed 输出最终 `terminal` 帧，退出 0。若该 Run 是
+   `answer_question`，随后必须以原 `writingSessionId` 调用 `long.session.get` 回读权威 Agent 消息。
+10. V1 failed/cancelled/inconsistent 或 V2 failed/cancelled 输出最终 `terminal` 帧，退出 5。
+11. `Ctrl+C` 输出 `WATCH_INTERRUPTED`，说明只停止观察，退出 130；真正取消必须执行
    `long.task.cancel`。
 
 重新启动进程后的标准恢复只有：
@@ -881,8 +935,8 @@ queued -> running -> waiting_user -> running -> succeeded
 long.task.list -> long.task.get -> long.task.watch
 ```
 
-不要求找回本地 cursor。没有 cursor 时允许重复收到展示事件，但最终状态仍只由 PostgreSQL outcome
-决定，调用方不得重复执行正式副作用。
+不要求找回本地 cursor。没有 cursor 时允许重复收到展示事件，但最终状态仍只由 PostgreSQL 权威投影
+（V1 `outcome` 或 V2 `status`）决定，调用方不得重复执行正式副作用。
 
 ### 退出码
 

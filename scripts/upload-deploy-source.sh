@@ -6,6 +6,7 @@ set -euo pipefail
 : "${SSH_KEY_PATH:?必须设置 SSH 私钥路径}"
 : "${SSH_KNOWN_HOSTS_FILE:?必须设置 known_hosts 文件路径}"
 DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"
+DEPLOY_SOURCE_ROOT="${DEPLOY_SOURCE_ROOT:-$(pwd)}"
 
 SOURCE_UPLOAD_TIMEOUT_SECONDS="${SOURCE_UPLOAD_TIMEOUT_SECONDS:-600}"
 REMOTE_COMMAND_TIMEOUT_SECONDS="${REMOTE_COMMAND_TIMEOUT_SECONDS:-120}"
@@ -30,6 +31,13 @@ case "$DEPLOY_SHA" in
 esac
 [ "${#DEPLOY_SHA}" -eq 40 ] || {
   echo "部署提交必须是 40 位小写十六进制 SHA" >&2
+  exit 1
+}
+case "$DEPLOY_SOURCE_ROOT" in /*) ;;
+  *) echo "部署源码根目录必须是绝对路径" >&2; exit 1 ;;
+esac
+[ -d "$DEPLOY_SOURCE_ROOT/.git" ] || {
+  echo "部署源码根目录不是 Git checkout" >&2
   exit 1
 }
 
@@ -79,14 +87,14 @@ cleanup_local_bundle() {
 }
 trap cleanup_local_bundle EXIT
 
-head_sha="$(git rev-parse HEAD)"
+head_sha="$(git -C "$DEPLOY_SOURCE_ROOT" rev-parse HEAD)"
 [ "$head_sha" = "$DEPLOY_SHA" ] || {
   echo "CI checkout 与部署提交不一致" >&2
   exit 1
 }
 
 # HEAD bundle 只包含目标提交可达历史，不读取工作区未提交文件，也不会携带部署环境秘密。
-git bundle create "$local_bundle" HEAD --
+git -C "$DEPLOY_SOURCE_ROOT" bundle create "$local_bundle" HEAD --
 git bundle verify "$local_bundle"
 chmod 600 "$local_bundle"
 bundle_sha="$(git bundle list-heads "$local_bundle" HEAD | awk '$2 == "HEAD" { print $1 }')"

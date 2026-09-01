@@ -235,6 +235,26 @@ public final class ExecutionRegistry {
         return operation;
     }
 
+    /** 返回当前环境中实际启用且依赖完整的 Operation key，供执行入口做 handler 集合握手。 */
+    public Set<String> enabledOperationKeys(
+            String workflow, boolean allowDevelopmentOperations) {
+        if (workflow == null || workflow.isBlank()) {
+            throw new IllegalArgumentException("workflow 不能为空");
+        }
+        Set<String> result = new LinkedHashSet<>();
+        operations.values().stream()
+                .filter(operation -> operation.workflow().equals(workflow))
+                .filter(Operation::v2Enabled)
+                .filter(operation -> allowDevelopmentOperations || !operation.developmentOnly())
+                .sorted(java.util.Comparator.comparing(Operation::key))
+                .forEach(operation -> {
+                    // 列表不能把只打开布尔值、但依赖尚未实现的 Operation 暴露给路由。
+                    resolve(operation.key(), allowDevelopmentOperations);
+                    result.add(operation.key());
+                });
+        return Collections.unmodifiableSet(result);
+    }
+
     public AuthorizedDeployment requireAuthorizedDeployment(WorkflowResolvedModel resolved) {
         Objects.requireNonNull(resolved, "解析部署模型不能为空");
         DeploymentProfile profile = deploymentProfiles.get(resolved.deploymentProfileKey());

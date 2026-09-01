@@ -7,8 +7,10 @@ import cn.inkforge.contracts.api.WorkflowErrorSnapshot;
 import cn.inkforge.contracts.api.WorkflowEventEnvelope;
 import cn.inkforge.contracts.api.WorkflowRunSnapshot;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.DatabaseQueryCancellation;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
+import cn.inkforge.core.workflows.application.WorkflowEventObserverTimeouts;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
@@ -30,14 +32,24 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
     private final CoreDatabase database;
     private final WorkflowEventPayloadCodec payloads;
     private final WorkflowStepSnapshotFactory stepSnapshots;
+    private final WorkflowEventObserverTimeouts timeouts;
 
     JooqWorkflowEventStreamRepository(
             CoreDatabase database,
             WorkflowEventPayloadCodec payloads,
             ObjectMapper json) {
+        this(database, payloads, json, WorkflowEventObserverTimeouts.productionDefaults());
+    }
+
+    JooqWorkflowEventStreamRepository(
+            CoreDatabase database,
+            WorkflowEventPayloadCodec payloads,
+            ObjectMapper json,
+            WorkflowEventObserverTimeouts timeouts) {
         this.database = Objects.requireNonNull(database);
         this.payloads = Objects.requireNonNull(payloads);
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
+        this.timeouts = Objects.requireNonNull(timeouts);
     }
 
     @Override
@@ -81,6 +93,12 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
 
     @Override
     public Map<RunKey, TailState> readTails(List<RunKey> runs) {
+        return readTails(runs, new DatabaseQueryCancellation());
+    }
+
+    @Override
+    public Map<RunKey, TailState> readTails(
+            List<RunKey> runs, DatabaseQueryCancellation cancellation) {
         if (runs == null || runs.isEmpty()) return Map.of();
         if (runs.size() > 1_000 || runs.stream().distinct().count() != runs.size()) {
             throw new IllegalArgumentException("Workflow SSE 批量观察范围无效");
@@ -92,42 +110,58 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
             bindings.add(run.userId());
             bindings.add(run.runId());
         });
-        Map<RunKey, TailState> result = new LinkedHashMap<>();
-        database.dsl()
-                .fetch(
-                        """
-                        WITH requested(user_id, run_id) AS (VALUES %s)
-                        SELECT requested.user_id AS requested_user_id,
-                               requested.run_id AS requested_run_id,
-                               run.status::text AS status,
-                               run."lastEventSequence" AS last_event_sequence
-                        FROM requested
-                        JOIN public."WorkflowRun" AS run
-                          ON run.id = requested.run_id
-                         AND run."userId" = requested.user_id
-                         AND run."engineVersion" = 2
-                        ORDER BY requested.run_id, requested.user_id
-                        """
-                                .formatted(values),
-                        bindings.toArray())
-                .forEach(run -> {
-                    RunKey key = new RunKey(
-                            run.get("requested_user_id", String.class),
-                            run.get("requested_run_id", String.class));
-                    result.put(
-                            key,
-                            new TailState(
-                                    run.get("status", String.class),
-                                    requiredNonNegative(
-                                            run.get("last_event_sequence", Long.class),
-                                            "WorkflowRun lastEventSequence")));
+        return database.timedReadOnlyTransactionResult(
+                timeouts.statementTimeout(),
+                timeouts.networkTimeout(),
+                cancellation,
+                transaction -> {
+                    Map<RunKey, TailState> result = new LinkedHashMap<>();
+                    transaction
+                            .fetch(
+                                    """
+                                    WITH requested(user_id, run_id) AS (VALUES %s)
+                                    SELECT requested.user_id AS requested_user_id,
+                                           requested.run_id AS requested_run_id,
+                                           run.status::text AS status,
+                                           run."lastEventSequence" AS last_event_sequence
+                                    FROM requested
+                                    JOIN public."WorkflowRun" AS run
+                                      ON run.id = requested.run_id
+                                     AND run."userId" = requested.user_id
+                                     AND run."engineVersion" = 2
+                                    ORDER BY requested.run_id, requested.user_id
+                                    """
+                                            .formatted(values),
+                                    bindings.toArray())
+                            .forEach(run -> {
+                                RunKey key = new RunKey(
+                                        run.get("requested_user_id", String.class),
+                                        run.get("requested_run_id", String.class));
+                                result.put(
+                                        key,
+                                        new TailState(
+                                                run.get("status", String.class),
+                                                requiredNonNegative(
+                                                        run.get(
+                                                                "last_event_sequence",
+                                                                Long.class),
+                                                        "WorkflowRun lastEventSequence")));
+                            });
+                    return Map.copyOf(result);
                 });
-        return Map.copyOf(result);
     }
 
     @Override
     public Map<RunKey, List<WorkflowEventEnvelope>> readEventTails(
             List<EventTailRequest> requests, int limitPerRun) {
+        return readEventTails(requests, limitPerRun, new DatabaseQueryCancellation());
+    }
+
+    @Override
+    public Map<RunKey, List<WorkflowEventEnvelope>> readEventTails(
+            List<EventTailRequest> requests,
+            int limitPerRun,
+            DatabaseQueryCancellation cancellation) {
         if (requests == null || requests.isEmpty()) return Map.of();
         if (requests.size() > 1_000
                 || requests.stream().map(EventTailRequest::key).distinct().count()
@@ -140,57 +174,63 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
                 requests.size(),
                 "(CAST(? AS text), CAST(? AS text), CAST(? AS bigint), CAST(? AS bigint))"));
         List<Object> bindings = new ArrayList<>(requests.size() * 4 + 1);
-        Map<RunKey, List<WorkflowEventEnvelope>> result = new LinkedHashMap<>();
         requests.forEach(request -> {
             bindings.add(request.key().userId());
             bindings.add(request.key().runId());
             bindings.add(request.afterSequence());
             bindings.add(request.throughSequence());
-            result.put(request.key(), new ArrayList<>());
         });
         bindings.add(limitPerRun);
-        database.dsl()
-                .fetch(
-                        """
-                        WITH requested(user_id, run_id, after_sequence, through_sequence) AS (
-                          VALUES %s
-                        ), ranked AS (
-                          SELECT requested.user_id AS requested_user_id,
-                                 requested.run_id AS requested_run_id,
-                                 event.sequence,
-                                 event."eventType",
-                                 event."payloadJson",
-                                 event."createdAt",
-                                 ROW_NUMBER() OVER (
-                                   PARTITION BY requested.user_id, requested.run_id
-                                   ORDER BY event.sequence ASC
-                                 ) AS event_rank
-                          FROM requested
-                          JOIN public."WorkflowRun" AS run
-                            ON run.id = requested.run_id
-                           AND run."userId" = requested.user_id
-                           AND run."engineVersion" = 2
-                          JOIN public."WorkflowEvent" AS event
-                            ON event."runId" = requested.run_id
-                           AND event.sequence > requested.after_sequence
-                           AND event.sequence <= requested.through_sequence
-                        )
-                        SELECT requested_user_id, requested_run_id, sequence,
-                               "eventType", "payloadJson", "createdAt"
-                        FROM ranked
-                        WHERE event_rank <= ?
-                        ORDER BY requested_run_id, requested_user_id, sequence ASC
-                        """
-                                .formatted(values),
-                        bindings.toArray())
-                .forEach(event -> {
-                    RunKey key = new RunKey(
-                            event.get("requested_user_id", String.class),
-                            event.get("requested_run_id", String.class));
-                    result.get(key).add(envelope(key.runId(), event));
+        return database.timedReadOnlyTransactionResult(
+                timeouts.statementTimeout(),
+                timeouts.networkTimeout(),
+                cancellation,
+                transaction -> {
+                    Map<RunKey, List<WorkflowEventEnvelope>> result = new LinkedHashMap<>();
+                    requests.forEach(request -> result.put(request.key(), new ArrayList<>()));
+                    transaction
+                            .fetch(
+                                    """
+                                    WITH requested(user_id, run_id, after_sequence, through_sequence) AS (
+                                      VALUES %s
+                                    ), ranked AS (
+                                      SELECT requested.user_id AS requested_user_id,
+                                             requested.run_id AS requested_run_id,
+                                             event.sequence,
+                                             event."eventType",
+                                             event."payloadJson",
+                                             event."createdAt",
+                                             ROW_NUMBER() OVER (
+                                               PARTITION BY requested.user_id, requested.run_id
+                                               ORDER BY event.sequence ASC
+                                             ) AS event_rank
+                                      FROM requested
+                                      JOIN public."WorkflowRun" AS run
+                                        ON run.id = requested.run_id
+                                       AND run."userId" = requested.user_id
+                                       AND run."engineVersion" = 2
+                                      JOIN public."WorkflowEvent" AS event
+                                        ON event."runId" = requested.run_id
+                                       AND event.sequence > requested.after_sequence
+                                       AND event.sequence <= requested.through_sequence
+                                    )
+                                    SELECT requested_user_id, requested_run_id, sequence,
+                                           "eventType", "payloadJson", "createdAt"
+                                    FROM ranked
+                                    WHERE event_rank <= ?
+                                    ORDER BY requested_run_id, requested_user_id, sequence ASC
+                                    """
+                                            .formatted(values),
+                                    bindings.toArray())
+                            .forEach(event -> {
+                                RunKey key = new RunKey(
+                                        event.get("requested_user_id", String.class),
+                                        event.get("requested_run_id", String.class));
+                                result.get(key).add(envelope(key.runId(), event));
+                            });
+                    result.replaceAll((ignored, events) -> List.copyOf(events));
+                    return Map.copyOf(result);
                 });
-        result.replaceAll((ignored, events) -> List.copyOf(events));
-        return Map.copyOf(result);
     }
 
     public List<WorkflowEventEnvelope> readAfter(

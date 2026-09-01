@@ -227,6 +227,21 @@ final class LongWatchCommands {
             throw new CoreResponseContractException(
                     "V2 任务状态响应缺少有效的 status");
         }
+        JsonNode activeSteps = snapshot.get("activeSteps");
+        if (activeSteps == null || !activeSteps.isArray()) {
+            throw new CoreResponseContractException(
+                    "V2 任务状态响应缺少有效的 activeSteps");
+        }
+        JsonNode artifact = snapshot.get("artifact");
+        if (artifact != null && !artifact.isNull() && !artifact.isObject()) {
+            throw new CoreResponseContractException(
+                    "V2 任务状态响应包含无效的 artifact");
+        }
+        JsonNode error = snapshot.get("error");
+        if (error != null && !error.isNull() && !error.isObject()) {
+            throw new CoreResponseContractException(
+                    "V2 任务状态响应包含无效的 error");
+        }
         return status.textValue();
     }
 

@@ -26,7 +26,12 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 
-from .support import execution_request, rehash_request, review_request
+from .support import (
+    answer_question_request,
+    execution_request,
+    rehash_request,
+    review_request,
+)
 
 
 class RecordingModel:
@@ -136,6 +141,72 @@ async def test_generation_uses_one_strict_call_and_passes_provider_idempotency_k
 
 
 @pytest.mark.asyncio
+async def test_answer_question_uses_exact_no_reasoning_single_step_contract() -> None:
+    registry = load_execution_registry(environment="test")
+    request = answer_question_request(registry)
+    model = RecordingModel()
+    executor = _executor(model)
+    resolved = executor.resolve(request, registry)
+    model_request = executor.build_model_request(request, resolved)
+
+    outcome = await executor.call_provider(
+        request,
+        model_request,
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    assert terminal.resultKind == "output"
+    assert terminal.output == {"answer": "模拟模型已依据冻结章节证据回答问题。"}
+    assert terminal.usage.reasoningTokens == 0
+    assert request.purpose == "generation"
+    assert request.lane == "interactive"
+    assert request.artifactId is None
+    assert resolved.rubric_version is None
+    assert model_request.tools == []
+    assert model_request.parallelToolCalls is False
+    assert model_request.policy.thinkingMode == "disabled"
+    assert model_request.thinkingMode == "disabled"
+    assert len(model.requests) == 1
+
+
+def test_answer_question_rejects_non_catalog_input_and_execution_identity() -> None:
+    registry = load_execution_registry(environment="test")
+    executor = _executor(RecordingModel())
+    request = answer_question_request(registry)
+
+    extra_input = rehash_request(
+        request.model_copy(
+            update={
+                "input": {
+                    "userInstruction": "问题",
+                    "selectedAgents": ["编辑"],
+                }
+            }
+        )
+    )
+    with pytest.raises(ExecutionCapabilityError, match="只含完整"):
+        executor.resolve(extra_input, registry)
+
+    artifact_bound = rehash_request(
+        request.model_copy(
+            update={"artifactId": "artifact-1", "artifactRevision": 1}
+        )
+    )
+    with pytest.raises(ExecutionCapabilityError, match="不能绑定"):
+        executor.resolve(artifact_bound, registry)
+
+    no_novel = rehash_request(request.model_copy(update={"novelId": None}))
+    with pytest.raises(ExecutionCapabilityError, match="novelId"):
+        executor.resolve(no_novel, registry)
+
+    wrong_lane = rehash_request(request.model_copy(update={"lane": "creative"}))
+    with pytest.raises(ExecutionCapabilityError, match="lane"):
+        executor.resolve(wrong_lane, registry)
+
+
+@pytest.mark.asyncio
 async def test_reviewer_profile_produces_evidence_evaluation_without_tool_loop() -> None:
     registry = load_execution_registry(environment="test")
     request = review_request(registry)
@@ -214,7 +285,7 @@ def test_unknown_operation_and_budget_drift_fail_before_provider() -> None:
 
 def test_inflight_request_uses_retained_versioned_refs_after_operation_downline() -> None:
     registry = load_execution_registry(environment="test")
-    request = review_request(registry)
+    request = review_request(registry, dispatch_mode="running_recovery")
     downlined = replace(registry, operations=MappingProxyType({}))
 
     resolved = _executor(RecordingModel()).resolve(request, downlined)
@@ -223,6 +294,15 @@ def test_inflight_request_uses_retained_versioned_refs_after_operation_downline(
     assert resolved.prompt_profile.key == request.modelProfile.promptProfile.name
     assert resolved.output_schema.key == request.outputSchema.name
     assert resolved.rubric_version == "rubric.chapter_selection.review.v1"
+
+    answer = answer_question_request(
+        registry,
+        dispatch_mode="running_recovery",
+    )
+    resolved_answer = _executor(RecordingModel()).resolve(answer, downlined)
+    assert resolved_answer.profile.key == "editor.answer.v1"
+    assert resolved_answer.output_schema.key == "output.chat_answer.v1"
+    assert resolved_answer.rubric_version is None
 
 
 @pytest.mark.asyncio
@@ -445,6 +525,121 @@ async def test_blank_generation_replacement_is_a_deterministic_failure(
 
     assert terminal.errorCode == "MODEL_OUTPUT_PROTOCOL_INVALID"
     assert terminal.errorCategory == "validation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["", "   ", "\n\t", "\u3000"])
+async def test_blank_chat_answer_is_a_deterministic_failure(answer: str) -> None:
+    registry = load_execution_registry(environment="test")
+    request = answer_question_request(registry)
+    result = ModelTurnResult(
+        content="",
+        toolCalls=[],
+        structuredOutput={"answer": answer},
+        usage=ModelUsage(
+            promptTokens=100,
+            cachedTokens=0,
+            completionTokens=20,
+            totalTokens=120,
+        ),
+        diagnostics=ModelUsageDiagnostics(
+            promptCacheMissTokens=100,
+            reasoningTokens=0,
+        ),
+        finishReason="stop",
+    )
+    executor = _executor(RecordingModel(result=result))
+    resolved = executor.resolve(request, registry)
+
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    assert terminal.errorCode == "MODEL_OUTPUT_PROTOCOL_INVALID"
+    assert terminal.errorCategory == "validation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "structured_output",
+    [
+        {},
+        {"answer": 1},
+        {"answer": "回答", "review": "禁止夹带"},
+    ],
+)
+async def test_chat_answer_rejects_non_schema_output(
+    structured_output: dict[str, object],
+) -> None:
+    registry = load_execution_registry(environment="test")
+    request = answer_question_request(registry)
+    result = ModelTurnResult(
+        content="",
+        toolCalls=[],
+        structuredOutput=structured_output,
+        usage=ModelUsage(
+            promptTokens=100,
+            cachedTokens=0,
+            completionTokens=20,
+            totalTokens=120,
+        ),
+        diagnostics=ModelUsageDiagnostics(
+            promptCacheMissTokens=100,
+            reasoningTokens=0,
+        ),
+        finishReason="stop",
+    )
+    executor = _executor(RecordingModel(result=result))
+    resolved = executor.resolve(request, registry)
+
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    assert terminal.errorCode == "MODEL_OUTPUT_SCHEMA_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_answer_question_preserves_unexpected_reasoning_usage_and_fails_budget() -> None:
+    registry = load_execution_registry(environment="test")
+    request = answer_question_request(registry)
+    result = ModelTurnResult(
+        content="",
+        toolCalls=[],
+        structuredOutput={"answer": "完整回答"},
+        usage=ModelUsage(
+            promptTokens=100,
+            cachedTokens=0,
+            completionTokens=20,
+            totalTokens=120,
+        ),
+        diagnostics=ModelUsageDiagnostics(
+            promptCacheMissTokens=100,
+            reasoningTokens=1,
+        ),
+        finishReason="stop",
+    )
+    executor = _executor(RecordingModel(result=result))
+    resolved = executor.resolve(request, registry)
+
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    assert terminal.errorCode == "STEP_BUDGET_EXCEEDED"
+    assert terminal.usage.reasoningTokens == 1
 
 
 @pytest.mark.asyncio

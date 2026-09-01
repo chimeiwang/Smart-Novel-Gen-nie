@@ -1,4 +1,4 @@
-package cn.inkforge.core.writing.domain;
+package cn.inkforge.core.workflows.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -7,13 +7,13 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
-class WritingMessageMetadataTest {
+class WorkflowMessageMetadataTest {
 
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
     void 普通流程消息必须与Python使用相同的规范化JSON() {
-        String value = WritingMessageMetadata.serialize(
+        String value = WorkflowMessageMetadata.serialize(
                 "task-1", "user", "  完整消息  ", null, "workflow", json);
 
         assertThat(value).isEqualTo(
@@ -28,7 +28,7 @@ class WritingMessageMetadataTest {
         selection.put("chapterId", "chapter-1");
         selection.put("end", 8);
 
-        String value = WritingMessageMetadata.serialize(
+        String value = WorkflowMessageMetadata.serialize(
                 "task-2", "user", "完整消息", null, selection, json);
 
         assertThat(value).contains(

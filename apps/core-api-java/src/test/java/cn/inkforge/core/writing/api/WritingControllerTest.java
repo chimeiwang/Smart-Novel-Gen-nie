@@ -20,6 +20,7 @@ import cn.inkforge.core.identity.application.AuthenticatedUser;
 import cn.inkforge.core.identity.application.CurrentUserAccess;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.http.InternalServiceAuthenticator;
+import cn.inkforge.core.platform.http.ManagedSseEmitter;
 import cn.inkforge.core.writing.application.WritingCallbackRepository;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingEventStreamService;
@@ -38,7 +39,6 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 class WritingControllerTest {
 
@@ -159,7 +159,14 @@ class WritingControllerTest {
 
     @Test
     void 事件接口返回真实Sse媒体类型与禁用代理缓冲头() {
-        StreamingResponseBody stream = output -> output.write("event: ok\n\n".getBytes(StandardCharsets.UTF_8));
+        bindRequest("GET", "/api/v1/writing/runs/task-1/events", "");
+        ManagedSseEmitter stream = new ManagedSseEmitter(0L) {
+            @Override
+            protected void startManagedSession() {}
+
+            @Override
+            protected void abortManagedSession() {}
+        };
         when(streams.stream("user-1", "task-1", "3-0")).thenReturn(stream);
 
         var response = controller.streamWritingRunEventsApiV1WritingRunsTaskIdEventsGet(
@@ -171,6 +178,10 @@ class WritingControllerTest {
                 .isEqualTo("no-cache, no-transform");
         assertThat(response.getHeaders().getFirst("X-Accel-Buffering")).isEqualTo("no");
         assertThat(response.getBody()).isSameAs(stream);
+        var request = ((ServletRequestAttributes) RequestContextHolder.currentRequestAttributes())
+                .getRequest();
+        assertThat(request.getAttribute(ManagedSseEmitter.class.getName() + ".session"))
+                .isSameAs(stream);
     }
 
     private static void bindRequest(String method, String path, String body) {

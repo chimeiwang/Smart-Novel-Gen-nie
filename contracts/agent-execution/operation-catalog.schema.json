@@ -378,7 +378,35 @@
           "then": {
             "required": [
               "generatorStepBudgetProfile"
-            ],
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reviewPolicy": {
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "single",
+                      "parallel"
+                    ]
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              },
+              "v2Enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "reviewPolicy",
+              "v2Enabled"
+            ]
+          },
+          "then": {
             "properties": {
               "reviewPolicy": {
                 "required": [

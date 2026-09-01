@@ -3,6 +3,13 @@ set -u
 
 printf 'tag=%s|docker %s\n' "${INKFORGE_IMAGE_TAG:-}" "$*" >> "$FAKE_DOCKER_LOG"
 
+target_web_digest="${FAKE_TARGET_WEB_DIGEST:-sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+target_core_digest="${FAKE_TARGET_CORE_DIGEST:-sha256:2222222222222222222222222222222222222222222222222222222222222222}"
+target_agent_digest="${FAKE_TARGET_AGENT_DIGEST:-sha256:3333333333333333333333333333333333333333333333333333333333333333}"
+rollback_web_digest="${FAKE_ROLLBACK_WEB_DIGEST:-sha256:4444444444444444444444444444444444444444444444444444444444444444}"
+rollback_core_digest="${FAKE_ROLLBACK_CORE_DIGEST:-sha256:5555555555555555555555555555555555555555555555555555555555555555}"
+rollback_agent_digest="${FAKE_ROLLBACK_AGENT_DIGEST:-sha256:6666666666666666666666666666666666666666666666666666666666666666}"
+
 if [ "${1:-}" = "compose" ]; then
   case " $* " in
     *" version "*) exit 0 ;;
@@ -96,7 +103,12 @@ if [ "${1:-}" = "inspect" ]; then
   service="${container#container-}"
   case "$inspect_format" in
     '{{.Image}}')
-      printf 'sha256:previous-%s-id\n' "$service"
+      case "$service" in
+        web) printf '%s\n' "$rollback_web_digest" ;;
+        core-api) printf '%s\n' "$rollback_core_digest" ;;
+        agent-service) printf '%s\n' "$rollback_agent_digest" ;;
+        *) exit 2 ;;
+      esac
       ;;
     '{{.Config.Image}}')
       tag="previous-tag"
@@ -127,7 +139,7 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
   done
   if [ "${FAKE_PREVIOUS_STATE:-valid}" = "missing_image" ]; then
     case "$image" in
-      sha256:previous-core-api-id|inkforge-core-api:previous-tag) exit 1 ;;
+      "$rollback_core_digest"|inkforge-core-api:previous-tag) exit 1 ;;
     esac
   fi
   case "$inspect_format" in
@@ -136,7 +148,7 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
         inkforge-core-api:${FAKE_NEW_TAG:-new-tag})
           printf '%s\n' "${FAKE_NEW_CORE_RUNTIME-java}"
           ;;
-        sha256:previous-core-api-id|inkforge-core-api:previous-tag)
+        "$rollback_core_digest"|inkforge-core-api:previous-tag)
           printf '%s\n' "${FAKE_PREVIOUS_CORE_RUNTIME-}"
           ;;
         *)
@@ -146,30 +158,33 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
       ;;
     '{{.Id}}')
       case "$image" in
-        sha256:previous-*-id)
+        "$target_web_digest"|"$target_core_digest"|"$target_agent_digest"|"$rollback_web_digest"|"$rollback_core_digest"|"$rollback_agent_digest")
           printf '%s\n' "$image"
           ;;
+        inkforge-web:${FAKE_NEW_TAG:-new-tag}) printf '%s\n' "$target_web_digest" ;;
+        inkforge-core-api:${FAKE_NEW_TAG:-new-tag}) printf '%s\n' "$target_core_digest" ;;
+        inkforge-agent-service:${FAKE_NEW_TAG:-new-tag}) printf '%s\n' "$target_agent_digest" ;;
         inkforge-web:rollback-*)
           if [ "${FAKE_PREVIOUS_STATE:-valid}" = "snapshot_existing_conflict" ]; then
-            printf '%s\n' 'sha256:older-web-id'
+            printf '%s\n' 'sha256:7777777777777777777777777777777777777777777777777777777777777777'
             exit 0
           fi
           [ -f "$FAKE_SNAPSHOT_STATE_DIR/web" ] || exit 1
-          printf '%s\n' 'sha256:previous-web-id'
+          printf '%s\n' "$rollback_web_digest"
           ;;
         inkforge-core-api:rollback-*)
           [ -f "$FAKE_SNAPSHOT_STATE_DIR/core-api" ] || exit 1
           if [ "${FAKE_PREVIOUS_STATE:-valid}" = "snapshot_verify_mismatch" ]; then
-            printf '%s\n' 'sha256:unexpected-core-id'
+            printf '%s\n' 'sha256:8888888888888888888888888888888888888888888888888888888888888888'
           else
-            printf '%s\n' 'sha256:previous-core-api-id'
+            printf '%s\n' "$rollback_core_digest"
           fi
           ;;
         inkforge-agent-service:rollback-*)
           [ -f "$FAKE_SNAPSHOT_STATE_DIR/agent-service" ] || exit 1
-          printf '%s\n' 'sha256:previous-agent-service-id'
+          printf '%s\n' "$rollback_agent_digest"
           ;;
-        *) printf '%s\n' 'sha256:fixture-id' ;;
+        *) printf '%s\n' "$target_web_digest" ;;
       esac
       ;;
   esac
@@ -178,7 +193,7 @@ fi
 
 if [ "${1:-}" = "image" ] && [ "${2:-}" = "tag" ]; then
   if [ "${FAKE_PREVIOUS_STATE:-valid}" = "snapshot_tag_failure" ] \
-    && [ "${3:-}" = "sha256:previous-core-api-id" ]; then
+    && [ "${3:-}" = "$rollback_core_digest" ]; then
     exit 27
   fi
   case "${4:-}" in
@@ -192,6 +207,15 @@ fi
 if [ "${1:-}" = "exec" ]; then
   if [ "${2:-}" = "container-core-api" ]; then
     case " $* " in
+      *"printf"*"DURABLE_AGENT_EXECUTION_USER_ALLOWLIST"*)
+        printf '%s\n%s\n%s\n%s\n%s\n' \
+          "${FAKE_RUNNING_CORE_ROUTE_MODE:-off}" \
+          "${FAKE_RUNNING_CORE_SCHEMA_READY:-false}" \
+          "${FAKE_RUNNING_CORE_USER_ALLOWLIST:-user-canary}" \
+          "${FAKE_RUNNING_CORE_NOVEL_ALLOWLIST:-novel-canary}" \
+          "${FAKE_RUNNING_CORE_V1_FRESH_STARTS:-true}"
+        exit 0
+        ;;
       *"DURABLE_AGENT_EXECUTION_ROUTE_MODE"*)
         [ "${FAKE_RUNNING_CORE_ROUTE_MODE:-off}" = "off" ]
         exit $?

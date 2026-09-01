@@ -46,13 +46,12 @@
       "payload": {
         "novelId": "n1",
         "chapterId": "c1",
-        "clientRequestId": "agent-start-000001",
-        "operation": "write_chapter",
+        "clientRequestId": "agent-answer-00001",
+        "operation": "answer_question",
         "target": {"type": "chapter", "id": "c1"},
         "scope": {"kind": "chapter", "chapterId": "c1"},
-        "writingSessionId": null,
-        "targetWordCount": 3000,
-        "userInstruction": "  保持悬念  "
+        "writingSessionId": "s1",
+        "userInstruction": "  这一章的主要冲突是什么？  "
       }
     },
     {

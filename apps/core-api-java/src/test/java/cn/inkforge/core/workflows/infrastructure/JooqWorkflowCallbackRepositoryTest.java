@@ -73,6 +73,7 @@ class JooqWorkflowCallbackRepositoryTest {
     private static ObjectMapper json;
     private static ExecutionRegistry registry;
     private static ExecutionRegistry.ResolvedOperation operation;
+    private static ExecutionRegistry.ResolvedOperation answerOperation;
     private static JooqWorkflowStartRepository starts;
     private static JooqWorkflowDispatchRepository dispatches;
     private static JooqWorkflowCallbackRepository callbacks;
@@ -93,6 +94,7 @@ class JooqWorkflowCallbackRepositoryTest {
         json = new ObjectMapper();
         registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
         operation = registry.resolve("long_serial.rewrite_chapter_selection", false);
+        answerOperation = registry.resolve("long_serial.answer_question", false);
         CuidV1Generator ids = new CuidV1Generator(CLOCK);
         starts = new JooqWorkflowStartRepository(database, ids, CLOCK, json);
         dispatches = new JooqWorkflowDispatchRepository(
@@ -346,6 +348,183 @@ class JooqWorkflowCallbackRepositoryTest {
                 .isEqualTo(2);
         cancellations.request(
                 fixture.userId(), started.runId(), "registry-downline-full-cleanup");
+    }
+
+    @Test
+    void 问答成功原子保存完整Agent消息并按序完成Step和Run且重放不重复() {
+        Flow flow = runningAnswerFlow("callback-answer-happy");
+        String answer = "  第一段完整回答。\n第二段也必须原样保留。  ";
+        ExecutionStepResult result = answerResult(flow.request(), answer);
+
+        assertThat(callbacks.result(result).getStatus())
+                .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(callbacks.result(result).getStatus())
+                .isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+
+        Record message = database.dsl().fetchOne(
+                """
+                SELECT id, "sessionId", role, "agentId", content, metadata, "createdAt"
+                FROM public."WritingMessage"
+                WHERE "sessionId" = ? AND role = 'agent'
+                """,
+                flow.sessionId());
+        assertThat(message).isNotNull();
+        assertThat(message.get("sessionId", String.class)).isEqualTo(flow.sessionId());
+        assertThat(message.get("role", String.class)).isEqualTo("agent");
+        assertThat(message.get("agentId", String.class)).isEqualTo("编辑");
+        assertThat(message.get("content", String.class)).isEqualTo(answer);
+        assertThat(message.get("createdAt", LocalDateTime.class)).isEqualTo(NOW);
+        var metadata = json.readTree(message.get("metadata", String.class));
+        assertThat(metadata.path("taskId").asText()).isEqualTo(flow.runId());
+        assertThat(metadata.path("eventType").asText()).isEqualTo("done");
+        assertThat(metadata.path("agentId").asText()).isEqualTo("编辑");
+        assertThat(metadata.path("source").path("engineVersion").asInt()).isEqualTo(2);
+        assertThat(metadata.path("source").path("runId").asText()).isEqualTo(flow.runId());
+        assertThat(metadata.path("source").path("stepId").asText())
+                .isEqualTo(flow.request().getStepId());
+        assertThat(metadata.path("source").path("modelProfile").asText())
+                .isEqualTo("editor.answer.v1");
+        assertThat(metadata.path("source").path("outcomeType").asText())
+                .isEqualTo("chat_answer");
+        assertThat(count(
+                        "SELECT count(*) AS count FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND role = 'agent'",
+                        flow.sessionId()))
+                .isEqualTo(1);
+
+        Record step = database.dsl().fetchOne(
+                """
+                SELECT status::text AS status, output, "artifactId", "artifactRevision",
+                       "resultHash", "completedAt"
+                FROM public."WorkflowStep" WHERE id = ?
+                """,
+                flow.request().getStepId());
+        assertThat(step.get("status", String.class)).isEqualTo("completed");
+        assertThat(step.get("artifactId", String.class)).isNull();
+        assertThat(step.get("artifactRevision", Integer.class)).isNull();
+        assertThat(step.get("resultHash", String.class)).isEqualTo(result.getResultHash());
+        assertThat(step.get("completedAt", LocalDateTime.class)).isEqualTo(NOW);
+        assertThat(json.readTree(step.get("output", String.class)).path("answer").asText())
+                .isEqualTo(answer);
+
+        Record run = database.dsl().fetchOne(
+                """
+                SELECT status::text AS status, "completedAt", "errorCode", "lastEventSequence"
+                FROM public."WorkflowRun" WHERE id = ?
+                """,
+                flow.runId());
+        assertThat(run.get("status", String.class)).isEqualTo("completed");
+        assertThat(run.get("completedAt", LocalDateTime.class)).isEqualTo(NOW);
+        assertThat(run.get("errorCode", String.class)).isNull();
+        assertThat(eventTypes(flow.runId())).endsWith("step_finished", "completed");
+        String completedPayload = database.dsl().fetchOne(
+                        """
+                        SELECT "payloadJson" FROM public."WorkflowEvent"
+                        WHERE "runId" = ? AND "eventType" = 'completed'
+                        """,
+                        flow.runId())
+                .get("payloadJson", String.class);
+        var completed = json.readTree(completedPayload);
+        assertThat(completed.path("outcomeType").asText()).isEqualTo("chat_answer");
+        assertThat(completed.path("resultId").asText())
+                .isEqualTo(message.get("id", String.class));
+        assertThat(count(
+                        "SELECT count(*) AS count FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'review'",
+                        flow.runId()))
+                .isZero();
+        assertThat(count(
+                        "SELECT count(*) AS count FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?",
+                        flow.runId()))
+                .isZero();
+        assertThat(database.dsl().fetchOne(
+                                "SELECT \"updatedAt\" FROM public.\"WritingSession\" WHERE id = ?",
+                                flow.sessionId())
+                        .get("updatedAt", LocalDateTime.class))
+                .isEqualTo(NOW.plusNanos(1_000_000));
+    }
+
+    @Test
+    void 问答空白或额外字段均按冻结Schema拒绝且事务不留下消息或终态() {
+        List<Map<String, Object>> invalidOutputs = List.of(
+                Map.of("answer", " \n\t　"),
+                Map.of("answer", "不能夹带控制字段", "toolCall", Map.of("name", "forbidden")));
+        int index = 0;
+        for (Map<String, Object> invalidOutput : invalidOutputs) {
+            Flow flow = runningAnswerFlow("callback-answer-invalid-" + ++index);
+            int eventCount = eventTypes(flow.runId()).size();
+            ExecutionStepResult result = answerResult(flow.request(), "占位回答");
+            result.getOutput().get().clear();
+            result.getOutput().get().putAll(invalidOutput);
+            result.setResultHash(ExecutionCanonicalJson.sha256(
+                    WorkflowCallbackValues.resultHashMaterial(result)));
+
+            assertThatThrownBy(() -> callbacks.result(result))
+                    .isInstanceOfSatisfying(ApiException.class, error -> {
+                        assertThat(error.statusCode()).isEqualTo(409);
+                        assertThat(error.code()).isEqualTo("WORKFLOW_CALLBACK_INVALID");
+                    });
+            assertThat(count(
+                            "SELECT count(*) AS count FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND role = 'agent'",
+                            flow.sessionId()))
+                    .isZero();
+            assertThat(database.dsl().fetchOne(
+                            """
+                            SELECT status::text AS status, output, "resultHash", "completedAt"
+                            FROM public."WorkflowStep" WHERE id = ?
+                            """,
+                            flow.request().getStepId()))
+                    .satisfies(step -> {
+                        assertThat(step.get("status", String.class)).isEqualTo("running");
+                        assertThat(step.get("output", String.class)).isNull();
+                        assertThat(step.get("resultHash", String.class)).isNull();
+                        assertThat(step.get("completedAt", LocalDateTime.class)).isNull();
+                    });
+            assertThat(eventTypes(flow.runId())).hasSize(eventCount);
+            assertThat(count(
+                            "SELECT count(*) AS count FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?",
+                            flow.runId()))
+                    .isZero();
+
+            cancellations.request(
+                    flow.userId(), flow.runId(), "callback-answer-invalid-cleanup-" + index);
+            assertThat(callbacks.failure(preProviderFailure(flow.request())).getStatus())
+                    .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        }
+    }
+
+    @Test
+    void 问答失败和取消均收敛Run但绝不创建成功消息() {
+        Flow failed = runningAnswerFlow("callback-answer-failed");
+        assertThat(callbacks.failure(preProviderFailure(failed.request())).getStatus())
+                .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(database.dsl().fetchOne(
+                                "SELECT status::text AS status FROM public.\"WorkflowRun\" WHERE id = ?",
+                                failed.runId())
+                        .get("status", String.class))
+                .isEqualTo("failed");
+        assertThat(count(
+                        "SELECT count(*) AS count FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND role = 'agent'",
+                        failed.sessionId()))
+                .isZero();
+
+        Flow cancelled = runningAnswerFlow("callback-answer-cancelled");
+        cancellations.request(
+                cancelled.userId(), cancelled.runId(), "callback-answer-cancel-request-0001");
+        assertThat(callbacks.result(answerResult(cancelled.request(), "取消后不得保存")).getStatus())
+                .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(database.dsl().fetchOne(
+                                "SELECT status::text AS status FROM public.\"WorkflowRun\" WHERE id = ?",
+                                cancelled.runId())
+                        .get("status", String.class))
+                .isEqualTo("cancelled");
+        assertThat(count(
+                        "SELECT count(*) AS count FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND role = 'agent'",
+                        cancelled.sessionId()))
+                .isZero();
+        assertThat(count(
+                        "SELECT count(*) AS count FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" IN (?, ?)",
+                        failed.runId(),
+                        cancelled.runId()))
+                .isZero();
     }
 
     @Test
@@ -1168,7 +1347,20 @@ class JooqWorkflowCallbackRepositoryTest {
         accept(request);
         assertThat(callbacks.progress(progress(request, unknownUsage())).getStatus())
                 .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
-        return new Flow(started.runId(), fixture.userId(), request);
+        return new Flow(started.runId(), fixture.userId(), fixture.sessionId(), request);
+    }
+
+    private static Flow runningAnswerFlow(String prefix) {
+        Fixture fixture = fixture(prefix);
+        var started = starts.start(answerPlan(fixture, prefix + "-request-0001"));
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getOperation()).isEqualTo("answer_question");
+        assertThat(request.getPurpose()).isEqualTo("generation");
+        assertThat(request.getInput()).containsOnlyKeys("userInstruction");
+        accept(request);
+        assertThat(callbacks.progress(progress(request, unknownUsage())).getStatus())
+                .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        return new Flow(started.runId(), fixture.userId(), fixture.sessionId(), request);
     }
 
     private static void enqueueRevisionGeneration(
@@ -1277,6 +1469,28 @@ class JooqWorkflowCallbackRepositoryTest {
                 request.getStepId(),
                 partialUsage(request.getPurpose().equals("review")))
                 .output(output);
+        result.setResultHash(ExecutionCanonicalJson.sha256(
+                WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private static ExecutionStepResult answerResult(
+            ExecutionStepRequest request, String answer) {
+        ExecutionStepResult result = new ExecutionStepResult(
+                        API_NOW,
+                        request.getFencingToken(),
+                        request.getInputHash(),
+                        request.getJobId(),
+                        request.getNovelId(),
+                        "2.0",
+                        request.getRequestHash(),
+                        apiResolved(request),
+                        "0".repeat(64),
+                        ExecutionStepResult.ResultKindEnum.OUTPUT,
+                        request.getRunId(),
+                        request.getStepId(),
+                        answerUsage())
+                .output(new LinkedHashMap<>(Map.of("answer", answer)));
         result.setResultHash(ExecutionCanonicalJson.sha256(
                 WorkflowCallbackValues.resultHashMaterial(result)));
         return result;
@@ -1514,6 +1728,16 @@ class JooqWorkflowCallbackRepositoryTest {
                 .visibleOutputTokens(visible);
     }
 
+    private static StepUsage answerUsage() {
+        return new StepUsage(0, 1, StepUsage.UsageStatusEnum.PARTIAL, 1_000)
+                .inputTokens(100)
+                .cachedTokens(0)
+                .promptCacheMissTokens(100)
+                .completionTokens(20)
+                .reasoningTokens(0)
+                .visibleOutputTokens(20);
+    }
+
     private static StepUsage overBudgetUsage() {
         return new StepUsage(0, 1, StepUsage.UsageStatusEnum.PARTIAL, 2_000)
                 .inputTokens(30_001)
@@ -1566,6 +1790,48 @@ class JooqWorkflowCallbackRepositoryTest {
                         operation.generatorProfile(),
                         operation.generatorStepBudget(),
                         operation.outputSchema()));
+    }
+
+    private static WorkflowStartPlan answerPlan(Fixture fixture, String requestId) {
+        Map<String, Object> input = Map.of("userInstruction", "这一段的叙事视角是什么？");
+        return new WorkflowStartPlan(
+                fixture.userId(),
+                requestId,
+                sha256(requestId),
+                "long_serial",
+                "answer_question",
+                registry.catalogVersion(),
+                "chat",
+                fixture.novelId(),
+                fixture.chapterId(),
+                fixture.sessionId(),
+                "chapter",
+                fixture.chapterId(),
+                input,
+                answerOperation.operation().evidencePolicy(),
+                List.of(new WorkflowEvidenceItemPlan(
+                        "chapter_content",
+                        fixture.chapterId(),
+                        true,
+                        null,
+                        API_NOW,
+                        "甲😀乙",
+                        null,
+                        null,
+                        null,
+                        Map.of("role", "chapter_source"))),
+                answerOperation.operation().runBudget(),
+                ExecutionPlanSnapshot.freeze(
+                        registry.catalogVersion(),
+                        registry.manifestFingerprint(),
+                        answerOperation),
+                new WorkflowInitialStepPlan(
+                        "generation",
+                        answerOperation.operation().lane(),
+                        input,
+                        answerOperation.generatorProfile(),
+                        answerOperation.generatorStepBudget(),
+                        answerOperation.outputSchema()));
     }
 
     private static Fixture fixture(String prefix) {
@@ -1668,8 +1934,8 @@ class JooqWorkflowCallbackRepositoryTest {
                 .getValues("eventType", String.class);
     }
 
-    private static int count(String sql, Object binding) {
-        return database.dsl().fetchOne(sql, binding).get("count", Integer.class);
+    private static int count(String sql, Object... bindings) {
+        return database.dsl().fetchOne(sql, bindings).get("count", Integer.class);
     }
 
     private static String sha256(String value) {
@@ -1710,5 +1976,6 @@ class JooqWorkflowCallbackRepositoryTest {
 
     private record Fixture(String userId, String novelId, String chapterId, String sessionId) {}
 
-    private record Flow(String runId, String userId, ExecutionStepRequest request) {}
+    private record Flow(
+            String runId, String userId, String sessionId, ExecutionStepRequest request) {}
 }

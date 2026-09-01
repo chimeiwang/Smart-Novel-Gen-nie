@@ -4,11 +4,11 @@
     {
       "key": "editor.answer.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "disabled",
       "purpose": "generation",
-      "promptProfile": "prompt.unavailable.generation.v1",
-      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+      "promptProfile": "prompt.editor.answer.v1",
+      "deploymentProfileKey": "deployment.editor.answer.v1"
     },
     {
       "key": "editor.chapter_review.v1",

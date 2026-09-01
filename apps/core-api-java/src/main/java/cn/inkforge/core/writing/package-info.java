@@ -13,6 +13,7 @@
             "reviews::domain",
             "shortmedium::domain",
             "workflows::catalog",
-            "workflows::execution"
+            "workflows::execution",
+            "workflows::workflow-domain"
         })
 package cn.inkforge.core.writing;

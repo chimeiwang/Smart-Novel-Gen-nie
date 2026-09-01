@@ -22,7 +22,7 @@ import cn.inkforge.core.writing.application.WritingCommandPayload;
 import cn.inkforge.core.writing.domain.WritingBoundaryEvent;
 import cn.inkforge.core.writing.domain.WritingCallbackAcceptance;
 import cn.inkforge.core.writing.domain.WritingGraphSnapshot;
-import cn.inkforge.core.writing.domain.WritingMessageMetadata;
+import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import cn.inkforge.core.writing.domain.WritingTaskFailure;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -617,7 +617,7 @@ final class JooqWritingCallbackRepository implements WritingCallbackRepository {
             String agentId) {
         String visible = content.strip();
         if (visible.isEmpty() || task.getWritingsessionid() == null) return;
-        String serialized = WritingMessageMetadata.serialize(
+        String serialized = WorkflowMessageMetadata.serialize(
                 task.getId(), eventType, visible, agentId, "workflow", json);
         String existing = transaction.select(WRITINGMESSAGE.ID)
                 .from(WRITINGMESSAGE)

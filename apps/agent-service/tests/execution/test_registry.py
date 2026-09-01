@@ -65,13 +65,14 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
     _write_json(manifest_path, manifest)
 
 
-def test_loader_resolves_only_complete_enabled_rewrite_operation() -> None:
+def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "9f718f00813210f321c74da7a44227c2abcdf10386ea870cd9a3836696667322"
+        "52e4eab24f009efd0354b401fa14117d9014edcd73f80ff08a1247c5867153d7"
     )
 
     resolved = registry.resolve("long_serial", "rewrite_chapter_selection")
+    answer = registry.resolve("long_serial", "answer_question")
 
     assert resolved.operation.key == "long_serial.rewrite_chapter_selection"
     assert resolved.operation.run_budget.max_model_calls == 6
@@ -97,6 +98,23 @@ def test_loader_resolves_only_complete_enabled_rewrite_operation() -> None:
     assert resolved.output_schema.json_schema["additionalProperties"] is False
     assert not hasattr(resolved.generator_profile, "api_key")
     assert not hasattr(resolved.generator_profile, "model")
+    assert answer.operation.target_kinds == ("chapter",)
+    assert answer.operation.scope_kinds == ("chapter",)
+    assert answer.operation.mutating is False
+    assert answer.operation.review_policy.mode == "none"
+    assert answer.generator_profile.key == "editor.answer.v1"
+    assert answer.generator_profile.reasoning_mode == "disabled"
+    assert answer.generator_profile.prompt_profile.key == "prompt.editor.answer.v1"
+    assert answer.generator_profile.deployment_profile_key == "deployment.editor.answer.v1"
+    assert answer.generator_step_budget.key == (
+        "step_budget.long_serial.answer_question.generator.v1"
+    )
+    assert answer.generator_step_budget.max_reasoning_tokens == 0
+    assert answer.output_schema.key == "output.chat_answer.v1"
+    assert answer.output_schema.json_schema_value()["required"] == ["answer"]
+    assert answer.reviewer_profiles == ()
+    assert answer.reviewer_step_budgets == {}
+    assert answer.reviewer_output_schema is None
 
     with pytest.raises(FrozenInstanceError):
         resolved.operation.v2_enabled = False  # type: ignore[misc]
@@ -163,13 +181,30 @@ def test_deployment_authorization_binds_transport_capability_and_environment() -
 def test_loader_rejects_disabled_and_environment_forbidden_operations() -> None:
     production = load_execution_registry(CONTRACT_ROOT, environment="production")
     with pytest.raises(ExecutionOperationDisabledError):
-        production.resolve("long_serial", "answer_question")
+        production.resolve("long_serial", "review_chapter")
     with pytest.raises(ExecutionOperationEnvironmentError):
         production.resolve("video", "chapter_cinematic_adaptation_v2")
 
     development = load_execution_registry(CONTRACT_ROOT, environment="dev")
     with pytest.raises(ExecutionOperationDisabledError):
         development.resolve("video", "chapter_cinematic_adaptation_v2")
+
+
+def test_enabled_no_review_operation_rejects_hidden_reviewer_execution_refs(
+    contract_copy: Path,
+) -> None:
+    catalog_path = contract_copy / "operation-catalog.v1.json"
+    catalog = _read_json(catalog_path)
+    operation = catalog["operations"][0]
+    assert operation["key"] == "long_serial.answer_question"
+    operation["reviewPolicy"]["reviewerOutputSchema"] = (
+        "output.chapter_review_report.v1"
+    )
+    _write_json(catalog_path, catalog)
+    _refresh_manifest_hash(contract_copy, "catalog")
+
+    with pytest.raises(ExecutionRegistryReferenceError, match="不能冻结 Reviewer"):
+        load_execution_registry(contract_copy, environment="test")
 
 
 def test_loader_uses_explicit_environment_contract_directory(

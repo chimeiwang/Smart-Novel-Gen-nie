@@ -16,6 +16,8 @@ import cn.inkforge.core.workflows.catalog.ExecutionRegistryFixtures;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -33,6 +35,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.testcontainers.containers.Container.ExecResult;
@@ -631,6 +634,59 @@ class JooqWorkflowDispatchRepositoryTest {
                                 started.runId())
                         .getValues("eventType", String.class))
                 .endsWith("failed");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "inkforge.execution.fixture.path", matches = ".+")
+    void 输出AnswerQuestion实际ExecutionStepRequest跨语言临时Fixture() throws Exception {
+        Fixture fixture = fixture("wire-golden-answer");
+        ExecutionRegistry.ResolvedOperation answer =
+                registry.resolve("long_serial.answer_question", false);
+        Map<String, Object> input = Map.of("userInstruction", "这一段的叙事视角是什么？");
+        WorkflowStartPlan plan = new WorkflowStartPlan(
+                fixture.userId(),
+                "wire-golden-answer-request-0001",
+                "b".repeat(64),
+                "long_serial",
+                "answer_question",
+                registry.catalogVersion(),
+                "chat",
+                fixture.novelId(),
+                fixture.chapterId(),
+                fixture.sessionId(),
+                "chapter",
+                fixture.chapterId(),
+                input,
+                answer.operation().evidencePolicy(),
+                List.of(new WorkflowEvidenceItemPlan(
+                        "chapter_content",
+                        fixture.chapterId(),
+                        true,
+                        null,
+                        OffsetDateTime.parse("2026-09-01T02:00:00.123Z"),
+                        "甲😀乙",
+                        null,
+                        null,
+                        null,
+                        Map.of("role", "chapter_source"))),
+                answer.operation().runBudget(),
+                ExecutionPlanSnapshot.freeze(
+                        registry.catalogVersion(), registry.manifestFingerprint(), answer),
+                new WorkflowInitialStepPlan(
+                        "generation",
+                        answer.operation().lane(),
+                        input,
+                        answer.generatorProfile(),
+                        answer.generatorStepBudget(),
+                        answer.outputSchema()));
+        starts.start(plan);
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        Path fixturePath = Path.of(System.getProperty("inkforge.execution.fixture.path"));
+
+        Files.write(fixturePath, json.writeValueAsBytes(request));
+
+        assertThat(Files.size(fixturePath)).isPositive();
+        assertThat(request.getOperation()).isEqualTo("answer_question");
     }
 
     private static WorkflowStartPlan plan(Fixture fixture) {

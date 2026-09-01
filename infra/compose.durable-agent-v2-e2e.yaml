@@ -1,0 +1,322 @@
+name: inkforge-durable-agent-v2-e2e
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg14
+    user: "999:999"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_USER: inkforge_e2e
+      POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD:?必须配置随机测试数据库密码}
+      POSTGRES_DB: novelwriterdev
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_e2e_data:/var/lib/postgresql/data
+      - ../apps/core-api-java/src/test/resources/db/novelwriterdev-schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ../scripts/migrations/20260831_durable_agent_execution.sql:/docker-entrypoint-initdb.d/002-durable-agent-v2.sql:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/run/postgresql:size=8m,uid=999,gid=999
+    networks:
+      - data_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inkforge_e2e -d novelwriterdev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    cpus: "0.35"
+    mem_limit: 384m
+
+  redis:
+    image: redis:7.4-alpine
+    user: "999:999"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    tmpfs:
+      - /data:size=16m,uid=999,gid=999
+      - /tmp:size=8m,mode=1777
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    cpus: "0.10"
+    mem_limit: 96m
+
+  redis-drain-init:
+    image: redis:7.4-alpine
+    user: "999:999"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        test "$$(redis-cli -h redis --raw DBSIZE)" = 0;
+        test "$$(redis-cli -h redis --raw --eval /scripts/durable_agent_v1_drain_index_initialize.lua)" = initialized;
+        test "$$(redis-cli -h redis --raw GET inkforge:runs:drain:index-version)" = 1
+    volumes:
+      - ../scripts/durable_agent_v1_drain_index_initialize.lua:/scripts/durable_agent_v1_drain_index_initialize.lua:ro
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    networks:
+      - app_net
+    depends_on:
+      redis:
+        condition: service_healthy
+    cpus: "0.03"
+    mem_limit: 32m
+
+  execution-redis:
+    image: redis:7.4-alpine
+    user: "999:999"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "/usr/local/etc/redis/execution-redis.conf"]
+    volumes:
+      - ./redis/execution-redis.conf:/usr/local/etc/redis/execution-redis.conf:ro
+      - execution_redis_e2e_data:/data
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    networks:
+      - execution_net
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(redis-cli --raw PING)" = PONG &&
+          redis-cli --raw INFO persistence | grep -q '^aof_enabled:1' &&
+          redis-cli --raw INFO persistence | grep -q '^aof_last_write_status:ok'
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    cpus: "0.10"
+    mem_limit: 128m
+
+  execution-redis-drain-init:
+    image: redis:7.4-alpine
+    user: "999:999"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    command:
+      - /bin/sh
+      - -ec
+      - >-
+        test "$$(redis-cli -h execution-redis --raw DBSIZE)" = 0;
+        test "$$(redis-cli -h execution-redis --raw --eval /scripts/durable_agent_v2_drain_index_initialize.lua)" = initialized;
+        test "$$(redis-cli -h execution-redis --raw GET inkforge:executions:drain:index-version)" = 1
+    volumes:
+      - ../scripts/durable_agent_v2_drain_index_initialize.lua:/scripts/durable_agent_v2_drain_index_initialize.lua:ro
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    networks:
+      - execution_net
+    depends_on:
+      execution-redis:
+        condition: service_healthy
+    cpus: "0.03"
+    mem_limit: 32m
+
+  e2e-control:
+    build:
+      context: ..
+      dockerfile: infra/docker/agent-service.Dockerfile
+    image: inkforge-agent-service:${E2E_IMAGE_TAG:-durable-v2-e2e}
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - uvicorn
+      - control_app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --workers
+      - "1"
+      - --no-access-log
+    environment:
+      ENVIRONMENT: test
+      PYTHONPATH: /e2e
+      E2E_EXECUTION_CONTROL_TOKEN: ${E2E_EXECUTION_CONTROL_TOKEN:?必须配置随机测试控制令牌}
+      E2E_CORE_UPSTREAM: http://core-api:8000
+      E2E_AGENT_UPSTREAM: http://agent-service:8001
+      E2E_CONTROL_DATABASE: /data/control.db
+    ports:
+      - "127.0.0.1:${E2E_CONTROL_PORT:?必须配置本地控制端口}:8090"
+    volumes:
+      - ../tests/durable_agent_v2_e2e:/e2e:ro
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /data:size=16m,uid=10001,gid=10001
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health/live', timeout=2)"]
+      interval: 2s
+      timeout: 10s
+      retries: 20
+    cpus: "0.10"
+    mem_limit: 96m
+
+  agent-service:
+    build:
+      context: ..
+      dockerfile: infra/docker/agent-service.Dockerfile
+    image: inkforge-agent-service:${E2E_IMAGE_TAG:-durable-v2-e2e}
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - uvicorn
+      - agent_app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --workers
+      - "1"
+      - --no-access-log
+    environment:
+      PYTHONPATH: /e2e
+      ENVIRONMENT: test
+      MODEL_PROVIDER: fake
+      OPENAI_API_KEY: ""
+      AGENT_MAX_CONCURRENCY: "1"
+      MODEL_MAX_OUTPUT_TOKENS: "384000"
+      REDIS_URL: redis://redis:6379/0
+      EXECUTION_REDIS_URL: redis://execution-redis:6379/0
+      EXECUTION_TERMINAL_RETENTION_HOURS: "24"
+      TRUSTED_CORE_CIDRS: 172.16.0.0/12
+      CORE_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/core-to-agent-jwks.json
+      AGENT_SERVICE_PRIVATE_KEY_PATH: /run/inkforge-keys/agent-to-core-private.pem
+      AGENT_SERVICE_KEY_ID: agent-service-v1
+      CORE_API_URL: http://e2e-control:8090
+      WORKFLOW_HUMAN_LOG_DIR: /data/agent-logs
+      E2E_EXECUTION_CONTROL_URL: http://e2e-control:8090
+      E2E_EXECUTION_CONTROL_TOKEN: ${E2E_EXECUTION_CONTROL_TOKEN:?必须配置随机测试控制令牌}
+      RAG_INDEX_ENABLED: "false"
+      SEEDANCE_ENABLED: "false"
+    volumes:
+      - ../tests/durable_agent_v2_e2e:/e2e:ro
+      - ${E2E_KEYS_DIR:?必须配置临时服务密钥目录}/core-to-agent-jwks.json:/run/inkforge-keys/core-to-agent-jwks.json:ro
+      - ${E2E_KEYS_DIR:?必须配置临时服务密钥目录}/agent-to-core-private.pem:/run/inkforge-keys/agent-to-core-private.pem:ro
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /data/agent-logs:size=16m,uid=10001,gid=10001
+    networks:
+      - app_net
+      - execution_net
+    depends_on:
+      redis:
+        condition: service_healthy
+      execution-redis:
+        condition: service_healthy
+      redis-drain-init:
+        condition: service_completed_successfully
+      execution-redis-drain-init:
+        condition: service_completed_successfully
+      e2e-control:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/internal/v1/health/ready', timeout=2)"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+    cpus: "0.65"
+    mem_limit: 640m
+
+  core-api:
+    build:
+      context: ..
+      dockerfile: infra/docker/core-api.Dockerfile
+    image: inkforge-core-api:${E2E_IMAGE_TAG:-durable-v2-e2e}
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      ENVIRONMENT: test
+      JAVA_TOOL_OPTIONS: >-
+        -Xms64m -Xmx176m -XX:MaxMetaspaceSize=112m
+        -XX:ReservedCodeCacheSize=32m -XX:MaxDirectMemorySize=24m
+        -Xss512k -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+      DATABASE_URL: postgresql://inkforge_e2e:${E2E_POSTGRES_PASSWORD:?必须配置随机测试数据库密码}@postgres:5432/novelwriterdev
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${E2E_JWT_SECRET:?必须配置随机测试 JWT 密钥}
+      ALLOW_INSECURE_HTTP_AUTH: "true"
+      USERNAME_REGISTRATION_ENABLED: "true"
+      PHONE_AUTH_ENABLED: "false"
+      PHONE_AUTH_SEND_ENABLED: "false"
+      TRUSTED_PROXY_CIDRS: 172.16.0.0/12
+      AGENT_SERVICE_CIDRS: 172.16.0.0/12
+      CORE_SERVICE_PRIVATE_KEY_PATH: /run/inkforge-keys/core-to-agent-private.pem
+      CORE_SERVICE_KEY_ID: core-api-v1
+      AGENT_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/agent-to-core-jwks.json
+      AGENT_SERVICE_URL: http://e2e-control:8090
+      AGENT_MAX_CONCURRENCY: "1"
+      UPLOADS_ROOT: /data/uploads
+      RAG_INDEX_ENABLED: "false"
+      VIDEO_PREVIEW_ENABLED: "false"
+      VIDEO_DISPATCH_ENABLED: "false"
+      SEEDANCE_CONFIGURED: "false"
+      SEEDANCE_ENABLED: "false"
+      DURABLE_AGENT_EXECUTION_SCHEMA_READY: "true"
+      DURABLE_AGENT_EXECUTION_ROUTE_MODE: ${E2E_DURABLE_ROUTE_MODE:-off}
+      DURABLE_AGENT_EXECUTION_USER_ALLOWLIST: ${E2E_DURABLE_USER_ID:-bootstrap-disabled-user}
+      DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST: ${E2E_DURABLE_NOVEL_ID:-bootstrap-disabled-novel}
+      DURABLE_AGENT_RELEASE_GUARD_PATH: /run/inkforge-release-guard/guard.json
+    ports:
+      - "127.0.0.1:${E2E_CORE_PORT:?必须配置本地 Core 端口}:8000"
+    volumes:
+      - ${E2E_KEYS_DIR:?必须配置临时服务密钥目录}/core-to-agent-private.pem:/run/inkforge-keys/core-to-agent-private.pem:ro
+      - ${E2E_KEYS_DIR:?必须配置临时服务密钥目录}/agent-to-core-jwks.json:/run/inkforge-keys/agent-to-core-jwks.json:ro
+      - ${E2E_RELEASE_GUARD_DIR:?必须配置临时 release guard 目录}:/run/inkforge-release-guard:ro
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /data/uploads:size=16m,uid=10001,gid=10001
+    networks:
+      - app_net
+      - data_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      agent-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "3", "http://127.0.0.1:8000/api/v1/health/ready"]
+      interval: 2s
+      timeout: 4s
+      retries: 45
+    cpus: "0.45"
+    mem_limit: 448m
+
+networks:
+  app_net:
+  data_net:
+    internal: true
+  execution_net:
+    internal: true
+
+volumes:
+  postgres_e2e_data:
+  execution_redis_e2e_data:

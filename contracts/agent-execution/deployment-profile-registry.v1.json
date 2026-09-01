@@ -2,6 +2,63 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "deployment.editor.answer.v1",
+      "version": 1,
+      "supported": true,
+      "purpose": "generation",
+      "allowedModels": [
+        {
+          "provider": "fake",
+          "model": "fake",
+          "transportProfile": "transport.fake.v1",
+          "endpointProfile": "endpoint.local-fake.v1",
+          "structuredOutputRoute": "responses_json_schema_v1",
+          "capabilityVersion": "capability.fake.structured-output.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": true,
+          "allowedEnvironments": [
+            "dev",
+            "test"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": false
+        },
+        {
+          "provider": "openai_compatible",
+          "model": "deepseek-v4-flash",
+          "transportProfile": "transport.deepseek-v4.v1",
+          "endpointProfile": "endpoint.deepseek-official.v1",
+          "structuredOutputRoute": "chat_json_output_v1",
+          "capabilityVersion": "capability.deepseek-v4.chat-json.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": false,
+          "allowedEnvironments": [
+            "dev",
+            "test",
+            "production"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": true
+        },
+        {
+          "provider": "openai_compatible",
+          "model": "deepseek-v4-flash",
+          "transportProfile": "transport.deepseek-v4.v1",
+          "endpointProfile": "endpoint.deepseek-custom.v1",
+          "structuredOutputRoute": "chat_json_output_v1",
+          "capabilityVersion": "capability.deepseek-v4.chat-json.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": false,
+          "allowedEnvironments": [
+            "dev",
+            "test"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": true
+        }
+      ]
+    },
+    {
       "key": "deployment.reviewer.consistency.v1",
       "version": 1,
       "supported": true,
