@@ -173,6 +173,34 @@ execution journal/replayer/service 与 queue repository 五个关键源码逐一
 脱敏事实哈希完全一致；清理后容器、网络和卷残留均为零。该结果把本地隔离 Fake Provider 的完整 `minimum` 矩阵闭环，
 但报告仍明确标记 `twoCoreTwoGiBHostGate=not_proven`，不代表真实供应商、开发/生产环境或真实 2 核 2 GB 整机验收已经完成。
 
+### Core 重启跨租约的精确回归分支
+
+2026-09-04 章节规划接入后的额外问答回归
+`output/durable-agent-v2-e2e/20260904T120154Z-52fbf9c0/report.json` 在前三场景通过后，于 Core 重启场景被旧
+`attemptCount=1/fencingToken=1` 固定断言拒绝。报告中同一 Run/Step 的两次 submit 间隔约 30.483 秒，fence 从
+1 变为 2、job 改变，requestHash/resultHash 不变；Provider 物理调用仍为一次，唯一 reservation/TokenUsage 已结算，
+最终新 fence 回调被接受且 journal 为 delivered。该报告继续保留为 failed，不能补写缺失的 Step 状态证明。
+
+为区分合法耐久重绑与重复执行，后续仅 Core 重启场景可进入显式的第二分支，其余场景保持一次派发断言：
+
+- 正常分支仍要求 attempt/fence 都为 1；换租约分支只允许精确的两次 submit：同 Run/Step/requestHash，
+  fence 为 1→2，不同 job，最终 attempt/fence 都为 2。不得泛化为任意正整数或无限重派。
+- 两分支都必须保持 Provider 物理/完成次数为 1、providerAttempts 为 1、相同 resultHash、唯一消息/事件/计费，
+  最终 Core Step、合法 accepted/duplicate callback 与 delivered journal 的身份精确一致。
+  已由两次 submit 证明合法重绑时，旧身份只能返回同哈希、身份完全匹配的 stale/superseded 等非物化回执，
+  不能以旧身份 accepted/duplicate 冒充最终提交。
+- 重启前被控制器挂起的请求可能因旧服务令牌过期返回 401；仅允许已有相同身份 held 记录可配对的旧请求，
+  401 数量不能多于 held 数量。未知身份、没有 held 的 401、其他非法回执、新 fence 的错误均不得放过。
+- 在上述业务断言前保存完整脱敏数据库结构事实，仍不保存正文/令牌；不调整生产租约、鉴权或重试策略来使测试通过。
+
+此分支只有新增负例门禁与重新运行成功后才能宣称验收通过；它不改变生产代码，也不代替其他重派故障矩阵。
+
+修正后 `test_run_e2e.py` 的 50 项测试通过，覆盖未配对/新身份 401、旧身份成功回执、第三 fence、缺 submit、
+不同 job/hash 和重复副作用等负例；独立复核确认普通场景的严格一次派发规则未变。随后
+`output/durable-agent-v2-e2e/20260904T121154Z-c0d8dff9/report.json` 重新通过完整 `minimum` 五场景与 AOF 重启，
+供应商集合与 PostgreSQL 脱敏事实哈希前后相同，清理后三类资源均为零。本次成功报告中 Core 重启实际走的是
+`attempt=1/fence=1` 分支，不能把它宣传为一次新的动态 `1→2` 成功报告；合法重绑分支另有上述定向正反测试。
+
 Java Core 实际 `ExecutionStepRequest` 还必须经过独立跨语言 wire golden：Java 从隔离 PostgreSQL fixture 领取
 `answer_question` Step，并由生产 `ObjectMapper` 写入临时 JSON；Python 只能使用
 `ExecutionStepRequest.model_validate_json` 严格校验。422 诊断代理只记录请求 SHA、资源身份和

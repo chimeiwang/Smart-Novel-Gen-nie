@@ -12,6 +12,7 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
 )
 from inkforge_agents.providers.fake import FakeModelProvider
+from inkforge_contracts import EvaluationFinding
 
 
 class ControlledFakeModelProvider:
@@ -63,6 +64,20 @@ class ControlledFakeModelProvider:
         )
         response.raise_for_status()
         result = await self._delegate.complete_turn(request)
+        if request.policy.policyId == "reviewer.chapter_plan_editorial.v1":
+            decision = await self._http.post(
+                "/control/provider/chapter-plan-review-decision",
+                json={
+                    "idempotencyKey": idempotency_key,
+                    "requestSha256": request_sha256,
+                },
+            )
+            decision.raise_for_status()
+            verdict = decision.json().get("contentVerdict")
+            if verdict == "issues_found":
+                result = _chapter_plan_revision(request, result)
+            elif verdict != "pass":
+                raise ValueError("E2E 章节规划复审控制结论无效")
         completed = await self._http.post(
             "/control/provider/completed",
             json={
@@ -75,3 +90,57 @@ class ControlledFakeModelProvider:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+def _chapter_plan_revision(request: ModelTurnRequest, result: ModelTurnResult) -> ModelTurnResult:
+    """仅在内存读取真实冻结证据身份；控制器与诊断不接收候选正文。"""
+
+    envelopes = [
+        json.loads(message.content) for message in request.messages if message.role == "user"
+    ]
+    if len(envelopes) != 1 or not isinstance(envelopes[0], dict):
+        raise ValueError("E2E 章节规划复审缺少唯一执行信封")
+    envelope = envelopes[0]
+    if (envelope.get("workflow"), envelope.get("operation"), envelope.get("purpose")) != (
+        "long_serial",
+        "plan_chapter",
+        "review",
+    ):
+        raise ValueError("E2E 章节规划复审执行身份不匹配")
+    bundle = envelope.get("evidenceBundle")
+    items = bundle.get("items") if isinstance(bundle, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("E2E 章节规划复审缺少冻结 Evidence")
+    item = next(
+        (value for value in items if isinstance(value, dict) and value.get("exists") is True), None
+    )
+    if item is None:
+        raise ValueError("E2E 章节规划复审没有可引用证据")
+    finding = EvaluationFinding.model_validate(
+        {
+            "dimension": "chapter_plan.local",
+            "severity": "warning",
+            "claim": "隔离验收要求候选经过一次完整返工以突出人物主动选择。",
+            "evidence": [
+                {"evidenceItemId": item.get("id"), "contentSha256": item.get("contentSha256")}
+            ],
+            "suggestion": "保持冻结事实不变，完整重写规划并突出人物的主动选择。",
+            "confidence": 1.0,
+        }
+    )
+    output = {
+        "contentVerdict": "issues_found",
+        "findings": [finding.model_dump(mode="json")],
+    }
+    completion_tokens = len(json.dumps(output, ensure_ascii=False))
+    return result.model_copy(
+        update={
+            "structuredOutput": output,
+            "usage": result.usage.model_copy(
+                update={
+                    "completionTokens": completion_tokens,
+                    "totalTokens": result.usage.promptTokens + completion_tokens,
+                }
+            ),
+        }
+    )

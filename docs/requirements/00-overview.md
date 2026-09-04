@@ -717,8 +717,8 @@ schemaVersion 5，并保留固定 origin/profile、绑定用户名和既有 Keyc
 
 Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回退到明文；Windows 实机验收不属于
 本次 macOS 入口切换，Linux 仍不是受支持的生产凭据平台。Python CLI 源码及跨语言测试继续保留为契约对照，
-不作为新版 macOS Skill 的业务入口。本次未读取真实 token，未验收真实会话；本机入口切换不代表服务器
-Agent V2 已部署或生产问答已开放。
+不作为新版 macOS Skill 的业务入口。2026-09-04 已用新版生产入口和既有 Keychain 会话通过指定账号的
+`auth.whoami`，没有导出令牌；真实写作业务仍待验收。本机入口切换不代表服务器 Agent V2 已部署或生产问答已开放。
 生产 Operator 当前只支持无认证 HTTP 代理；TLS、SOCKS 或带认证代理明确拒绝，不会自动改为直连，
 具体环境变量规则见 Java CLI 文档。本地回环始终直连。
 
@@ -869,8 +869,8 @@ Agent V2 已部署或生产问答已开放。
 ### 14.5 自动化与平台
 
 - CLI 不是公共 API 全量镜像；
-- macOS Operator Skill 的 Java 实际入口已切换并完成离线验收；Python CLI 保留为契约对照，真实会话和
-  Windows 实机尚未验收；
+- macOS Operator Skill 的 Java 实际入口已切换并完成离线验收，生产既有会话的 `auth.whoami` 已通过；
+  Python CLI 保留为契约对照，真实写作业务和 Windows 实机尚未验收；
 - 生产是单机 2 核 2 GB 预算，不是多地域、高可用或水平扩展架构；
 - PostgreSQL schema 默认冻结，应用不能自动迁移；
 - 当前没有公开 Webhook、第三方插件市场或外部开发者 API 产品。

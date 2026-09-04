@@ -177,6 +177,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   只返回严格 `{"answer": string}`；不创建 Reviewer、Artifact、工具循环或 LangGraph 状态。问答仍完整经过
   deployment 授权、`preparing` 预留、累计 usage、journal、fence、取消和终态回放；会话消息 ID 与持久化只由
   Core 负责。
+- V2 `long_serial.plan_chapter` 的生成使用 `plot.chapter_plan.v1`，编辑复审使用
+  `reviewer.chapter_plan_editorial.v1`。Agent 只消费 Core 冻结的 `chapter_plan_context` JSON Evidence 和严格
+  PlanInput；返工使用同一 Evidence、上一候选/revision 与明确意见，不读工作区、不调用工具或 LangGraph。
+  Provider 只生成 title/summary/chapterGoal/sceneBeats 等语义字段，连续 order、beatCount、contentSha256
+  由程序派生并由 Core 复验。Core 持有候选、复审、最多一次自动完整返工和用户决定的编排及计费。
+  该 Operation 的本分支接入不表示其余 Catalog 占位项已实现，也不表示生产已经开放。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

@@ -18,6 +18,8 @@ import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistryFixtures;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
+import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
+import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
 import java.time.Clock;
 import java.time.Instant;
@@ -85,6 +87,84 @@ class JooqDurableReviewDecisionStoreTest {
     @AfterAll
     static void closeDatabase() {
         if (database != null) database.close();
+    }
+
+    @Test
+    void 章节计划批准单事务替换正式计划且重复请求不增场景不改正文() {
+        Fixture fixture = waitingArtifact("plan-approve", false, true);
+        var request = decision("plan-approve-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.APPROVE);
+        var response = reviews.decide(fixture.userId(), fixture.artifactId(), request);
+        assertThat(reviews.decide(fixture.userId(), fixture.artifactId(), request)).isEqualTo(response);
+        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ? AND status = 'approved'", fixture.chapterId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ? AND status = 'superseded'", fixture.chapterId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"SceneBeat\" WHERE \"beatPlanId\" IN (SELECT id FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ? AND status = 'approved')", fixture.chapterId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'user_decision'", fixture.runId())).isEqualTo(1);
+        assertThat(eventTypes(fixture.runId())).endsWith("applying", "completed");
+    }
+
+    @Test
+    void 章节计划详情从最小Revision重建完整计划来源与强ETag() {
+        Fixture fixture = waitingArtifact("plan-detail", false, true);
+        var detail = reviews.getDetail(fixture.userId(), fixture.artifactId(), 1, null);
+        assertThat(detail.response().getKind().getValue()).isEqualTo("beat_plan");
+        assertThat(detail.response().getPayload()).containsEntry("beatPlan", DurableBeatPlanArtifact.validateOutput(planOutput()));
+        assertThat(detail.response().getSourceBindings()).isNotEmpty();
+        assertThat(detail.response().getSourceBindings()).anySatisfy(source -> assertThat(source.getResourceType()).isEqualTo("chapter"));
+        assertThat(reviews.getDetail(fixture.userId(), fixture.artifactId(), 1, detail.etag()).notModified()).isTrue();
+        var stored = json.readTree(database.dsl().fetchOne("SELECT \"payloadJson\", \"diffJson\" FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", fixture.artifactId()).get("payloadJson", String.class));
+        assertThat(stored.has("source")).isFalse();
+        assertThat(stored.has("before")).isFalse();
+        assertThat(stored.has("plan")).isTrue();
+    }
+
+    @Test
+    void 章节计划显式返工绑定同Evidence完整计划和原始指令且丢弃保留审计() {
+        Fixture revise = waitingArtifact("plan-revise", false, true);
+        var request = decision("plan-revise-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("让第二个场景更清晰");
+        var response = reviews.decide(revise.userId(), revise.artifactId(), request);
+        assertThat(reviews.decide(revise.userId(), revise.artifactId(), request)).isEqualTo(response);
+        Record step = database.dsl().fetchOne("SELECT input, \"evidenceBundleId\", \"artifactId\", \"artifactRevision\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1", revise.runId());
+        assertThat(step.get("evidenceBundleId", String.class)).isEqualTo(revise.bundleId());
+        assertThat(json.readTree(step.get("input", String.class)).path("previousArtifact").path("payload")).isEqualTo(json.valueToTree(planOutput()));
+        assertThat(json.readTree(step.get("input", String.class)).path("targetWordCount").asInt()).isEqualTo(2500);
+        assertThat(json.readTree(step.get("input", String.class)).path("originalUserInstruction").asText()).isEqualTo("规划完整章节");
+        Fixture discard = waitingArtifact("plan-discard", false, true);
+        reviews.decide(discard.userId(), discard.artifactId(), decision("plan-discard-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.DISCARD));
+        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", discard.artifactId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ? AND status = 'approved'", discard.chapterId())).isEqualTo(1);
+        assertThat(chapterContent(discard.chapterId())).isEqualTo("甲😀乙");
+    }
+
+    @Test
+    void 章节计划来源漂移旧修订与正文编辑字段均拒绝且无正式副作用() {
+        Fixture fixture = waitingArtifact("plan-conflict", false, true);
+        var approve = decision("plan-conflict-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.APPROVE);
+        assertThatThrownBy(() -> reviews.decide(fixture.userId(), fixture.artifactId(), approve.editedReplacement("绕过计划")))
+                .isInstanceOf(ApiException.class).satisfies(error -> assertThat(((ApiException) error).code()).isEqualTo("VALIDATION_ERROR"));
+        approve.setEditedReplacement(org.openapitools.jackson.nullable.JsonNullable.undefined());
+        approve.setExpectedRevision(2);
+        assertThatThrownBy(() -> reviews.decide(fixture.userId(), fixture.artifactId(), approve)).isInstanceOf(ApiException.class);
+        approve.setExpectedRevision(1);
+        database.dsl().execute("UPDATE public.\"ChapterBeatPlan\" SET \"chapterGoal\" = '来源已变化但保留同timestamp' WHERE \"chapterId\" = ?", fixture.chapterId());
+        assertThatThrownBy(() -> reviews.decide(fixture.userId(), fixture.artifactId(), approve))
+                .isInstanceOf(ApiException.class).satisfies(error -> assertThat(((ApiException) error).code()).isEqualTo("ARTIFACT_SOURCE_VERSION_CONFLICT"));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'user_decision'", fixture.runId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ?", fixture.chapterId())).isEqualTo(1);
+        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
+    }
+
+    private static Map<String, Object> planOutput() {
+        Map<String, Object> firstScene = new LinkedHashMap<>(Map.of("order", 1, "goal", "面对冲突😀", "estimatedWords", 1000));
+        firstScene.put("acceptanceCriteria", null);
+        firstScene.put("conflict", null);
+        firstScene.put("foreshadowingRefs", null);
+        Map<String, Object> output = new LinkedHashMap<>(Map.of("title", "完整章节😀计划", "summary", "保留完整计划摘要",
+                "chapterGoal", "围绕角色抉择推动章节", "totalEstimatedWords", 2500, "beatCount", 2,
+                "sceneBeats", List.of(firstScene,
+                        Map.of("order", 2, "goal", "作出抉择", "estimatedWords", 1500, "acceptanceCriteria", "明确付出代价"))));
+        output.put("contentSha256", ExecutionCanonicalJson.sha256(output));
+        return output;
     }
 
     @Test
@@ -420,6 +500,10 @@ class JooqDurableReviewDecisionStoreTest {
     }
 
     private static Fixture waitingArtifact(String prefix, boolean reviewers) {
+        return waitingArtifact(prefix, reviewers, false);
+    }
+
+    private static Fixture waitingArtifact(String prefix, boolean reviewers, boolean beatPlan) {
         String userId = prefix + "-user";
         String novelId = prefix + "-novel";
         String chapterId = prefix + "-chapter";
@@ -466,13 +550,30 @@ class JooqDurableReviewDecisionStoreTest {
                 NOW,
                 NOW);
         ExecutionRegistry.ResolvedOperation operation = registry.resolve(
-                "long_serial.rewrite_chapter_selection", false);
+                beatPlan ? "long_serial.plan_chapter" : "long_serial.rewrite_chapter_selection", false);
         String selectedHash = ReviewArtifactRules.sha256("😀");
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("selectionStart", 1);
         input.put("selectionEnd", 2);
         input.put("selectedTextSha256", selectedHash);
         input.put("userInstruction", "改写这个表情");
+        if (beatPlan) {
+            input.clear();
+            input.put("userInstruction", "规划完整章节");
+            input.put("targetWordCount", 2500);
+            database.dsl().execute("""
+                    INSERT INTO public."ChapterBeatPlan" (id, "chapterId", status, "chapterGoal", "createdAt", "updatedAt")
+                    VALUES (?, ?, 'approved', '旧正式计划', ?, ?)
+                    """, prefix + "-previous-plan", chapterId, NOW, NOW);
+        }
+        List<WorkflowEvidenceItemPlan> evidenceItems = beatPlan
+                ? List.of(new WorkflowEvidenceItemPlan("chapter_plan_context", chapterId, true, null,
+                        DatabaseTimestamp.api(NOW), null,
+                        new JooqChapterPlanEvidenceReader(json).capture(database.dsl(), novelId, chapterId, "规划完整章节").context(),
+                        null, null, Map.of("role", "chapter_plan_context")))
+                : List.of(new WorkflowEvidenceItemPlan("chapter_content", chapterId, true, null,
+                        DatabaseTimestamp.api(NOW), "甲😀乙", null, 1, 2, Map.of("role", "selection_source",
+                        "baseContentHash", ReviewArtifactRules.sha256("甲😀乙"), "selectedTextHash", selectedHash)));
         var started = starts.start(new WorkflowStartPlan(
                 userId,
                 prefix + "-start-client-0001",
@@ -488,20 +589,7 @@ class JooqDurableReviewDecisionStoreTest {
                 chapterId,
                 input,
                 operation.operation().evidencePolicy(),
-                List.of(new WorkflowEvidenceItemPlan(
-                        "chapter_content",
-                        chapterId,
-                        true,
-                        null,
-                        DatabaseTimestamp.api(NOW),
-                        "甲😀乙",
-                        null,
-                        1,
-                        2,
-                        Map.of(
-                                "role", "selection_source",
-                                "baseContentHash", ReviewArtifactRules.sha256("甲😀乙"),
-                                "selectedTextHash", selectedHash))),
+                evidenceItems,
                 operation.operation().runBudget(),
                 ExecutionPlanSnapshot.freeze(
                         registry.catalogVersion(), registry.manifestFingerprint(), operation),
@@ -535,13 +623,21 @@ class JooqDurableReviewDecisionStoreTest {
                 ReviewArtifactRules.sha256("甲模型改写乙"),
                 started.stepId(),
                 "a".repeat(64));
+        Map<String, Object> storedPayload = stored.payload();
+        Map<String, Object> storedDiff = stored.diff();
+        if (beatPlan) {
+            String manifestHash = database.dsl().fetchOne("SELECT \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ?", bundleId).get(0, String.class);
+            var plan = DurableBeatPlanArtifact.create(bundleId, manifestHash, chapterId, planOutput(), started.stepId(), "a".repeat(64));
+            storedPayload = plan.payload();
+            storedDiff = plan.diff();
+        }
         database.dsl().execute(
                 """
                 INSERT INTO public."ReviewArtifact" (
                   id, "novelId", "chapterId", "taskId", "workflowRunId", "artifactKey",
                   kind, status, title, "payloadJson", "diffJson", "createdByAgent",
                   "updatedByAgent", revision, "createdAt", "updatedAt"
-                ) VALUES (?, ?, ?, NULL, ?, ?, CAST('chapter_draft' AS "ReviewArtifactKind"),
+                ) VALUES (?, ?, ?, NULL, ?, ?, CAST(? AS "ReviewArtifactKind"),
                   CAST('awaiting_user' AS "ReviewArtifactStatus"), '章节选区改写', ?, ?,
                   'writer.chapter_selection.v1', 'writer.chapter_selection.v1', 1, ?, ?)
                 """,
@@ -550,8 +646,9 @@ class JooqDurableReviewDecisionStoreTest {
                 chapterId,
                 started.runId(),
                 "workflow:" + started.runId() + ":candidate",
-                json.writeValueAsString(stored.payload()),
-                json.writeValueAsString(stored.diff()),
+                beatPlan ? "beat_plan" : "chapter_draft",
+                json.writeValueAsString(storedPayload),
+                json.writeValueAsString(storedDiff),
                 NOW,
                 NOW);
         database.dsl().execute(
@@ -562,8 +659,8 @@ class JooqDurableReviewDecisionStoreTest {
                 """,
                 prefix + "-revision-1",
                 artifactId,
-                json.writeValueAsString(stored.payload()),
-                json.writeValueAsString(stored.diff()),
+                json.writeValueAsString(storedPayload),
+                json.writeValueAsString(storedDiff),
                 NOW);
         database.dsl().execute(
                 """

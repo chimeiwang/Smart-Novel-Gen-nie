@@ -73,6 +73,25 @@ describe("ReviewArtifact contract", () => {
     );
   });
 
+  it("V2 章节规划完整保留有序节拍且无需选区目标", () => {
+    const beatPlan = {
+      title: "隔离章节规划",
+      summary: "人物核对现有事实后，为下一步行动作出选择。",
+      chapterGoal: "让人物通过可观察的行动确认当前处境。",
+      totalEstimatedWords: 1000,
+      sceneBeats: [
+        { order: 1, goal: "核对线索", characters: [], estimatedWords: 500 },
+        { order: 2, goal: "作出选择", characters: [], estimatedWords: 500 },
+      ],
+    };
+    const parsed = ReviewArtifactPayloadSchema.parse({
+      kind: "beat_plan",
+      beatPlan,
+    });
+    assert.deepEqual(parsed, { kind: "beat_plan", beatPlan });
+    assert.equal("target" in parsed, false);
+  });
+
   it("Artifact DTO 必须显式携带与 Run 归属一致的 engineVersion", () => {
     const base = {
       id: "artifact-1",

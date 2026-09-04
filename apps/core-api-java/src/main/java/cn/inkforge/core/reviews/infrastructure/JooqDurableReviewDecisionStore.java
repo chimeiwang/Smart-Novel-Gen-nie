@@ -20,6 +20,7 @@ import cn.inkforge.core.reviews.domain.ReviewDecisionIdentity;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
+import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -125,13 +126,17 @@ final class JooqDurableReviewDecisionStore {
         requireActionable(locked, request.getExpectedRevision());
         ExecutionPlanSnapshot executionPlan = executionPlan(locked.run());
         requireSupported(locked, executionPlan);
-        Source source = lockAndVerifySource(transaction, locked);
-        Revision revision = exactRevision(locked, source);
+        boolean beatPlan = "beat_plan".equals(locked.kind());
+        if (beatPlan && nullable(request.getEditedReplacement()) != null) {
+            throw new ApiException(422, "VALIDATION_ERROR", "章节计划批准不接受正文替换；请提交返工指令");
+        }
+        Source source = beatPlan ? null : lockAndVerifySource(transaction, locked);
+        Revision revision = beatPlan ? exactPlanRevision(transaction, locked) : exactRevision(locked, source);
         LocalDateTime now = DatabaseTimestamp.now(clock);
         String decision = request.getDecision().getValue();
 
         if ("approve".equals(decision)) {
-            Revision applied = editedRevision(
+            Revision applied = beatPlan ? revision : editedRevision(
                     transaction,
                     locked,
                     revision,
@@ -162,7 +167,7 @@ final class JooqDurableReviewDecisionStore {
                             locked.artifactKey(),
                             locked.kind(),
                             applied.number(),
-                            applied.payload()),
+                            beatPlan ? formalPlanPayload(applied.payload()) : applied.payload()),
                     request);
             transitionArtifact(transaction, artifactId, "applying", "applied", now, true);
             sequence = appendEvent(
@@ -238,7 +243,7 @@ final class JooqDurableReviewDecisionStore {
         if (runId == null) throw forbidden();
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "userId", "novelId", "chapterId", workflow, operation,
+                SELECT id, "userId", "novelId", "chapterId", workflow, operation, input,
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "currentEvidenceBundleId",
                        "lastEventSequence", revision, "cancelRequestedAt"
@@ -302,21 +307,23 @@ final class JooqDurableReviewDecisionStore {
 
     private static void requireSupported(
             Locked locked, ExecutionPlanSnapshot executionPlan) {
-        boolean supported = "long_serial".equals(locked.run().get("workflow", String.class))
-                && "rewrite_chapter_selection"
+        boolean operation = "rewrite_chapter_selection"
                         .equals(locked.run().get("operation", String.class))
                 && "chapter_draft".equals(locked.kind())
+                && "long_serial.rewrite_chapter_selection".equals(executionPlan.operation().key())
+                && "apply.chapter_selection.v1".equals(executionPlan.operation().applyHandler());
+        operation |= "plan_chapter".equals(locked.run().get("operation", String.class))
+                && "beat_plan".equals(locked.kind())
+                && "long_serial.plan_chapter".equals(executionPlan.operation().key())
+                && "apply.beat_plan.v1".equals(executionPlan.operation().applyHandler());
+        boolean supported = operation && "long_serial".equals(locked.run().get("workflow", String.class))
                 && locked.artifact().get("taskId", String.class) == null
                 && Objects.equals(
                         locked.run().get("novelId", String.class),
                         locked.artifact().get("novelId", String.class))
                 && Objects.equals(
                         locked.run().get("chapterId", String.class),
-                        locked.artifact().get("chapterId", String.class))
-                && "long_serial.rewrite_chapter_selection"
-                        .equals(executionPlan.operation().key())
-                && "apply.chapter_selection.v1"
-                        .equals(executionPlan.operation().applyHandler());
+                        locked.artifact().get("chapterId", String.class));
         if (!supported) {
             throw new ApiException(
                     409,
@@ -388,6 +395,49 @@ final class JooqDurableReviewDecisionStore {
                 selectedHash,
                 ReviewArtifactRules.slice(current, 0, start),
                 ReviewArtifactRules.slice(current, end, length));
+    }
+
+    private Revision exactPlanRevision(DSLContext transaction, Locked locked) {
+        Map<String, Object> payload = readObject(locked.revision().get("payloadJson", String.class));
+        Map<String, Object> diff = readObject(locked.revision().get("diffJson", String.class));
+        requireHeadMatches(locked, payload, diff);
+        DurableChapterPlanReviewEvidence evidence = DurableChapterPlanReviewEvidence.read(transaction,
+                json, locked.runId(), sourceBundleId(locked), locked.chapterId());
+        String instruction = readObject(locked.run().get("input", String.class)).get("userInstruction") instanceof String value
+                ? value : null;
+        var current = new JooqChapterPlanEvidenceReader(json).capture(
+                transaction, locked.novelId(), locked.chapterId(), instruction);
+        if (!ExecutionCanonicalJson.sha256(evidence.context()).equals(ExecutionCanonicalJson.sha256(current.context()))) {
+            throw new ApiException(409, "ARTIFACT_SOURCE_VERSION_CONFLICT", "章节计划的冻结来源已变化",
+                    Map.of("resourceType", "chapter_plan_context", "resourceId", locked.chapterId()));
+        }
+        DurableBeatPlanArtifact.Materialized materialized = DurableBeatPlanArtifact.reconstruct(payload,
+                diff, evidence.bundleId(), evidence.manifestHash(), locked.chapterId());
+        return new Revision(locked.revision().get("revision", Integer.class),
+                materialized.payload(), materialized.diff(), payload, diff);
+    }
+
+    private void requireHeadMatches(Locked locked, Map<String, Object> storedPayload, Map<String, Object> storedDiff) {
+        if (!storedPayload.equals(readObject(locked.artifact().get("payloadJson", String.class)))
+                || !storedDiff.equals(readObject(locked.artifact().get("diffJson", String.class)))) {
+            throw new ApiException(409, "ARTIFACT_REVISION_HEAD_INCONSISTENT", "待审核草案 head 与精确修订事实不一致");
+        }
+    }
+
+    private static Map<String, Object> formalPlanPayload(Map<String, Object> payload) {
+        Map<String, Object> plan = new LinkedHashMap<>(map(payload.get("beatPlan"), "beatPlan"));
+        List<Map<String, Object>> scenes = new ArrayList<>();
+        for (Object value : (List<?>) plan.get("sceneBeats")) {
+            Map<String, Object> scene = new LinkedHashMap<>(map(value, "sceneBeat"));
+            // V2 Schema 的显式 null 与省略都表示沿用 goal；旧正式 writer 仅接受省略。
+            // 只调整单次调用的映射，候选 revision、详情与完整性 hash 始终保留原始 null。
+            if (scene.get("acceptanceCriteria") == null) scene.remove("acceptanceCriteria");
+            scenes.add(scene);
+        }
+        plan.put("sceneBeats", scenes);
+        Map<String, Object> result = new LinkedHashMap<>(payload);
+        result.put("beatPlan", plan);
+        return result;
     }
 
     private Revision exactRevision(Locked locked, Source source) {
@@ -630,10 +680,15 @@ final class JooqDurableReviewDecisionStore {
                 : null;
         input.put("originalUserInstruction", originalInstruction);
         input.put("userInstruction", nullable(request.getUserMessage()));
-        input.put("previousCandidate", Map.of(
-                "artifactId", locked.artifactId(),
-                "artifactRevision", revision.number(),
-                "replacement", string(revision.payload(), "replacement")));
+        if ("beat_plan".equals(locked.kind())) {
+            input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
+                    "artifactRevision", revision.number(), "payload", DurableBeatPlanArtifact.output(revision.storedPayload())));
+        } else {
+            input.put("previousCandidate", Map.of(
+                    "artifactId", locked.artifactId(),
+                    "artifactRevision", revision.number(),
+                    "replacement", string(revision.payload(), "replacement")));
+        }
         String inputHash = ExecutionCanonicalJson.sha256(input);
         String stepId = ids.next();
         String idempotencyKey = locked.runId() + "." + stepId;

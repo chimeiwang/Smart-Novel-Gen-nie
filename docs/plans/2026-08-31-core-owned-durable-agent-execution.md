@@ -121,7 +121,9 @@
   拒绝迟到会话响应；问答完成不刷新 ReviewArtifact，活动项显示“章节问答”；
 - [ ] `answer_question` 通过跨进程故障注入、真实供应商低额度预发布与生产交集 allowlist canary；
 - [ ] review_chapter；
-- [ ] plan_chapter；
+- [x] `plan_chapter` 仓内接线：严格结构化计划、同 Evidence 生成/编辑复审、一次耐久自动返工、作者决定及
+  正式 Beat Plan 应用；独立 Compose 五场景通过，详见 `docs/specs/2026-09-04-durable-chapter-planning.md`；
+- [ ] `plan_chapter` 真实供应商、开发及生产 canary；本地 Fake 通过不代替这些结果；
 - [ ] write_chapter / rewrite_scene；
 - [ ] rewrite_outline_selection；
 - [ ] create_lore / revise_lore；
@@ -186,16 +188,20 @@
 
 ## Task 9：全量验证和预发布
 
-- [x] `./mvnw verify`：5/5 reactor 全部通过；结果包含本轮 Java release guard 移除，随后跨语言 wire golden
-  又以 PostgreSQL Testcontainer 定向验证真实 Java `ExecutionStepRequest`；
-- [x] Agent/共享包及根 Python 全量 pytest、Ruff、Mypy：最新根套件 4041 passed、3 个外部条件 skip，Mypy
+- [x] `./mvnw verify`：5/5 reactor 全部通过；章节规划阶段最新 Core 667 项（3 skip）、CLI 108 项无失败；
+  此前跨语言 wire golden 已以 PostgreSQL Testcontainer 验证真实 Java `ExecutionStepRequest`，本阶段另有
+  规划生成/复审/返工的真实跨进程请求验收；
+- [x] Agent/共享包及根 Python 全量 pytest、Ruff、Mypy：最新根套件 4156 passed、3 个外部条件 skip，Mypy
   280 files、Ruff 全绿；
-- [x] Web 全量测试、typecheck、lint、API check 和生产构建通过：Web 322 tests、生成客户端 3 tests；
+- [x] Web 全量测试、typecheck、lint、API check 和生产构建通过：Web 324 tests、生成客户端 3 tests；
 - [x] 架构、迁移、Compose 静态检查和本地 E2E harness 回归通过；
 - [x] 当前首开 `long_serial.answer_question` 的完整 Compose `minimum` E2E 已通过；五个场景覆盖成功/幂等、
   callback 已提交后丢回执、Agent/Core 重启、submit 前取消和 execution Redis AOF 重启，报告为
-  `output/durable-agent-v2-e2e/20260904T091808Z-67a649f1/report.json`。历史三份 failed 报告继续保留；
+  `output/durable-agent-v2-e2e/20260904T121154Z-c0d8dff9/report.json`。本次在章节规划新镜像上复验；
+  先前成功报告与所有 failed 报告继续保留，Core 重启的精确租约分支见 Compose E2E spec；
 - [ ] 后续每个新增 V2 Operation 仍须补自己的完整 Compose E2E，不能沿用问答结果冒充；
+- [x] `plan_chapter` 独立 Compose：生成/复审、Core 重启、批准/丢弃、作者和自动返工、幂等、submit 前取消；
+  报告 `output/durable-agent-v2-e2e/20260904T115848Z-e21d37f9/report.json`，仍不代表真实模型及整机资源验收；
 - [ ] 每个昂贵边界的重启和网络故障注入；
 - [ ] 执行本计划末尾“生命周期协议专项测试清单”并保存逐项证据；
 - [ ] 三车道公平调度、2 核 2 GB、448 MiB Core 资源验证；

@@ -19,15 +19,156 @@
     {
       "key": "output.beat_plan.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "purpose": "generation",
-      "sha256": "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5",
+      "sha256": "711ef3169c19c540e5ac2dd7a25da87d510cc527fadf33b6331929a19f2be0cd",
       "jsonSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
         "additionalProperties": false,
-        "required": [],
-        "properties": {}
+        "properties": {
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "chapterGoal": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "sceneBeats": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "goal": {
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "conflict": {
+                  "anyOf": [
+                    {
+                      "maxLength": 1000,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "characters": {
+                  "items": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                "foreshadowingRefs": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "\\S",
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "estimatedWords": {
+                  "anyOf": [
+                    {
+                      "maximum": 2147483647,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "acceptanceCriteria": {
+                  "anyOf": [
+                    {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "goal"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          },
+          "mainPlotConnection": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chapterAcceptanceCriteria": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "totalEstimatedWords": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "summary",
+          "chapterGoal",
+          "sceneBeats"
+        ],
+        "type": "object"
       }
     },
     {
@@ -60,7 +201,11 @@
         ],
         "properties": {
           "contentVerdict": {
-            "enum": ["pass", "issues_found", "cannot_assess"]
+            "enum": [
+              "pass",
+              "issues_found",
+              "cannot_assess"
+            ]
           },
           "findings": {
             "type": "array",
@@ -85,7 +230,11 @@
                   "pattern": "^[a-z][a-z0-9_.-]*$"
                 },
                 "severity": {
-                  "enum": ["info", "warning", "error"]
+                  "enum": [
+                    "info",
+                    "warning",
+                    "error"
+                  ]
                 },
                 "claim": {
                   "type": "string",
@@ -97,7 +246,10 @@
                     {
                       "type": "object",
                       "additionalProperties": false,
-                      "required": ["startCodePoint", "endCodePoint"],
+                      "required": [
+                        "startCodePoint",
+                        "endCodePoint"
+                      ],
                       "properties": {
                         "startCodePoint": {
                           "type": "integer",
@@ -121,7 +273,11 @@
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["evidenceItemId", "contentSha256", "range"],
+                    "required": [
+                      "evidenceItemId",
+                      "contentSha256",
+                      "range"
+                    ],
                     "properties": {
                       "evidenceItemId": {
                         "type": "string",
@@ -138,7 +294,10 @@
                           {
                             "type": "object",
                             "additionalProperties": false,
-                            "required": ["startCodePoint", "endCodePoint"],
+                            "required": [
+                              "startCodePoint",
+                              "endCodePoint"
+                            ],
                             "properties": {
                               "startCodePoint": {
                                 "type": "integer",
@@ -180,7 +339,9 @@
                   "const": "issues_found"
                 }
               },
-              "required": ["contentVerdict"]
+              "required": [
+                "contentVerdict"
+              ]
             },
             "then": {
               "properties": {

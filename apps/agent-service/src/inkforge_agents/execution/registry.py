@@ -1159,7 +1159,9 @@ def _validate_strict_output_schema(item: _OutputSchemaDocument) -> None:
         or schema.get("additionalProperties") is not False
         or not isinstance(properties, dict)
         or not isinstance(required, list)
-        or set(required) != set(properties)
+        # 严格闭合要求拒绝额外字段；章节规划的可选语义字段允许省略，不能误要求全部字段必填。
+        or len(required) != len(set(required))
+        or not set(required).issubset(properties)
     ):
         raise ExecutionRegistryReferenceError(f"Output Schema 不是严格闭合对象：{item.key}")
     if canonical_execution_sha256(schema) != item.sha256:

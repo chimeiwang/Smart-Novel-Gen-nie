@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, cast
 
@@ -143,6 +145,21 @@ def _read_json(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
+def test_execution_derived_manifest_and_planning_schema_have_no_drift() -> None:
+    result = subprocess.run(  # noqa: S603 -- 固定解释器只检查仓内派生资产，不联网不修改文件
+        [
+            sys.executable,
+            str(REPOSITORY_ROOT / "scripts/refresh_agent_execution_manifest.py"),
+            "--check",
+        ],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def _operations() -> list[dict[str, Any]]:
     value = _read_json(CATALOG_PATH)["operations"]
     assert isinstance(value, list)
@@ -219,6 +236,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
     enabled_keys = {operation["key"] for operation in operations if operation["v2Enabled"]}
     assert enabled_keys == {
         "long_serial.answer_question",
+        "long_serial.plan_chapter",
         "long_serial.rewrite_chapter_selection",
     }
     answer = next(
@@ -377,7 +395,7 @@ def test_every_registered_output_schema_is_strict_hash_bound_and_honest() -> Non
         assert schema["additionalProperties"] is False
         assert isinstance(schema["required"], list)
         assert isinstance(schema["properties"], dict)
-        assert set(schema["required"]) == set(schema["properties"])
+        assert set(schema["required"]) <= set(schema["properties"])
         assert item["sha256"] == _canonical_sha256(schema)
         jsonschema_rs.validator_for(schema)
 
@@ -469,6 +487,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
 
     assert [operation["key"] for operation in enabled] == [
         "long_serial.answer_question",
+        "long_serial.plan_chapter",
         "long_serial.rewrite_chapter_selection",
     ]
     for operation in enabled:
@@ -536,18 +555,28 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         assert output_schema["supported"] is True
         assert output_schema["purpose"] == "generation"
         assert output_schema["jsonSchema"]["properties"]
-        expected_output_field = (
-            "answer"
-            if operation["key"] == "long_serial.answer_question"
-            else "replacement"
-        )
-        assert output_schema["jsonSchema"]["required"] == [expected_output_field]
-        assert set(output_schema["jsonSchema"]["properties"]) == {expected_output_field}
-        assert output_schema["jsonSchema"]["properties"][expected_output_field] == {
-            "type": "string",
-            "minLength": 1,
-            "pattern": r"\S",
-        }
+        if operation["key"] == "long_serial.plan_chapter":
+            assert output_schema["jsonSchema"]["required"] == [
+                "title", "summary", "chapterGoal", "sceneBeats"
+            ]
+            scene = output_schema["jsonSchema"]["properties"]["sceneBeats"]["items"]
+            assert scene["additionalProperties"] is False
+            assert scene["required"] == ["goal"]
+            assert "order" not in scene["properties"]
+            assert "beatCount" not in output_schema["jsonSchema"]["properties"]
+        else:
+            expected_output_field = (
+                "answer"
+                if operation["key"] == "long_serial.answer_question"
+                else "replacement"
+            )
+            assert output_schema["jsonSchema"]["required"] == [expected_output_field]
+            assert set(output_schema["jsonSchema"]["properties"]) == {expected_output_field}
+            assert output_schema["jsonSchema"]["properties"][expected_output_field] == {
+                "type": "string",
+                "minLength": 1,
+                "pattern": r"\S",
+            }
 
         prompt_hashes = {
             profiles[operation["generatorProfile"]]["promptProfile"]: prompts[
@@ -560,7 +589,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 for profile_key in operation["reviewPolicy"]["reviewerProfiles"]
             },
         }
-        expected_prompt_count = 1 if not reviewers else 3
+        expected_prompt_count = 1 + len(reviewers)
         assert len(prompt_hashes) == expected_prompt_count
         assert len(set(prompt_hashes.values())) == expected_prompt_count
 
@@ -683,7 +712,8 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
         assert budget["maxVisibleOutputTokens"] <= 24000
 
     chapter_plan_budget = operations["long_serial.plan_chapter"]["runBudgetProfile"]
-    assert chapter_plan_budget["maxPromptCacheMissTokens"] <= 40000
+    assert chapter_plan_budget["maxPromptCacheMissTokens"] == 120000
+    assert chapter_plan_budget["maxPromptCacheMissTokens"] == chapter_plan_budget["maxInputTokens"]
     assert chapter_plan_budget["maxReasoningTokens"] <= 12000
     assert chapter_plan_budget["maxVisibleOutputTokens"] <= 8000
 

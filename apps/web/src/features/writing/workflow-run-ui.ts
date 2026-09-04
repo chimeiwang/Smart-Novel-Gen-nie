@@ -52,6 +52,8 @@ export type WorkflowRunUiState = {
 
 const MODEL_PROFILE_LABELS: Readonly<Record<string, string>> = {
   "editor.answer.v1": "章节问答",
+  "plot.chapter_plan.v1": "章节规划",
+  "reviewer.chapter_plan_editorial.v1": "章节规划复审",
   "writer.chapter_selection.v1": "章节选区改写",
   "reviewer.consistency.v1": "一致性校验",
   "reviewer.editorial.v1": "编辑复审",

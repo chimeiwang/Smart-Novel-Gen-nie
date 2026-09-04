@@ -112,6 +112,140 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 章节计划局部问题仅自动返工一次且同Evidence与不可变Revision贯穿完整链() {
+        Flow flow = runningPlanFlow("plan-auto");
+        ExecutionStepResult first = planResult(flow.request(), "首轮😀计划");
+        assertThat(callbacks.result(first).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(callbacks.result(first).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        Record artifact = database.dsl().fetchOne("SELECT id, kind::text AS kind, \"payloadJson\", \"diffJson\" FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId());
+        assertThat(artifact.get("kind", String.class)).isEqualTo("beat_plan");
+        assertThat(json.readTree(artifact.get("diffJson", String.class)).has("after")).isFalse();
+        assertThat(json.readTree(database.dsl().fetchOne("SELECT output FROM public.\"WorkflowStep\" WHERE id = ?", flow.request().getStepId()).get("output", String.class)).has("sceneBeats")).isFalse();
+        ExecutionStepRequest review = startNextPlanStep(flow);
+        assertThat(review.getInput().get("candidate")).isEqualTo(WorkflowCallbackValues.optional(first.getOutput()));
+        ExecutionStepResult issues = planReviewResult(review, "chapter_plan.local", 0.95);
+        callbacks.result(issues);
+        assertThat(callbacks.result(issues).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        ExecutionStepRequest revision = startNextPlanStep(flow);
+        assertThat(revision.getPurpose()).isEqualTo("generation");
+        assertThat(revision.getArtifactRevision()).isEqualTo(1);
+        assertThat(revision.getInput()).containsEntry("targetWordCount", 2500).containsEntry("originalUserInstruction", "规划完整章节");
+        assertThat(revision.getInput()).containsOnlyKeys("userInstruction", "targetWordCount", "originalUserInstruction", "previousArtifact");
+        assertThat(revision.getInput().get("previousArtifact")).isEqualTo(Map.of("artifactId", artifact.get("id", String.class),
+                "artifactRevision", 1, "payload", WorkflowCallbackValues.optional(first.getOutput())));
+        ExecutionStepResult second = planResult(revision, "第二轮完整计划");
+        callbacks.result(second);
+        assertThat(callbacks.result(second).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        ExecutionStepRequest secondReview = startNextPlanStep(flow);
+        assertThat(secondReview.getArtifactRevision()).isEqualTo(2);
+        assertThat((Map<String, Object>) secondReview.getInput().get("task"))
+                .containsEntry("userInstruction", revision.getInput().get("userInstruction"))
+                .containsEntry("originalUserInstruction", "规划完整章节");
+        callbacks.result(planReviewResult(secondReview, "chapter_plan.local", 0.99));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", flow.runId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", artifact.get("id", String.class))).isEqualTo(2);
+        assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", flow.runId()).get(0, String.class)).isEqualTo("waiting_user");
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" IN (SELECT id FROM public.\"Chapter\" WHERE \"novelId\" = ?)", flow.request().getNovelId())).isZero();
+    }
+
+    @Test
+    void 章节计划作者返工后的编辑Reviewer同时收到原指令与本次要求() {
+        Flow flow = runningPlanFlow("plan-author-revise");
+        ExecutionStepResult initial = planResult(flow.request(), "首轮完整计划");
+        callbacks.result(initial);
+        ExecutionStepRequest firstReview = startNextPlanStep(flow);
+        callbacks.result(reviewResult(firstReview));
+        String artifactId = firstReview.getArtifactId();
+        // 决定存储测试已验证相同输入由真实 revise 单事务写入；此处从其持久 Step 边界验证 callback。
+        Map<String, Object> revisedInput = new LinkedHashMap<>(flow.request().getInput());
+        revisedInput.put("originalUserInstruction", "规划完整章节");
+        revisedInput.put("userInstruction", "让人物以更主动的选择解决问题");
+        revisedInput.put("previousArtifact", Map.of("artifactId", artifactId, "artifactRevision", 1,
+                "payload", WorkflowCallbackValues.optional(initial.getOutput())));
+        enqueueRevisionGeneration(flow.runId(), flow.request().getStepId(), artifactId, 1, revisedInput);
+        ExecutionStepRequest revision = startNextPlanStep(flow);
+        callbacks.result(planResult(revision, "作者要求后的完整计划"));
+        ExecutionStepRequest secondReview = startNextPlanStep(flow);
+        assertThat((Map<String, Object>) secondReview.getInput().get("task"))
+                .containsEntry("userInstruction", "让人物以更主动的选择解决问题")
+                .containsEntry("originalUserInstruction", "规划完整章节");
+        assertThat(secondReview.getArtifactRevision()).isEqualTo(2);
+        callbacks.result(reviewResult(secondReview));
+    }
+
+    @Test
+    void 章节计划结构问题低置信与不可用均直接交作者且畸形候选零写入() {
+        for (String mode : List.of("structural", "uncertain", "unavailable")) {
+            Flow flow = runningPlanFlow("plan-" + mode);
+            ExecutionStepResult malformed = planResult(flow.request(), "计划");
+            Map<String, Object> bad = new LinkedHashMap<>(WorkflowCallbackValues.optional(malformed.getOutput()));
+            bad.put("beatCount", 4);
+            malformed.setOutput(org.openapitools.jackson.nullable.JsonNullable.of(bad));
+            malformed.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(malformed)));
+            assertThatThrownBy(() -> callbacks.result(malformed)).isInstanceOf(ApiException.class);
+            assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId())).isZero();
+            callbacks.result(planResult(flow.request(), "完整计划"));
+            ExecutionStepRequest review = startNextPlanStep(flow);
+            if ("unavailable".equals(mode)) callbacks.failure(reviewFailure(review));
+            else callbacks.result(planReviewResult(review, "structural".equals(mode) ? "chapter_plan.structural" : "chapter_plan.local", "uncertain".equals(mode) ? 0.5 : 0.95));
+            assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", flow.runId()).get(0, String.class)).isEqualTo("waiting_user");
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", flow.runId())).isEqualTo(1);
+        }
+    }
+
+    private static Flow runningPlanFlow(String prefix) {
+        Fixture fixture = fixture(prefix);
+        var op = registry.resolve("long_serial.plan_chapter", false);
+        Map<String, Object> input = Map.of("userInstruction", "规划完整章节", "targetWordCount", 2500);
+        Map<String, Object> normalizedBody = new LinkedHashMap<>(input);
+        normalizedBody.putAll(Map.of("workflow", "long_serial", "operation", "plan_chapter", "novelId", fixture.novelId(),
+                "chapterId", fixture.chapterId(), "target", Map.of("kind", "chapter"), "scope", Map.of("kind", "chapter")));
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request", sha256(prefix),
+                "long_serial", "plan_chapter", "1", "chapter_generation", fixture.novelId(), fixture.chapterId(),
+                fixture.sessionId(), "chapter", fixture.chapterId(), normalizedBody, op.operation().evidencePolicy(),
+                List.of(new WorkflowEvidenceItemPlan("chapter_plan_context", fixture.chapterId(), true, null, API_NOW,
+                        null, Map.of("chapter", Map.of("id", fixture.chapterId(), "content", "甲😀乙")), null, null, Map.of("role", "chapter_plan_context"))),
+                op.operation().runBudget(), ExecutionPlanSnapshot.freeze(registry.catalogVersion(), registry.manifestFingerprint(), op),
+                new WorkflowInitialStepPlan("generation", op.operation().lane(), input, op.generatorProfile(), op.generatorStepBudget(), op.outputSchema())));
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        accept(request);
+        callbacks.progress(progress(request, unknownUsage()));
+        return new Flow(started.runId(), fixture.userId(), fixture.sessionId(), request);
+    }
+
+    private static ExecutionStepRequest startNextPlanStep(Flow flow) {
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(flow.runId());
+        assertThat(request.getEvidenceBundle().getId()).isEqualTo(flow.request().getEvidenceBundle().getId());
+        accept(request);
+        callbacks.progress(progress(request, unknownUsage()));
+        return request;
+    }
+
+    private static ExecutionStepResult planResult(ExecutionStepRequest request, String title) {
+        Map<String, Object> output = new LinkedHashMap<>(Map.of("title", title, "summary", "完整语义摘要", "chapterGoal", "推进主线",
+                "sceneBeats", List.of(Map.of("order", 1, "goal", "角色抉择😀", "estimatedWords", 2500)), "beatCount", 1));
+        output.put("contentSha256", ExecutionCanonicalJson.sha256(output));
+        ExecutionStepResult result = outputResult(request, "占位");
+        result.setOutput(org.openapitools.jackson.nullable.JsonNullable.of(output));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private static ExecutionStepResult planReviewResult(ExecutionStepRequest request, String dimension, double confidence) {
+        ExecutionStepResult result = reviewResult(request);
+        EvidenceEvaluation evaluation = result.getEvaluation();
+        var item = request.getEvidenceBundle().getItems().getFirst();
+        evaluation.setContentVerdict(EvidenceEvaluation.ContentVerdictEnum.ISSUES_FOUND);
+        evaluation.setFindings(List.of(json.convertValue(Map.of("dimension", dimension,
+                "severity", "warning", "confidence", confidence, "claim", "角色目标需要明确", "suggestion", "明确场景中的角色目标",
+                "evidence", List.of(Map.of("evidenceItemId", item.getId(), "contentSha256", item.getContentSha256()))), cn.inkforge.contracts.api.EvaluationFinding.class)));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    @Test
     void progress严格去重并在同一事务升格StepStarted和StepProgress() {
         Flow flow = runningFlow("callback-progress");
 
@@ -1365,6 +1499,11 @@ class JooqWorkflowCallbackRepositoryTest {
 
     private static void enqueueRevisionGeneration(
             String runId, String sourceStepId, String artifactId, int artifactRevision) {
+        enqueueRevisionGeneration(runId, sourceStepId, artifactId, artifactRevision, null);
+    }
+
+    private static void enqueueRevisionGeneration(
+            String runId, String sourceStepId, String artifactId, int artifactRevision, Map<String, Object> input) {
         String stepId = "revision-generation-" + artifactId;
         database.dsl().execute(
                 """
@@ -1384,18 +1523,20 @@ class JooqWorkflowCallbackRepositoryTest {
                   "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt"
                 )
                 SELECT ?, "runId", "agentId", "stepType", CAST('pending' AS "WorkflowStepStatus"),
-                       input, ?, (SELECT max(ordinal) + 1 FROM public."WorkflowStep" WHERE "runId" = ?),
-                       'generation', lane, 0, ?, 0, ?, ?, "inputHash", "evidenceBundleId",
+                       coalesce(CAST(? AS text), input), ?, (SELECT max(ordinal) + 1 FROM public."WorkflowStep" WHERE "runId" = ?),
+                       'generation', lane, 0, ?, 0, ?, ?, coalesce(CAST(? AS text), "inputHash"), "evidenceBundleId",
                        ?, ?, "modelProfile", "modelProfileVersion", "outputSchema",
                        "outputSchemaVersion", "budgetJson", ?, ?
                 FROM public."WorkflowStep" WHERE id = ? AND "runId" = ?
                 """,
                 stepId,
+                input == null ? null : json.writeValueAsString(input),
                 NOW,
                 runId,
                 NOW,
                 runId + "." + stepId,
                 sha256(stepId),
+                input == null ? null : ExecutionCanonicalJson.sha256(input),
                 artifactId,
                 artifactRevision,
                 NOW,

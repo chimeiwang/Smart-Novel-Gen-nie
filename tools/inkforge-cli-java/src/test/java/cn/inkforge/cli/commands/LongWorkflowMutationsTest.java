@@ -293,7 +293,7 @@ class LongWorkflowMutationsTest {
     }
 
     @Test
-    void ArtifactV2只允许选区批准且V1返工保持可选说明() {
+    void ArtifactV2编辑字段限于选区批准且V1返工保持可选说明() {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);
 
@@ -360,6 +360,46 @@ class LongWorkflowMutationsTest {
         assertThat(api.calls.getLast().body().toString()).isEqualTo(
                 "{\"engineVersion\":1,\"clientRequestId\":\"artifact-v1-revise-01\",\"expectedRevision\":4,"
                         + "\"decision\":\"revise\"}");
+    }
+
+    @Test
+    void V2章节规划通过公共草案决定入口批准返工和丢弃() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        JsonNode plan = json.readTree("""
+                {"engineVersion":2,"id":"plan-1","revision":2,
+                 "sourceBindingStatus":"verified","kind":"beat_plan",
+                 "payload":{"kind":"beat_plan","beatPlan":{
+                   "title":"章节规划","summary":"先核对线索，再作出选择。",
+                   "chapterGoal":"主角确认线索的来源。","beatCount":1,
+                   "sceneBeats":[{"order":1,"goal":"核对线索","characters":[]}]}}}
+                """);
+
+        for (String decision : List.of("approve", "revise", "discard")) {
+            api.nextGet = plan;
+            int before = api.calls.size();
+            String message = decision.equals("revise")
+                    ? ",\"userMessage\":\"保留目标，增加行动阻力\"" : "";
+            Result result = run(
+                    application,
+                    "long.artifact." + decision,
+                    "{\"artifactId\":\"plan-1\",\"clientRequestId\":\"plan-" + decision
+                            + "-00001\",\"engineVersion\":2,\"expectedRevision\":2" + message + "}");
+
+            assertThat(result.exit()).as(result.stdout()).isZero();
+            assertThat(api.calls).hasSize(before + (decision.equals("discard") ? 1 : 2));
+            if (!decision.equals("discard")) {
+                assertThat(api.calls.get(before).method()).isEqualTo("GET");
+                assertThat(api.calls.get(before).path()).isEqualTo("/api/v1/review-artifacts/plan-1");
+                assertThat(api.calls.get(before).query()).isEqualTo(Map.of("revision", List.of("2")));
+            }
+            Call post = api.calls.getLast();
+            assertThat(post.method()).isEqualTo("POST");
+            assertThat(post.path()).isEqualTo("/api/v1/review-artifacts/plan-1/decision");
+            assertThat(post.body()).isEqualTo(json.readTree(
+                    "{\"engineVersion\":2,\"clientRequestId\":\"plan-" + decision
+                            + "-00001\",\"expectedRevision\":2,\"decision\":\"" + decision + "\"" + message + "}"));
+        }
     }
 
     @Test

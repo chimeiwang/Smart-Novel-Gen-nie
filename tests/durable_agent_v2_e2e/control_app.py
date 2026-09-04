@@ -37,6 +37,12 @@ class GateRequest(BaseModel):
     mode: Literal["pass", "hold"]
 
 
+class ChapterPlanReviewModeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["pass", "revise_once"]
+
+
 class CallbackModeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -137,6 +143,17 @@ class _Store:
                   validation_errors_json TEXT NOT NULL,
                   occurred_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS chapter_plan_review_mode (
+                  id INTEGER PRIMARY KEY CHECK (id = 1),
+                  revise_remaining INTEGER NOT NULL CHECK (revise_remaining IN (0, 1))
+                );
+                INSERT OR IGNORE INTO chapter_plan_review_mode VALUES (1, 0);
+                CREATE TABLE IF NOT EXISTS chapter_plan_review (
+                  idempotency_key TEXT PRIMARY KEY,
+                  request_sha256 TEXT NOT NULL,
+                  content_verdict TEXT NOT NULL CHECK (content_verdict IN ('pass', 'issues_found')),
+                  decided_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -174,6 +191,47 @@ class _Store:
             ).rowcount
             if updated != 1:
                 raise ValueError("供应商完成记录没有匹配的请求身份")
+
+    def chapter_plan_review_mode(self, mode: Literal["pass", "revise_once"]) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE chapter_plan_review_mode SET revise_remaining = ? WHERE id = 1",
+                (1 if mode == "revise_once" else 0,),
+            )
+
+    def chapter_plan_review_decision(self, identity: ProviderIdentity) -> str:
+        with self._lock, self._connection:
+            # 计数消耗与结论落库同事务；控制器重启或重复请求不会把第一次revise变成pass。
+            self._connection.execute("BEGIN IMMEDIATE")
+            provider = self._connection.execute(
+                "SELECT request_sha256 FROM provider_call WHERE idempotency_key = ?",
+                (identity.idempotencyKey,),
+            ).fetchone()
+            if provider is None or provider["request_sha256"] != identity.requestSha256:
+                raise ValueError("章节规划复审没有匹配的供应商请求身份")
+            previous = self._connection.execute(
+                "SELECT request_sha256, content_verdict FROM chapter_plan_review "
+                "WHERE idempotency_key = ?",
+                (identity.idempotencyKey,),
+            ).fetchone()
+            if previous is not None:
+                if previous["request_sha256"] != identity.requestSha256:
+                    raise ValueError("章节规划复审幂等键绑定了不同请求哈希")
+                return str(previous["content_verdict"])
+            policy = self._connection.execute(
+                "SELECT revise_remaining FROM chapter_plan_review_mode WHERE id = 1"
+            ).fetchone()
+            needs_revision = policy["revise_remaining"] == 1
+            decision = "issues_found" if needs_revision else "pass"
+            self._connection.execute(
+                "INSERT INTO chapter_plan_review VALUES (?, ?, ?, ?)",
+                (identity.idempotencyKey, identity.requestSha256, decision, _now()),
+            )
+            if needs_revision:
+                self._connection.execute(
+                    "UPDATE chapter_plan_review_mode SET revise_remaining = 0 WHERE id = 1"
+                )
+            return decision
 
     def callback(
         self,
@@ -272,10 +330,21 @@ class _Store:
             ]
             for submission in submissions:
                 del submission["validation_errors_json"]
+            reviews = [
+                dict(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM chapter_plan_review ORDER BY decided_at, idempotency_key"
+                ).fetchall()
+            ]
+            review_mode = self._connection.execute(
+                "SELECT revise_remaining FROM chapter_plan_review_mode WHERE id = 1"
+            ).fetchone()
         return {
             "providerCalls": providers,
             "callbackAttempts": callbacks,
             "executionSubmitAttempts": submissions,
+            "chapterPlanReviews": reviews,
+            "chapterPlanReviewMode": {"reviseRemaining": review_mode["revise_remaining"]},
         }
 
     def reset(self) -> None:
@@ -283,6 +352,10 @@ class _Store:
             self._connection.execute("DELETE FROM callback_attempt")
             self._connection.execute("DELETE FROM provider_call")
             self._connection.execute("DELETE FROM execution_submit_attempt")
+            self._connection.execute("DELETE FROM chapter_plan_review")
+            self._connection.execute(
+                "UPDATE chapter_plan_review_mode SET revise_remaining = 0 WHERE id = 1"
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -346,16 +419,14 @@ def create_app() -> FastAPI:
         return {
             key: value
             for key, value in request.headers.items()
-            if key.lower()
-            not in {"host", "content-length", "connection", "transfer-encoding"}
+            if key.lower() not in {"host", "content-length", "connection", "transfer-encoding"}
         }
 
     def response_headers(response: httpx.Response) -> dict[str, str]:
         return {
             key: value
             for key, value in response.headers.items()
-            if key.lower()
-            not in {"content-length", "connection", "transfer-encoding"}
+            if key.lower() not in {"content-length", "connection", "transfer-encoding"}
         }
 
     @app.get("/health/live")
@@ -431,6 +502,27 @@ def create_app() -> FastAPI:
         await provider_gate.configure(body.mode)
         return {"mode": body.mode}
 
+    @app.put("/control/chapter-plan-review-mode")
+    async def set_chapter_plan_review_mode(
+        body: ChapterPlanReviewModeRequest,
+        control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
+    ) -> dict[str, str]:
+        authorize(control_token)
+        store.chapter_plan_review_mode(body.mode)
+        return {"mode": body.mode}
+
+    @app.post("/control/provider/chapter-plan-review-decision")
+    async def chapter_plan_review_decision(
+        body: ProviderIdentity,
+        control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
+    ) -> dict[str, str]:
+        authorize(control_token)
+        try:
+            decision = store.chapter_plan_review_decision(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return {"contentVerdict": decision}
+
     @app.put("/control/callback-mode")
     async def set_callback_mode(
         body: CallbackModeRequest,
@@ -439,9 +531,7 @@ def create_app() -> FastAPI:
         authorize(control_token)
         async with callback_mode_lock:
             callback_mode["value"] = body.mode
-            callback_mode["dropRemaining"] = (
-                1 if body.mode == "drop_after_forward_once" else 0
-            )
+            callback_mode["dropRemaining"] = 1 if body.mode == "drop_after_forward_once" else 0
         await callback_gate.configure(
             "hold_before_forward" if body.mode == "hold_before_forward" else "pass"
         )

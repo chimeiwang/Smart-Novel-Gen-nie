@@ -388,9 +388,12 @@ class ComposeStack:
 
         relative_paths = (
             "app.py",
+            "execution/executor.py",
+            "execution/registry.py",
             "execution/journal.py",
             "execution/replayer.py",
             "execution/service.py",
+            "providers/fake.py",
             "queue/repository.py",
         )
         host_root = ROOT / "apps" / "agent-service" / "src" / "inkforge_agents"
@@ -895,6 +898,7 @@ class Acceptance:
         session_id: str,
         client_request_id: str,
         instruction: str,
+        operation: str = "answer_question",
     ) -> dict[str, object]:
         return {
             "clientRequestId": client_request_id,
@@ -902,7 +906,7 @@ class Acceptance:
             "novelId": self.novel_id,
             "chapterId": self.chapter_id,
             "writingSessionId": session_id,
-            "operation": "answer_question",
+            "operation": operation,
             "target": {"type": "chapter", "id": self.chapter_id},
             "scope": {"kind": "chapter", "chapterId": self.chapter_id},
             "targetWordCount": 1000,
@@ -1245,6 +1249,78 @@ class Acceptance:
         if unauthenticated_inflight_requests > 1:
             raise AssertionError("重启后出现多条未通过鉴权的旧 callback 请求")
 
+    @staticmethod
+    def assert_core_restart_recovery_bindings(
+        *,
+        run_id: str,
+        step: dict[str, object],
+        journal: dict[str, object],
+        submits: list[dict[str, object]],
+        attempts: list[dict[str, object]],
+    ) -> None:
+        """只接受一次原派发或一次到期重派，并逐条核对已有终态的身份重绑。"""
+        count = len(submits)
+        if count not in {1, 2} or (
+            step.get("attemptCount"), step.get("fencingToken")
+        ) != (count, count):
+            raise AssertionError("Core 重启只允许原派发或精确一次 1→2 重派")
+        bindings: list[tuple[object, ...]] = []
+        for fence, submit in enumerate(submits, 1):
+            job_id = submit.get("job_id")
+            if (
+                submit.get("run_id") != run_id
+                or submit.get("step_id") != step.get("id")
+                or submit.get("request_hash") != step.get("requestHash")
+                or submit.get("fencing_token") != fence
+                or not isinstance(job_id, str) or not job_id
+                or submit.get("agent_status") != 202
+                or submit.get("validation_errors") != []
+            ):
+                raise AssertionError("Core 重启 execution submit 身份或回执无效")
+            bindings.append((run_id, step.get("id"), job_id, fence,
+                             step.get("requestHash"), step.get("resultHash")))
+        if count == 2 and bindings[0][2] == bindings[1][2]:
+            raise AssertionError("Core 重启换 fence 必须生成新 job")
+        final = bindings[-1]
+        if (journal.get("jobId"), journal.get("fencingToken"),
+            journal.get("requestHash"), journal.get("resultHash")) != final[2:]:
+            raise AssertionError("Core 重启最终 journal 未绑定末次派发")
+        # 每条 401 都必须消耗更早的同身份 held 记录，不能放行任意鉴权失败。
+        held: dict[tuple[object, ...], int] = {}
+        accepted = False
+        for attempt in attempts:
+            identity = (attempt.get("run_id"), attempt.get("step_id"),
+                        attempt.get("job_id"), attempt.get("fencing_token"),
+                        attempt.get("request_hash"), attempt.get("result_hash"))
+            if identity not in bindings:
+                raise AssertionError("Core 重启 callback 来源或不可变结果不匹配")
+            action = attempt.get("action")
+            status = attempt.get("core_status")
+            receipt = attempt.get("receipt_status")
+            matches = attempt.get("receipt_identity_matches")
+            if action == "held_before_forward":
+                if status is not None or receipt is not None or matches is not None:
+                    raise AssertionError("Core 重启 held callback 不应已有回执")
+                held[identity] = held.get(identity, 0) + 1
+                continue
+            if action != "forwarded":
+                raise AssertionError("Core 重启出现未授权的 callback 控制动作")
+            if status == 401 and receipt is None and matches is False:
+                if identity != bindings[0] or held.get(identity, 0) <= 0:
+                    raise AssertionError("Core 重启 401 缺少此前同身份 held callback")
+                held[identity] -= 1
+                continue
+            if status != 200 or matches is not True:
+                raise AssertionError("Core 重启 callback 回执或身份无效")
+            if identity == final and receipt in {"accepted", "duplicate"}:
+                accepted = accepted or receipt == "accepted"
+                continue
+            if count == 2 and identity == bindings[0] and receipt in {"stale", "superseded"}:
+                continue
+            raise AssertionError("Core 重启旧身份不得物化结果，末次身份必须确认结果")
+        if not accepted:
+            raise AssertionError("Core 重启缺少最终身份的 accepted 回执")
+
     def database_facts(self, run_id: str, session_id: str) -> dict[str, object]:
         sql = """
         SELECT json_build_object(
@@ -1361,6 +1437,7 @@ class Acceptance:
         value["billing"] = billing
         # 必须早于 journal 取证和任何业务断言写入失败报告的脱敏诊断集合。
         self.safe_diagnostics["billing"] = billing
+        self.safe_diagnostics["database"] = {"runId": run_id, **value}
         if expected_step_id is not None:
             journal = self.journal_facts(expected_step_id)
             value["journal"] = journal
@@ -1368,6 +1445,7 @@ class Acceptance:
                 "stepId": expected_step_id,
                 **journal,
             }
+        self.safe_diagnostics["database"] = {"runId": run_id, **value}
         return value
 
     def assert_scenario_facts(
@@ -1376,7 +1454,9 @@ class Acceptance:
         run_id: str,
         session_id: str,
         provider_before: set[str],
+        core_restart: bool = False,
     ) -> tuple[dict[str, object], dict[str, object]]:
+        facts = self.database_facts(run_id, session_id)
         state = self.control_state()
         providers = state["providerCalls"]
         if not isinstance(providers, list):
@@ -1392,7 +1472,6 @@ class Acceptance:
         provider = new[0]
         if provider["physical_calls"] != 1 or provider["completed_calls"] != 1:
             raise AssertionError("Provider 发生重复调用或没有完整返回")
-        facts = self.database_facts(run_id, session_id)
         if facts["run"] != {
             "status": "completed",
             "operation": "answer_question",
@@ -1411,8 +1490,8 @@ class Acceptance:
         if (
             step["status"] != "completed"
             or step["purpose"] != "generation"
-            or step["attemptCount"] != 1
-            or step["fencingToken"] != 1
+            or (step["attemptCount"], step["fencingToken"])
+            not in ({(1, 1), (2, 2)} if core_restart else {(1, 1)})
             or not isinstance(step["requestHash"], str)
             or step["providerAttempts"] != 1
             or not step["resultHash"]
@@ -1730,32 +1809,33 @@ class Acceptance:
             run_id=run_id,
             session_id=session_id,
             provider_before=before,
+            core_restart=True,
         )
+        state = self.control_state()
         attempts = [
             item
-            for item in self.control_state()["callbackAttempts"]
+            for item in state["callbackAttempts"]
             if isinstance(item, dict)
             and item.get("run_id") == run_id
             and item.get("callback_kind") == "result"
+        ]
+        submits = [
+            item for item in state["executionSubmitAttempts"]
+            if isinstance(item, dict) and item.get("run_id") == run_id
         ]
         self.safe_diagnostics["coreRestart"] = {
             "runId": run_id,
             "serviceRestart": runtime,
             "callbackAttempts": attempts,
+            "executionSubmitAttempts": submits,
             "executionJournal": facts["journal"],
         }
-        if not any(
-            item.get("action") == "forwarded"
-            and item.get("receipt_status") in {"accepted", "duplicate"}
-            for item in attempts
-        ):
-            raise AssertionError("Core 重启后没有合法 terminal callback receipt")
-        self.assert_callback_attempt_bindings(
+        self.assert_core_restart_recovery_bindings(
             run_id=run_id,
             step=facts["steps"][0],
             journal=facts["journal"],
+            submits=submits,
             attempts=attempts,
-            allow_one_unauthenticated_inflight_request=True,
         )
         return Scenario(
             name="core_restart_before_terminal_callback",
@@ -1767,10 +1847,11 @@ class Acceptance:
                 **facts,
                 "serviceRestart": runtime,
                 "callbackAttempts": attempts,
+                "executionSubmitAttempts": submits,
             },
         )
 
-    def cancel_before_agent_submit(self) -> Scenario:
+    def cancel_before_agent_submit(self, *, operation: str = "answer_question") -> Scenario:
         self.control_request("PUT", "/control/execution-mode", {"mode": "hold"})
         session_id = self.create_session("cancel-before-agent-submit")
         request_id = "e2e-cancel-before-submit-0001"
@@ -1780,6 +1861,7 @@ class Acceptance:
                 session_id=session_id,
                 client_request_id=request_id,
                 instruction="这个问题不应抵达模型。",
+                operation=operation,
             )
         ).json()
         run_id = str(started["runId"])
@@ -1805,7 +1887,7 @@ class Acceptance:
         if (
             not isinstance(run, dict)
             or run.get("status") != "cancelled"
-            or run.get("operation") != "answer_question"
+            or run.get("operation") != operation
             or run.get("engineVersion") != 2
             or run.get("writingSessionId") != session_id
             or run.get("cancelRequestedAtPresent") is not True
@@ -2115,7 +2197,14 @@ def run(
                 }
             )
 
-        record_scenario(acceptance.happy_and_idempotency())
+        if phase == "chapter-planning":
+            from tests.durable_agent_v2_e2e.chapter_planning import scenarios as plan_scenarios
+
+            for scenario in plan_scenarios(acceptance):
+                record_scenario(scenario)
+            record_scenario(acceptance.cancel_before_agent_submit(operation="plan_chapter"))
+        else:
+            record_scenario(acceptance.happy_and_idempotency())
         if phase == "minimum":
             record_scenario(acceptance.callback_receipt_loss())
             record_scenario(acceptance.agent_restart_replays_terminal_journal())
@@ -2190,11 +2279,12 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument(
         "--phase",
-        choices=("happy", "minimum"),
+        choices=("happy", "minimum", "chapter-planning"),
         default="minimum",
         help=(
             "happy 只验成功/幂等/SSE；minimum 继续验 callback 丢回执、"
-            "Agent/Core 重启、submit 前取消与 AOF"
+            "Agent/Core 重启、submit 前取消与 AOF；chapter-planning 单独验证规划生成、复审、"
+            "Core 重启、批准/丢弃/显式与自动返工、幂等与 submit 前取消"
         ),
     )
     parser.add_argument(

@@ -7,6 +7,7 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.references.application.ReferenceRepository;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
+import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.ReviewRepository;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
@@ -20,6 +21,11 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class ReviewConfiguration {
+
+    @Bean
+    ChapterPlanEvidenceReader chapterPlanEvidenceReader(ObjectMapper objectMapper) {
+        return new JooqChapterPlanEvidenceReader(objectMapper);
+    }
 
     @Bean
     AgentUpdatesExecutor agentUpdatesExecutor(

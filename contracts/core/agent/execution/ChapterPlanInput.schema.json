@@ -1,0 +1,274 @@
+{
+  "$defs": {
+    "ChapterPlanPreviousArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "payload": {
+          "$ref": "#/$defs/ChapterPlanResult"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "payload"
+      ],
+      "title": "ChapterPlanPreviousArtifact",
+      "type": "object"
+    },
+    "ChapterPlanResult": {
+      "additionalProperties": false,
+      "description": "执行器派生后的终报；哈希仅覆盖规范计划，不包含 Artifact 或来源身份。",
+      "properties": {
+        "beatCount": {
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Beatcount",
+          "type": "integer"
+        },
+        "chapterAcceptanceCriteria": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapteracceptancecriteria"
+        },
+        "chapterGoal": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Chaptergoal",
+          "type": "string"
+        },
+        "contentSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contentsha256",
+          "type": "string"
+        },
+        "mainPlotConnection": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mainplotconnection"
+        },
+        "sceneBeats": {
+          "items": {
+            "$ref": "#/$defs/ChapterPlanSceneResult"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Scenebeats",
+          "type": "array"
+        },
+        "summary": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Summary",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Title",
+          "type": "string"
+        },
+        "totalEstimatedWords": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Totalestimatedwords"
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "chapterGoal",
+        "sceneBeats",
+        "beatCount",
+        "contentSha256"
+      ],
+      "title": "ChapterPlanResult",
+      "type": "object"
+    },
+    "ChapterPlanSceneResult": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceCriteria": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Acceptancecriteria"
+        },
+        "characters": {
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Characters",
+          "type": "array"
+        },
+        "conflict": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conflict"
+        },
+        "estimatedWords": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimatedwords"
+        },
+        "foreshadowingRefs": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Foreshadowingrefs"
+        },
+        "goal": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Goal",
+          "type": "string"
+        },
+        "order": {
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Order",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "goal",
+        "order"
+      ],
+      "title": "ChapterPlanSceneResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/ChapterPlanInput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "初始规划与精确候选返工的输入；返工不允许读取当前可变 workspace。",
+  "properties": {
+    "originalUserInstruction": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Originaluserinstruction"
+    },
+    "previousArtifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChapterPlanPreviousArtifact"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "targetWordCount": {
+      "maximum": 10000000,
+      "minimum": 1,
+      "title": "Targetwordcount",
+      "type": "integer"
+    },
+    "userInstruction": {
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Userinstruction",
+      "type": "string"
+    }
+  },
+  "required": [
+    "userInstruction",
+    "targetWordCount"
+  ],
+  "title": "ChapterPlanInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChapterPlanInput"
+}

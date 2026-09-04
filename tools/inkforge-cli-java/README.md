@@ -24,8 +24,9 @@ printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.w
 2026-09-04，本机两份 Skill 已安装 shell 启动器与固定 Java JAR，配置已升为 schemaVersion 5，旧 Python
 入口和测试已迁出到可恢复备份。实际入口的帮助、端点拒绝及隔离安装检查通过；完整 Maven 验证、CLI 回归、
 Skill 结构检查和独立文档验收已通过，具体结果见
-`../../docs/specs/2026-09-04-java-cli-operator-cutover.md`。本次未读取真实 token，真实会话和 Windows 实机
-尚未验收；未部署服务器、未执行数据库迁移，不表示生产 Agent V2 或问答已开放。
+`../../docs/specs/2026-09-04-java-cli-operator-cutover.md`。同日已通过新版生产入口复用既有 Keychain 会话，
+成功执行指定账号的 `auth.whoami`，未导出令牌。真实写作业务和 Windows 实机尚未验收；未部署服务器、
+未执行数据库迁移，不表示生产 Agent V2 或问答已开放。
 
 仓内启动器位于 `operator/local/` 与 `operator/production/`。构建 JAR 后，在仓库根目录先备份已有 Skill，
 再安装对应启动器：
@@ -108,8 +109,12 @@ tools/inkforge-cli-java/operator/test-launchers.sh "$PWD" "$JAVA_HOME/bin/java"
 ```
 
 该脚本自动使用隔离配置并清理自身临时目录，不读取真实账号凭据、不联网；它不代表真实 JAR 已完成模拟 Core
-业务全链。本次未读取真实 token，既有会话可复用的契约不等于已验收真实会话；真实账号和 Windows 实机验收
-均不得写成通过。测试结果记录在切换 spec。
+业务全链。另行完成的生产 `auth.whoami` 只证明 Java 入口、既有 Keychain 会话与真实身份接线；不能据此宣称
+真实写作业务、Agent V2 上线或 Windows 实机通过。测试结果记录在切换 spec。
 
 `tools/inkforge-cli` 的 Python 源码和差异测试继续保留为兼容对照。它不再是新版 macOS Skill 的执行链；
 保留 Python Agent、共享 Python 契约和旧 Core 回滚代码也不影响 Java CLI 独立运行。
+
+章节规划 V2 沿用 `long.agent.start` 的 `plan_chapter` 及既有观察/草案决定命令，完整输入示例、
+`waiting_user`/`completed` 区别、返工和禁止编辑字段见
+`../../docs/specs/2026-09-04-durable-chapter-planning.md`。这条链已通过本分支的隔离 Fake 验收，不代表服务器已启用。

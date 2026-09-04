@@ -474,7 +474,167 @@ def test_database_facts_saves_scrubbed_billing_before_business_assertion() -> No
     assert "billingRaw" not in facts
     assert "usageRaw" not in facts["steps"][0]
     assert acceptance.safe_diagnostics["billing"] == facts["billing"]
+    assert acceptance.safe_diagnostics["database"] == {"runId": "run-1", **facts}
     _assert_fake_billing_evidence(facts["billing"])
+
+
+def _core_restart_evidence(fence: int = 2) -> dict[str, object]:
+    submits = [
+        {
+            "run_id": "run-1", "step_id": "step-1", "job_id": f"job-{number}",
+            "fencing_token": number, "request_hash": "request-hash",
+            "agent_status": 202, "validation_errors": [],
+        }
+        for number in range(1, fence + 1)
+    ]
+    old = _terminal_callback_attempt(
+        core_status=401, receipt_status=None, receipt_identity_matches=False,
+    )
+    held = {**old, "action": "held_before_forward", "core_status": None,
+            "receipt_identity_matches": None}
+    accepted = {
+        **_terminal_callback_attempt(
+            core_status=200, receipt_status="accepted", receipt_identity_matches=True,
+        ),
+        "job_id": f"job-{fence}", "fencing_token": fence,
+    }
+    return {
+        "run_id": "run-1",
+        "step": {"id": "step-1", "attemptCount": fence, "fencingToken": fence,
+                 "requestHash": "request-hash", "resultHash": "result-hash"},
+        "journal": {"jobId": f"job-{fence}", "fencingToken": fence,
+                    "requestHash": "request-hash", "resultHash": "result-hash"},
+        "submits": submits,
+        "attempts": [held.copy(), held.copy(), old.copy(), old.copy(), accepted],
+    }
+
+
+@pytest.mark.parametrize("fence", [1, 2])
+def test_core_restart_accepts_exact_dispatch_history_and_paired_held_callbacks(fence: int) -> None:
+    Acceptance.assert_core_restart_recovery_bindings(**_core_restart_evidence(fence))
+
+
+@pytest.mark.parametrize("receipt", ["stale", "superseded"])
+def test_core_restart_accepts_proven_old_fence_nonmaterializing_receipt(receipt: str) -> None:
+    evidence = _core_restart_evidence()
+    attempts = evidence["attempts"]
+    assert isinstance(attempts, list)
+    attempts.insert(-1, _terminal_callback_attempt(
+        core_status=200, receipt_status=receipt, receipt_identity_matches=True,
+    ))
+    Acceptance.assert_core_restart_recovery_bindings(**evidence)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["third_fence", "attempt_mismatch", "missing_submit", "changed_request", "same_job",
+     "invalid_submit", "wrong_run", "wrong_step", "changed_result", "journal_mismatch",
+     "old_success", "unpaired_401", "late_held", "new_identity_401", "no_accepted",
+     "unknown_identity", "unproven_stale", "invalid_schema", "new_fence_held_401"],
+)
+def test_core_restart_rejects_unproven_refence_or_callback(mutation: str) -> None:
+    evidence = _core_restart_evidence(3 if mutation == "third_fence" else 2)
+    step = evidence["step"]
+    journal = evidence["journal"]
+    submits = evidence["submits"]
+    attempts = evidence["attempts"]
+    assert isinstance(step, dict) and isinstance(journal, dict)
+    assert isinstance(submits, list) and isinstance(attempts, list)
+    if mutation == "attempt_mismatch":
+        step["attemptCount"] = 1
+    elif mutation == "missing_submit":
+        submits.pop(0)
+    elif mutation == "changed_request":
+        submits[-1]["request_hash"] = "changed"
+    elif mutation == "same_job":
+        submits[-1]["job_id"] = "job-1"
+    elif mutation == "invalid_submit":
+        submits[-1]["agent_status"] = 503
+    elif mutation == "wrong_run":
+        submits[0]["run_id"] = "another-run"
+    elif mutation == "wrong_step":
+        submits[0]["step_id"] = "another-step"
+    elif mutation == "changed_result":
+        attempts[0]["result_hash"] = "changed"
+    elif mutation == "journal_mismatch":
+        journal["jobId"] = "job-1"
+    elif mutation == "old_success":
+        attempts[-1]["job_id"] = "job-1"
+        attempts[-1]["fencing_token"] = 1
+    elif mutation == "unpaired_401":
+        attempts.insert(-1, attempts[2].copy())
+    elif mutation == "late_held":
+        attempts[0], attempts[2] = attempts[2], attempts[0]
+    elif mutation == "new_identity_401":
+        attempts[2]["job_id"] = "job-2"
+        attempts[2]["fencing_token"] = 2
+    elif mutation == "no_accepted":
+        attempts[-1]["receipt_status"] = "duplicate"
+    elif mutation == "unknown_identity":
+        attempts[0]["job_id"] = "unknown-job"
+    elif mutation == "unproven_stale":
+        attempts[-1]["receipt_status"] = "stale"
+    elif mutation == "invalid_schema":
+        submits[-1]["validation_errors"] = [{"type": "missing"}]
+    elif mutation == "new_fence_held_401":
+        new_held = {**attempts[0], "job_id": "job-2", "fencing_token": 2}
+        new_401 = {**attempts[2], "job_id": "job-2", "fencing_token": 2}
+        attempts[-1:-1] = [new_held, new_401]
+    with pytest.raises(AssertionError):
+        Acceptance.assert_core_restart_recovery_bindings(**evidence)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [None, "ordinary_fence_2", "provider_duplicate", "provider_incomplete", "billing_duplicate",
+     "message_duplicate", "completed_event_duplicate", "step_duplicate"],
+)
+def test_core_restart_preserves_single_model_billing_message_and_event_rules(
+    mutation: str | None,
+) -> None:
+    evidence = _core_restart_evidence()
+    step = evidence["step"]
+    assert isinstance(step, dict)
+    step.update({"status": "completed", "purpose": "generation", "providerAttempts": 1})
+    provider = {"idempotency_key": "run-1.step-1", "physical_calls": 1, "completed_calls": 1}
+    billing = _safe_billing_evidence(
+        _raw_billing(), step_usage=_usage(), expected_run_id="run-1", expected_step_id="step-1",
+        expected_user_id="user-1", initial_balance_micros=987_654_321,
+    )
+    facts = {
+        "run": {"status": "completed", "operation": "answer_question", "engineVersion": 2,
+                "lastEventSequence": 11, "errorCode": None, "cancelRequestId": None,
+                "cancelRequestedAtPresent": False, "writingSessionId": "session-1"},
+        "steps": [step], "messageRoles": {"agent": 1, "user": 1}, "artifactCount": 0,
+        "evaluationCount": 0, "billing": billing, "completedEventCount": 1,
+    }
+    if mutation == "provider_duplicate":
+        provider["physical_calls"] = 2
+    elif mutation == "provider_incomplete":
+        provider["completed_calls"] = 0
+    elif mutation == "billing_duplicate":
+        billing["tokenUsageCount"] = 2
+    elif mutation == "message_duplicate":
+        facts["messageRoles"] = {"agent": 2, "user": 1}
+    elif mutation == "completed_event_duplicate":
+        facts["completedEventCount"] = 2
+    elif mutation == "step_duplicate":
+        facts["steps"] = [step, step]
+    acceptance = cast(Acceptance, SimpleNamespace(
+        database_facts=lambda *_args: facts,
+        control_state=lambda: {"providerCalls": [provider]},
+        wait_delivered_journal=lambda *_args: evidence["journal"],
+    ))
+    def assert_facts() -> None:
+        Acceptance.assert_scenario_facts(
+            acceptance, run_id="run-1", session_id="session-1", provider_before=set(),
+            core_restart=mutation != "ordinary_fence_2",
+        )
+    if mutation is None:
+        assert_facts()
+    else:
+        with pytest.raises(AssertionError):
+            assert_facts()
 
 
 def test_missing_execution_journal_normalizes_redis_cli_empty_line() -> None:

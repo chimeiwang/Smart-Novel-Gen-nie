@@ -77,7 +77,8 @@
   已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机入口切换与离线验收，由 `scripts/run.sh`
   启动固定安装的 Java CLI。新入口不依赖 Python 或 uv，仍只访问 Core 公共 API；125 个 CLI 命令与 Skill 的 45 个
   允许命令不变。Java 使用 macOS Keychain 或 Windows Credential Manager，不允许明文回退；Windows 实机验收
-  与真实会话验收不属于本次结果，服务器部署状态不随本机切换变化。Python CLI 保留为契约对照。
+  尚未完成；2026-09-04 已通过既有 Keychain 会话的生产账号 `auth.whoami`，真实写作业务仍待验收，
+  服务器部署状态不随本机切换变化。Python CLI 保留为契约对照。
   若接口、命令或结构发生获批变化，必须重新计算并同步产品基线，
   不能机械维护旧数字。
 - Java Core 已于 2026-08-26 单切生产并处于观察期：生产始终只有一个 Core，不双 Core、不双写；Python

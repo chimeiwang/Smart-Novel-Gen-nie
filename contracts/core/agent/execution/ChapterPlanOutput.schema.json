@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "ChapterPlanSceneOutput": {
+      "additionalProperties": false,
+      "description": "模型只填写节拍语义；顺序由 Core/执行器按数组位置派生。",
+      "properties": {
+        "acceptanceCriteria": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Acceptancecriteria"
+        },
+        "characters": {
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Characters",
+          "type": "array"
+        },
+        "conflict": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conflict"
+        },
+        "estimatedWords": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimatedwords"
+        },
+        "foreshadowingRefs": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Foreshadowingrefs"
+        },
+        "goal": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Goal",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal"
+      ],
+      "title": "ChapterPlanSceneOutput",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/ChapterPlanOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "章节规划的 Provider 语义输出，保留完整原文与可选字段省略语义。",
+  "properties": {
+    "chapterAcceptanceCriteria": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chapteracceptancecriteria"
+    },
+    "chapterGoal": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Chaptergoal",
+      "type": "string"
+    },
+    "mainPlotConnection": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mainplotconnection"
+    },
+    "sceneBeats": {
+      "items": {
+        "$ref": "#/$defs/ChapterPlanSceneOutput"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Scenebeats",
+      "type": "array"
+    },
+    "summary": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Summary",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Title",
+      "type": "string"
+    },
+    "totalEstimatedWords": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Totalestimatedwords"
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "chapterGoal",
+    "sceneBeats"
+  ],
+  "title": "ChapterPlanOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChapterPlanOutput"
+}

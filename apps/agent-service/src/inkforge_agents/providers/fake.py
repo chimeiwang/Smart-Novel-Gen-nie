@@ -80,6 +80,29 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
         return {"replacement": replacement}
     if "answer" in properties:
         return {"answer": "模拟模型已依据冻结章节证据回答问题。"}
+    if {"title", "summary", "chapterGoal", "sceneBeats"} <= set(properties):
+        return {
+            "title": "隔离章节规划",
+            "summary": "人物核对现有事实后，为下一步行动作出选择。",
+            "chapterGoal": "让人物通过可观察的行动确认当前处境。",
+            "totalEstimatedWords": 1000,
+            "sceneBeats": [
+                {
+                    "goal": "人物核对已经发现的线索。",
+                    "conflict": "线索不足以直接支持结论。",
+                    "characters": [],
+                    "foreshadowingRefs": [],
+                    "estimatedWords": 500,
+                    "acceptanceCriteria": "人物确认一条已有证据。",
+                },
+                {
+                    "goal": "人物依据已确认的证据选择下一步行动。",
+                    "characters": [],
+                    "estimatedWords": 500,
+                    "acceptanceCriteria": "人物作出明确决定。",
+                },
+            ],
+        }
     if {"contentVerdict", "findings"} <= set(properties):
         return {"contentVerdict": "pass", "findings": []}
     raise ValueError("模拟 Provider 不支持该结构化输出 Schema")

@@ -20,12 +20,13 @@ class ExecutionRegistryTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Test
-    void 只解析目录中真实启用且依赖完整的首个纵切() {
+    void 只解析目录中真实启用且依赖完整的纵切() {
         ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
 
         assertThat(registry.enabledOperationKeys("long_serial", false))
                 .containsExactly(
                         "long_serial.answer_question",
+                        "long_serial.plan_chapter",
                         "long_serial.rewrite_chapter_selection");
         ExecutionRegistry.ResolvedOperation resolved =
                 registry.resolve("long_serial.rewrite_chapter_selection", false);
@@ -64,6 +65,25 @@ class ExecutionRegistryTest {
         assertThat(resolved.operation().reviewPolicy().evidencePolicy())
                 .isEqualTo("evidence.review.same_bundle_artifact_revision.v1");
         assertThat(resolved.operation().reviewPolicy().lane()).isEqualTo("interactive");
+    }
+
+    @Test
+    void 章节规划冻结专用生成复审与四调用预算() {
+        ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        ExecutionRegistry.ResolvedOperation plan = registry.resolve("long_serial.plan_chapter", false);
+        assertThat(plan.generatorProfile().key()).isEqualTo("plot.chapter_plan.v1");
+        assertThat(plan.generatorProfile().promptProfile().systemPrompt()).contains("章节规划");
+        assertThat(plan.outputSchema().jsonSchema().get("required"))
+                .isEqualTo(java.util.List.of("title", "summary", "chapterGoal", "sceneBeats"));
+        assertThat(plan.reviewers()).extracting(reviewer -> reviewer.profile().key())
+                .containsExactly("reviewer.chapter_plan_editorial.v1");
+        assertThat(plan.operation().reviewPolicy().rubricVersion()).isEqualTo("rubric.chapter_plan.review.v1");
+        assertThat(plan.operation().reviewPolicy().maxAutomaticRevisions()).isEqualTo(1);
+        assertThat(plan.operation().runBudget().maxModelCalls()).isEqualTo(4);
+        assertThat(plan.generatorStepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(30_000);
+        assertThat(plan.reviewers().getFirst().stepBudget().budget().maxPromptCacheMissTokens())
+                .isEqualTo(30_000);
+        assertThat(plan.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(120_000);
     }
 
     @Test

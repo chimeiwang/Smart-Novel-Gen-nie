@@ -19,6 +19,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
+import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetDimension;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
@@ -497,6 +498,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CHAPTER_SELECTION_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case BEAT_PLAN_REVIEW_ARTIFACT -> completeSelectionGeneration(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
     }
 
@@ -509,8 +512,10 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             WorkflowStepUsage usage,
             Map<String, Object> output,
             LocalDateTime now) {
-        validateSelectionGenerationOutput(frozenStep.outputSchema(), output);
-        Artifact artifact = materializeSelection(
+        boolean beatPlan = "long_serial.plan_chapter".equals(executionPlan.operation().key());
+        if (!beatPlan) validateSelectionGenerationOutput(frozenStep.outputSchema(), output);
+        Artifact artifact = beatPlan ? materializeBeatPlan(
+                transaction, locked, executionPlan, output, body.getResultHash(), now) : materializeSelection(
                 transaction,
                 locked,
                 executionPlan,
@@ -526,12 +531,19 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 locked,
                 body.getResultHash(),
                 usage,
-                canonicalJson(output),
+                canonicalJson(beatPlan ? Map.of("artifactId", artifact.id(),
+                        "artifactRevision", artifact.revision(), "contentSha256", output.get("contentSha256")) : output),
                 frozenArtifactId == null ? artifact.id() : frozenArtifactId,
                 frozenArtifactRevision == null ? artifact.revision() : frozenArtifactRevision,
                 now);
+        Map<String, Object> reviewerCandidate = output;
+        if (beatPlan) {
+            Record exact = transaction.fetchOne("SELECT \"payloadJson\" FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ? AND revision = ?",
+                    artifact.id(), artifact.revision());
+            reviewerCandidate = DurableBeatPlanArtifact.output(readObject(exact.get("payloadJson", String.class)));
+        }
         List<Map<String, Object>> reviewerSteps = createReviewerSteps(
-                transaction, locked, executionPlan, artifact, output, now);
+                transaction, locked, executionPlan, artifact, reviewerCandidate, now);
         long sequence = locked.run().get("lastEventSequence", Long.class);
         sequence = appendStepFinished(
                 transaction, locked, "completed", null, sequence, now);
@@ -886,10 +898,55 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 sha256(candidate),
                 locked.step().get("id", String.class),
                 generationResultHash);
+        return persistCandidate(transaction, locked, "chapter_draft", "章节选区改写", null,
+                stored.payload(), stored.diff(), now);
+    }
 
+    private Artifact materializeBeatPlan(DSLContext transaction, Locked locked,
+            ExecutionPlanSnapshot executionPlan, Map<String, Object> output,
+            String resultHash, LocalDateTime now) {
+        if (!"long_serial.plan_chapter".equals(executionPlan.operation().key())
+                || !"apply.beat_plan.v1".equals(executionPlan.operation().applyHandler())) {
+            throw invalid("章节计划未绑定正式 BeatPlan 应用器");
+        }
+        try {
+            DurableBeatPlanArtifact.validateOutput(output);
+            Map<String, Object> semantic = new LinkedHashMap<>(output);
+            semantic.remove("contentSha256");
+            semantic.remove("beatCount");
+            List<Map<String, Object>> scenes = new ArrayList<>();
+            for (Object value : (List<?>) semantic.get("sceneBeats")) {
+                Map<String, Object> scene = new LinkedHashMap<>((Map<String, Object>) value);
+                scene.remove("order");
+                scenes.add(scene);
+            }
+            semantic.put("sceneBeats", scenes);
+            WorkflowOutputValidator.validate(executionPlan.generator().outputSchema().jsonSchema(), semantic);
+        } catch (IllegalArgumentException exception) {
+            throw invalid("章节计划不符合冻结的严格语义结果契约");
+        }
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        Record bundle = transaction.fetchOne("""
+                SELECT bundle."manifestSha256" FROM public."WorkflowEvidenceBundle" AS bundle
+                JOIN public."WorkflowEvidenceItem" AS item ON item."bundleId" = bundle.id
+                WHERE bundle.id = ? AND bundle."runId" = ?
+                  AND item."resourceType" = 'chapter_plan_context' AND item."resourceId" = ?
+                  AND item.exists AND item."contentType" = 'json'
+                """, bundleId, locked.run().get("id", String.class), locked.run().get("chapterId", String.class));
+        if (bundle == null) throw invalid("章节计划缺少不可变完整 Evidence");
+        DurableBeatPlanArtifact.Stored stored = DurableBeatPlanArtifact.create(bundleId,
+                bundle.get("manifestSha256", String.class), locked.run().get("chapterId", String.class),
+                output, locked.step().get("id", String.class), resultHash);
+        return persistCandidate(transaction, locked, "beat_plan", string(output, "title"),
+                string(output, "summary"), stored.payload(), stored.diff(), now);
+    }
+
+    private Artifact persistCandidate(DSLContext transaction, Locked locked, String kind,
+            String title, String summary, Map<String, Object> payload, Map<String, Object> diff, LocalDateTime now) {
+        String chapterId = locked.run().get("chapterId", String.class);
         String profile = locked.step().get("modelProfile", String.class);
-        String payloadJson = canonicalJson(stored.payload());
-        String diffJson = canonicalJson(stored.diff());
+        String payloadJson = canonicalJson(payload);
+        String diffJson = canonicalJson(diff);
         String artifactId = locked.step().get("artifactId", String.class);
         Integer expectedRevision = locked.step().get("artifactRevision", Integer.class);
         int revision;
@@ -904,8 +961,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                       "createdByAgent", "updatedByAgent", "reviewerAgent", revision,
                       "createdAt", "updatedAt"
                     ) VALUES (
-                      ?, ?, ?, NULL, ?, ?, CAST('chapter_draft' AS "ReviewArtifactKind"),
-                      CAST('under_review' AS "ReviewArtifactStatus"), ?, NULL, ?, ?, ?, ?, NULL, 1, ?, ?
+                      ?, ?, ?, NULL, ?, ?, CAST(? AS "ReviewArtifactKind"),
+                      CAST('under_review' AS "ReviewArtifactStatus"), ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?
                     )
                     """,
                     artifactId,
@@ -913,7 +970,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                     chapterId,
                     locked.run().get("id", String.class),
                     "workflow:" + locked.run().get("id", String.class) + ":candidate",
-                    "章节选区改写",
+                    kind,
+                    title,
+                    summary,
                     payloadJson,
                     diffJson,
                     profile,
@@ -938,10 +997,12 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                     """
                     UPDATE public."ReviewArtifact"
                     SET status = CAST('under_review' AS "ReviewArtifactStatus"),
-                        "payloadJson" = ?, "diffJson" = ?, "updatedByAgent" = ?,
+                        title = ?, summary = ?, "payloadJson" = ?, "diffJson" = ?, "updatedByAgent" = ?,
                         "reviewerAgent" = NULL, revision = ?, "updatedAt" = ?
                     WHERE id = ? AND "workflowRunId" = ? AND revision = ?
                     """,
+                    title,
+                    summary,
                     payloadJson,
                     diffJson,
                     profile,
@@ -959,11 +1020,12 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 INSERT INTO public."ReviewArtifactRevision" (
                   id, "artifactId", revision, summary, "payloadJson", "diffJson",
                   "createdByAgent", "createdAt"
-                ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 ids.next(),
                 artifactId,
                 revision,
+                summary,
                 payloadJson,
                 diffJson,
                 profile,
@@ -1013,6 +1075,13 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Object userInstruction = task.get("userInstruction");
         if (userInstruction != null && !(userInstruction instanceof String)) {
             throw invalid("Run 的 userInstruction 必须是字符串或 null");
+        }
+        if ("long_serial.plan_chapter".equals(executionPlan.operation().key())) {
+            Map<String, Object> generationInput = readObject(locked.step().get("input", String.class));
+            task.put("userInstruction", generationInput.get("userInstruction"));
+            if (generationInput.containsKey("originalUserInstruction")) {
+                task.put("originalUserInstruction", generationInput.get("originalUserInstruction"));
+            }
         }
         task.put("rubricVersion", executionPlan.reviewPolicy().rubricVersion());
         Map<String, Object> inputValues = new LinkedHashMap<>();
@@ -1153,8 +1222,10 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 locked.step().get("artifactId", String.class),
                 locked.step().get("artifactRevision", Integer.class));
         ExecutionPlanSnapshot executionPlan = executionPlan(locked.run());
-        if (!"review.merge_all_pass_else_author.v1"
-                        .equals(executionPlan.reviewPolicy().mergePolicy())
+        boolean planPolicy = "long_serial.plan_chapter".equals(executionPlan.operation().key())
+                && "review.chapter_plan_one_revision_else_author.v1".equals(executionPlan.reviewPolicy().mergePolicy());
+        if ((!planPolicy && !"review.merge_all_pass_else_author.v1"
+                        .equals(executionPlan.reviewPolicy().mergePolicy()))
                 || !"awaiting_user"
                         .equals(executionPlan.reviewPolicy().onUnavailable())) {
             throw new IllegalStateException("当前 Core 不支持冻结执行计划的 Reviewer 收敛策略");
@@ -1174,7 +1245,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         List<Record> evaluations = transaction.fetch(
                 """
                 SELECT evaluation.id, evaluation."executionStatus", evaluation."contentVerdict",
-                       step.ordinal
+                       evaluation."findingsJson", step.ordinal
                 FROM public."WorkflowEvaluation" AS evaluation
                 JOIN public."WorkflowStep" AS step ON step.id = evaluation."stepId"
                 WHERE evaluation."runId" = ? AND evaluation."artifactId" = ?
@@ -1230,6 +1301,15 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                         "reviewAvailability", availability),
                 "review:completed:" + artifactId + ":" + artifactRevision,
                 now);
+        if (planPolicy && "complete".equals(availability) && "issues_found".equals(verdict)
+                && enqueueAutomaticPlanRevision(transaction, locked, executionPlan, evaluations, now)) {
+            transaction.execute("""
+                    UPDATE public."ReviewArtifact" SET status = CAST('draft' AS "ReviewArtifactStatus"), "updatedAt" = ?
+                    WHERE id = ? AND "workflowRunId" = ? AND revision = ?
+                    """, now, artifactId, locked.run().get("id", String.class), artifactRevision);
+            updateRun(transaction, locked.run().get("id", String.class), "running", sequence, null, null, now);
+            return;
+        }
         sequence = appendEvent(
                 transaction,
                 locked.run().get("id", String.class),
@@ -1250,6 +1330,77 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 null,
                 null,
                 now);
+    }
+
+    private boolean enqueueAutomaticPlanRevision(DSLContext tx, Locked locked,
+            ExecutionPlanSnapshot plan, List<Record> evaluations, LocalDateTime now) {
+        List<Map<String, Object>> findings = new ArrayList<>();
+        for (Record evaluation : evaluations) {
+            // 任何分歧或无法判断都交作者；模型不能自行把结构阻塞降级为局部返工。
+            if (!"issues_found".equals(evaluation.get("contentVerdict", String.class))) return false;
+            List<Map<String, Object>> values = json.readValue(evaluation.get("findingsJson", String.class), new TypeReference<>() {});
+            if (values.isEmpty()) return false;
+            for (Map<String, Object> finding : values) {
+                if (!"chapter_plan.local".equals(finding.get("dimension"))
+                        || !(finding.get("confidence") instanceof Number confidence)
+                        || !Double.isFinite(confidence.doubleValue()) || confidence.doubleValue() < 0.8) return false;
+            }
+            findings.addAll(values);
+        }
+        String runId = locked.run().get("id", String.class);
+        long generations = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", runId).get(0, Long.class);
+        long modelSteps = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"stepType\" = CAST('agent' AS \"WorkflowStepType\")", runId).get(0, Long.class);
+        if (generations - 1 >= Math.min(1, plan.reviewPolicy().maxAutomaticRevisions())
+                || modelSteps + 1 + plan.reviewers().size() > plan.runBudget().maxModelCalls()) return false;
+        String artifactId = locked.step().get("artifactId", String.class);
+        int revision = locked.step().get("artifactRevision", Integer.class);
+        Record stored = tx.fetchOne("""
+                SELECT revision."payloadJson", revision."diffJson" FROM public."ReviewArtifact" AS artifact
+                JOIN public."ReviewArtifactRevision" AS revision ON revision."artifactId" = artifact.id AND revision.revision = artifact.revision
+                WHERE artifact.id = ? AND artifact."workflowRunId" = ? AND artifact.revision = ?
+                  AND artifact."payloadJson" = revision."payloadJson" AND artifact."diffJson" = revision."diffJson"
+                FOR UPDATE OF artifact, revision
+                """, artifactId, runId, revision);
+        if (stored == null) throw invalid("自动返工引用的候选 revision 不一致");
+        Record bundle = tx.fetchOne("SELECT id, version, \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?",
+                locked.step().get("evidenceBundleId", String.class), runId);
+        if (bundle == null) throw invalid("自动返工缺少冻结 Evidence");
+        Map<String, Object> payload = readObject(stored.get("payloadJson", String.class));
+        DurableBeatPlanArtifact.reconstruct(payload, readObject(stored.get("diffJson", String.class)),
+                bundle.get("id", String.class), bundle.get("manifestSha256", String.class), locked.run().get("chapterId", String.class));
+        Record originalGeneration = tx.fetchOne("""
+                SELECT input FROM public."WorkflowStep" WHERE "runId" = ? AND purpose = 'generation'
+                ORDER BY ordinal ASC LIMIT 1
+                """, runId);
+        if (originalGeneration == null) throw invalid("自动返工缺少原始 generation 输入");
+        Map<String, Object> input = new LinkedHashMap<>(readObject(originalGeneration.get("input", String.class)));
+        input.put("originalUserInstruction", input.get("userInstruction"));
+        input.put("userInstruction", "依据同一冻结来源修正下列明确局部问题，输出完整章节计划：" + canonicalJson(findings));
+        input.put("previousArtifact", Map.of("artifactId", artifactId, "artifactRevision", revision,
+                "payload", DurableBeatPlanArtifact.output(payload)));
+        ExecutionPlanSnapshot.Step generator = plan.generator();
+        String stepId = ids.next();
+        String idempotencyKey = runId + "." + stepId;
+        String inputHash = ExecutionCanonicalJson.sha256(input);
+        Map<String, Object> request = new LinkedHashMap<>(stepRequestMaterial(locked.run(), stepId,
+                idempotencyKey, inputHash, bundle, generator.evidencePolicy(), generator.lane(),
+                generator.modelProfile().toMap(), generator.outputSchema().toMap(), generator.stepBudget().budgetMap(), new Artifact(artifactId, revision)));
+        request.put("purpose", GENERATION);
+        int ordinal = tx.fetchOne("SELECT max(ordinal) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId).get(0, Integer.class) + 1;
+        tx.execute("""
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal,
+                  purpose, lane, "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey",
+                  "requestHash", "inputHash", "evidenceBundleId", "artifactId", "artifactRevision",
+                  "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt"
+                ) VALUES (?, ?, ?, CAST('agent' AS "WorkflowStepType"), CAST('pending' AS "WorkflowStepStatus"),
+                  ?, ?, ?, 'generation', ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, stepId, runId, generator.modelProfile().profile(), canonicalJson(input), now, ordinal,
+                generator.lane(), now, idempotencyKey, ExecutionCanonicalJson.sha256(request), inputHash,
+                bundle.get("id", String.class), artifactId, revision, generator.modelProfile().profile(),
+                Integer.toString(generator.modelProfile().version()), generator.outputSchema().name(),
+                Integer.toString(generator.outputSchema().version()), json.writeValueAsString(generator.stepBudget().stored()), now, now);
+        return true;
     }
 
     private void completeStep(

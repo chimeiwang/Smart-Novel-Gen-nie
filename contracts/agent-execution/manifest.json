@@ -3,7 +3,7 @@
   "catalogVersion": "1",
   "catalog": {
     "path": "operation-catalog.v1.json",
-    "sha256": "272a9a309f488d5651840da900a9fa7e1c571a1b5a081fab40aabb6afe3dc9f6"
+    "sha256": "709871031d7f8ddcaf7267fd28a46d51f575dc19f90637d21355f5a01903ee85"
   },
   "schema": {
     "path": "operation-catalog.schema.json",
@@ -11,7 +11,7 @@
   },
   "profileRegistry": {
     "path": "profile-registry.v1.json",
-    "sha256": "532998fc35b6b67a430bcb3740e9448f38d9a60a5db41421a0b690db9344372e"
+    "sha256": "dffd667e25688b69f0bfc40e0eee638b15d907a4d85ada612974087c398d9efa"
   },
   "profileRegistrySchema": {
     "path": "profile-registry.schema.json",
@@ -19,7 +19,7 @@
   },
   "deploymentProfileRegistry": {
     "path": "deployment-profile-registry.v1.json",
-    "sha256": "767582c7243d610b7f26c98bfc40eaaefbc7bdc6ba54abb04961bfa2efae98c0"
+    "sha256": "03a8f61bfda7b49881652f2f92bb4de51baad66065481d689adaf8c85efe1766"
   },
   "deploymentProfileRegistrySchema": {
     "path": "deployment-profile-registry.schema.json",
@@ -27,7 +27,7 @@
   },
   "promptProfileRegistry": {
     "path": "prompt-profile-registry.v1.json",
-    "sha256": "0ffe5570764a2b0d9b58866909095e4b170e97a41fb99bdca09e8e8c8785be79"
+    "sha256": "49cb727a685c3fd0fe43aa1f1fb45c8b8b84e680b4c3cbcce6d2215d036a372d"
   },
   "promptProfileRegistrySchema": {
     "path": "prompt-profile-registry.schema.json",
@@ -35,7 +35,7 @@
   },
   "outputSchemaRegistry": {
     "path": "output-schema-registry.v1.json",
-    "sha256": "39b506e84b2fbcc718b035b78f5472bfb2c991b6a02a41a425186e4a4501fde5"
+    "sha256": "4638ef1ed0a12f06f71f6f8c8ee9dd126d0de35c5f14c7ec1385c7fcfbb8ee31"
   },
   "outputSchemaRegistrySchema": {
     "path": "output-schema-registry.schema.json",
@@ -43,7 +43,7 @@
   },
   "stepBudgetRegistry": {
     "path": "step-budget-registry.v1.json",
-    "sha256": "17c8befe89f0e7d29a85cd3b6f8150763cf44b9aa058fd4f063c5e3344117d25"
+    "sha256": "6d19cf0c595cc6df1ef66119a269964ea0b703d4154831da69aef146a7f41227"
   },
   "stepBudgetRegistrySchema": {
     "path": "step-budget-registry.schema.json",

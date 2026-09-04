@@ -1,0 +1,93 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/ChapterPlanSceneOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "模型只填写节拍语义；顺序由 Core/执行器按数组位置派生。",
+  "properties": {
+    "acceptanceCriteria": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Acceptancecriteria"
+    },
+    "characters": {
+      "items": {
+        "maxLength": 100,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Characters",
+      "type": "array"
+    },
+    "conflict": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conflict"
+    },
+    "estimatedWords": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimatedwords"
+    },
+    "foreshadowingRefs": {
+      "anyOf": [
+        {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Foreshadowingrefs"
+    },
+    "goal": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Goal",
+      "type": "string"
+    }
+  },
+  "required": [
+    "goal"
+  ],
+  "title": "ChapterPlanSceneOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChapterPlanSceneOutput"
+}

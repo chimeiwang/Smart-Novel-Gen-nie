@@ -504,6 +504,19 @@ test("逻辑角色与解析模型只展示允许公开的信息", () => {
   assert.doesNotMatch(workflowResolvedModelLabel(resolved) ?? "", /deployment|endpoint|fingerprint/i);
 });
 
+test("章节规划刷新后恢复实际生成与专用编辑复审角色", () => {
+  const run = pendingRun([
+    activeStep("plan-generator", 1, "plot.chapter_plan.v1", "deepseek-chat"),
+  ]);
+  run.operation = "plan_chapter";
+  const state = createWorkflowRunUiState(run);
+  assert.equal(workflowRunStatusTitle(state), "章节规划");
+  assert.equal(
+    workflowModelRoleLabel(modelProfile("reviewer.chapter_plan_editorial.v1"), "review"),
+    "章节规划复审",
+  );
+});
+
 test("只有 chat_answer 完成事件要求回读当前会话权威消息", () => {
   const answerCompleted = workflowEvent(envelope(3, "completed", {
     outcomeType: "chat_answer",

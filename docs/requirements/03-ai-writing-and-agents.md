@@ -82,6 +82,23 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 
 选区 Agent 产物仍必须走 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用`。Agent 只生成 replacement，Core 在应用时再次校验来源绑定、范围和 hash，并保持选区外正文不变；CLI 不得绕过 Artifact 直接写入章节或大纲。普通 `plan_chapter` Beat Plan 与全文 `write_chapter`/`rewrite_scene` 草案继续使用原有完整草案语义。
 
+## V2 章节规划接入
+
+2026-09-04 工作分支已实现 `long_serial.plan_chapter` 的 Core-owned V2 执行链，并通过本地隔离 Fake 验收，尚未部署生产。
+公共操作、章节 target/scope 和 CLI 命令不变；V2 路由命中时才使用以下机制，不能把本段解释为其余 Operation
+已经迁移或 V1 已退役：
+
+- Core 冻结章节目标、大纲路径、剧情/章节进展、相关设定和伏笔、已批准计划及明确的缺失来源；不把全文 workspace
+  交给模型。生成、编辑复审和返工使用同一 Evidence，不重新读取可变资料。
+- Agent 的 `plot.chapter_plan.v1` 单 Step 只返回结构化计划；程序派生节拍顺序、数量和哈希。
+  `reviewer.chapter_plan_editorial.v1` 使用规划专用提示与 rubric，复审结果由 Core 保存。
+- Core 决定是否创建最多一次自动完整返工和再次复审；每次均为独立耐久模型 Step，不进入 LangGraph 或工具循环。
+  作者显式返工也创建新候选 revision，不能覆写旧候选。
+- 模型完成后只产生 `beat_plan` ReviewArtifact，作者确认后由 Core 同事务写入正式计划及 SceneBeat；不修改正文。
+  用公共 Run 的 `engineVersion/status/activeSteps/artifact` 观察，`waiting_user` 不等于已应用。
+
+具体阶段证据及 CLI/Skill 更新说明见 `docs/specs/2026-09-04-durable-chapter-planning.md`。
+
 ## 目标
 
 为作者提供可持续的 AI 创作协作能力。系统需要把用户的自然语言请求识别为创作操作，选择主责 Agent 执行，并通过流式事件把过程、草案和用户确认状态展示给前端。

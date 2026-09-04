@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 215,
+  "modelCount": 221,
   "models": [
     {
       "model": "AgentEvent",
@@ -43,6 +43,42 @@
       "module": "execution",
       "path": "execution/BillingReconciliationRequest.schema.json",
       "sha256": "ef106527fcbbc85cef5a7ceeb2c93600f0e8edb10fa56ae39bd55498ac7d1e49"
+    },
+    {
+      "model": "ChapterPlanInput",
+      "module": "execution",
+      "path": "execution/ChapterPlanInput.schema.json",
+      "sha256": "8a9bcaccce683bec8f3ab62c1ef146887c17557945e6251883805ccf501770d2"
+    },
+    {
+      "model": "ChapterPlanOutput",
+      "module": "execution",
+      "path": "execution/ChapterPlanOutput.schema.json",
+      "sha256": "46120923a3be718d419abfbe5938f44b42c29c5e29727fd2e4b5c908e26478dd"
+    },
+    {
+      "model": "ChapterPlanPreviousArtifact",
+      "module": "execution",
+      "path": "execution/ChapterPlanPreviousArtifact.schema.json",
+      "sha256": "3de0d7588d07947cf6f97fa6e051f5e391d4c487611ecab5535ea8bba6c76d8b"
+    },
+    {
+      "model": "ChapterPlanResult",
+      "module": "execution",
+      "path": "execution/ChapterPlanResult.schema.json",
+      "sha256": "77970fc0a68a9e5474dfb42135f897cb11c19c029ed9afb92a7fbb1e5758862e"
+    },
+    {
+      "model": "ChapterPlanSceneOutput",
+      "module": "execution",
+      "path": "execution/ChapterPlanSceneOutput.schema.json",
+      "sha256": "4bfb06c6da7307df2360a522dd5cdcab5ff1d47b9b76010140db79326e9d92f1"
+    },
+    {
+      "model": "ChapterPlanSceneResult",
+      "module": "execution",
+      "path": "execution/ChapterPlanSceneResult.schema.json",
+      "sha256": "08dc4f386ffbb901dd02bbb6a4a09039e5e0a54eea1029dd28a8d32e23aae988"
     },
     {
       "model": "ChatAnswerInput",

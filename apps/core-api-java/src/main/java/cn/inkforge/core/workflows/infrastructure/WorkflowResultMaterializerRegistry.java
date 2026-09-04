@@ -12,6 +12,8 @@ final class WorkflowResultMaterializerRegistry {
     private static final Map<String, Binding> BINDINGS = Map.of(
             "long_serial.answer_question",
             new Binding("apply.chat_answer.v1", Materializer.CHAT_ANSWER),
+            "long_serial.plan_chapter",
+            new Binding("apply.beat_plan.v1", Materializer.BEAT_PLAN_REVIEW_ARTIFACT),
             "long_serial.rewrite_chapter_selection",
             new Binding(
                     "apply.chapter_selection.v1",
@@ -47,6 +49,7 @@ final class WorkflowResultMaterializerRegistry {
 
     enum Materializer {
         CHAT_ANSWER,
+        BEAT_PLAN_REVIEW_ARTIFACT,
         CHAPTER_SELECTION_REVIEW_ARTIFACT
     }
 

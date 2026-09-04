@@ -10,8 +10,9 @@
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
 - 本次不新增 CLI 命令名，只扩展现有 `long.agent.start` 的一个显式 Operation。
 - macOS 两份 Skill 已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机实际入口切换与离线验收，
-  执行链为 `scripts/run.sh → Java Operator → Java CLI`。真实会话与 Windows 实机尚未验收，服务器部署状态
-  不随本机切换变化。该入口变更不开放问答；Python CLI
+  执行链为 `scripts/run.sh → Java Operator → Java CLI`。新版生产入口已于 2026-09-04 用既有 Keychain 会话通过
+  指定账号的 `auth.whoami`，真实写作业务与 Windows 实机尚未验收，服务器部署状态不随本机切换变化。
+  该入口变更不开放问答；Python CLI
   保留为契约对照，问答生产开放前仍须证明 Python/Java 两端对本契约全绿。
 
 ### 当前本地验证证据

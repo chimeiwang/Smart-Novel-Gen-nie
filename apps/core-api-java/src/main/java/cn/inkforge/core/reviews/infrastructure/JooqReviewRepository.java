@@ -43,6 +43,7 @@ import cn.inkforge.core.reviews.domain.SelectionMaterialization;
 import cn.inkforge.core.reviews.domain.SelectionSource;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
+import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -625,7 +626,7 @@ final class JooqReviewRepository implements ReviewRepository {
                 : durableDetail(context, artifact, revision);
         Map<String, Object> payload = durable == null
                 ? parseObject(artifact.getPayloadjson())
-                : durable.materialized().payload();
+                : durable.payload();
         if (!artifact.getKind().getLiteral().equals(payload.get("kind"))) {
             throw invalidPayload();
         }
@@ -633,10 +634,10 @@ final class JooqReviewRepository implements ReviewRepository {
         payload.remove("_inkforgeControl");
         Object diff = durable == null
                 ? artifact.getDiffjson() == null ? null : parseValue(artifact.getDiffjson())
-                : durable.materialized().diff();
+                : durable.diff();
         SourceView sourceView = durable == null
                 ? sourceView(context, artifact)
-                : new SourceView(List.of(durable.sourceBinding()), "verified");
+                : new SourceView(durable.sourceBindings(), "verified");
         List<ArtifactEvaluationResponse> evaluations = includeEvaluations
                 ? durable == null
                         ? context.selectFrom(REVIEWARTIFACTEVALUATION)
@@ -661,6 +662,11 @@ final class JooqReviewRepository implements ReviewRepository {
                 artifact.getStatus().getLiteral()));
         result.setTitle(artifact.getTitle());
         result.setSummary(artifact.getSummary());
+        if (durable != null && "beat_plan".equals(payload.get("kind"))
+                && payload.get("beatPlan") instanceof Map<?, ?> plan) {
+            result.setTitle((String) plan.get("title"));
+            result.setSummary((String) plan.get("summary"));
+        }
         result.setPayload(payload);
         result.setDiff(JsonNullable.of(diff));
         result.setCreatedByAgent(artifact.getCreatedbyagent());
@@ -732,6 +738,17 @@ final class JooqReviewRepository implements ReviewRepository {
                     "待审核草案 head 与精确修订事实不一致");
         }
         String bundleId = requiredStoredText(storedPayload, "evidenceBundleId");
+        if (DurableBeatPlanArtifact.isStored(storedPayload)) {
+            DurableChapterPlanReviewEvidence evidence = DurableChapterPlanReviewEvidence.read(
+                    context, json, artifact.getWorkflowrunid(), bundleId, artifact.getChapterid());
+            DurableBeatPlanArtifact.Materialized plan = DurableBeatPlanArtifact.reconstruct(storedPayload,
+                    storedDiff, bundleId, evidence.manifestHash(), artifact.getChapterid());
+            Object bindings = evidence.context().get("sourceBindings");
+            if (!(bindings instanceof List<?> list) || list.isEmpty()) throw artifactIntegrityError();
+            List<SourceBinding> sources = list.stream()
+                    .map(value -> json.convertValue(value, SourceBinding.class)).toList();
+            return new DurableDetail(plan.payload(), plan.diff(), sources);
+        }
         String itemId = requiredStoredText(storedPayload, "evidenceItemId");
         Record evidence = context.fetchOne(
                 """
@@ -771,7 +788,7 @@ final class JooqReviewRepository implements ReviewRepository {
                 value.resourceType(),
                 evidence.get("resourceRevision", Integer.class),
                 value.resourceUpdatedAt());
-        return new DurableDetail(materialized, binding);
+        return new DurableDetail(materialized.payload(), materialized.diff(), List.of(binding));
     }
 
     private List<ArtifactEvaluationResponse> durableEvaluations(
@@ -1201,6 +1218,6 @@ final class JooqReviewRepository implements ReviewRepository {
     private record SourceView(List<SourceBinding> bindings, String status) {}
 
     private record DurableDetail(
-            DurableSelectionArtifact.Materialized materialized,
-            SourceBinding sourceBinding) {}
+            Map<String, Object> payload, Map<String, Object> diff,
+            List<SourceBinding> sourceBindings) {}
 }

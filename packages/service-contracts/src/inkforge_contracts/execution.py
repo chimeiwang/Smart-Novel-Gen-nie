@@ -481,6 +481,138 @@ class ChatAnswerOutput(_StrictModel):
         return self
 
 
+class ChapterPlanSceneOutput(_StrictModel):
+    """模型只填写节拍语义；顺序由 Core/执行器按数组位置派生。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    goal: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+    conflict: str | None = Field(default=None, max_length=1000)
+    characters: list[Annotated[str, Field(min_length=1, max_length=100, pattern=r"\S")]] = Field(
+        default_factory=list, max_length=50
+    )
+    foreshadowingRefs: (
+        list[Annotated[str, Field(min_length=1, max_length=200, pattern=r"\S")]] | None
+    ) = Field(default=None, max_length=50)
+    estimatedWords: int | None = Field(default=None, ge=0, le=2_147_483_647)
+    acceptanceCriteria: str | None = Field(
+        default=None, min_length=1, max_length=1000, pattern=r"\S"
+    )
+
+    @model_validator(mode="after")
+    def validate_semantic_text(self) -> Self:
+        values = [self.goal, *self.characters, *(self.foreshadowingRefs or [])]
+        if self.acceptanceCriteria is not None:
+            values.append(self.acceptanceCriteria)
+        _require_plan_text(values)
+        return self
+
+
+class ChapterPlanOutput(_StrictModel):
+    """章节规划的 Provider 语义输出，保留完整原文与可选字段省略语义。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    summary: str = Field(min_length=1, max_length=2000, pattern=r"\S")
+    chapterGoal: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+    sceneBeats: list[ChapterPlanSceneOutput] = Field(min_length=1, max_length=50)
+    mainPlotConnection: str | None = Field(default=None, max_length=1000)
+    chapterAcceptanceCriteria: str | None = Field(default=None, max_length=1000)
+    totalEstimatedWords: int | None = Field(default=None, ge=0, le=2_147_483_647)
+
+    @model_validator(mode="after")
+    def validate_semantic_text(self) -> Self:
+        _require_plan_text([self.title, self.summary, self.chapterGoal])
+        return self
+
+
+class ChapterPlanSceneResult(ChapterPlanSceneOutput):
+    order: int = Field(ge=1, le=50)
+
+
+class ChapterPlanResult(_StrictModel):
+    """执行器派生后的终报；哈希仅覆盖规范计划，不包含 Artifact 或来源身份。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    summary: str = Field(min_length=1, max_length=2000, pattern=r"\S")
+    chapterGoal: str = Field(min_length=1, max_length=1000, pattern=r"\S")
+    sceneBeats: list[ChapterPlanSceneResult] = Field(min_length=1, max_length=50)
+    mainPlotConnection: str | None = Field(default=None, max_length=1000)
+    chapterAcceptanceCriteria: str | None = Field(default=None, max_length=1000)
+    totalEstimatedWords: int | None = Field(default=None, ge=0, le=2_147_483_647)
+    beatCount: int = Field(ge=1, le=50)
+    contentSha256: Sha256
+
+    @model_validator(mode="after")
+    def validate_derived_fields(self) -> Self:
+        _require_plan_text([self.title, self.summary, self.chapterGoal])
+        if self.beatCount != len(self.sceneBeats):
+            raise ValueError("章节规划 beatCount 与场景数量不一致")
+        if [scene.order for scene in self.sceneBeats] != list(range(1, self.beatCount + 1)):
+            raise ValueError("章节规划 order 必须从 1 连续递增")
+        material = self.model_dump(mode="json", exclude_unset=True, exclude={"contentSha256"})
+        if self.contentSha256 != canonical_execution_sha256(material):
+            raise ValueError("章节规划 contentSha256 与完整规范计划不一致")
+        return self
+
+
+class ChapterPlanPreviousArtifact(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    artifactId: ExecutionId
+    artifactRevision: StrictPositiveInt
+    payload: ChapterPlanResult
+
+
+class ChapterPlanInput(_StrictModel):
+    """初始规划与精确候选返工的输入；返工不允许读取当前可变 workspace。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    userInstruction: str = Field(min_length=1, pattern=r"\S")
+    targetWordCount: int = Field(ge=1, le=10_000_000)
+    originalUserInstruction: str | None = Field(default=None, min_length=1, pattern=r"\S")
+    previousArtifact: ChapterPlanPreviousArtifact | None = None
+
+    @model_validator(mode="after")
+    def validate_revision_pair(self) -> Self:
+        _require_plan_text([self.userInstruction])
+        if self.originalUserInstruction is not None:
+            _require_plan_text([self.originalUserInstruction])
+        revision_fields = self.model_fields_set & {"originalUserInstruction", "previousArtifact"}
+        if revision_fields and (
+            len(revision_fields) != 2
+            or self.originalUserInstruction is None
+            or self.previousArtifact is None
+        ):
+            raise ValueError("规划返工的原指令与精确上一候选不能缺失或为空")
+        if (self.originalUserInstruction is None) != (self.previousArtifact is None):
+            raise ValueError("规划返工必须同时绑定原指令与精确上一候选")
+        return self
+
+
+def _require_plan_text(values: list[str]) -> None:
+    # BOM 也不是可见内容；只检验而不清洗文本，保持与 Core 的 Unicode 语义复验一致。
+    if any(not value.replace("\ufeff", "").strip() for value in values):
+        raise ValueError("章节规划语义字段不能只含空白或 BOM")
+
+
+def materialize_chapter_plan_output(value: object) -> dict[str, JsonValue]:
+    """不改语义文本；仅按完整数组派生计数、顺序和跨语言 canonical SHA。"""
+
+    plan = ChapterPlanOutput.model_validate(value)
+    output = plan.model_dump(mode="json", exclude_unset=True)
+    output["sceneBeats"] = [
+        scene | {"order": index} for index, scene in enumerate(output["sceneBeats"], start=1)
+    ]
+    output["beatCount"] = len(output["sceneBeats"])
+    output["contentSha256"] = canonical_execution_sha256(output)
+    return ChapterPlanResult.model_validate(output).model_dump(mode="json", exclude_unset=True)
+
+
 class StepUsage(_StrictModel):
     usageStatus: Literal["complete", "partial", "unknown"]
     providerAttempts: StrictNonNegativeInt = Field(le=3)

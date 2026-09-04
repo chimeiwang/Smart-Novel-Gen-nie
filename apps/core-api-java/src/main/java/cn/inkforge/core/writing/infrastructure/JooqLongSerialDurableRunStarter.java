@@ -7,6 +7,7 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
+import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
@@ -42,6 +43,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
     private final ObjectMapper json;
     private final WorkflowStepSnapshotFactory stepSnapshots;
     private final Map<String, EvidencePlanner> planners;
+    private final ChapterPlanEvidenceReader chapterPlanningSources;
 
     JooqLongSerialDurableRunStarter(
             CoreDatabase database,
@@ -50,7 +52,8 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
             ExecutionRegistry registry,
             CuidV1Generator ids,
             Clock clock,
-            ObjectMapper json) {
+            ObjectMapper json,
+            ChapterPlanEvidenceReader chapterPlanningSources) {
         this.database = Objects.requireNonNull(database);
         this.assembler = Objects.requireNonNull(assembler);
         this.workflows = Objects.requireNonNull(workflows);
@@ -58,9 +61,11 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
+        this.chapterPlanningSources = Objects.requireNonNull(chapterPlanningSources);
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
         this.planners = Map.of(
                 "long_serial.answer_question", this::planAnswerQuestion,
+                "long_serial.plan_chapter", this::planChapter,
                 "long_serial.rewrite_chapter_selection", this::planChapterSelectionRewrite);
     }
 
@@ -249,6 +254,22 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                         null,
                         null,
                         Map.of("role", "answer_context"))),
+                null);
+    }
+
+    private PreparedStart planChapter(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        ChapterPlanEvidenceReader.Snapshot snapshot = chapterPlanningSources.capture(
+                transaction, request.getNovelId(), request.getChapterId(), request.getUserInstruction());
+        return new PreparedStart(
+                "beat_plan", "chapter", request.getChapterId(),
+                Map.of("userInstruction", request.getUserInstruction(), "targetWordCount", request.getTargetWordCount()),
+                List.of(new WorkflowEvidenceItemPlan(
+                        "chapter_plan_context", request.getChapterId(), true, null, snapshot.chapterUpdatedAt(),
+                        null, snapshot.context(), null, null, Map.of("role", "chapter_plan_context"))),
                 null);
     }
 

@@ -19,6 +19,40 @@
       }
     },
     {
+      "key": "step_budget.long_serial.plan_chapter.generator.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 30000,
+        "maxPromptCacheMissTokens": 30000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 6000,
+        "maxVisibleOutputTokens": 2000,
+        "maxCostMicros": 300000,
+        "maxWallClockSeconds": 180,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.plan_chapter.reviewer_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 30000,
+        "maxPromptCacheMissTokens": 30000,
+        "maxCompletionTokens": 2000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 2000,
+        "maxCostMicros": 100000,
+        "maxWallClockSeconds": 60,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.long_serial.rewrite_chapter_selection.generator.v1",
       "version": 1,
       "supported": true,

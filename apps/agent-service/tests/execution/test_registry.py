@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "52e4eab24f009efd0354b401fa14117d9014edcd73f80ff08a1247c5867153d7"
+        "bb2c55cee208d59bbf1310f7902629034f6733c9a4f392921ba25fb953bbead0"
     )
 
     resolved = registry.resolve("long_serial", "rewrite_chapter_selection")

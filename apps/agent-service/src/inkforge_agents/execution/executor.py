@@ -13,6 +13,9 @@ from typing import Literal, Protocol
 
 import jsonschema_rs
 from inkforge_contracts.execution import (
+    ChapterPlanInput,
+    ChapterPlanOutput,
+    ChapterPlanResult,
     ChatAnswerInput,
     ChatAnswerOutput,
     EvidenceEvaluation,
@@ -24,6 +27,7 @@ from inkforge_contracts.execution import (
     calculate_resolved_model_fingerprint,
     canonical_execution_json_bytes,
     canonical_execution_sha256,
+    materialize_chapter_plan_output,
 )
 from pydantic import JsonValue, ValidationError
 
@@ -62,6 +66,7 @@ BeginAttempt = Callable[[], Awaitable[int]]
 _SUPPORTED_OPERATION_HANDLERS = frozenset(
     {
         ("long_serial", "answer_question"),
+        ("long_serial", "plan_chapter"),
         ("long_serial", "rewrite_chapter_selection"),
     }
 )
@@ -1022,6 +1027,9 @@ def _structured_output_name(value: str) -> str:
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if (request.workflow, request.operation) == ("long_serial", "plan_chapter"):
+        _validate_chapter_plan_input(request)
+        return
     if (request.workflow, request.operation) != (
         "long_serial",
         "answer_question",
@@ -1066,6 +1074,62 @@ def _validate_operation_input(request: ExecutionStepRequest) -> None:
         or chapter.range is not None
     ):
         raise ExecutionCapabilityError("长篇问答章节 Evidence 必须是完整 text 快照")
+
+
+def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
+    if request.novelId is None:
+        raise ExecutionCapabilityError("章节规划必须绑定 novelId")
+    context_items = [
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType == "chapter_plan_context"
+    ]
+    if len(context_items) != 1:
+        raise ExecutionCapabilityError("章节规划 Evidence 必须包含唯一规划上下文")
+    item = context_items[0]
+    context = item.contentJson
+    chapter = context.get("chapter") if isinstance(context, dict) else None
+    if (
+        not item.exists
+        or item.contentType != "json"
+        or item.range is not None
+        or not isinstance(context, dict)
+        or type(context.get("schemaVersion")) is not int
+        or context.get("schemaVersion") != 1
+        or context.get("novelId") != request.novelId
+        or not isinstance(chapter, dict)
+        or chapter.get("id") != item.resourceId
+    ):
+        raise ExecutionCapabilityError("章节规划 Evidence 的完整上下文或目标身份不一致")
+    try:
+        if request.purpose == "review":
+            if set(request.input) != {"task", "candidate"}:
+                raise ValueError("规划复审只接受 task 与精确候选")
+            task = request.input["task"]
+            if not isinstance(task, dict) or (
+                task.get("workflow") != "long_serial"
+                or task.get("operation") != "plan_chapter"
+                or task.get("rubricVersion") != "rubric.chapter_plan.review.v1"
+            ):
+                raise ValueError("规划复审任务身份不一致")
+            ChapterPlanInput.model_validate({
+                "userInstruction": task.get("userInstruction"),
+                "targetWordCount": task.get("targetWordCount"),
+            })
+            ChapterPlanResult.model_validate(request.input["candidate"])
+            return
+        plan = ChapterPlanInput.model_validate(request.input)
+        previous = plan.previousArtifact
+        if previous is None:
+            if request.artifactId is not None or request.artifactRevision is not None:
+                raise ValueError("初始规划不能绑定上一候选")
+        elif (
+            previous.artifactId != request.artifactId
+            or previous.artifactRevision != request.artifactRevision
+        ):
+            raise ValueError("规划返工与精确上一候选身份不一致")
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ExecutionCapabilityError("章节规划输入或候选不符合冻结契约") from exc
 
 
 def _retry_delay_seconds(base_seconds: float, attempt: int, request_hash: str) -> float:
@@ -1213,6 +1277,11 @@ def _validate_provider_result(
             ChatAnswerOutput.model_validate(result.structuredOutput)
         except ValidationError:
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "generation" and request.operation == "plan_chapter":
+        try:
+            ChapterPlanOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
 
@@ -1253,6 +1322,8 @@ def _derive_generation_output(
     elif request.workflow == "long_serial" and request.operation == "answer_question":
         answer = ChatAnswerOutput.model_validate(output)
         output = answer.model_dump(mode="json")
+    elif request.workflow == "long_serial" and request.operation == "plan_chapter":
+        output = materialize_chapter_plan_output(output)
     return output
 
 

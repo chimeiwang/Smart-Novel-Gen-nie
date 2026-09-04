@@ -14,6 +14,7 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
+import cn.inkforge.core.reviews.infrastructure.JooqChapterPlanEvidenceReader;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
@@ -107,7 +108,8 @@ class RoutingWritingRunStarterTest {
                 registry,
                 ids,
                 CLOCK,
-                json);
+                json,
+                new JooqChapterPlanEvidenceReader(json));
     }
 
     @AfterAll
@@ -292,6 +294,91 @@ class RoutingWritingRunStarterTest {
         assertThat(count(
                         "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
                         fixture.sessionId()))
+                .isZero();
+    }
+
+    @Test
+    void 章节规划V2只创建Run并冻结最小上下文及缺失来源且幂等不重读() {
+        Fixture fixture = fixture("route-v2-plan");
+        ParsedWritingRunStartRequest request = longSerialRequest(
+                fixture, "request-route-v2-plan-01", "plan_chapter", true);
+        assertThat(durable.supportedOperationKeys()).contains("long_serial.plan_chapter");
+
+        WritingRunV2Response first = (WritingRunV2Response) router(fixture, "allowlist")
+                .start(fixture.userId(), request);
+        Record facts = database.dsl().fetchOne(
+                """
+                SELECT run.kind::text AS kind, item."contentJson" AS context,
+                       item."contentText" AS content_text, item."resourceType" AS resource_type,
+                       item."metadataJson" AS metadata, step.input::text AS step_input
+                FROM public."WorkflowRun" AS run
+                JOIN public."WorkflowEvidenceBundle" AS bundle ON bundle."runId" = run.id
+                JOIN public."WorkflowEvidenceItem" AS item ON item."bundleId" = bundle.id
+                JOIN public."WorkflowStep" AS step ON step."runId" = run.id
+                WHERE run.id = ?
+                """, first.getRunId());
+        assertThat(first.getOperation()).isEqualTo("plan_chapter");
+        assertThat(first.getCurrentStep().getModelProfile().getProfile())
+                .isEqualTo("plot.chapter_plan.v1");
+        assertThat(facts.get("kind", String.class)).isEqualTo("beat_plan");
+        assertThat(facts.get("resource_type", String.class)).isEqualTo("chapter_plan_context");
+        assertThat(facts.get("content_text", String.class)).isNull();
+        var context = json.readTree(facts.get("context", String.class));
+        assertThat(context.at("/chapter/id").textValue()).isEqualTo(fixture.chapterId());
+        assertThat(context.at("/outline/content").textValue()).isEqualTo(fixture.outlineContent());
+        assertThat(context.path("chapterGoal").isNull()).isTrue();
+        assertThat(context.path("approvedBeatPlan").isNull()).isTrue();
+        assertThat(context.path("outlinePath").isEmpty()).isTrue();
+        assertThat(context.path("sourceBindings").findValues("resourceType"))
+                .extracting(tools.jackson.databind.JsonNode::textValue)
+                .contains("chapter", "chapter_goal", "approved_beat_plan", "chapter_group");
+        assertThat(context.path("sourceBindings").findValues("exists"))
+                .anySatisfy(value -> assertThat(value.booleanValue()).isFalse());
+        assertThat(context.has("workspace")).isFalse();
+        assertThat(json.readTree(facts.get("step_input", String.class)))
+                .isEqualTo(json.valueToTree(Map.of(
+                        "userInstruction", "请执行 plan_chapter", "targetWordCount", 1000)));
+        assertThat(json.readTree(facts.get("metadata", String.class)).path("role").textValue())
+                .isEqualTo("chapter_plan_context");
+        database.dsl().execute("UPDATE public.\"Outline\" SET content = '后来修改' WHERE id = ?",
+                fixture.outlineId());
+        WritingRunV2Response replay = (WritingRunV2Response) router("off")
+                .start(fixture.userId(), request);
+        assertThat(replay.getRunId()).isEqualTo(first.getRunId());
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", first.getRunId()))
+                .isEqualTo(1);
+        assertThat(database.dsl().fetchOne("""
+                SELECT item."contentJson" FROM public."WorkflowEvidenceItem" item
+                JOIN public."WorkflowEvidenceBundle" bundle ON bundle.id = item."bundleId"
+                WHERE bundle."runId" = ?
+                """, first.getRunId()).get("contentJson", String.class)).isEqualTo(facts.get("context", String.class));
+        assertThat(count("SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?", fixture.novelId()))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WritingRunCommand\" WHERE \"taskId\" IN (SELECT id FROM public.\"WritingTask\" WHERE \"novelId\" = ?)", fixture.novelId()))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ?", fixture.chapterId()))
+                .isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?", fixture.sessionId()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void 章节规划V2章节组映射冲突时不留下任何耐久执行事实() {
+        Fixture fixture = fixture("route-v2-plan-ambiguous");
+        for (int index = 0; index < 2; index++) {
+            database.dsl().execute(
+                    """
+                    INSERT INTO public."OutlineNode" (
+                      id, "novelId", kind, title, "order", "chapterStartOrder", "chapterEndOrder", "createdAt", "updatedAt"
+                    ) VALUES (?, ?, 'chapter_group', '冲突章节组', ?, 1, 2, ?, ?)
+                    """, fixture.novelId() + "-group-" + index, fixture.novelId(), index, NOW, NOW);
+        }
+        assertThatThrownBy(() -> router(fixture, "allowlist").start(fixture.userId(),
+                longSerialRequest(fixture, "request-plan-ambiguous-01", "plan_chapter", false)))
+                .isInstanceOfSatisfying(ApiException.class,
+                        error -> assertThat(error.code()).isEqualTo("CHAPTER_GROUP_MAPPING_CONFLICT"));
+        assertThat(workflowFacts(fixture.userId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?", fixture.novelId()))
                 .isZero();
     }
 

@@ -139,3 +139,41 @@ async def test_fake_provider_returns_complete_quality_report_from_tool_scope() -
         "report": "一致性终检未发现冲突。",
         "rewriteBrief": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_returns_semantic_chapter_plan_without_system_fields() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "根据冻结证据规划章节"}],
+            tools=[],
+            maxOutputTokens=2000,
+            policy=LEGACY_PROVIDER_DEFAULT,
+            structuredOutput={
+                "route": "chat_json_output_v1",
+                "name": "output_beat_plan_v1",
+                "jsonSchema": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "chapterGoal": {"type": "string"},
+                        "sceneBeats": {"type": "array"},
+                    },
+                },
+            },
+        )
+    )
+    output = result.structuredOutput
+    assert output is not None
+    assert output["title"] == "隔离章节规划"
+    assert output["chapterGoal"]
+    assert isinstance(output["sceneBeats"], list)
+    assert len(output["sceneBeats"]) == 2
+    assert all(isinstance(beat, dict) and beat["goal"] for beat in output["sceneBeats"])
+    assert "beatCount" not in output
+    assert "contentSha256" not in output
+    assert all("order" not in beat for beat in output["sceneBeats"] if isinstance(beat, dict))
+    assert result.toolCalls == []
+    assert result.finishReason == "stop"
+    assert result.usage.totalTokens == result.usage.promptTokens + result.usage.completionTokens

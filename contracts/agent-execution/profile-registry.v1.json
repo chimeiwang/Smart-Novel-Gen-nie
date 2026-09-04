@@ -40,11 +40,11 @@
     {
       "key": "plot.chapter_plan.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "bounded",
       "purpose": "generation",
-      "promptProfile": "prompt.unavailable.generation.v1",
-      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+      "promptProfile": "prompt.plot.chapter_plan.v1",
+      "deploymentProfileKey": "deployment.plot.chapter_plan.v1"
     },
     {
       "key": "plot.foreshadowing.v1",
@@ -117,6 +117,15 @@
       "purpose": "embedding",
       "promptProfile": "prompt.unavailable.embedding.v1",
       "deploymentProfileKey": "deployment.unavailable.embedding.v1"
+    },
+    {
+      "key": "reviewer.chapter_plan_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.chapter_plan_editorial.v1",
+      "deploymentProfileKey": "deployment.reviewer.chapter_plan_editorial.v1"
     },
     {
       "key": "reviewer.cinematic.v2",
