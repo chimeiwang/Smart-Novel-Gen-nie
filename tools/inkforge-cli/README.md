@@ -3,52 +3,43 @@
 这个 CLI 给本机 Codex 和作者提供中短篇工作室与长篇服务端控制台的公开接口。它绕过 Web UI，
 但不绕过 Core API 登录、作品归属、并发控制、ReviewArtifact、Diff 确认或版本状态机。
 
-## 本地启动
+## 当前入口与本地启动
 
-现行正式入口仍是 Python CLI。在 Java Core 切换验收完成前，不修改生产 Skill 的 executable：
+本文件保留完整 125 命令的共享契约。macOS 本地与生产两份 Operator Skill 已完成实际入口切换及离线验收，
+执行链为 `scripts/run.sh → Java Operator → Java CLI → Core 公共 API`；新版 Skill 不再运行
+Python 或 uv。构建、安装及真实 Skill 入口见 `tools/inkforge-cli-java/README.md`，本次切换规格见
+`docs/specs/2026-09-04-java-cli-operator-cutover.md`。
 
-在仓库根目录执行：
-
-```powershell
-uv sync --frozen --all-packages --group dev
-uv run --package inkforge-cli inkforge auth.login `
-  --origin http://127.0.0.1:8000 `
-  --username <用户名>
-```
-
-`auth.login` 是唯一交互命令。密码只从真实 TTY 隐藏读取；登录会话写入 Windows Credential
-Manager，不写入仓库、普通配置、stdout 或日志。远程 Core 默认只允许 HTTPS，本地 HTTP 只允许
-回环地址。已明确接受风险的受控 wrapper 可以把
-`INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN` 设置为一个完整 HTTP origin；该放行只匹配这个地址，
-不得使用通配值。
-
-Java 等价候选已实现同一注册表中的 125 个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包
-只携带独立 CLI 运行时，不依赖 Spring Core、数据库驱动或 Agent。构建和本地运行方式如下：
+Java CLI 实现同一注册表中的 125 个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包只携带独立
+CLI 运行时，不依赖 Spring Core、数据库驱动或 Agent。直接 CLI 的构建和本地运行方式如下：
 
 ```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
-  ./mvnw -pl tools/inkforge-cli-java clean package
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+./mvnw -pl tools/inkforge-cli-java clean package
 java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.login \
   --origin http://127.0.0.1:8000 \
   --username <用户名>
 printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.whoami
 ```
 
-Java 候选在 macOS 只使用 Keychain，在 Windows 只使用 Credential Manager；其他系统明确失败，不会把
-Cookie 降级写入普通文件。其配置路径和命令 stdin/stdout 契约与现有 CLI 相同。逐命令 Python/Java
-差异矩阵、真实开发环境验收和生产 Skill 切换完成前，不得删除或替换上面的 Python 入口。
-现有两个生产 wrapper 仍实际调用 Python CLI，因此新增 Operation 必须先在 Python 与 Java 两端通过
-同契约和跨语言差异测试，不能只更新 Java 候选或只修改 Skill 文档。
+`auth.login` 是唯一交互命令。密码只从真实 TTY 隐藏读取；Java CLI 在 macOS 只使用 Keychain，在 Windows
+只使用 Credential Manager；其他系统明确失败，不会把 Cookie 降级写入普通文件，也不把凭据写入仓库、
+stdout 或日志。配置路径与旧 CLI 相同，迁移沿用原 profile/origin 对应的凭据，不要求重新登录。
+系统若要求 Java 访问旧 Keychain 项，由用户确认；本次未读取真实 token，未宣称真实会话验收完成。
+远程 Core 默认只允许 HTTPS，本地 HTTP 只允许回环地址。
+
+Python CLI 源码与测试继续保留为契约对照，不作为新版 macOS Skill 的业务入口。尚未覆盖的逐命令成功分支、
+真实账号端到端和 Windows 实机验收不能用本次 macOS 入口切换代替。新增 Operation 仍须通过 Python/Java
+同契约与跨语言差异测试；Skill 的允许集合必须单独维护，不能自动开放底层 CLI 的全部能力。
 
 除登录外，命令都从 stdin 读取一个 UTF-8 JSON 对象，stdout 返回 JSON；`short.agent.watch`、
 `long.task.watch` 和 `long.video.adaptation.watch` 返回 JSONL。例如：
 
-```powershell
-'{}' | uv run --package inkforge-cli inkforge auth.whoami
-'{}' |
-  uv run --package inkforge-cli inkforge short.list
-'{}' |
-  uv run --package inkforge-cli inkforge long.novel.list
+```bash
+printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.whoami
+printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar short.list
+printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar long.novel.list
 ```
 
 ## 中短篇写作边界
@@ -63,8 +54,8 @@ Cookie 降级写入普通文件。其配置路径和命令 stdin/stdout 契约�
   dirty 时 CLI 直接拒绝。选区修改只发送权威基础版本、Unicode 码点范围和选区哈希，正文由
   Core 读取。
 
-Codex 的完整操作规程位于用户 Skill：
-`C:\Users\niebo\.codex\skills\inkforge-short-story-operator\SKILL.md`。
+Codex 的完整操作规程位于用户安装的 `inkforge-short-story-operator` 与
+`inkforge-production-short-story-operator` Skill；macOS 使用各自的 `scripts/run.sh`，不是以上裸 CLI 示例。
 
 ## 长篇写作边界
 
@@ -75,6 +66,8 @@ Codex 的完整操作规程位于用户 Skill：
 ReviewArtifact；`long.task.watch` 返回 V2 `completed` 后，使用 `long.session.get` 回读该会话中的权威
 Agent 消息，不能把 SSE 或任务状态拼成回答。问答的 `writingSessionId` 缺失、为 `null`、为空字符串或
 使用非字符串类型时，两种 CLI 都在业务 POST 前以 `WRITING_SESSION_REQUIRED` 和退出码 2 拒绝。
+这只是底层 CLI 契约：两份 Operator Skill 目前仍只允许 `plan_chapter`、`write_chapter`、`review_chapter`，
+不会因更换 Java 入口而开放 `answer_question` 或选区改写。
 
 `long.artifact.approve` 对选区 Artifact 使用 `editedReplacement` 或 `editedReplacementFile`，对全文草案继续使用 `editedContent`。每次决定前先 GET Artifact 并查看完整 Diff，独立确认后提交稳定幂等请求，完成后再次 GET 回读；CLI 会执行 sourceBinding preflight 并拒绝错误的全文/选区编辑字段。
 

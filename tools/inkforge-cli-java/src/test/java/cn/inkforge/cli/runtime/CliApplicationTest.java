@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.inkforge.cli.config.MemoryConfigStore;
 import cn.inkforge.cli.config.MemoryCredentialStore;
+import cn.inkforge.cli.config.CredentialStore;
+import cn.inkforge.cli.config.SecureCredentialBackendException;
 import cn.inkforge.cli.transport.CoreApi;
 import cn.inkforge.cli.transport.FileDescriptor;
 import cn.inkforge.cli.transport.LoginResult;
@@ -14,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -146,6 +149,64 @@ class CliApplicationTest {
         assertThat(longFailure.exit()).isEqualTo(5);
         assertThat(longFailure.stdout()).contains("\"code\":\"CORE_TRANSPORT_ERROR\"");
         assertThat(longFailure.stderr()).isEmpty();
+    }
+
+    @Test
+    void Operator登录短篇与长篇网络失败统一稳定退出码且不写stderr() {
+        MemoryConfigStore configs = new MemoryConfigStore();
+        MemoryCredentialStore credentials = new MemoryCredentialStore();
+        configs.save("default", new cn.inkforge.cli.config.ProfileConfig(
+                "http://127.0.0.1:8000", "nie"));
+        credentials.set("default", "http://127.0.0.1:8000", "合成凭据");
+        CliApplication application = CliApplication.createOperator(new CliDependencies(
+                (origin, token) -> new TransportFailureApi(),
+                configs, credentials, prompt -> "合成密码".toCharArray(), () -> true, json));
+        for (List<String> command : List.of(
+                List.of("auth.login", "--origin", "http://127.0.0.1:8000", "--username", "nie"),
+                List.of("auth.whoami"), List.of("short.list"), List.of("long.novel.list"))) {
+            DetailedResult failure = runDetailed(application, command, "{}");
+            assertThat(failure.exit()).isEqualTo(5);
+            assertThat(failure.stdout()).contains("\"code\":\"CORE_TRANSPORT_ERROR\"")
+                    .doesNotContain("合成凭据", "合成密码");
+            assertThat(failure.stderr()).isEmpty();
+        }
+    }
+
+    @Test
+    void 凭据后端读取写入与删除失败统一退出3且不输出底层异常() {
+        MemoryConfigStore configs = new MemoryConfigStore();
+        configs.save("default", new cn.inkforge.cli.config.ProfileConfig(
+                "http://127.0.0.1:8000", "nie"));
+        for (String failingOperation : List.of("get", "set", "delete")) {
+            CredentialStore credentials = new CredentialStore() {
+                private void check(String operation) {
+                    if (operation.equals(failingOperation)) {
+                        throw new SecureCredentialBackendException("含敏感后端详情的测试错误");
+                    }
+                }
+
+                public Optional<String> get(String profile, String origin) {
+                    check("get");
+                    return Optional.of("合成凭据");
+                }
+
+                public void set(String profile, String origin, String token) { check("set"); }
+                public void delete(String profile, String origin) { check("delete"); }
+            };
+            CliApplication application = CliApplication.createOperator(new CliDependencies(
+                    (origin, token) -> new FakeApi(json), configs, credentials,
+                    prompt -> "pw".toCharArray(), () -> true, json));
+            List<String> command = switch (failingOperation) {
+                case "set" -> List.of("auth.login", "--origin", "http://127.0.0.1:8000", "--username", "nie");
+                case "delete" -> List.of("auth.logout");
+                default -> List.of("long.novel.list");
+            };
+            DetailedResult failure = runDetailed(application, command, "{}");
+            assertThat(failure.exit()).isEqualTo(3);
+            assertThat(failure.stdout()).contains("\"code\":\"SECURE_CREDENTIAL_BACKEND_REQUIRED\"")
+                    .doesNotContain("含敏感后端详情", "合成凭据");
+            assertThat(failure.stderr()).isEmpty();
+        }
     }
 
     private Result run(CliApplication application, List<String> arguments, String input) {

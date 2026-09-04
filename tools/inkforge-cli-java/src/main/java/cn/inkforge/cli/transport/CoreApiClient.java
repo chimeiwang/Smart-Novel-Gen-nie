@@ -38,13 +38,21 @@ public final class CoreApiClient implements CoreApi {
     private final HttpClient http;
 
     public CoreApiClient(String origin, String token, ObjectMapper json) {
+        this(origin, token, json, HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build());
+    }
+
+    /** Operator 可注入显式代理策略；普通 CLI 保持原有默认客户端。 */
+    public CoreApiClient(String origin, String token, ObjectMapper json, HttpClient http) {
         this.origin = CoreOrigin.validate(origin);
         this.token = token;
         this.json = json;
-        this.http = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
+        this.http = java.util.Objects.requireNonNull(http);
+        if (http.followRedirects() != HttpClient.Redirect.NEVER) {
+            throw new IllegalArgumentException("Core API 客户端禁止自动跟随重定向");
+        }
     }
 
     public JsonNode request(String method, String path) {

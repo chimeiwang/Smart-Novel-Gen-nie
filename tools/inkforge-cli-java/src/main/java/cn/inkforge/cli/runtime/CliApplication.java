@@ -1,6 +1,7 @@
 package cn.inkforge.cli.runtime;
 
 import cn.inkforge.cli.config.ProfileConfig;
+import cn.inkforge.cli.config.SecureCredentialBackendException;
 import cn.inkforge.cli.commands.LongReadCommands;
 import cn.inkforge.cli.commands.ShortCommands;
 import cn.inkforge.cli.commands.VideoCommands;
@@ -36,17 +37,36 @@ public final class CliApplication {
     private final CommandCatalog catalog;
     private final Map<String, CommandHandler> handlers;
     private final CliDependencies dependencies;
+    private final boolean operatorTransportErrors;
 
     public CliApplication(
             CommandCatalog catalog,
             Map<String, CommandHandler> handlers,
             CliDependencies dependencies) {
+        this(catalog, handlers, dependencies, false);
+    }
+
+    private CliApplication(
+            CommandCatalog catalog,
+            Map<String, CommandHandler> handlers,
+            CliDependencies dependencies,
+            boolean operatorTransportErrors) {
         this.catalog = catalog;
         this.handlers = Map.copyOf(handlers);
         this.dependencies = dependencies;
+        this.operatorTransportErrors = operatorTransportErrors;
     }
 
     public static CliApplication createDefault(CliDependencies dependencies) {
+        return create(dependencies, false);
+    }
+
+    /** Operator 统一网络错误出口，但保留 watcher 内部重试所需的异常类型。 */
+    public static CliApplication createOperator(CliDependencies dependencies) {
+        return create(dependencies, true);
+    }
+
+    private static CliApplication create(CliDependencies dependencies, boolean operatorTransportErrors) {
         try (InputStream source = CliApplication.class
                 .getResourceAsStream("/cli-contracts/command-registry.json")) {
             CommandCatalog catalog = CommandCatalog.load(source, dependencies.json());
@@ -58,7 +78,7 @@ public final class CliApplication {
             LongReadCommands.register(handlers);
             VideoCommands.register(handlers);
             requireCompleteHandlers(catalog, handlers);
-            return new CliApplication(catalog, handlers, dependencies);
+            return new CliApplication(catalog, handlers, dependencies, operatorTransportErrors);
         } catch (IOException exception) {
             throw new IllegalStateException("CLI 命令基线加载失败", exception);
         }
@@ -127,8 +147,16 @@ public final class CliApplication {
                     exception.details(),
                     exception.requestId()));
             return exitCode(spec, exception);
+        } catch (SecureCredentialBackendException exception) {
+            write(stdout, error(
+                    command,
+                    "SECURE_CREDENTIAL_BACKEND_REQUIRED",
+                    "系统安全凭据后端不可用，请检查 Keychain 或 Credential Manager",
+                    null,
+                    null));
+            return 3;
         } catch (CoreTransportException exception) {
-            if (spec != null && spec.name().startsWith("long.")) {
+            if (operatorTransportErrors || spec != null && spec.name().startsWith("long.")) {
                 write(stdout, error(
                         command,
                         "CORE_TRANSPORT_ERROR",

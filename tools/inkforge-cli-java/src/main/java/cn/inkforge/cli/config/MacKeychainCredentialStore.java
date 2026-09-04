@@ -19,7 +19,7 @@ public final class MacKeychainCredentialStore implements CredentialStore {
     @Override
     public Optional<String> get(String profile, String origin) {
         CredentialKey key = CredentialKey.of(profile, origin);
-        String value = keychain.get(key.service(), key.account());
+        String value = NativeCredentialLibraries.access(() -> keychain.get(key.service(), key.account()));
         return value == null || value.isEmpty() ? Optional.empty() : Optional.of(value);
     }
 
@@ -27,12 +27,12 @@ public final class MacKeychainCredentialStore implements CredentialStore {
     public void set(String profile, String origin, String token) {
         if (token == null || token.isEmpty()) throw new IllegalArgumentException("会话不能为空");
         CredentialKey key = CredentialKey.of(profile, origin);
-        keychain.set(key.service(), key.account(), token);
+        NativeCredentialLibraries.perform(() -> keychain.set(key.service(), key.account(), token));
     }
 
     @Override
     public void delete(String profile, String origin) {
         CredentialKey key = CredentialKey.of(profile, origin);
-        keychain.delete(key.service(), key.account());
+        NativeCredentialLibraries.perform(() -> keychain.delete(key.service(), key.account()));
     }
 }

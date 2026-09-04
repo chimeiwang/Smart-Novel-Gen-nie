@@ -19,7 +19,8 @@ final class NativeWindowsCredentialBackend implements WindowsCredentialBackend {
     private final WinCredentials api;
 
     NativeWindowsCredentialBackend() {
-        this(Native.load("Advapi32", WinCredentials.class, W32APIOptions.UNICODE_OPTIONS));
+        this(NativeCredentialLibraries.load(
+                () -> Native.load("Advapi32", WinCredentials.class, W32APIOptions.UNICODE_OPTIONS)));
     }
 
     NativeWindowsCredentialBackend(WinCredentials api) {
@@ -83,8 +84,8 @@ final class NativeWindowsCredentialBackend implements WindowsCredentialBackend {
         if (error != ERROR_NOT_FOUND) throw failure("CredDeleteW", error);
     }
 
-    private static IllegalStateException failure(String operation, int error) {
-        return new IllegalStateException(
+    private static SecureCredentialBackendException failure(String operation, int error) {
+        return new SecureCredentialBackendException(
                 "Windows Credential Manager 操作失败（" + operation + "，Win32=" + error + "）");
     }
 

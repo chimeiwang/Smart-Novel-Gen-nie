@@ -384,6 +384,9 @@ FFmpeg/ffprobe，因此实现与隔离测试已完成，但生产镜像内的真
 
 ## Task 13：Java CLI 等价迁移
 
+后续说明：本任务保留原迁移验收记录。2026-09-04 的 macOS Skill 实际入口切换单独按
+`docs/specs/2026-09-04-java-cli-operator-cutover.md` 执行，不把该切换等同于全部 125 命令成功分支或跨平台实机验收。
+
 **文件：**
 
 - 新增：`tools/inkforge-cli-java/**`

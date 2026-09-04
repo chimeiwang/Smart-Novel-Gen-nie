@@ -219,6 +219,9 @@ Java Core 仍是唯一数据库业务所有者。开发差异测试允许 Python
 
 ### Java CLI
 
+后续说明：以下日期化记录保留为迁移历史。2026-09-04 的 macOS Skill 实际入口切换范围与当前验收状态，
+以 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 为准；它不替代全部 125 命令成功分支或跨平台实机验收。
+
 迁移现有 125 个命令名、stdin JSON、stdout JSON/JSONL、文件输入输出、TTY 密码和退出码。迁移过程中
 Python CLI 继续作为兼容客户端；Java CLI 全量等价后才替换正式操作入口。
 

@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,6 +55,14 @@ class CoreApiClientTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> client.request("GET", "/not-public"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 注入代理客户端时也不得自动跟随重定向() {
+        assertThatThrownBy(() -> new CoreApiClient(origin, "synthetic-token", json,
+                HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Core API 客户端禁止自动跟随重定向");
     }
 
     @Test

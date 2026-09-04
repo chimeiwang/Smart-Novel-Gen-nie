@@ -698,7 +698,7 @@ CLI 的产品规则：
 - CLI 不绕过归属、Diff 确认、ReviewArtifact、CAS、素材权利或视频开关；
 - 停止 watcher 只停止本地观察，不取消服务端任务。
 
-CLI 当前不是 148 个公共 API 的逐接口镜像，明确缺口包括：
+CLI 当前不是 151 个公共 API 的逐接口镜像，明确缺口包括：
 
 - 不提供注册命令；
 - 不提供积分余额、用量和任务 token 查询命令；
@@ -708,12 +708,22 @@ CLI 当前不是 148 个公共 API 的逐接口镜像，明确缺口包括：
 - 伏笔只有列表，没有手工写命令；
 - 健康检查和 OpenAPI 文档不包装为业务命令。
 
-当前生产 wrapper 仍调用 Python CLI。Python CLI 直接运行时的凭据后端只允许 Windows Credential Manager 的
-`WinVaultKeyring`，不会回退到明文文件；macOS 生产 Skill 通过受控 wrapper 注入 Keychain，同样禁止明文回退。
-Java CLI 候选已实现 macOS Keychain 与 Windows Credential Manager，但逐命令差异矩阵、真实环境验收和 Skill
-切换完成前还不是生产 executable。Linux 仍不是受支持的生产凭据平台。
+macOS 本地与生产两份 Operator Skill 已完成实际入口切换和离线验收，执行链为
+`scripts/run.sh → Java Operator → Java CLI → Core 公共 API`。新入口使用固定安装的 JAR，不运行 Python、uv
+或临时构建，不直接调用 Agent；配置已升级到
+schemaVersion 5，并保留固定 origin/profile、绑定用户名和既有 Keychain 凭据身份。日常业务命令仍先核对
+`auth.whoami`。两份 Skill 只允许原有 45 个命令，`long.agent.start` 仍只允许 `plan_chapter`、`write_chapter`、
+`review_chapter`，不因底层 CLI 支持而开放 `answer_question`、选区改写或视频。
 
-完整 125 命令及字段见 `tools/inkforge-cli/README.md`，注册表是命令存在性的权威。
+Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回退到明文；Windows 实机验收不属于
+本次 macOS 入口切换，Linux 仍不是受支持的生产凭据平台。Python CLI 源码及跨语言测试继续保留为契约对照，
+不作为新版 macOS Skill 的业务入口。本次未读取真实 token，未验收真实会话；本机入口切换不代表服务器
+Agent V2 已部署或生产问答已开放。
+生产 Operator 当前只支持无认证 HTTP 代理；TLS、SOCKS 或带认证代理明确拒绝，不会自动改为直连，
+具体环境变量规则见 Java CLI 文档。本地回环始终直连。
+
+完整 125 命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
+`tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。
 
 ## 11. 接口与数据追溯
 
@@ -859,8 +869,8 @@ Java CLI 候选已实现 macOS Keychain 与 Windows Credential Manager，但逐�
 ### 14.5 自动化与平台
 
 - CLI 不是公共 API 全量镜像；
-- 当前生产 wrapper 仍调用 Python CLI：Windows 使用 Credential Manager，macOS 由 Skill wrapper 注入 Keychain；
-  Java CLI 只是尚未切换的候选；
+- macOS Operator Skill 的 Java 实际入口已切换并完成离线验收；Python CLI 保留为契约对照，真实会话和
+  Windows 实机尚未验收；
 - 生产是单机 2 核 2 GB 预算，不是多地域、高可用或水平扩展架构；
 - PostgreSQL schema 默认冻结，应用不能自动迁移；
 - 当前没有公开 Webhook、第三方插件市场或外部开发者 API 产品。
@@ -890,4 +900,5 @@ Java 重写的第一目标是行为等价，不是顺便增加功能。完成迁
 - `docs/requirements/04-review-quality-and-workflow.md`：ReviewArtifact、版本、复审、质量和视频人工确认；
 - `docs/requirements/05-auth-billing-and-ops.md`：认证、计费、恢复、迁移、日志和部署；
 - `tools/inkforge-cli/README.md`：125 个 CLI 命令及输入输出；
+- `tools/inkforge-cli-java/README.md`：Java CLI 构建与 macOS Skill 实际入口；
 - `docs/plans/2026-08-24-core-java-tdd-replacement.md`：Java Core TDD 替换计划。

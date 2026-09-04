@@ -19,8 +19,8 @@ final class NativeMacKeychainBackend implements MacKeychainBackend {
 
     NativeMacKeychainBackend() {
         this(
-                Native.load("Security", Security.class),
-                Native.load("CoreFoundation", CoreFoundation.class));
+                NativeCredentialLibraries.load(() -> Native.load("Security", Security.class)),
+                NativeCredentialLibraries.load(() -> Native.load("CoreFoundation", CoreFoundation.class)));
     }
 
     NativeMacKeychainBackend(Security security, CoreFoundation coreFoundation) {
@@ -44,8 +44,9 @@ final class NativeMacKeychainBackend implements MacKeychainBackend {
         byte[] serviceBytes = service.getBytes(StandardCharsets.UTF_8);
         byte[] accountBytes = account.getBytes(StandardCharsets.UTF_8);
         byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
-        Found found = find(serviceBytes, accountBytes);
+        Found found = null;
         try {
+            found = find(serviceBytes, accountBytes);
             if (found == null) {
                 PointerByReference item = new PointerByReference();
                 check(security.SecKeychainAddGenericPassword(
@@ -113,7 +114,7 @@ final class NativeMacKeychainBackend implements MacKeychainBackend {
 
     private static void check(int status) {
         if (status != SUCCESS) {
-            throw new IllegalStateException("macOS Keychain 操作失败（OSStatus=" + status + "）");
+            throw new SecureCredentialBackendException("macOS Keychain 操作失败（OSStatus=" + status + "）");
         }
     }
 

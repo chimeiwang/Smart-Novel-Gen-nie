@@ -9,9 +9,10 @@
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
 - 本次不新增 CLI 命令名，只扩展现有 `long.agent.start` 的一个显式 Operation。
-- 上述两个现有 wrapper 当前实际调用 `tools/inkforge-cli` 的 Python CLI；Java CLI 是迁移目标但尚不能
-  代替该事实。因此生产开放前必须由同一提交证明 Python 与 Java 两端对本契约全绿，不能只因 Java CLI
-  已支持就提前修改 Skill。
+- macOS 两份 Skill 已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机实际入口切换与离线验收，
+  执行链为 `scripts/run.sh → Java Operator → Java CLI`。真实会话与 Windows 实机尚未验收，服务器部署状态
+  不随本机切换变化。该入口变更不开放问答；Python CLI
+  保留为契约对照，问答生产开放前仍须证明 Python/Java 两端对本契约全绿。
 
 ### 当前本地验证证据
 
@@ -23,12 +24,12 @@
   `contracts/cli/parity-watch-cases.json` 的 7 个 watcher 场景均由 Python/Java 跨语言测试读取；
 - Python Ruff、CLI 源码 Mypy 与 `git diff --check` 均通过。
 
-两个已安装 Skill 的 `SKILL.md` 目前仍未把 `answer_question` 列入允许集合，但现有 wrapper 只按命令名允许
-`long.agent.start`，尚未按请求内的 `operation` 做硬拒绝。因此当前“未开放”只是一层必须遵守的 Skill 指令，不能
-表述成 wrapper 已从技术上阻止该 Operation。按本文件更新 Skill 时，必须先补齐下文的 operation 级硬门禁；在各自
-环境的启用条件满足前，该硬门禁仍须拒绝 `answer_question`。
+2026-09-01 的 Python wrapper 只按命令名允许 `long.agent.start`，当时“未开放问答”仅是 Skill 指令，
+尚无 operation 级硬拒绝。2026-09-04 的 Java Operator 已落实下文精确 Operation 检查，并完成本机实际入口
+切换与离线验收。两份 `SKILL.md` 的允许集合仍只有原三种 Operation，在各自环境启用条件满足前继续拒绝
+`answer_question`，不能把 executable 切换解释为业务开放。
 
-两个已安装 Skill 已经单独完成一项不扩大业务能力的凭据诊断收紧：macOS
+此前两个 Python Skill wrapper 已经单独完成一项不扩大业务能力的凭据诊断收紧：macOS
 Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成稳定的
 `SECURE_CREDENTIAL_BACKEND_REQUIRED`，不再把它吞成泛化 `UNEXPECTED_ERROR`。该变化没有增加命令白名单、
 不会读取或打印密码，也没有明文、环境变量或文件凭据回退。更新者必须在目标发布提交进入 `main`、本节测试由该提交
@@ -44,8 +45,9 @@ Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成�
 - 该错误只表示当前本机安全凭据后端不可用，不能被 Skill 解释为 `AUTH_REQUIRED` 后自动登录，也不能用浏览器 Cookie、
   自拼 HTTP、SSH、数据库或内部 API 绕过。
 - 两个已安装 Skill 的离线回归必须分别覆盖：原生 Keychain backend error 被精确转换、错误文本不包含底层异常正文、
-  backend 不可用时零目标业务请求。当前本机门禁为 production Skill `13 tests OK`、local Skill `16 tests OK`，
-  两者各有 1 个只在当前宿主未提供原生 Keychain 测试条件时的显式 skip，且两份 `quick_validate.py` 均通过。
+  backend 不可用时零目标业务请求。2026-09-01 的 Python wrapper 门禁为 production Skill `13 tests OK`、
+  local Skill `16 tests OK`，两者各有 1 个宿主未提供原生 Keychain 测试条件的显式 skip，且两份
+  `quick_validate.py` 均通过；Java Operator 的当前安装与回归证据以 2026-09-04 入口切换 spec 为准。
 
 ## 命令面与 Skill 行为变化
 
@@ -83,9 +85,10 @@ CLI 命令名不变；只有 `long.agent.start` 的 Operation 集合增加了 `a
 
 ### Skill wrapper 的 Operation 硬门禁
 
-两份 Skill 的 `scripts/operator_support.py` 必须在成功完成固定 origin/profile 的 `auth.whoami` 后、启动目标 CLI
-业务命令前，对 `long.agent.start` 请求体的 `operation` 做精确字符串允许集合检查。该检查不是命令名前缀匹配，也
-不能由环境变量、调用参数或普通 JSON 字段关闭：
+两份 Skill 的 Java Operator 入口（由 `scripts/run.sh` 调用，替代旧 `scripts/operator_support.py`）必须在成功
+完成固定 origin/profile 的 `auth.whoami` 后、启动目标 CLI 业务命令前，对 `long.agent.start` 请求体的
+`operation` 做精确字符串允许集合检查。该检查不是命令名前缀匹配，也不能由环境变量、调用参数或普通 JSON
+字段关闭：
 
 - 未满足本文件对应环境的开放条件时，允许集合精确为 `plan_chapter`、`write_chapter`、`review_chapter`；
 - Production Skill 只有在“生产启用门禁”全部满足后，才把 `answer_question` 加入其集合；
@@ -202,10 +205,11 @@ CLI 本地 `WRITING_SESSION_REQUIRED`、`INVALID_TARGET`、`INVALID_SCOPE`、`IN
 - `agents/openai.yaml`：同步 `default_prompt`，明确长篇必须按 `engineVersion` 分流，且
   `answer_question` 的 V2 成功结果是会话消息、没有 ReviewArtifact；不能继续把所有长篇任务概括为
   ReviewArtifact/outcome 闭环。
-- `scripts/operator_support.py`：命令白名单不变，因为命令名未变化；新增本文件定义的
+- `scripts/run.sh` 所调用的 Java Operator：命令白名单不变，因为命令名未变化；实现本文件定义的
   `long.agent.start.operation` 精确允许集合硬门禁，不得新增任意前缀通配或可由调用方覆盖的开关。Local 与
-  Production 两份脚本必须分别按各自启用状态维护，不能因其中一个环境开放而同步放开另一个环境。
-- `tests/test_operator.py`：新增当前未开放状态下 `answer_question` 返回
+  Production 必须分别按各自启用状态维护，不能因其中一个环境开放而同步放开另一个环境。旧
+  `scripts/operator_support.py` 已由 2026-09-04 入口切换 spec 取代，不再作为新增实现位置。
+- Operator 回归测试：覆盖当前未开放状态下 `answer_question` 返回
   `OPERATOR_OPERATION_NOT_ALLOWED`/退出码 2、一次身份预检且零目标业务请求；既有三种 Operation 继续透传；启用版
   合法问答原样透传；缺会话与错误 scope 在身份预检后零目标业务请求；watch 完成后执行 `long.session.get` 回读。
   底层 CLI 单元测试另行证明非法输入本身可以在零网络条件下拒绝。
@@ -214,7 +218,7 @@ CLI 本地 `WRITING_SESSION_REQUIRED`、`INVALID_TARGET`、`INVALID_SCOPE`、`IN
 - 结果关联目前属于 Skill 的编排行为，现有 wrapper 不编排 watch→session，也不解析消息；因此必须用干净上下文
   forward-test 分别覆盖“收到 `frame.data.payload.resultId`”“首次 GET 已 completed、未收到终态事件”和“running 后 SSE
   断线、下一次持久 GET 已 completed”，并覆盖 0 条、重复两条、message ID 与 source 身份冲突时全部 fail closed。
-  不得在 `tests/test_operator.py` 中复制一份并未被 Skill 调用的筛选算法来伪装单元覆盖；若以后新增 Skill 实际调用的
+  不得在测试中复制一份并未被 Skill 调用的筛选算法来伪装单元覆盖；若以后新增 Skill 实际调用的
   确定性离线 resolver，再把这些身份用例下沉为 resolver 单测。
 - Python CLI 与 Java CLI 都必须通过合法问答请求映射、非法输入、V1 历史响应和 V2 status/SSE 游标的
   同契约测试；合法问答、watcher 和本地/响应错误分别由
@@ -223,9 +227,10 @@ CLI 本地 `WRITING_SESSION_REQUIRED`、`INVALID_TARGET`、`INVALID_SCOPE`、`IN
   JSON/JSONL 帧和公共 API 调用记录，不能只验证其中一个实现或只比较错误码。
 - 生产 Skill 仍必须先 `auth.whoami` 并精确核对预期用户名；密码只能由用户在真实 TTY 隐藏输入。
 
-每份 Skill 更新后都必须运行 Skill Creator 的 `quick_validate.py <skill-directory>`，再运行该 Skill 的
-`python -m unittest discover -s <skill-directory>/tests`。两项离线门禁与上述干净上下文 forward-test 全部通过，
-才可把更新视为可安装；生产 Skill 仍须额外满足下一节的生产启用门禁。
+每份 Skill 更新后都必须运行 Skill Creator 的 `quick_validate.py <skill-directory>`，再运行对应实现的离线回归
+和干净上下文 forward-test。Java Operator 的 JUnit 与真实 JAR/shell 验证按 2026-09-04 入口切换 spec 执行，
+不再要求以 Python wrapper 测试证明 Java 入口。问答开放还须满足下一节条件；仅切换 Java executable 不受问答
+开放条件阻塞，也不因此获得问答授权。
 
 ## 退役发布控制面（Skill 维护者必读）
 
@@ -246,7 +251,7 @@ GitHub evidence 和文件型 release guard 已删除；不存在可供 Skill 调
 `answer_question` 都创建 V2 Run 时，Production Skill 才能同时更新 `SKILL.md` 与 wrapper Operation 允许集合。
 
 单用户与单小说交集 allowlist 只授权维护者做 canary，不足以更新通用生产 Skill：allowlist 外小说当前可能
-回落到 V1，而 V1 的 outcome/消息身份不是本契约。canary 必须使用维护者明确配置 userId/novelId 后的公共 Python
+回落到 V1，而 V1 的 outcome/消息身份不是本契约。canary 必须使用维护者明确配置 userId/novelId 后的公共
 CLI 调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary 通过并切到能覆盖该 Skill 全部目标的 V2 路由后，
 才按本文件更新 Production Skill。Local Skill 也只能在其固定本地运行副本、Core 配置以及该 Skill 可操作的全部
 用户/小说目标都保证 fresh 问答创建 V2 Run，并完成对应本地 canary 后开放；单一 allowlist canary 或代码存在都

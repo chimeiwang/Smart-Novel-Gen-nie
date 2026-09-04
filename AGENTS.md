@@ -73,10 +73,13 @@
   图片生成、TTS 或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。
 - 基线提交 `c9afc95` 有 148 个公共 Core 操作、30 个内部 Core 操作和 125 个 CLI 命令；当前公共 Core
   在此基础上增加 2 个受配置门禁的手机号认证操作和 1 个有界审核摘要操作，共 151 个；当前内部 Core 另增加 3 个 V2 耐久
-  Workflow Step 回调和 1 个受审计计费对账入口，共 34 个。CLI 不是公共 API 全量镜像；现行两个生产 Skill wrapper
-  仍调用 Python CLI，其中 Windows 由 Python CLI 使用 Credential Manager，macOS 由 Skill wrapper 注入 Keychain，
-  均禁止明文回退。Java CLI 候选已支持这两个平台，但尚未替换生产 executable。若接口、命令或结构发生获批变化，
-  必须重新计算并同步产品基线，不能机械维护旧数字。
+  Workflow Step 回调和 1 个受审计计费对账入口，共 34 个。CLI 不是公共 API 全量镜像；macOS 两份 Operator Skill
+  已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机入口切换与离线验收，由 `scripts/run.sh`
+  启动固定安装的 Java CLI。新入口不依赖 Python 或 uv，仍只访问 Core 公共 API；125 个 CLI 命令与 Skill 的 45 个
+  允许命令不变。Java 使用 macOS Keychain 或 Windows Credential Manager，不允许明文回退；Windows 实机验收
+  与真实会话验收不属于本次结果，服务器部署状态不随本机切换变化。Python CLI 保留为契约对照。
+  若接口、命令或结构发生获批变化，必须重新计算并同步产品基线，
+  不能机械维护旧数字。
 - Java Core 已于 2026-08-26 单切生产并处于观察期：生产始终只有一个 Core，不双 Core、不双写；Python
   Core 只保留整镜像回滚，Python Agent 保留，Web 继续遵守 Next.js 现有边界。手机号认证已在切换后另立
   spec 实施；开发库与正式库具名迁移、备份、契约复验和生产启用均已完成，生产仍须保持旧密码登录回退，且不得

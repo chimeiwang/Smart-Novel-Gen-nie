@@ -19,6 +19,9 @@
 - Next.js 只负责页面、SSR/SEO 和浏览器交互。
 - Java Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE；FastAPI Core 只保留回滚镜像。
 - FastAPI Agent Service 负责 LangGraph、模型和工具执行，不连接数据库。
+- macOS 本地、生产两份 Operator Skill 已完成实际 Java 入口切换与离线验收，由 shell 启动固定安装的 JAR，
+  不运行 Python 或 uv。CLI 只访问 Core 公共 API，Python CLI 保留为契约对照；真实会话与 Windows 实机尚未验收，
+  服务器部署状态不随本机入口切换。
 - Java Core 单体已于 2026-08-26 完成生产切换并处于观察期；生产不得双 Core 或双写，Python Core 只按
   已冻结流程用于整镜像回滚。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
@@ -97,6 +100,8 @@
 - Agent 执行架构决策：`docs/architecture-decisions/004-core-owned-durable-agent-execution.md`
 - Agent 执行实施计划：`docs/plans/2026-08-31-core-owned-durable-agent-execution.md`
 - CLI 与 Operator Skill 更新契约：`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
+- macOS Skill 的 Java CLI 入口切换：`docs/specs/2026-09-04-java-cli-operator-cutover.md`
+- Java CLI 构建与使用：`tools/inkforge-cli-java/README.md`
 - V1/V2 联合 drain：`docs/specs/2026-09-01-durable-agent-joint-drain.md`
 - 个人项目 Agent 发布范围：`docs/specs/2026-09-04-personal-durable-agent-release-scope.md`
 - execution journal 容量与恢复演练：`docs/audits/2026-09-01-execution-journal-capacity.md`

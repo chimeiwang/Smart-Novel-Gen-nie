@@ -20,10 +20,10 @@ public final class WindowsCredentialStore implements CredentialStore {
     @Override
     public Optional<String> get(String profile, String origin) {
         CredentialKey key = CredentialKey.of(profile, origin);
-        WindowsCredentialBackend.StoredCredential stored = backend.get(key.service());
+        WindowsCredentialBackend.StoredCredential stored = read(key.service());
         if (stored == null || !stored.account().equals(key.account())) {
             wipe(stored);
-            stored = backend.get(compound(key));
+            stored = read(compound(key));
         }
         if (stored == null || !stored.account().equals(key.account())) {
             wipe(stored);
@@ -42,17 +42,18 @@ public final class WindowsCredentialStore implements CredentialStore {
     public void set(String profile, String origin, String token) {
         if (token == null || token.isEmpty()) throw new IllegalArgumentException("会话不能为空");
         CredentialKey key = CredentialKey.of(profile, origin);
-        WindowsCredentialBackend.StoredCredential existing = backend.get(key.service());
+        WindowsCredentialBackend.StoredCredential existing = read(key.service());
         try {
             if (existing != null && !existing.account().equals(key.account())) {
-                backend.set(compound(existing.account(), key.service()), existing.account(), existing.secret());
+                NativeCredentialLibraries.perform(() -> backend.set(
+                        compound(existing.account(), key.service()), existing.account(), existing.secret()));
             }
         } finally {
             wipe(existing);
         }
         byte[] secret = token.getBytes(StandardCharsets.UTF_16LE);
         try {
-            backend.set(key.service(), key.account(), secret);
+            NativeCredentialLibraries.perform(() -> backend.set(key.service(), key.account(), secret));
         } finally {
             Arrays.fill(secret, (byte) 0);
         }
@@ -66,12 +67,18 @@ public final class WindowsCredentialStore implements CredentialStore {
     }
 
     private void deleteIfOwned(String target, String account) {
-        WindowsCredentialBackend.StoredCredential stored = backend.get(target);
+        WindowsCredentialBackend.StoredCredential stored = read(target);
         try {
-            if (stored != null && stored.account().equals(account)) backend.delete(target);
+            if (stored != null && stored.account().equals(account)) {
+                NativeCredentialLibraries.perform(() -> backend.delete(target));
+            }
         } finally {
             wipe(stored);
         }
+    }
+
+    private WindowsCredentialBackend.StoredCredential read(String target) {
+        return NativeCredentialLibraries.access(() -> backend.get(target));
     }
 
     private static String decode(byte[] secret) {
