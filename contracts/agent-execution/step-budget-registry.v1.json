@@ -123,7 +123,7 @@
     {
       "key": "step_budget.system.resolve_intent.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "budget": {
         "maxModelCalls": 1,
         "maxInputTokens": 8000,
@@ -134,7 +134,7 @@
         "maxCostMicros": 50000,
         "maxWallClockSeconds": 30,
         "maxProviderRetries": 2,
-        "maxProtocolCorrections": 1
+        "maxProtocolCorrections": 0
       }
     },
     {

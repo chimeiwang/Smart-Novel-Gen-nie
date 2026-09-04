@@ -1,0 +1,40 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/IntentAvailableOperation/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "操作授权由 Core 冻结计划与 Agent Registry 校验，不维护第二份业务目录。",
+  "properties": {
+    "description": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Description",
+      "type": "string"
+    },
+    "operation": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Operation",
+      "type": "string"
+    },
+    "scopeKind": {
+      "const": "chapter",
+      "title": "Scopekind",
+      "type": "string"
+    },
+    "targetType": {
+      "const": "chapter",
+      "title": "Targettype",
+      "type": "string"
+    }
+  },
+  "required": [
+    "operation",
+    "description",
+    "targetType",
+    "scopeKind"
+  ],
+  "title": "IntentAvailableOperation",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.IntentAvailableOperation"
+}

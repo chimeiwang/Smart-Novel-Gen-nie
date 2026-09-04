@@ -75,6 +75,39 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
     properties = structured.jsonSchema.get("properties")
     if not isinstance(properties, dict):
         raise ValueError("模拟结构化输出 Schema 缺少 properties")
+    if {"workflow", "operation", "confidence", "clarification"} <= set(properties):
+        # 隔离 Fake 只识别明确测试标记；真实意图判断仍由严格模型 Step 执行。
+        envelope = json.loads(request.messages[-1].content)
+        input_value = envelope.get("input", {})
+        text = input_value.get("userInstruction", "")
+        answers = input_value.get("clarifications", [])
+        if answers:
+            text = answers[-1].get("userMessage", "")
+        for operation in ("answer_question", "plan_chapter", "write_chapter"):
+            if text == f"【隔离意图:{operation}】":
+                return {
+                    "workflow": "long_serial",
+                    "operation": operation,
+                    "confidence": 0.99,
+                    "targetType": None,
+                    "targetId": None,
+                    "scopeKind": None,
+                    "arguments": {},
+                    "clarification": None,
+                }
+        return {
+            "workflow": None,
+            "operation": None,
+            "confidence": 0.2,
+            "targetType": None,
+            "targetId": None,
+            "scopeKind": None,
+            "arguments": {},
+            "clarification": {
+                "code": "intent.unclear",
+                "prompt": "请明确希望问答、规划章节，还是生成完整正文。",
+            },
+        }
     if "replacement" in properties:
         replacement = "模拟选区替换文本"
         return {"replacement": replacement}

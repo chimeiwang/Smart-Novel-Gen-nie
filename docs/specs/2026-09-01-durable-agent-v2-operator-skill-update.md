@@ -53,6 +53,11 @@ Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成�
 
 ## 命令面与 Skill 行为变化
 
+2026-09-04 普通聊天迁移补充：`2026-09-04-durable-natural-language-entry.md` 仍在实施。当前只增加了
+共享 clarification 快照和内部意图执行基础，尚未接通通用 CLI 的自然输入/澄清命令，也未修改两份已安装
+Skill 的脚本、说明或固定 JAR。维护者此时不要按新规格发送 inputMode=natural/clarification，不要放开
+Operator 允许集合；待 Core、watcher 与公共入口完整验证后，再按该规格更新实际命令说明和安装包。
+
 2026-09-01 问答阶段的 CLI 命令名不变；当时只有 `long.agent.start` 的 Operation 集合增加了 `answer_question`。已有 Operation 的输入和结果
 语义、身份预检、固定 origin/profile、Keychain 与幂等边界保持不变。`long.task.watch` 的命令名和中断语义不变，
 但其输出判别已经从 V1-only `outcome.state` 扩展为按显式 `engineVersion` 分流的 V1/V2 契约；两份 Skill 必须同步

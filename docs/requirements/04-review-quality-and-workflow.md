@@ -352,6 +352,10 @@ approve 必须复验同一来源和当前 revision，编辑批准先形成新的
 
 ## WorkflowRun 与调试
 
+2026-09-04 共享 V2 快照已增加可选 clarification（问题原文、代码、decisionStepId），只能在未取消的
+waiting_user 中出现且与 Artifact 互斥，缺省时不改变旧快照。自然语言入口仍在接线，当前不能把这个契约
+字段当作已可提交澄清回答的产品能力，也不能把所有 waiting_user 都解释成候选草案已就绪。
+
 WorkflowRun 记录工作流运行。
 
 字段：

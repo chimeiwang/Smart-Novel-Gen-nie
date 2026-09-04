@@ -479,15 +479,89 @@
     {
       "key": "output.proposed_command.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "purpose": "generation",
-      "sha256": "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5",
+      "sha256": "d01c3444cfd4da13d9df6fe5dee58dfe5a75c413ad89ac28a766d18f6e8bde25",
       "jsonSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
         "additionalProperties": false,
-        "required": [],
-        "properties": {}
+        "properties": {
+          "workflow": {
+            "anyOf": [
+              {
+                "const": "long_serial",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "targetType": {
+            "type": "null"
+          },
+          "targetId": {
+            "type": "null"
+          },
+          "scopeKind": {
+            "type": "null"
+          },
+          "arguments": {
+            "additionalProperties": false,
+            "maxProperties": 0,
+            "type": "object"
+          },
+          "confidence": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "clarification": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[a-z][a-z0-9_.-]*$",
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "prompt"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "confidence"
+        ],
+        "type": "object"
       }
     },
     {

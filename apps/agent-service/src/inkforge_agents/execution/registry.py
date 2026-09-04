@@ -427,6 +427,14 @@ class ResolvedExecutionOperation:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolvedSystemPurpose:
+    definition: SystemPurposeDefinition
+    model_profile: ProfileDefinition
+    output_schema: OutputSchemaDefinition
+    step_budget: StepBudgetDefinition
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionRegistry:
     catalog_version: str
     manifest_fingerprint: str
@@ -438,6 +446,26 @@ class ExecutionRegistry:
     output_schemas: Mapping[str, OutputSchemaDefinition]
     step_budgets: Mapping[str, StepBudgetDefinition]
     system_purposes: Mapping[str, SystemPurposeDefinition]
+
+    def resolve_system_purpose(self, purpose: str, workflow: str) -> ResolvedSystemPurpose:
+        """初次系统用途独立于业务 Operation，必须由当前 Registry 完整授权。"""
+
+        definition = self.system_purposes.get(purpose)
+        if definition is None or workflow not in definition.workflows:
+            raise ExecutionRegistryReferenceError("System Purpose 不适用于当前 workflow")
+        if not definition.supported:
+            raise ExecutionRegistryReferenceError("System Purpose 尚未启用")
+        profile = self.profiles[definition.model_profile_key]
+        output = self.output_schemas[definition.output_schema_key]
+        budget = self.step_budgets[definition.step_budget_key]
+        if not (
+            profile.supported
+            and profile.prompt_profile.supported
+            and output.supported
+            and budget.supported
+        ):
+            raise ExecutionRegistryReferenceError("System Purpose 的冻结执行依赖未完整保留")
+        return ResolvedSystemPurpose(definition, profile, output, budget)
 
     def require_authorized_deployment(
         self,
@@ -1197,12 +1225,7 @@ def _require_key_version(key: str, version: int) -> None:
 
 def _require_versioned_identifier(value: str, field: str) -> None:
     prefix, separator, version_text = value.rpartition(".v")
-    if (
-        not separator
-        or not prefix
-        or not version_text.isdigit()
-        or int(version_text) < 1
-    ):
+    if not separator or not prefix or not version_text.isdigit() or int(version_text) < 1:
         raise ExecutionRegistryReferenceError(f"{field} 必须是正版本标识：{value}")
 
 

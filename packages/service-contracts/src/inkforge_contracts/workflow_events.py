@@ -12,10 +12,11 @@ from pydantic import (
     Field,
     StrictBool,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
-from .execution import ModelProfileRef, ResolvedModelRef
+from .execution import ModelProfileRef, ResolvedModelRef, count_chapter_text_length
 
 WORKFLOW_EVENT_PROTOCOL_VERSION = "2.0"
 
@@ -46,7 +47,7 @@ ErrorCode = Annotated[
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 NonBlankPrompt = Annotated[
     str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000),
+    StringConstraints(strict=True, min_length=1, max_length=2_000),
 ]
 StrictPositiveInt = Annotated[int, Field(strict=True, gt=0)]
 StrictNonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
@@ -133,6 +134,13 @@ def _find_forbidden_event_key(value: object) -> str | None:
 
 class _StrictWorkflowEventModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("prompt", check_fields=False)
+    @classmethod
+    def validate_complete_prompt(cls, value: str) -> str:
+        if count_chapter_text_length(value) == 0:
+            raise ValueError("澄清问题不能为空白")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -475,6 +483,12 @@ class WorkflowErrorSnapshot(_StrictWorkflowEventModel):
     outcomeUnknown: StrictBool
 
 
+class WorkflowClarificationSnapshot(_StrictWorkflowEventModel):
+    clarificationCode: ProtocolCode
+    prompt: NonBlankPrompt
+    decisionStepId: WorkflowId
+
+
 class WorkflowRunSnapshot(_StrictWorkflowEventModel):
     workflow: ProtocolCode
     operation: ProtocolCode | None = None
@@ -486,9 +500,18 @@ class WorkflowRunSnapshot(_StrictWorkflowEventModel):
     revision: StrictPositiveInt
     artifact: WorkflowArtifactSnapshot | None = None
     error: WorkflowErrorSnapshot | None = None
+    clarification: WorkflowClarificationSnapshot | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_lifecycle(self) -> WorkflowRunSnapshot:
+        if self.clarification is not None and (
+            self.status != "waiting_user"
+            or self.artifact is not None
+            or self.cancelRequestedAt is not None
+        ):
+            raise ValueError("澄清只属于未取消的 waiting_user Run，且不能与 Artifact 同时出现")
         active_keys = [(step.ordinal, step.stepId) for step in self.activeSteps]
         if active_keys != sorted(active_keys):
             raise ValueError("activeSteps 必须按 ordinal、stepId 稳定排序")

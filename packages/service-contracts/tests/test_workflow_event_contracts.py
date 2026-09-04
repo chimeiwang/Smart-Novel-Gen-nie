@@ -30,6 +30,7 @@ from inkforge_contracts import (
     StepProgressEventPayload,
     StepQueuedEventPayload,
     StepStartedEventPayload,
+    WorkflowClarificationSnapshot,
     WorkflowCurrentStepSnapshot,
     WorkflowEventEnvelope,
     WorkflowEventType,
@@ -45,6 +46,57 @@ from pydantic import BaseModel, ValidationError
 
 NOW = datetime(2026, 8, 31, 8, 30, tzinfo=UTC)
 SHA = "a" * 64
+
+
+def test_clarification_snapshot_restores_full_prompt_without_changing_old_serialization():
+    payload = running_snapshot_payload()
+    old = WorkflowRunSnapshot.model_validate(payload)
+    assert "clarification" not in old.model_dump(mode="json")
+    explicit_null = WorkflowRunSnapshot.model_validate(payload | {"clarification": None})
+    assert "clarification" not in explicit_null.model_dump(mode="json")
+    prompt = "  需要规划还是写正文？\r\n  "
+    clarification = {
+        "clarificationCode": "uncertain", "prompt": prompt, "decisionStepId": "decision-1",
+    }
+    value = payload | {
+        "operation": None, "status": "waiting_user", "activeSteps": [],
+        "currentStep": None, "clarification": clarification,
+    }
+    snapshot = WorkflowRunSnapshot.model_validate(value)
+    assert snapshot.clarification.prompt == prompt
+    assert snapshot.model_dump(mode="json")["clarification"] == clarification
+    assert WorkflowClarificationSnapshot.model_validate(clarification).model_dump() == clarification
+    event = ClarificationRequiredEventPayload.model_validate(clarification)
+    assert event.prompt == prompt
+    assert WorkflowRunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+
+
+@pytest.mark.parametrize("changed", [
+    {"status": "pending"}, {"status": "running"}, {"status": "completed"},
+    {"status": "failed", "error": {"errorCode": "INTENT_UNRESOLVED", "outcomeUnknown": False}},
+    {"status": "cancelled", "cancelRequestedAt": NOW},
+    {"artifact": {
+        "artifactId": "artifact-1", "artifactRevision": 1, "status": "draft", "actionable": False,
+    }},
+    {"cancelRequestedAt": NOW},
+])
+def test_clarification_snapshot_cannot_mix_lifecycle_or_artifact(changed):
+    payload = running_snapshot_payload() | {
+        "operation": None, "status": "waiting_user", "activeSteps": [], "currentStep": None,
+        "clarification": {
+            "clarificationCode": "uncertain", "prompt": "请选择", "decisionStepId": "decision-1",
+        },
+    }
+    with pytest.raises(ValidationError):
+        WorkflowRunSnapshot.model_validate(payload | changed)
+
+
+@pytest.mark.parametrize("prompt", ["", " \r\n\ufeff\u0085", None, 123, "字" * 2001])
+def test_clarification_snapshot_and_event_reject_invalid_prompt(prompt):
+    payload = {"clarificationCode": "uncertain", "prompt": prompt, "decisionStepId": "decision-1"}
+    for model in (WorkflowClarificationSnapshot, ClarificationRequiredEventPayload):
+        with pytest.raises(ValidationError):
+            model.model_validate(payload)
 
 
 def model_profile_payload(

@@ -7,6 +7,7 @@ import cn.inkforge.contracts.api.EvidenceRange;
 import cn.inkforge.contracts.api.ExecutionStepFailure;
 import cn.inkforge.contracts.api.ExecutionStepResult;
 import cn.inkforge.contracts.api.ModelProfileRef;
+import cn.inkforge.contracts.api.ProposedCommand;
 import cn.inkforge.contracts.api.ResolvedModelRef;
 import cn.inkforge.contracts.api.StepUsage;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
@@ -149,8 +150,10 @@ final class WorkflowCallbackValues {
             case OUTPUT -> selected = requiredPresent(result.getOutput(), "output");
             case EVALUATION -> selected = evaluationMap(Objects.requireNonNull(
                     result.getEvaluation(), "evaluation 结果分支不能为空"));
-            case EVIDENCE_EXPANSION, PROPOSED_COMMAND -> throw new IllegalArgumentException(
-                    "首个 V2 纵切尚不接受该结果分支");
+            case PROPOSED_COMMAND -> selected = proposedCommandMap(Objects.requireNonNull(
+                    result.getProposedCommand(), "proposed_command 结果分支不能为空"));
+            case EVIDENCE_EXPANSION -> throw new IllegalArgumentException(
+                    "当前 V2 尚不接受证据扩展结果分支");
             default -> throw new IllegalArgumentException("未知 Execution resultKind");
         }
         int branchCount = (present(result.getOutput()) ? 1 : 0)
@@ -164,6 +167,45 @@ final class WorkflowCallbackValues {
         material.put("usage", usageMap(usage(result.getUsage())));
         material.put("value", selected);
         return Collections.unmodifiableMap(material);
+    }
+
+    /** 与 Pydantic exclude_none 投影一致；命令授权仍由冻结执行计划和 Core 意图裁决负责。 */
+    static Map<String, Object> proposedCommandMap(ProposedCommand value) {
+        Objects.requireNonNull(value, "ProposedCommand 不能为空");
+        String workflow = optional(value.getWorkflow());
+        String operation = optional(value.getOperation());
+        String targetType = optional(value.getTargetType());
+        String targetId = optional(value.getTargetId());
+        String scope = optional(value.getScopeKind());
+        var clarification = value.getClarification();
+        var confidence = value.getConfidence();
+        Map<String, Object> arguments = Objects.requireNonNullElse(value.getArguments(), Map.of());
+        if ((workflow == null) != (operation == null) || (targetType == null) != (targetId == null)
+                || (workflow != null) == (clarification != null)
+                || (workflow == null && (targetType != null || scope != null || !arguments.isEmpty()))
+                || confidence == null || confidence.signum() < 0
+                || confidence.compareTo(java.math.BigDecimal.ONE) > 0) {
+            throw new IllegalArgumentException("ProposedCommand 必须且只能包含合法命令或澄清");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (workflow != null) {
+            result.put("workflow", workflow);
+            result.put("operation", operation);
+        }
+        if (targetType != null) {
+            result.put("targetType", targetType);
+            result.put("targetId", targetId);
+        }
+        if (scope != null) result.put("scopeKind", scope);
+        result.put("arguments", arguments);
+        result.put("confidence", confidence);
+        if (clarification != null) {
+            if (clarification.getCode() == null || clarification.getPrompt() == null) {
+                throw new IllegalArgumentException("澄清必须包含 code 与完整 prompt");
+            }
+            result.put("clarification", Map.of("code", clarification.getCode(), "prompt", clarification.getPrompt()));
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     static Map<String, Object> failureHashMaterial(ExecutionStepFailure failure) {

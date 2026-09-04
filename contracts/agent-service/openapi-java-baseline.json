@@ -796,6 +796,7 @@
           "operation": {
             "maxLength": 128,
             "minLength": 1,
+            "nullable": true,
             "pattern": "^[a-z][a-z0-9_.-]*$",
             "title": "Operation",
             "type": "string"

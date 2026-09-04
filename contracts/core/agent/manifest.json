@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 226,
+  "modelCount": 232,
   "models": [
     {
       "model": "AgentEvent",
@@ -228,13 +228,43 @@
       "model": "ExecutionStepRequest",
       "module": "execution",
       "path": "execution/ExecutionStepRequest.schema.json",
-      "sha256": "1b20fa7e759658dd265790d415c8fc1902551adb0dc71b9f15d352a7030b294a"
+      "sha256": "606800eaba55e598b03eef7a5158bd4aed6b43caa4f461b0f474685b1db6b283"
     },
     {
       "model": "ExecutionStepResult",
       "module": "execution",
       "path": "execution/ExecutionStepResult.schema.json",
       "sha256": "02788841105dccfec601cea4c42eeca820259919d6ac08934b405c996d2ed01d"
+    },
+    {
+      "model": "IntentAvailableOperation",
+      "module": "execution",
+      "path": "execution/IntentAvailableOperation.schema.json",
+      "sha256": "553eb08f97a9aeb0b61e4a7a3015e0828ba4f6f85f3a1ac7a303fbf9a085a7be"
+    },
+    {
+      "model": "IntentClarificationAnswer",
+      "module": "execution",
+      "path": "execution/IntentClarificationAnswer.schema.json",
+      "sha256": "c71ef34d472917a7c57276b00dfb2bc7cef4d5f08a4cf802579b8d90bb222108"
+    },
+    {
+      "model": "IntentContext",
+      "module": "execution",
+      "path": "execution/IntentContext.schema.json",
+      "sha256": "85ecaa52d004562c95092667c9f27b6159f3c5ae9e8528bf3e1d8dc0ee0b6207"
+    },
+    {
+      "model": "IntentResolutionInput",
+      "module": "execution",
+      "path": "execution/IntentResolutionInput.schema.json",
+      "sha256": "46f74c43b0924a1db74c3ddca06528737d21c865e0882da484a713221b0181cc"
+    },
+    {
+      "model": "IntentResolutionOutput",
+      "module": "execution",
+      "path": "execution/IntentResolutionOutput.schema.json",
+      "sha256": "72c562e41fb952272a3493e214447b4f17c38a1dfe8d8a440edeb61d47134100"
     },
     {
       "model": "ModelProfileRef",
@@ -1290,7 +1320,7 @@
       "model": "RunSnapshot",
       "module": "workflow_events",
       "path": "workflow_events/RunSnapshot.schema.json",
-      "sha256": "555fad7927791a3d86f7b47e0e53b3740ae443e6e217331f37f5bfe40a118e28"
+      "sha256": "8143adec66310e30112628ea7ec32bae4942cb40de5b66c93ad7059ae2ec09d5"
     },
     {
       "model": "StepFinishedEventPayload",
@@ -1323,6 +1353,12 @@
       "sha256": "4cd07e12e95d48540e1979c0ae75be5929d71411bba7d792571f6b63d79f9c65"
     },
     {
+      "model": "WorkflowClarificationSnapshot",
+      "module": "workflow_events",
+      "path": "workflow_events/WorkflowClarificationSnapshot.schema.json",
+      "sha256": "df5a4c4ffcc60884e1bf65533fc70aa1aa2d57a15c50944e23a74bdd9f5e8967"
+    },
+    {
       "model": "WorkflowCurrentStepSnapshot",
       "module": "workflow_events",
       "path": "workflow_events/WorkflowCurrentStepSnapshot.schema.json",
@@ -1344,7 +1380,7 @@
       "model": "WorkflowRunSnapshot",
       "module": "workflow_events",
       "path": "workflow_events/WorkflowRunSnapshot.schema.json",
-      "sha256": "5786aeab9292b6f42feaa63bb53e78601e310f11116afdfa5551940d76620193"
+      "sha256": "f0367080d5f24911d596193746c71c52abc906995926e98c5ab260f36d905ef0"
     },
     {
       "model": "WorkflowStepProgressSnapshot",

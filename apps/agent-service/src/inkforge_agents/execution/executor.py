@@ -25,6 +25,10 @@ from inkforge_contracts.execution import (
     ExecutionStepFailure,
     ExecutionStepRequest,
     ExecutionStepResult,
+    IntentContext,
+    IntentResolutionInput,
+    IntentResolutionOutput,
+    ProposedCommand,
     ResolvedModelRef,
     StepUsage,
     calculate_resolved_model_fingerprint,
@@ -56,7 +60,7 @@ from .registry import (
     StepBudgetDefinition,
 )
 
-ExecutionPurpose = Literal["generation", "review"]
+ExecutionPurpose = Literal["generation", "review", "resolve_intent"]
 FailureCategory = Literal[
     "provider_transient",
     "provider_terminal",
@@ -75,6 +79,7 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
         ("long_serial", "rewrite_chapter_selection"),
     }
 )
+_INTENT_OPERATIONS = frozenset({"answer_question", "plan_chapter", "write_chapter"})
 
 
 class ExecutionModelPort(Protocol):
@@ -186,12 +191,16 @@ class StatelessExecutionStepExecutor:
         request: ExecutionStepRequest,
         registry: ExecutionRegistry,
     ) -> ResolvedExecutionStep:
+        if request.purpose == "resolve_intent":
+            return self._resolve_intent(request, registry)
         operation_key = (request.workflow, request.operation)
         if operation_key not in _SUPPORTED_OPERATION_HANDLERS:
             raise ExecutionCapabilityError("当前执行器尚未实现该 Operation handler")
         if request.dispatchMode != "initial":
             return self._resolve_retained_request(request, registry)
         try:
+            if request.operation is None:
+                raise ExecutionCapabilityError("业务 Step 必须绑定 operation")
             operation = registry.resolve(request.workflow, request.operation)
         except ExecutionRegistryError as exc:
             raise ExecutionCapabilityError(
@@ -269,7 +278,9 @@ class StatelessExecutionStepExecutor:
                 supports_request_idempotency=self._model.supports_request_idempotency,
             )
         except ExecutionRegistryReferenceError as exc:
-            raise ExecutionCapabilityError("当前部署模型未被 Deployment Profile 授权") from exc
+            raise ExecutionCapabilityError(
+                "当前部署模型未被 Deployment Profile 授权"
+            ) from exc
 
         resolved_model = _resolved_model(
             profile,
@@ -292,12 +303,48 @@ class StatelessExecutionStepExecutor:
             resolved_model=resolved_model,
         )
 
+    def _resolve_intent(
+        self, request: ExecutionStepRequest, registry: ExecutionRegistry
+    ) -> ResolvedExecutionStep:
+        if (
+            request.operation is not None
+            or request.workflow != "long_serial"
+            or request.artifactId is not None
+            or request.artifactRevision is not None
+        ):
+            raise ExecutionCapabilityError("意图解析不允许业务 Operation 或 Artifact 绑定")
+        if (
+            request.lane != "interactive"
+            or request.evidenceBundle.policyVersion != "evidence.system.intent.v1"
+            or request.modelProfile.reasoningMode != "disabled"
+        ):
+            raise ExecutionCapabilityError("意图解析 lane、Evidence 或模型策略不一致")
+        context = _validate_intent_input(request)
+        if request.dispatchMode == "initial":
+            try:
+                contract = registry.resolve_system_purpose("resolve_intent", request.workflow)
+            except ExecutionRegistryError as exc:
+                raise ExecutionCapabilityError("意图解析系统用途未被精确授权") from exc
+            if (contract.definition.parent_operations or request.lane != contract.definition.lane
+                    or request.evidenceBundle.policyVersion != contract.definition.evidence_policy):
+                raise ExecutionCapabilityError("意图解析当前系统用途绑定不一致")
+            _validate_profile_ref(request, contract.model_profile)
+            _validate_output_schema_ref(request, contract.output_schema)
+            _validate_step_budget(request, contract.step_budget)
+            for available in context.availableOperations:
+                try:
+                    registry.resolve(request.workflow, available.operation)
+                except ExecutionRegistryError as exc:
+                    raise ExecutionCapabilityError("意图上下文包含当前未启用的 Operation") from exc
+        # 共用冻结引用、Prompt、部署能力与预算的完整复验；不改写 journal 的初始或恢复语义。
+        return self._resolve_retained_request(request, registry)
+
     def _resolve_retained_request(
         self,
         request: ExecutionStepRequest,
         registry: ExecutionRegistry,
     ) -> ResolvedExecutionStep:
-        """仅供 recovery 使用冻结引用收敛已受理 Step，不给新请求开旁路。"""
+        """复验已冻结依赖；新意图请求只有先通过独立系统用途授权才能复用此路径。"""
 
         profile = registry.profiles.get(request.modelProfile.profile)
         if profile is None:
@@ -309,6 +356,8 @@ class StatelessExecutionStepExecutor:
             budget
             for budget in registry.step_budgets.values()
             if budget.supported and _step_budget_matches(request, budget)
+            and (request.purpose != "resolve_intent"
+                 or budget.key.startswith("step_budget.system.resolve_intent.v"))
         )
         if not matching_budgets:
             raise ExecutionCapabilityError("Execution Step Budget 未保留在 Registry")
@@ -325,9 +374,19 @@ class StatelessExecutionStepExecutor:
             if request.artifactId is None or request.artifactRevision is None:
                 raise ExecutionCapabilityError("Reviewer Step 必须绑定 Artifact revision")
             rubric_version = _frozen_rubric_version(request)
+        elif request.purpose == "resolve_intent":
+            purpose = "resolve_intent"
+            if (profile.purpose != "generation" or output_schema.purpose != "generation"
+                    or not profile.key.startswith("system.intent_resolver.v")
+                    or not output_schema.key.startswith("output.proposed_command.v")):
+                raise ExecutionCapabilityError("意图解析 Profile/Output 用途不一致")
+            rubric_version = None
         else:
             raise ExecutionCapabilityError("当前执行器只支持 generation/review Step")
-        _validate_operation_input(request)
+        if request.purpose == "resolve_intent":
+            _validate_intent_input(request)
+        else:
+            _validate_operation_input(request)
         _validate_profile_ref(request, profile)
         _validate_prompt_profile_ref(request, profile.prompt_profile)
         _validate_output_schema_ref(request, output_schema)
@@ -350,9 +409,7 @@ class StatelessExecutionStepExecutor:
                 supports_request_idempotency=self._model.supports_request_idempotency,
             )
         except ExecutionRegistryReferenceError as exc:
-            raise ExecutionCapabilityError(
-                "当前部署模型未被 Deployment Profile 授权"
-            ) from exc
+            raise ExecutionCapabilityError("当前部署模型未被 Deployment Profile 授权") from exc
         resolved_model = _resolved_model(
             profile,
             provider=self._model.provider_name,
@@ -441,6 +498,14 @@ class StatelessExecutionStepExecutor:
         begin_attempt: BeginAttempt,
         cancel_event: asyncio.Event,
     ) -> ProviderCallOutcome:
+        if cancel_event.is_set():
+            return ProviderCallOutcome(
+                result=None,
+                provider_attempts=0,
+                elapsed_millis=0,
+                failure_category="cancelled",
+                failure_code="RUN_CANCELLED",
+            )
         provider_started: float | None = None
         attempts = 0
 
@@ -654,10 +719,7 @@ class StatelessExecutionStepExecutor:
             )
             category = outcome.failure_category
             code = outcome.failure_code or "MODEL_EXECUTION_FAILED"
-            if (
-                not outcome.outcome_unknown
-                and _step_budget_exceeded(request, usage)
-            ):
+            if not outcome.outcome_unknown and _step_budget_exceeded(request, usage):
                 category = "validation"
                 code = "STEP_BUDGET_EXCEEDED"
             return _failure(
@@ -714,7 +776,10 @@ class StatelessExecutionStepExecutor:
         if resolved.purpose == "generation":
             output = _derive_generation_output(request, structured_output)
             result_kind = "output"
-            value: dict[str, JsonValue] | EvidenceEvaluation = output
+            value: dict[str, JsonValue] | EvidenceEvaluation | ProposedCommand = output
+        elif resolved.purpose == "resolve_intent":
+            value = _intent_command(request, structured_output)
+            result_kind = "proposed_command"
         else:
             try:
                 evaluation = _evaluation(request, resolved, structured_output)
@@ -732,7 +797,7 @@ class StatelessExecutionStepExecutor:
             value = evaluation
         hash_value: object = (
             value.model_dump(mode="json", exclude_none=True)
-            if isinstance(value, EvidenceEvaluation)
+            if isinstance(value, (EvidenceEvaluation, ProposedCommand))
             else value
         )
         result_hash = canonical_execution_sha256(
@@ -756,6 +821,23 @@ class StatelessExecutionStepExecutor:
                 resolvedModel=resolved.resolved_model,
                 resultKind="evaluation",
                 evaluation=value,
+                resultHash=result_hash,
+                usage=usage,
+                completedAt=now,
+            )
+        if isinstance(value, ProposedCommand):
+            return ExecutionStepResult(
+                protocolVersion="2.0",
+                jobId=request.jobId,
+                runId=request.runId,
+                novelId=request.novelId,
+                stepId=request.stepId,
+                fencingToken=request.fencingToken,
+                requestHash=request.requestHash,
+                inputHash=request.inputHash,
+                resolvedModel=resolved.resolved_model,
+                resultKind="proposed_command",
+                proposedCommand=value,
                 resultHash=result_hash,
                 usage=usage,
                 completedAt=now,
@@ -1031,6 +1113,46 @@ def _structured_output_name(value: str) -> str:
     return normalized[:128]
 
 
+def _validate_intent_input(request: ExecutionStepRequest) -> IntentContext:
+    try:
+        IntentResolutionInput.model_validate(request.input)
+        if request.novelId is None or len(request.evidenceBundle.items) != 1:
+            raise ValueError("意图解析必须绑定小说与唯一上下文")
+        item = request.evidenceBundle.items[0]
+        if (
+            item.resourceType != "intent_context"
+            or not item.exists
+            or item.contentType != "json"
+            or item.range is not None
+            or item.contentJson is None
+        ):
+            raise ValueError("意图 Evidence 必须是完整 JSON 上下文")
+        context = IntentContext.model_validate(item.contentJson)
+        if (
+            context.workflow != request.workflow
+            or context.novelId != request.novelId
+            or context.chapterId != item.resourceId
+            or any(
+                option.operation not in _INTENT_OPERATIONS for option in context.availableOperations
+            )
+        ):
+            raise ValueError("意图上下文身份或允许操作不一致")
+        return context
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ExecutionCapabilityError("意图解析输入或 Evidence 不符合冻结契约") from exc
+
+
+def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCommand:
+    proposed = IntentResolutionOutput.model_validate(output)
+    context = _validate_intent_input(request)
+    if proposed.operation is not None and (
+        proposed.workflow != context.workflow or proposed.workflow != request.workflow
+        or proposed.operation not in {option.operation for option in context.availableOperations}
+    ):
+        raise ValueError("意图结果选择了未被当前上下文授权的操作")
+    return ProposedCommand.model_validate(proposed.model_dump(mode="json", exclude_none=True))
+
+
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
     if (request.workflow, request.operation) == ("long_serial", "write_chapter"):
         _validate_chapter_draft_input(request)
@@ -1241,11 +1363,7 @@ def _provider_outcome_unknown(
         return False
     if error.code in {"connection_error", "timeout_error"}:
         return True
-    return (
-        error.code == "http_error"
-        and error.statusCode is not None
-        and error.statusCode >= 500
-    )
+    return error.code == "http_error" and error.statusCode is not None and error.statusCode >= 500
 
 
 def _elapsed_millis(started: float) -> int:
@@ -1361,6 +1479,11 @@ def _validate_provider_result(
             ChapterDraftOutput.model_validate(result.structuredOutput)
         except ValidationError:
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "resolve_intent":
+        try:
+            _intent_command(request, result.structuredOutput)
+        except (ValueError, ValidationError, ExecutionCapabilityError):
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
 
@@ -1390,10 +1513,7 @@ def _derive_generation_output(
     provider_output: Mapping[str, JsonValue],
 ) -> dict[str, JsonValue]:
     output = dict(provider_output)
-    if (
-        request.workflow == "long_serial"
-        and request.operation == "rewrite_chapter_selection"
-    ):
+    if request.workflow == "long_serial" and request.operation == "rewrite_chapter_selection":
         replacement = output.get("replacement")
         if not isinstance(replacement, str) or not replacement.strip():
             raise ExecutionCapabilityError("章节选区改写结果缺少 replacement")

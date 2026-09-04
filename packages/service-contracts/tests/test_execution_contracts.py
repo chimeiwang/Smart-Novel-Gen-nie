@@ -27,6 +27,7 @@ from inkforge_contracts import (
     ExecutionStepProgress,
     ExecutionStepRequest,
     ExecutionStepResult,
+    IntentResolutionOutput,
     ModelProfileRef,
     PromptProfileRef,
     ProposedCommand,
@@ -41,6 +42,60 @@ from pydantic import ValidationError
 
 NOW = datetime(2026, 8, 31, 8, 30, tzinfo=UTC)
 SHA = "a" * 64
+
+
+@pytest.mark.parametrize("dispatch_mode", ["initial", "pending_recovery", "running_recovery"])
+def test_only_intent_resolution_requires_null_operation_without_artifact(dispatch_mode):
+    payload = valid_request_payload() | {
+        "purpose": "resolve_intent", "operation": None, "dispatchMode": dispatch_mode,
+    }
+    payload["requestHash"] = sha256(canonical_bytes(request_hash_material(payload)))
+    assert ExecutionStepRequest.model_validate(payload).operation is None
+    for changed in (
+        {"purpose": "generation"}, {"purpose": "review"}, {"purpose": "summarize_evidence"},
+        {"operation": "answer_question"}, {"artifactId": "artifact-1", "artifactRevision": 1},
+    ):
+        invalid = payload | changed
+        invalid["requestHash"] = sha256(canonical_bytes(request_hash_material(invalid)))
+        with pytest.raises(ValidationError):
+            ExecutionStepRequest.model_validate(invalid)
+    with pytest.raises(ValidationError):
+        ExecutionStepRequest.model_validate(
+            {key: value for key, value in payload.items() if key != "operation"}
+        )
+
+
+def test_intent_result_hash_preserves_complete_prompt_after_base_round_trip():
+    prompt = "  请明确是规划还是正文。\r\n  "
+    output = IntentResolutionOutput.model_validate(
+        {"confidence": 0.2, "clarification": {"code": "uncertain", "prompt": prompt}}
+    )
+    command = ProposedCommand.model_validate(output.model_dump(mode="json"))
+    assert command.clarification is not None
+    assert command.clarification.prompt == prompt
+    value = {
+        "confidence": 0.2,
+        "arguments": {},
+        "clarification": {"code": "uncertain", "prompt": prompt},
+    }
+    usage = valid_usage_payload()
+    model = valid_resolved_model_payload()
+    material = {
+        "resultKind": "proposed_command", "resolvedModel": model, "usage": usage, "value": value,
+    }
+    result = ExecutionStepResult.model_validate({
+        "protocolVersion": "2.0", "jobId": "job-1", "runId": "run-1", "novelId": "novel-1",
+        "stepId": "step-1", "fencingToken": 7, "requestHash": SHA, "inputHash": "b" * 64,
+        "resolvedModel": model, "resultKind": "proposed_command", "proposedCommand": command,
+        "resultHash": sha256(canonical_bytes(material)), "usage": usage, "completedAt": NOW,
+    })
+    restored = ExecutionStepResult.model_validate_json(result.model_dump_json())
+    assert restored.proposedCommand.clarification.prompt == prompt
+    assert restored.resultHash == result.resultHash
+    altered = result.model_dump(mode="json")
+    altered["proposedCommand"]["clarification"]["prompt"] = prompt.strip()
+    with pytest.raises(ValidationError):
+        ExecutionStepResult.model_validate(altered)
 
 
 def test_execution_canonical_json_v1_has_stable_cross_language_bytes() -> None:

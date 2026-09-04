@@ -13,6 +13,7 @@ from inkforge_contracts.execution import (
     CandidateTextPatch,
     ChapterDraftOutput,
     ChapterPlanOutput,
+    IntentResolutionOutput,
     canonical_execution_sha256,
 )
 from pydantic import BaseModel
@@ -79,6 +80,9 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         elif output["key"] == "output.chapter_draft.v1":
             output["supported"] = True
             output["jsonSchema"] = model_output_schema(ChapterDraftOutput)
+        elif output["key"] == "output.proposed_command.v1":
+            output["supported"] = True
+            output["jsonSchema"] = model_output_schema(IntentResolutionOutput)
         elif output["key"] == "output.chapter_draft_review_report.v1":
             schema = json.loads(json.dumps(original_review_schema))
             patch = model_output_schema(CandidateTextPatch)

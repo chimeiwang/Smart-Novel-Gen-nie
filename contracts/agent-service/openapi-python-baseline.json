@@ -902,11 +902,18 @@
             "title": "Novelid"
           },
           "operation": {
-            "maxLength": 128,
-            "minLength": 1,
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Operation",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
           },
           "outputSchema": {
             "$ref": "#/components/schemas/OutputSchemaRef"

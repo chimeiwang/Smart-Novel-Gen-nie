@@ -28,6 +28,7 @@ public final class WorkflowOutputValidator {
             "maxLength",
             "minItems",
             "maxItems",
+            "maxProperties",
             "minimum",
             "maximum",
             "items",
@@ -83,6 +84,9 @@ public final class WorkflowOutputValidator {
         nestedSchema(schema.get("if"), path + ".if");
         nestedSchema(schema.get("then"), path + ".then");
         nestedSchema(schema.get("else"), path + ".else");
+        if (schema.containsKey("maxProperties")) {
+            maximumProperties(schema.get("maxProperties"), path + ".maxProperties");
+        }
         if (schema.containsKey("pattern")) {
             try {
                 Pattern.compile(string(schema.get("pattern"), path + ".pattern"));
@@ -163,6 +167,11 @@ public final class WorkflowOutputValidator {
             Map<?, ?> value,
             String path,
             List<String> violations) {
+        if (schema.containsKey("maxProperties")
+                && BigDecimal.valueOf(value.size()).compareTo(
+                        maximumProperties(schema.get("maxProperties"), path + ".maxProperties")) > 0) {
+            violations.add(path + " 属性数量超过上限");
+        }
         Map<?, ?> properties = schema.containsKey("properties")
                 ? map(schema.get("properties"), path + ".properties")
                 : Map.of();
@@ -317,6 +326,17 @@ public final class WorkflowOutputValidator {
             throw new IllegalArgumentException(path + " 必须是整数");
         }
         return decimal(number, path).intValueExact();
+    }
+
+    private static BigDecimal maximumProperties(Object value, String path) {
+        if (!(value instanceof Number number) || !finite(number)) {
+            throw new IllegalArgumentException(path + " 必须为非负整数");
+        }
+        BigDecimal result = decimal(number, path);
+        if (result.signum() < 0 || result.stripTrailingZeros().scale() > 0) {
+            throw new IllegalArgumentException(path + " 必须为非负整数");
+        }
+        return result;
     }
 
     private static String string(Object value, String path) {

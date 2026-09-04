@@ -1,0 +1,36 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/IntentClarificationAnswer/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "作者对一个已冻结问题的完整回答；不归一化空格或换行。",
+  "properties": {
+    "decisionStepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Decisionstepid",
+      "type": "string"
+    },
+    "prompt": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Prompt",
+      "type": "string"
+    },
+    "userMessage": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Usermessage",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decisionStepId",
+    "prompt",
+    "userMessage"
+  ],
+  "title": "IntentClarificationAnswer",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.IntentClarificationAnswer"
+}

@@ -7126,6 +7126,15 @@ export interface components {
             /** Reviewavailability */
             reviewAvailability?: ("complete" | "partial" | "unavailable") | null;
         };
+        /** WorkflowClarificationSnapshot */
+        WorkflowClarificationSnapshot: {
+            /** Clarificationcode */
+            clarificationCode: string;
+            /** Prompt */
+            prompt: string;
+            /** Decisionstepid */
+            decisionStepId: string;
+        };
         /** WorkflowCurrentStepSnapshot */
         WorkflowCurrentStepSnapshot: {
             /** Stepid */
@@ -7718,6 +7727,7 @@ export interface components {
             revision: number;
             artifact?: components["schemas"]["WorkflowArtifactSnapshot"] | null;
             error?: components["schemas"]["WorkflowErrorSnapshot"] | null;
+            clarification?: components["schemas"]["WorkflowClarificationSnapshot"] | null;
             /**
              * Engineversion
              * @constant

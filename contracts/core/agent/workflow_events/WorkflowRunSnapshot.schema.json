@@ -219,6 +219,38 @@
       "title": "WorkflowArtifactSnapshot",
       "type": "object"
     },
+    "WorkflowClarificationSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "clarificationCode": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Clarificationcode",
+          "type": "string"
+        },
+        "decisionStepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Decisionstepid",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clarificationCode",
+        "prompt",
+        "decisionStepId"
+      ],
+      "title": "WorkflowClarificationSnapshot",
+      "type": "object"
+    },
     "WorkflowCurrentStepSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -453,6 +485,17 @@
       ],
       "default": null,
       "title": "Cancelrequestedat"
+    },
+    "clarification": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowClarificationSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "currentStep": {
       "anyOf": [

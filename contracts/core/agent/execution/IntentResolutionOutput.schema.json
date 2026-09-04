@@ -1,0 +1,106 @@
+{
+  "$defs": {
+    "CommandClarification": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Code",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "prompt"
+      ],
+      "title": "CommandClarification",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/IntentResolutionOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "模型只提出操作或澄清；资源身份、范围和业务参数由 Core 确定。",
+  "properties": {
+    "arguments": {
+      "additionalProperties": false,
+      "maxProperties": 0,
+      "title": "Arguments",
+      "type": "object"
+    },
+    "clarification": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CommandClarification"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "confidence": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "operation": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operation"
+    },
+    "scopeKind": {
+      "default": null,
+      "title": "Scopekind",
+      "type": "null"
+    },
+    "targetId": {
+      "default": null,
+      "title": "Targetid",
+      "type": "null"
+    },
+    "targetType": {
+      "default": null,
+      "title": "Targettype",
+      "type": "null"
+    },
+    "workflow": {
+      "anyOf": [
+        {
+          "const": "long_serial",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workflow"
+    }
+  },
+  "required": [
+    "confidence"
+  ],
+  "title": "IntentResolutionOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.IntentResolutionOutput"
+}

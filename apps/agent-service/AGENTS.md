@@ -177,6 +177,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   只返回严格 `{"answer": string}`；不创建 Reviewer、Artifact、工具循环或 LangGraph 状态。问答仍完整经过
   deployment 授权、`preparing` 预留、累计 usage、journal、fence、取消和终态回放；会话消息 ID 与持久化只由
   Core 负责。
+- V2 `resolve_intent` 是独立系统 Step，不是业务 Operation；operation 必须为 null，不绑定 Artifact。
+  执行器只消费完整指令、有序澄清回答和唯一 intent_context，使用 disabled reasoning、interactive lane 和
+  专用有限预算，输出严格 ProposedCommand，不生成正文或调用工具。资源身份、有效命令和同 Run 后续
+  编排仍由 Core 决定；执行器支持及共享澄清快照不代表普通 Web/CLI 入口已切换。恢复只复验请求冻结的
+  完整保留依赖，不能用当前系统用途引用覆盖历史 Profile；缺 execution journal 的 running recovery
+  仍以 MODEL_OUTCOME_UNKNOWN 收敛，不重复调用模型。
 - V2 `long_serial.plan_chapter` 的生成使用 `plot.chapter_plan.v1`，编辑复审使用
   `reviewer.chapter_plan_editorial.v1`。Agent 只消费 Core 冻结的 `chapter_plan_context` JSON Evidence 和严格
   PlanInput；返工使用同一 Evidence、上一候选/revision 与明确意见，不读工作区、不调用工具或 LangGraph。

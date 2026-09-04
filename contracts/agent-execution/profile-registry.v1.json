@@ -175,11 +175,11 @@
     {
       "key": "system.intent_resolver.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "disabled",
       "purpose": "generation",
-      "promptProfile": "prompt.unavailable.generation.v1",
-      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+      "promptProfile": "prompt.system.intent_resolver.v1",
+      "deploymentProfileKey": "deployment.system.intent_resolver.v1"
     },
     {
       "key": "system.protocol_corrector.v1",

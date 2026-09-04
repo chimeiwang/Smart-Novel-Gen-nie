@@ -162,6 +162,18 @@ public final class ExecutionPlanSnapshot {
                 expectedSha256);
     }
 
+    /** 独立系统用途复用完全相同的 Step 快照形状，不创建占位业务 Operation。 */
+    public static Step freezeSystemPurpose(ExecutionRegistry.ResolvedSystemPurpose resolved) {
+        Objects.requireNonNull(resolved, "解析 System Purpose 不能为空");
+        return step(
+                resolved.purpose().purpose(),
+                resolved.purpose().lane(),
+                resolved.purpose().evidencePolicy(),
+                resolved.modelProfile(),
+                resolved.outputSchema(),
+                resolved.stepBudget());
+    }
+
     public String operationCatalogVersion() {
         return operationCatalogVersion;
     }
@@ -385,7 +397,7 @@ public final class ExecutionPlanSnapshot {
         return List.copyOf(result);
     }
 
-    private static Step parseStep(Object raw, String label) {
+    static Step parseStep(Object raw, String label) {
         Map<String, Object> value = exactObject(
                 raw,
                 label,
@@ -479,7 +491,7 @@ public final class ExecutionPlanSnapshot {
                 nonNegativeInt(value, "maxAutomaticRevisions"));
     }
 
-    private static ExecutionRegistry.RunBudget parseRunBudget(Object raw) {
+    static ExecutionRegistry.RunBudget parseRunBudget(Object raw) {
         Map<String, Object> value = exactObject(
                 raw,
                 "执行计划 Run Budget",
@@ -537,7 +549,7 @@ public final class ExecutionPlanSnapshot {
                 nonNegativeInt(value, "maxProtocolCorrections"));
     }
 
-    private static Map<String, Object> runBudgetMap(ExecutionRegistry.RunBudget budget) {
+    static Map<String, Object> runBudgetMap(ExecutionRegistry.RunBudget budget) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("profile", budget.profile());
         value.put("maxModelCalls", budget.maxModelCalls());

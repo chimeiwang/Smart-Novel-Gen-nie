@@ -3,13 +3,13 @@
   "purposes": [
     {
       "purpose": "resolve_intent",
-      "supported": false,
+      "supported": true,
       "modelProfile": "system.intent_resolver.v1",
       "outputSchema": "output.proposed_command.v1",
       "evidencePolicy": "evidence.system.intent.v1",
       "lane": "interactive",
       "stepBudgetProfile": "step_budget.system.resolve_intent.v1",
-      "workflows": ["long_serial", "quality", "short_medium", "style", "video"],
+      "workflows": ["long_serial"],
       "parentOperations": []
     },
     {

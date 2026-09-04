@@ -286,6 +286,7 @@ def test_openapi_run_responses_use_explicit_engine_discriminators() -> None:
         "revision",
         "artifact",
         "error",
+        "clarification",
         "commandId",
         "commandStatus",
     }
@@ -307,6 +308,15 @@ def test_openapi_run_responses_use_explicit_engine_discriminators() -> None:
     assert v2["properties"]["engineVersion"]["const"] == 2
     assert v2["properties"]["commandId"]["enum"] == [None]
     assert v2["properties"]["commandStatus"]["enum"] == [None]
+    assert v2["properties"]["clarification"]["anyOf"] == [
+        {"$ref": "#/components/schemas/WorkflowClarificationSnapshot"},
+        {"type": "null"},
+    ]
+    clarification = schemas["WorkflowClarificationSnapshot"]
+    assert clarification["additionalProperties"] is False
+    assert set(clarification["properties"]) == set(clarification["required"]) == {
+        "clarificationCode", "prompt", "decisionStepId"
+    }
     assert schemas["WorkflowCurrentStepSnapshot"]["properties"]["status"]["enum"] == [
         "pending",
         "running",

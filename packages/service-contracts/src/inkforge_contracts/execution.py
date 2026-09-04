@@ -510,6 +510,62 @@ def count_chapter_text_length(content: str) -> int:
     return sum(character not in _IGNORED_CHAPTER_CHARACTERS for character in content)
 
 
+class IntentClarificationAnswer(_StrictModel):
+    """作者对一个已冻结问题的完整回答；不归一化空格或换行。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decisionStepId: ExecutionId
+    prompt: str = Field(min_length=1, max_length=2_000, pattern=_CHAPTER_TEXT_PATTERN)
+    userMessage: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class IntentResolutionInput(_StrictModel):
+    """自然请求和有序澄清事实；输入预算负责限制长度，不裁切作者要求。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    userInstruction: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+    clarifications: list[IntentClarificationAnswer] = Field(default_factory=list, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_unique_decisions(self) -> Self:
+        identifiers = [answer.decisionStepId for answer in self.clarifications]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("意图解析不能包含重复澄清决定")
+        return self
+
+
+class IntentAvailableOperation(_StrictModel):
+    """操作授权由 Core 冻结计划与 Agent Registry 校验，不维护第二份业务目录。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: ProtocolCode
+    description: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+    targetType: Literal["chapter"]
+    scopeKind: Literal["chapter"]
+
+
+class IntentContext(_StrictModel):
+    """intent_context 唯一 JSON 投影，不接受正文、历史模型消息或额外作品资料。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    workflow: Literal["long_serial"]
+    novelId: ExecutionId
+    chapterId: ExecutionId
+    chapterTitle: str
+    availableOperations: list[IntentAvailableOperation] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_unique_operations(self) -> Self:
+        operations = [operation.operation for operation in self.availableOperations]
+        if len(operations) != len(set(operations)):
+            raise ValueError("意图上下文不能包含重复操作")
+        return self
+
+
 class ChapterDraftOutput(_StrictModel):
     """完整正文与说明是唯一模型语义输出，不截断、不复用旧标记协议。"""
 
@@ -849,7 +905,7 @@ class ExecutionStepRequest(_StrictModel):
     inputHash: Sha256
     input: dict[str, JsonValue]
     workflow: ProtocolCode
-    operation: ProtocolCode
+    operation: ProtocolCode | None
     purpose: ProtocolCode
     lane: Literal["interactive", "creative", "batch_media"]
     evidenceBundle: EvidenceBundle
@@ -891,6 +947,10 @@ class ExecutionStepRequest(_StrictModel):
 
     @model_validator(mode="after")
     def validate_bindings(self) -> Self:
+        if (self.purpose == "resolve_intent") != (self.operation is None):
+            raise ValueError("只有 resolve_intent 必须且允许 operation 为 null")
+        if self.purpose == "resolve_intent" and self.artifactId is not None:
+            raise ValueError("意图解析 Step 不能绑定 Artifact")
         if self.evidenceBundle.runId != self.runId:
             raise ValueError("执行 Step 与 Evidence bundle 必须属于同一 Run")
         if (self.artifactId is None) != (self.artifactRevision is None):
@@ -979,7 +1039,13 @@ class EvidenceExpansionRequest(_StrictModel):
 
 class CommandClarification(_StrictModel):
     code: ProtocolCode
-    prompt: NonBlankText
+    prompt: Annotated[str, Field(strict=True, min_length=1, max_length=2_000)]
+
+    @model_validator(mode="after")
+    def validate_non_blank_prompt(self) -> Self:
+        if count_chapter_text_length(self.prompt) == 0:
+            raise ValueError("澄清问题不能为空白")
+        return self
 
 
 class ProposedCommand(_StrictModel):
@@ -1009,6 +1075,20 @@ class ProposedCommand(_StrictModel):
         if not resolved and self.arguments:
             raise ValueError("澄清请求不能夹带命令参数")
         return self
+
+
+class IntentResolutionOutput(ProposedCommand):
+    """模型只提出操作或澄清；资源身份、范围和业务参数由 Core 确定。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    workflow: Literal["long_serial"] | None = None
+    targetType: None = None
+    targetId: None = None
+    scopeKind: None = None
+    arguments: dict[str, JsonValue] = Field(
+        default_factory=dict, max_length=0, json_schema_extra={"additionalProperties": False}
+    )
 
 
 class EvaluationEvidenceReference(_StrictModel):
