@@ -136,15 +136,6 @@ class WritingConfiguration {
     }
 
     @Bean
-    DurableAgentReleaseGuard durableAgentReleaseGuard(
-            CoreSettings settings, Clock coreClock, ExecutionRegistry registry) {
-        return new FileDurableAgentReleaseGuard(
-                settings.durableAgentReleaseGuardPath(),
-                coreClock,
-                registry.manifestFingerprint());
-    }
-
-    @Bean
     @ConditionalOnProperty(
             name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
             havingValue = "true")
@@ -167,7 +158,6 @@ class WritingConfiguration {
             ObjectProvider<LongSerialDurableRunStarter> durableStarters,
             ObjectProvider<DurableAgentExecutionReadiness> agentReadinessChecks,
             CommandIdempotencyStore writingCommandIdempotencyStore,
-            DurableAgentReleaseGuard durableAgentReleaseGuard,
             CoreSettings settings,
             ObjectMapper objectMapper,
             ExecutionRegistry registry) {
@@ -187,7 +177,6 @@ class WritingConfiguration {
                 legacy,
                 durable,
                 writingCommandIdempotencyStore,
-                durableAgentReleaseGuard,
                 settings,
                 () -> {
                     DurableAgentExecutionReadiness readiness =

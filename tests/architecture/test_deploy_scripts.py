@@ -5,8 +5,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,11 +13,6 @@ ROOT = Path(__file__).parents[2]
 UPLOAD = ROOT / "scripts" / "upload-docker-images.sh"
 SOURCE_UPLOAD = ROOT / "scripts" / "upload-deploy-source.sh"
 DEPLOY = ROOT / "scripts" / "deploy-production.sh"
-RELEASE_DRIVER = ROOT / "scripts" / "durable-agent-v2-release.sh"
-RELEASE_MANIFEST_HELPER = ROOT / "scripts" / "durable_agent_v2_release_manifest.py"
-RELEASE_BOUNDARY_HELPER = ROOT / "scripts" / "durable_agent_release_boundary.py"
-RELEASE_GUARD_HELPER = ROOT / "scripts" / "durable_agent_release_guard.py"
-JOINT_DRAIN_HELPER = ROOT / "scripts" / "durable_agent_joint_drain.py"
 ROLLBACK_DRILL = ROOT / "scripts" / "rollback_drill.sh"
 BACKUP = ROOT / "scripts" / "backup.sh"
 EXECUTION_RESTORE = ROOT / "scripts" / "restore-execution-journal.sh"
@@ -28,14 +21,6 @@ FAKE_DOCKER = ROOT / "tests" / "architecture" / "fixtures" / "fake_docker.sh"
 POSIX_SHELL = shutil.which("sh") or str(
     Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "sh.exe"
 )
-TARGET_WEB_DIGEST = "sha256:" + "1" * 64
-TARGET_CORE_DIGEST = "sha256:" + "2" * 64
-TARGET_AGENT_DIGEST = "sha256:" + "3" * 64
-ROLLBACK_WEB_DIGEST = "sha256:" + "4" * 64
-ROLLBACK_CORE_DIGEST = "sha256:" + "5" * 64
-ROLLBACK_AGENT_DIGEST = "sha256:" + "6" * 64
-CONTROL_BUNDLE_SHA = "9" * 64
-ROLLBACK_SOURCE_RECEIPT_SHA = "8" * 64
 
 
 def test_upload_requires_pinned_known_hosts_before_network_calls() -> None:
@@ -376,16 +361,10 @@ def _run_source_upload(
         "#!/bin/sh\n"
         'printf \'git %s\\n\' "$*" >> "$SOURCE_UPLOAD_LOG"\n'
         'case "$*" in\n'
-        "  *'rev-parse HEAD') printf '%s\\n' \"$DEPLOY_SHA\" ;;\n"
-        "  *'bundle create '*)\n"
-        "    previous=''\n"
-        "    for value in \"$@\"; do\n"
-        "      [ \"$previous\" != create ] || { printf 'bundle-fixture' > \"$value\"; exit 0; }\n"
-        "      previous=$value\n"
-        "    done\n"
-        "    exit 1 ;;\n"
-        "  *'bundle verify '*) exit 0 ;;\n"
-        "  *'bundle list-heads '*) printf '%s HEAD\\n' \"$DEPLOY_SHA\" ;;\n"
+        "  -C\\ *\\ rev-parse\\ HEAD) printf '%s\\n' \"$DEPLOY_SHA\" ;;\n"
+        "  -C\\ *\\ bundle\\ create*) printf 'bundle-fixture' > \"$5\" ;;\n"
+        "  bundle\\ verify*) exit 0 ;;\n"
+        "  bundle\\ list-heads*) printf '%s HEAD\\n' \"$DEPLOY_SHA\" ;;\n"
         "  *) exit 1 ;;\n"
         "esac\n",
     )
@@ -498,46 +477,37 @@ def _run_deploy(
     durable_migration_state: str = "unmigrated",
     durable_schema_ready: bool = False,
     durable_route_mode: str = "off",
-    durable_user_allowlist: str = "user-canary",
-    durable_novel_allowlist: str = "novel-canary",
-    v1_fresh_starts: bool = False,
+    durable_user_allowlist: str = "",
+    durable_novel_allowlist: str = "",
+    execution_redis_config: str = "EXECUTION_REDIS_URL=redis://execution-redis:6379/0",
+    v1_fresh_starts: bool | None = None,
     core_v2_aware_status: int = 0,
     agent_v2_aware_status: int = 0,
     target_agent_manifest_fingerprint: str | None = None,
     rollback_agent_manifest_fingerprint: str | None = None,
     active_v2_run_count: int = 0,
-    running_core_route_mode: str | None = None,
+    running_core_route_mode: str = "off",
     new_core_runtime: str = "java",
     previous_core_runtime: str = "",
-    deploy_sha: str | None = None,
-    deploy_bundle: bool = True,
-    protected_manifest: bool = True,
-    protected_lock: bool = True,
-    verified_drain: bool = True,
-    boundary_consume_status: int = 0,
-    boundary_applied_status: int = 0,
-    real_release_driver: bool = False,
-    release_fault_point: str = "",
+    deploy_sha: str = "new-tag",
+    deploy_bundle: bool = False,
+    flock_status: int = 0,
+    ambient_rollout_overrides: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
-    control_dir = tmp_path / "control"
     bin_dir = tmp_path / "bin"
     (app_dir / ".git").mkdir(parents=True)
     (app_dir / "infra" / "secrets").mkdir(parents=True)
     (app_dir / "scripts").mkdir(parents=True)
     (app_dir / "contracts" / "agent-execution").mkdir(parents=True)
-    (control_dir / "scripts" / "migrations").mkdir(parents=True)
-    (control_dir / "infra" / "nginx").mkdir(parents=True)
-    (control_dir / "contracts" / "agent-execution").mkdir(parents=True)
     bin_dir.mkdir()
-    deploy_sha = deploy_sha or hashlib.sha1(  # noqa: S324
-        str(tmp_path).encode()
-    ).hexdigest()
-    deploy_route_mode = "off" if durable_route_mode == "allowlist" else durable_route_mode
+    if v1_fresh_starts is None:
+        v1_fresh_starts = durable_route_mode == "allowlist"
     (app_dir / ".env").write_text(
         "DATABASE_URL=postgresql+asyncpg://user:pass@host.docker.internal:5432/novelwriter\n"
+        f"{execution_redis_config}\n"
         f"DURABLE_AGENT_EXECUTION_SCHEMA_READY={'true' if durable_schema_ready else 'false'}\n"
-        f"DURABLE_AGENT_EXECUTION_ROUTE_MODE={deploy_route_mode}\n"
+        f"DURABLE_AGENT_EXECUTION_ROUTE_MODE={durable_route_mode}\n"
         f"DURABLE_AGENT_EXECUTION_USER_ALLOWLIST={durable_user_allowlist}\n"
         f"DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST={durable_novel_allowlist}\n"
         f"V1_FRESH_AGENT_STARTS_ENABLED={'true' if v1_fresh_starts else 'false'}\n",
@@ -564,10 +534,6 @@ def _run_deploy(
     source_manifest = ROOT / "contracts" / "agent-execution" / "manifest.json"
     fixture_manifest = app_dir / "contracts" / "agent-execution" / "manifest.json"
     shutil.copy2(source_manifest, fixture_manifest)
-    shutil.copy2(
-        source_manifest,
-        control_dir / "contracts" / "agent-execution" / "manifest.json",
-    )
     expected_manifest_fingerprint = _execution_manifest_fingerprint(fixture_manifest)
     target_agent_manifest_fingerprint = (
         target_agent_manifest_fingerprint or expected_manifest_fingerprint
@@ -575,79 +541,6 @@ def _run_deploy(
     rollback_agent_manifest_fingerprint = (
         rollback_agent_manifest_fingerprint or expected_manifest_fingerprint
     )
-    scope_user = durable_user_allowlist or "user-canary"
-    scope_novel = durable_novel_allowlist or "novel-canary"
-    canary_scope_sha256 = hashlib.sha256(
-        json.dumps(
-            {"novelId": scope_novel, "userId": scope_user},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    manifest_dir = tmp_path / "release-manifest"
-    manifest_sha256 = ""
-    if protected_manifest:
-        manifest_result = subprocess.run(  # noqa: S603 - 固定 helper 与测试输入
-            [
-                sys.executable,
-                str(RELEASE_MANIFEST_HELPER),
-                "create",
-                "--repository-root",
-                str(ROOT),
-                "--output-dir",
-                str(manifest_dir),
-                "--workflow-trusted-commit",
-                deploy_sha,
-                "--target-release-commit",
-                deploy_sha,
-                "--rollback-source-release-commit",
-                "f" * 40,
-                "--cli-commit",
-                deploy_sha,
-                "--development-evidence-sha256",
-                "7" * 64,
-                "--control-bundle-sha256",
-                CONTROL_BUNDLE_SHA,
-                "--rollback-source-receipt-sha256",
-                ROLLBACK_SOURCE_RECEIPT_SHA,
-                "--producer-run-id",
-                "123",
-                "--producer-run-attempt",
-                "1",
-                "--producer-repository",
-                "owner/repo",
-                "--canary-scope-sha256",
-                canary_scope_sha256,
-                "--route-mode",
-                "allowlist" if durable_route_mode == "allowlist" else "off",
-                "--target-web-digest",
-                TARGET_WEB_DIGEST,
-                "--target-core-digest",
-                TARGET_CORE_DIGEST,
-                "--target-agent-digest",
-                TARGET_AGENT_DIGEST,
-                "--rollback-web-digest",
-                ROLLBACK_WEB_DIGEST,
-                "--rollback-core-digest",
-                ROLLBACK_CORE_DIGEST,
-                "--rollback-agent-digest",
-                ROLLBACK_AGENT_DIGEST,
-                "--target-manifest-fingerprint",
-                target_agent_manifest_fingerprint,
-                "--rollback-manifest-fingerprint",
-                rollback_agent_manifest_fingerprint,
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if manifest_result.returncode != 0:
-            return manifest_result, ""
-        manifest_sha256 = hashlib.sha256(
-            (manifest_dir / "release-manifest.json").read_bytes()
-        ).hexdigest()
     _write_executable(
         app_dir / "scripts" / "token-usage-production-migration.sh",
         "#!/bin/sh\n"
@@ -679,18 +572,6 @@ def _run_deploy(
         'case "$1" in\n'
         "  status) printf '%s\\n' \"$FAKE_DURABLE_MIGRATION_STATE\" ;;\n"
         "  active-v2-count) printf '%s\\n' \"$FAKE_ACTIVE_V2_RUN_COUNT\" ;;\n"
-        "  boundary-drain)\n"
-        "    [ -n \"${FAKE_DRAIN_REPORT:-}\" ] || exit 1\n"
-        "    python3 - \"$FAKE_DRAIN_REPORT\" <<'PY'\n"
-        "import json\n"
-        "import sys\n"
-        "from datetime import UTC, datetime\n"
-        "from pathlib import Path\n"
-        "document = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
-        "document['capturedAt'] = datetime.now(UTC).isoformat().replace('+00:00', 'Z')\n"
-        "print(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':')))\n"
-        "PY\n"
-        "    ;;\n"
         "  *) exit 2 ;;\n"
         "esac\n",
     )
@@ -715,107 +596,6 @@ def _run_deploy(
         "  *) exit 2 ;;\n"
         "esac\n",
     )
-    for name in (
-        "token-usage-production-migration.sh",
-        "durable-agent-execution-migration.sh",
-        "verify-durable-agent-v2-image.sh",
-    ):
-        shutil.copy2(app_dir / "scripts" / name, control_dir / "scripts" / name)
-    for name in (
-        "20260823_token_usage_details.production.sql",
-        "rollback_20260823_token_usage_details.sql",
-    ):
-        shutil.copy2(
-            ROOT / "scripts" / "migrations" / name,
-            control_dir / "scripts" / "migrations" / name,
-        )
-    shutil.copy2(ROOT / "scripts" / "compose_smoke.sh", control_dir / "scripts")
-    shutil.copy2(ROOT / "scripts" / "agent_readiness_probe.py", control_dir / "scripts")
-    shutil.copy2(ROOT / "infra" / "compose.yaml", control_dir / "infra" / "compose.yaml")
-    shutil.copy2(
-        ROOT / "infra" / "compose.python-core-rollback.yaml",
-        control_dir / "infra" / "compose.python-core-rollback.yaml",
-    )
-    shutil.copy2(
-        ROOT / "infra" / "compose.durable-agent-release-guard.yaml",
-        control_dir / "infra" / "compose.durable-agent-release-guard.yaml",
-    )
-    shutil.copy2(
-        ROOT / "infra" / "nginx" / "nginx.conf",
-        control_dir / "infra" / "nginx" / "nginx.conf",
-    )
-    _write_executable(
-        control_dir / "scripts" / "durable_agent_v2_control_bundle.py",
-        "#!/usr/bin/env python3\n"
-        "import os\n"
-        "print('control-bundle-verified:' + os.environ['DURABLE_AGENT_CONTROL_BUNDLE_SHA256'])\n",
-    )
-    if real_release_driver:
-        shutil.copy2(RELEASE_DRIVER, control_dir / "scripts" / RELEASE_DRIVER.name)
-        shutil.copy2(
-            RELEASE_BOUNDARY_HELPER,
-            control_dir / "scripts" / RELEASE_BOUNDARY_HELPER.name,
-        )
-        shutil.copy2(
-            RELEASE_GUARD_HELPER,
-            control_dir / "scripts" / RELEASE_GUARD_HELPER.name,
-        )
-        shutil.copy2(
-            JOINT_DRAIN_HELPER,
-            control_dir / "scripts" / JOINT_DRAIN_HELPER.name,
-        )
-        (control_dir / "control-bundle.json").write_text(
-            json.dumps(
-                {
-                    "workflowTrustedCommit": deploy_sha,
-                    "targetReleaseCommit": deploy_sha,
-                    "producerRunId": "123",
-                    "producerRunAttempt": "1",
-                }
-            ),
-            encoding="utf-8",
-        )
-    else:
-        _write_executable(
-            control_dir / "scripts" / "durable-agent-v2-release.sh",
-            "#!/bin/sh\n"
-            'printf \'release-driver %s %s\\n\' "$1" "${2:-}" '
-            '>> "$FAKE_DOCKER_LOG"\n'
-            'case "$1" in\n'
-            "  verify-drain-binding)\n"
-            '    [ -n "${VERIFIED_DRAIN_SHA256:-}" ] || exit 1\n'
-            "    printf 'verified-drain-binding-ok:%s\\n' "
-            '"$VERIFIED_DRAIN_SHA256" ;;\n'
-            "  consume-live-boundary) exit \"${FAKE_BOUNDARY_CONSUME_STATUS:-0}\" ;;\n"
-            "  mark-live-boundary-applied)\n"
-            '    state="$APP_DIR/.durable-agent-v2-release-transactions/'
-            '$DURABLE_AGENT_RELEASE_LOCK_ID/state"\n'
-            '    state_value=$(sed -n \'1p\' "$state")\n'
-            '    outcome=${DURABLE_AGENT_BOUNDARY_OUTCOME:-succeeded}\n'
-            '    printf \'release-boundary-state %s %s\\n\' '
-            '"$state_value" "$outcome" >> "$FAKE_DOCKER_LOG"\n'
-            '    [ "$state_value" = active ] || exit 41\n'
-            '    [ "${FAKE_BOUNDARY_APPLIED_STATUS:-0}" -eq 0 ] '
-            '|| exit "$FAKE_BOUNDARY_APPLIED_STATUS"\n'
-            '    printf \'release-boundary-applied %s\\n\' "$outcome" '
-            '>> "$FAKE_DOCKER_LOG" ;;\n'
-            "  mark-transaction-failed)\n"
-            '    state="$APP_DIR/.durable-agent-v2-release-transactions/'
-            '$DURABLE_AGENT_RELEASE_LOCK_ID/state"\n'
-            '    state_value=$(sed -n \'1p\' "$state")\n'
-            '    printf \'release-failed-state %s\\n\' "$state_value" '
-            '>> "$FAKE_DOCKER_LOG"\n'
-            '    case "$state_value" in\n'
-            "      active)\n"
-            '        printf \'failed\\n\' > "${state}.partial"\n'
-            '        chmod 600 "${state}.partial"\n'
-            '        mv -f "${state}.partial" "$state" ;;\n'
-            "      failed) ;;\n"
-            "      *) exit 41 ;;\n"
-            "    esac ;;\n"
-            "  *) exit 2 ;;\n"
-            "esac\n",
-        )
     shutil.copy2(FAKE_DOCKER, bin_dir / "docker")
     (bin_dir / "docker").chmod(0o755)
     _write_executable(
@@ -828,14 +608,7 @@ def _run_deploy(
     )
     _write_executable(
         bin_dir / "stat",
-        "#!/bin/sh\n"
-        'case "$*" in\n'
-        "  *%u*) echo 10001 ;;\n"
-        "  *%g*) echo 10001 ;;\n"
-        "  *%a*)\n"
-        '    for path in "$@"; do :; done\n'
-        '    if [ -d "$path" ]; then echo 700; else echo 600; fi ;;\n'
-        "esac\n",
+        '#!/bin/sh\ncase "$*" in *%u*) echo 10001;; *%g*) echo 10001;; *%a*) echo 600;; esac\n',
     )
     _write_executable(
         bin_dir / "curl",
@@ -845,123 +618,29 @@ def _run_deploy(
         '*health/ready*) printf \'{"status":"ready","checks":{"agent":"ok"}}\';; '
         "esac\n",
     )
+    _write_executable(
+        bin_dir / "flock",
+        "#!/bin/sh\n"
+        'printf \'flock %s\\n\' "$*" >> "$FAKE_DOCKER_LOG"\n'
+        'exit "$FAKE_FLOCK_STATUS"\n',
+    )
     log_path = tmp_path / "docker.log"
     agent_counter_path = tmp_path / "agent-ready-counter"
     migration_state_path = tmp_path / "migration-state"
     migration_up_count_path = tmp_path / "migration-up-count"
     snapshot_state_dir = tmp_path / "snapshot-state"
     snapshot_state_dir.mkdir()
-    drain_report_path = tmp_path / "live-drain.json"
-    drain_report_path.write_text(
-        json.dumps(
-            {
-                "capturedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "coreRuntime": {
-                    "containerId": "c" * 64,
-                    "imageId": ROLLBACK_CORE_DIGEST,
-                    "routeMode": "off",
-                    "schemaReady": False,
-                    "v1FreshStartsEnabled": False,
-                },
-                "database": "novelwriter",
-                "executionRedisIdentity": {
-                    "containerId": "e" * 64,
-                    "imageId": "sha256:" + "8" * 64,
-                    "redisRunId": "9" * 40,
-                },
-                "format": "inkforge-durable-agent-v2-live-drain/1",
-                "mode": "pre-contract",
-                "postgresIdentity": {
-                    "databaseOid": "1",
-                    "serverAddress": "127.0.0.1",
-                    "serverPort": "5432",
-                    "serverVersionNum": "170000",
-                },
-                "redisIdentity": {
-                    "containerId": "d" * 64,
-                    "imageId": "sha256:" + "7" * 64,
-                    "redisRunId": "8" * 40,
-                },
-                "runtimeTopologySha256": "a" * 64,
-                "schemaState": "unmigrated",
-                "sourceReportSha256": "b" * 64,
-                "zeroDrain": True,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n",
-        encoding="utf-8",
-    )
     # 必须使用与生产脚本相同的固定目录，SHA 让并行测试互不覆盖。
     bundle_root = Path("/tmp")  # noqa: S108
     bundle_path = bundle_root / f"inkforge-deploy-{deploy_sha}.bundle"
     if deploy_bundle:
         bundle_path.write_text("bundle fixture", encoding="utf-8")
-    lock_id = "d" * 64
-    lock_root = app_dir / ".durable-agent-v2-release-transactions"
-    lock_dir = lock_root / lock_id
-    lock_file = app_dir / ".durable-agent-v2-release-transaction.lock"
-    if protected_lock:
-        lock_dir.mkdir(mode=0o700, parents=True)
-        owner = lock_dir / "owner"
-        owner.write_text(
-            "\n".join(
-                (
-                    "format=2",
-                    f"lockId={lock_id}",
-                    "runId=123",
-                    "runAttempt=1",
-                    (
-                        "operation=allowlist_release"
-                        if durable_route_mode == "allowlist"
-                        else "operation=route_off_release"
-                    ),
-                    f"workflowTrustedCommit={deploy_sha}",
-                    f"targetReleaseCommit={deploy_sha}",
-                    f"controlBundleSha256={CONTROL_BUNDLE_SHA}",
-                    "",
-                )
-            ),
-            encoding="ascii",
-        )
-        owner.chmod(0o600)
-        os.link(owner, lock_file)
-        state = lock_dir / "state"
-        state.write_text("active\n", encoding="ascii")
-        state.chmod(0o600)
-        if real_release_driver:
-            base_receipt = lock_dir / "base-receipt.sha256"
-            base_receipt.write_text("0" * 64 + "\n", encoding="ascii")
-            base_receipt.chmod(0o600)
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
         "DEPLOY_SHA": deploy_sha,
+        "DEPLOY_BUNDLE_PATH": bundle_path.as_posix() if deploy_bundle else "",
         "INKFORGE_IMAGE_TAG": "new-tag",
-        "DURABLE_AGENT_RELEASE_MANIFEST_DIR": _posix_path(manifest_dir),
-        "RELEASE_MANIFEST_DIR": _posix_path(manifest_dir),
-        "DURABLE_AGENT_RELEASE_OPERATION": "release",
-        "WORKFLOW_TRUSTED_COMMIT": deploy_sha,
-        "TARGET_RELEASE_COMMIT": deploy_sha,
-        "RELEASE_MANIFEST_SHA256": manifest_sha256,
-        "RELEASE_ACTION": (
-            "allowlist_release"
-            if durable_route_mode == "allowlist"
-            else "route_off_release"
-        ),
-        "DURABLE_AGENT_RELEASE_LOCK_ID": lock_id,
-        "DURABLE_AGENT_CONTROL_BUNDLE_DIR": _posix_path(control_dir),
-        "DURABLE_AGENT_CONTROL_BUNDLE_SHA256": CONTROL_BUNDLE_SHA,
-        "DEPLOY_RUNTIME_ROUTE_MODE": "off",
-        "GITHUB_ACTIONS": "true",
-        "GITHUB_EVENT_NAME": "workflow_dispatch",
-        "GITHUB_REF": "refs/heads/main",
-        "GITHUB_SHA": deploy_sha,
-        "GITHUB_RUN_ID": "123",
-        "GITHUB_RUN_ATTEMPT": "1",
-        "INKFORGE_RELEASE_APPROVED_ENVIRONMENT": "production",
         "FAKE_DOCKER_LOG": _posix_path(log_path),
         "FAKE_NEW_TAG": "new-tag",
         "FAKE_NEW_CORE_RUNTIME": new_core_runtime,
@@ -980,74 +659,31 @@ def _run_deploy(
         "FAKE_MIGRATION_UP_FAIL_ATTEMPT": str(migration_up_fail_attempt),
         "FAKE_MIGRATION_DOWN_STATUS": str(migration_down_status),
         "FAKE_DURABLE_MIGRATION_STATE": durable_migration_state,
-        "FAKE_DRAIN_REPORT": _posix_path(drain_report_path),
         "FAKE_CORE_V2_AWARE_STATUS": str(core_v2_aware_status),
         "FAKE_AGENT_V2_AWARE_STATUS": str(agent_v2_aware_status),
         "FAKE_TARGET_AGENT_MANIFEST_FINGERPRINT": target_agent_manifest_fingerprint,
         "FAKE_ROLLBACK_AGENT_MANIFEST_FINGERPRINT": rollback_agent_manifest_fingerprint,
         "FAKE_ACTIVE_V2_RUN_COUNT": str(active_v2_run_count),
-        "FAKE_RUNNING_CORE_ROUTE_MODE": (
-            running_core_route_mode
-            or ("off" if durable_route_mode == "allowlist" else durable_route_mode)
-        ),
-        "FAKE_RUNNING_CORE_SCHEMA_READY": (
-            "true" if durable_schema_ready else "false"
-        ),
-        "FAKE_RUNNING_CORE_USER_ALLOWLIST": durable_user_allowlist,
-        "FAKE_RUNNING_CORE_NOVEL_ALLOWLIST": durable_novel_allowlist,
-        "FAKE_RUNNING_CORE_V1_FRESH_STARTS": (
-            "true" if v1_fresh_starts else "false"
-        ),
-        "FAKE_TARGET_WEB_DIGEST": TARGET_WEB_DIGEST,
-        "FAKE_TARGET_CORE_DIGEST": TARGET_CORE_DIGEST,
-        "FAKE_TARGET_AGENT_DIGEST": TARGET_AGENT_DIGEST,
-        "FAKE_ROLLBACK_WEB_DIGEST": ROLLBACK_WEB_DIGEST,
-        "FAKE_ROLLBACK_CORE_DIGEST": ROLLBACK_CORE_DIGEST,
-        "FAKE_ROLLBACK_AGENT_DIGEST": ROLLBACK_AGENT_DIGEST,
-        "FAKE_BOUNDARY_CONSUME_STATUS": str(boundary_consume_status),
-        "FAKE_BOUNDARY_APPLIED_STATUS": str(boundary_applied_status),
+        "FAKE_RUNNING_CORE_ROUTE_MODE": running_core_route_mode,
+        "FAKE_FLOCK_STATUS": str(flock_status),
         "FAKE_SNAPSHOT_STATE_DIR": _posix_path(snapshot_state_dir),
         "SMOKE_AGENT_MAX_ATTEMPTS": "1",
         "SMOKE_AGENT_REQUIRED_SUCCESSES": "1",
         "SMOKE_AGENT_POLL_SECONDS": "0",
     }
-    if release_fault_point:
-        env["DURABLE_AGENT_RELEASE_FAULT_POINT"] = release_fault_point
-        env["INKFORGE_LOCAL_RELEASE_TEST_MODE"] = "true"
-    if real_release_driver:
-        env["PATH"] = f"{Path(sys.executable).parent}:{env['PATH']}"
-    if deploy_bundle:
-        env["DEPLOY_BUNDLE_PATH"] = bundle_path.as_posix()
-    if verified_drain and real_release_driver and protected_lock and protected_manifest:
-        prepared = subprocess.run(  # noqa: S603 - 隔离 fake runtime 下执行真实发布 driver
-            [
-                POSIX_SHELL,
-                str(control_dir / "scripts" / RELEASE_DRIVER.name),
-                "prepare-release",
-            ],
-            cwd=ROOT,
-            env={**env, "PATH": f"{bin_dir}:{env['PATH']}"},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
+    if ambient_rollout_overrides:
+        env.update(
+            {
+                "DATABASE_URL": "postgresql://ambient.invalid/other",
+                "EXECUTION_REDIS_URL": "redis://ambient.invalid:6379/9",
+                "DURABLE_AGENT_EXECUTION_SCHEMA_READY": "true",
+                "DURABLE_AGENT_EXECUTION_ROUTE_MODE": "all",
+                "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST": "ambient-user",
+                "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST": "ambient-novel",
+                "V1_FRESH_AGENT_STARTS_ENABLED": "false",
+                "FAKE_ASSERT_ROLLOUT_ENV_UNSET": "true",
+            }
         )
-        if prepared.returncode != 0:
-            bundle_path.unlink(missing_ok=True)
-            return prepared, log_path.read_text(encoding="utf-8")
-        prefix = "prepare-release-ok:verifiedDrain:"
-        if not prepared.stdout.startswith(prefix):
-            bundle_path.unlink(missing_ok=True)
-            return prepared, log_path.read_text(encoding="utf-8")
-        env["VERIFIED_DRAIN_SHA256"] = prepared.stdout.strip().removeprefix(prefix)
-    elif verified_drain:
-        env["VERIFIED_DRAIN_SHA256"] = "a" * 64
-    if not protected_manifest:
-        env.pop("DURABLE_AGENT_RELEASE_MANIFEST_DIR", None)
-        env.pop("RELEASE_MANIFEST_DIR", None)
-    if not protected_lock:
-        lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     result = subprocess.run(  # noqa: S603 - 仅执行仓库内固定脚本和测试夹具
         [
             POSIX_SHELL,
@@ -1062,37 +698,10 @@ def _run_deploy(
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=60 if real_release_driver else 20,
+        timeout=20,
         check=False,
     )
-    bundle_path.unlink(missing_ok=True)
     return result, log_path.read_text(encoding="utf-8") if log_path.exists() else ""
-
-
-@pytest.mark.parametrize(
-    ("overrides", "expected_error"),
-    [
-        ({"protected_manifest": False}, "release manifest 目录"),
-        ({"deploy_bundle": False}, "部署源码 bundle"),
-        ({"protected_lock": False}, "release-lock-file"),
-    ],
-)
-def test_protected_deploy_missing_manifest_bundle_or_lock_fails_before_actions(
-    tmp_path: Path,
-    overrides: dict[str, bool],
-    expected_error: str,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        **overrides,
-    )
-
-    assert result.returncode != 0
-    assert expected_error in result.stderr
-    assert "docker compose" not in log
-    assert "migration " not in log
-    assert "git " not in log
 
 
 def test_deploy_fetches_from_bundle_without_contacting_origin_and_cleans_file(
@@ -1122,11 +731,6 @@ def _full_stack_up_lines(log: str) -> list[str]:
     return [line for line in log.splitlines() if line.endswith(" up --no-build -d --wait")]
 
 
-def _protected_rollback_tag(tmp_path: Path) -> str:
-    deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
-    return f"rollback-release-{deploy_sha}"
-
-
 def _nginx_refresh_lines(log: str) -> list[str]:
     return [
         line
@@ -1149,7 +753,7 @@ def _deployment_up_events(log: str) -> list[tuple[str, str]]:
 @pytest.mark.parametrize(
     ("state", "expected_status", "expected_up_count"),
     [
-        ("none", 1, 0),
+        ("none", 0, 1),
         ("partial", 1, 0),
         ("mismatch", 0, 1),
         ("valid", 0, 1),
@@ -1179,12 +783,10 @@ def test_current_running_bundle_is_snapshotted_by_exact_image_id_before_switch(
 
     assert result.returncode == 0, result.stderr
     lines = log.splitlines()
-    deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
-    snapshot_tag = f"rollback-release-{deploy_sha}"
     expected_tags = [
-        f"docker image tag {ROLLBACK_WEB_DIGEST} inkforge-web:{snapshot_tag}",
-        f"docker image tag {ROLLBACK_CORE_DIGEST} inkforge-core-api:{snapshot_tag}",
-        f"docker image tag {ROLLBACK_AGENT_DIGEST} inkforge-agent-service:{snapshot_tag}",
+        f"docker image tag sha256:{'4' * 64} inkforge-web:rollback-new-tag",
+        f"docker image tag sha256:{'5' * 64} inkforge-core-api:rollback-new-tag",
+        f"docker image tag sha256:{'6' * 64} inkforge-agent-service:rollback-new-tag",
     ]
     for expected in expected_tags:
         matching_index = next(index for index, line in enumerate(lines) if expected in line)
@@ -1193,7 +795,7 @@ def test_current_running_bundle_is_snapshotted_by_exact_image_id_before_switch(
         )
         assert matching_index < first_switch_index
 
-    assert f"已冻结当前生产三服务精确回滚快照：{snapshot_tag}（python）" in result.stdout
+    assert "已冻结当前生产三服务精确回滚快照：rollback-new-tag（python）" in result.stdout
 
 
 def test_existing_conflicting_rollback_snapshot_is_not_overwritten(
@@ -1206,10 +808,7 @@ def test_existing_conflicting_rollback_snapshot_is_not_overwritten(
 
     assert result.returncode != 0
     assert "回滚镜像标签已存在但指向另一镜像" in result.stderr
-    assert not any(
-        "docker image tag" in line and ":rollback-" in line
-        for line in log.splitlines()
-    )
+    assert "docker image tag" not in log
     assert _full_stack_up_lines(log) == []
 
 
@@ -1304,21 +903,6 @@ def test_non_java_new_core_is_rejected_before_version_switch(tmp_path: Path) -> 
     assert _full_stack_up_lines(log) == []
 
 
-def test_live_boundary_rejection_preserves_status_before_git_or_compose(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        boundary_consume_status=17,
-    )
-
-    assert result.returncode == 17
-    assert "release-driver consume-live-boundary compose-release" in log
-    assert "git reset --hard" not in log
-    assert _full_stack_up_lines(log) == []
-
-
 def test_agent_log_volume_initialization_failure_stops_before_version_switch(
     tmp_path: Path,
 ) -> None:
@@ -1359,115 +943,16 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
     up_lines = _full_stack_up_lines(log)
     assert [line.split("|", 1)[0] for line in up_lines] == [
         "tag=new-tag",
-        f"tag={_protected_rollback_tag(tmp_path)}",
+        "tag=rollback-new-tag",
     ]
-    assert "compose.python-core-rollback.yaml ps" in log
-    assert "compose.python-core-rollback.yaml" in up_lines[1]
+    assert (
+        " compose --env-file .env -f infra/compose.yaml "
+        "-f infra/compose.python-core-rollback.yaml ps"
+    ) in log
+    assert "-f infra/compose.python-core-rollback.yaml" in up_lines[1]
     assert " exec -T core-api python -c" in log
-    boundary_marker = "release-boundary-state active compensated"
-    assert boundary_marker in log
-    assert log.index(" exec -T core-api python -c") < log.index(boundary_marker)
-    assert "release-boundary-applied compensated" in log
-    assert log.index("release-boundary-applied compensated") < log.index(
-        "release-failed-state active"
-    )
-    lock_state = (
-        tmp_path
-        / "app"
-        / ".durable-agent-v2-release-transactions"
-        / ("d" * 64)
-        / "state"
-    )
-    assert lock_state.read_text(encoding="ascii") == "failed\n"
     assert "新版本部署失败，旧版本已恢复" in result.stdout
     assert "生产编排已启动" not in result.stdout
-
-
-@pytest.mark.parametrize("durable_route_mode", ("off", "allowlist"))
-def test_real_release_driver_settles_compensation_before_failed_without_receipt(
-    tmp_path: Path,
-    durable_route_mode: str,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        new_status=23,
-        rollback_status=0,
-        real_release_driver=True,
-        durable_route_mode=durable_route_mode,
-    )
-
-    assert result.returncode == 23
-    up_lines = _full_stack_up_lines(log)
-    assert [line.split("|", 1)[0] for line in up_lines] == [
-        "tag=new-tag",
-        f"tag={_protected_rollback_tag(tmp_path)}",
-    ]
-    nginx_lines = _nginx_refresh_lines(log)
-    assert [line.split("|", 1)[0] for line in nginx_lines] == [
-        f"tag={_protected_rollback_tag(tmp_path)}"
-    ]
-    runtime_probe = " exec -T core-api python -c"
-    assert runtime_probe in log
-    assert log.index(nginx_lines[0]) < log.index(runtime_probe)
-    assert "--no-deps --force-recreate core-api" not in log
-
-    lock_dir = (
-        tmp_path
-        / "app"
-        / ".durable-agent-v2-release-transactions"
-        / ("d" * 64)
-    )
-    state = lock_dir / "state"
-    assert state.read_text(encoding="ascii") == "failed\n"
-    evidence_dir = lock_dir / "boundary-evidence"
-    claimed = list(evidence_dir.glob("*-compose-release.claimed.json"))
-    applied = list(evidence_dir.glob("*-compose-release.applied.json"))
-    assert len(claimed) == len(applied) == 1
-    assert json.loads(applied[0].read_text(encoding="utf-8")) == {
-        "boundary": "compose-release",
-        "evidenceSha256": hashlib.sha256(claimed[0].read_bytes()).hexdigest(),
-        "format": "inkforge-durable-agent-v2-boundary-applied/1",
-        "lockId": "d" * 64,
-        "outcome": "compensated",
-        "sequence": 1,
-    }
-    # 真实 driver 只允许 active lock 落 applied；最终 state 的替换必须发生在其后。
-    assert applied[0].stat().st_mtime_ns <= state.stat().st_mtime_ns
-    receipt_root = tmp_path / "app" / ".durable-agent-v2-release-receipts"
-    assert not receipt_root.exists()
-    assert "新版本部署失败，旧版本已恢复" in result.stdout
-    assert "生产编排已启动" not in result.stdout
-
-
-def test_failed_new_version_does_not_claim_proven_compensation_when_marker_fails(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        new_status=23,
-        rollback_status=0,
-        real_release_driver=True,
-        release_fault_point="boundary-before-applied",
-    )
-
-    assert result.returncode == 23
-    assert len(_full_stack_up_lines(log)) == 2
-    lock_state = (
-        tmp_path
-        / "app"
-        / ".durable-agent-v2-release-transactions"
-        / ("d" * 64)
-        / "state"
-    )
-    assert lock_state.read_text(encoding="ascii") == "failed\n"
-    evidence_dir = lock_state.parent / "boundary-evidence"
-    assert len(list(evidence_dir.glob("*-compose-release.claimed.json"))) == 1
-    assert list(evidence_dir.glob("*-compose-release.applied.json")) == []
-    assert not (tmp_path / "app" / ".durable-agent-v2-release-receipts").exists()
-    assert "旧版本已恢复" not in result.stdout
-    assert "自动回滚也失败（退出码：90）" in result.stderr
 
 
 def test_failed_new_version_restores_previous_java_with_java_guard(
@@ -1484,7 +969,7 @@ def test_failed_new_version_restores_previous_java_with_java_guard(
     up_lines = _full_stack_up_lines(log)
     assert [line.split("|", 1)[0] for line in up_lines] == [
         "tag=new-tag",
-        f"tag={_protected_rollback_tag(tmp_path)}",
+        "tag=rollback-new-tag",
     ]
     assert "compose.python-core-rollback.yaml" not in up_lines[1]
     assert log.count("exec -T core-api /usr/local/bin/inkforge-schema-guard") == 1
@@ -1506,18 +991,16 @@ def test_unknown_previous_core_runtime_stops_before_version_switch(
     assert _full_stack_up_lines(log) == []
 
 
-def test_protected_deploy_rejects_removed_first_deployment_compatibility(
-    tmp_path: Path,
-) -> None:
+def test_failed_first_deployment_does_not_fabricate_rollback(tmp_path: Path) -> None:
     result, log = _run_deploy(
         tmp_path,
         previous_state="none",
         new_status=23,
     )
 
-    assert result.returncode != 0
-    assert _full_stack_up_lines(log) == []
-    assert "verifiedDrain 前置门禁找不到当前 Core" in result.stderr
+    assert result.returncode == 23
+    assert len(_full_stack_up_lines(log)) == 1
+    assert "本次为首次部署，没有可自动恢复的上一版本" in result.stderr
     assert "旧版本已恢复" not in result.stdout
     assert "生产编排已启动" not in result.stdout
 
@@ -1536,15 +1019,6 @@ def test_failed_rollback_reports_both_failures_without_success(
     assert len(_full_stack_up_lines(log)) == 2
     assert "新版本部署失败" in result.stderr
     assert "自动回滚也失败" in result.stderr
-    assert "release-boundary-state" not in log
-    lock_state = (
-        tmp_path
-        / "app"
-        / ".durable-agent-v2-release-transactions"
-        / ("d" * 64)
-        / "state"
-    )
-    assert lock_state.read_text(encoding="ascii") == "failed\n"
     assert "生产编排已启动" not in result.stdout
 
 
@@ -1577,32 +1051,81 @@ def test_smoke_failure_refreshes_nginx_for_new_and_rollback_tags(
     assert result.returncode != 0
     assert [line.split("|", 1)[0] for line in _full_stack_up_lines(log)] == [
         "tag=new-tag",
-        f"tag={_protected_rollback_tag(tmp_path)}",
+        "tag=rollback-new-tag",
     ]
     assert [line.split("|", 1)[0] for line in _nginx_refresh_lines(log)] == [
         "tag=new-tag",
-        f"tag={_protected_rollback_tag(tmp_path)}",
+        "tag=rollback-new-tag",
     ]
     assert _deployment_up_events(log) == [
         ("tag=new-tag", "全栈"),
         ("tag=new-tag", "Nginx"),
-        (f"tag={_protected_rollback_tag(tmp_path)}", "全栈"),
-        (f"tag={_protected_rollback_tag(tmp_path)}", "Nginx"),
+        ("tag=rollback-new-tag", "全栈"),
+        ("tag=rollback-new-tag", "Nginx"),
     ]
     assert "新版本部署失败，旧版本已恢复" in result.stdout
 
 
-def test_durable_release_refuses_to_mix_unmigrated_token_usage_ddl(
-    tmp_path: Path,
-) -> None:
+def test_ordinary_deploy_never_runs_token_usage_ddl(tmp_path: Path) -> None:
     result, log = _run_deploy(tmp_path, previous_state="valid", migration_state="unmigrated")
 
     assert result.returncode != 0
-    assert "禁止夹带 TokenUsage DDL" in result.stderr
+    assert "普通部署不执行 TokenUsage DDL" in result.stderr
     assert [line for line in log.splitlines() if line.startswith("migration ")] == [
         "migration status"
     ]
+    assert "migration backup" not in log
+    assert "migration up" not in log
+    assert "migration down" not in log
     assert _full_stack_up_lines(log) == []
+
+
+def test_ordinary_route_off_deploy_keeps_v1_fresh_starts_available(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        durable_migration_state="unmigrated",
+        durable_schema_ready=False,
+        durable_route_mode="off",
+        v1_fresh_starts=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "durable-migration status novelwriter" in log
+    assert len(_full_stack_up_lines(log)) == 1
+
+
+def test_deploy_rejects_duplicate_execution_redis_configuration_before_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        execution_redis_config=(
+            "EXECUTION_REDIS_URL=redis://execution-redis:6379/0\n"
+            "EXECUTION_REDIS_URL=redis://redis:6379/0"
+        ),
+    )
+
+    assert result.returncode != 0
+    assert "durable-rollout-config:duplicate" in result.stderr
+    assert _full_stack_up_lines(log) == []
+
+
+def test_deploy_clears_ambient_overrides_before_any_compose_operation(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        ambient_rollout_overrides=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "受控 Compose 环境仍被调用进程覆盖" not in result.stderr
+    assert len(_full_stack_up_lines(log)) == 1
 
 
 def test_partial_schema_stops_before_backup_or_version_switch(tmp_path: Path) -> None:
@@ -1615,69 +1138,48 @@ def test_partial_schema_stops_before_backup_or_version_switch(tmp_path: Path) ->
     assert _full_stack_up_lines(log) == []
 
 
-def test_second_forward_failure_runs_down_without_switching_images(tmp_path: Path) -> None:
+def test_server_flock_blocks_overlapping_deploy_before_git_or_docker(tmp_path: Path) -> None:
     result, log = _run_deploy(
         tmp_path,
         previous_state="valid",
-        migration_state="unmigrated",
-        migration_up_fail_attempt=2,
+        flock_status=73,
     )
 
-    assert result.returncode == 1
-    assert "禁止夹带 TokenUsage DDL" in result.stderr
-    assert [line for line in log.splitlines() if line.startswith("migration ")] == [
-        "migration status"
-    ]
-    assert _full_stack_up_lines(log) == []
+    assert result.returncode != 0
+    assert "已有其他生产部署或迁移在运行" in result.stderr
+    assert "flock -n 9" in log
+    assert "git " not in log
+    assert "docker " not in log
 
 
-def test_first_forward_failure_runs_safe_down_without_switching_images(
+def test_deploy_does_not_apply_a_private_umask_to_git_managed_runtime_files() -> None:
+    source = DEPLOY.read_text(encoding="utf-8")
+
+    assert "umask 077" not in source
+    assert 'chmod 600 "$deployment_lock_file"' in source
+
+
+def test_rejected_overlapping_deploy_does_not_delete_active_bundle(
     tmp_path: Path,
 ) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        migration_state="unmigrated",
-        migration_up_fail_attempt=1,
-    )
+    deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
+    bundle_path = Path("/tmp") / f"inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108
+    try:
+        result, log = _run_deploy(
+            tmp_path,
+            previous_state="valid",
+            deploy_sha=deploy_sha,
+            deploy_bundle=True,
+            flock_status=73,
+        )
 
-    assert result.returncode == 1
-    assert "禁止夹带 TokenUsage DDL" in result.stderr
-    assert [line for line in log.splitlines() if line.startswith("migration ")] == [
-        "migration status"
-    ]
-    assert _full_stack_up_lines(log) == []
-
-
-def test_failed_new_version_downs_schema_before_restoring_previous_image(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        migration_state="unmigrated",
-        new_status=23,
-    )
-
-    assert result.returncode == 1
-    assert "禁止夹带 TokenUsage DDL" in result.stderr
-    assert "migration down" not in log
-    assert _full_stack_up_lines(log) == []
-
-
-def test_failed_schema_down_does_not_restore_previous_image(tmp_path: Path) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        migration_state="unmigrated",
-        new_status=23,
-        migration_down_status=32,
-    )
-
-    assert result.returncode == 1
-    assert "禁止夹带 TokenUsage DDL" in result.stderr
-    assert "migration down" not in log
-    assert _full_stack_up_lines(log) == []
+        assert result.returncode != 0
+        assert "已有其他生产部署或迁移在运行" in result.stderr
+        assert bundle_path.is_file()
+        assert "git " not in log
+        assert "docker " not in log
+    finally:
+        bundle_path.unlink(missing_ok=True)
 
 
 def test_durable_agent_partial_schema_stops_before_image_switch(tmp_path: Path) -> None:
@@ -1769,7 +1271,7 @@ def test_deploy_cannot_skip_allowlist_and_enable_all_routes(tmp_path: Path) -> N
     )
 
     assert result.returncode != 0
-    assert "当前运行 Core 未精确证明 V1/V2 新建入口关闭" in result.stderr
+    assert "禁止直接全量" in result.stderr
     assert _full_stack_up_lines(log) == []
 
 
@@ -1784,7 +1286,6 @@ def test_deploy_allows_only_complete_user_and_novel_intersection_allowlist(
         durable_schema_ready=True,
         durable_route_mode="allowlist",
         durable_user_allowlist="user-canary",
-        durable_novel_allowlist="",
     )
     accepted, accepted_log = _run_deploy(
         tmp_path / "accepted",
@@ -1798,14 +1299,17 @@ def test_deploy_allows_only_complete_user_and_novel_intersection_allowlist(
     )
 
     assert rejected.returncode != 0
-    assert "精确单 userId 与单 novelId" in rejected.stderr
+    assert "必须同时配置" in rejected.stderr
     assert _full_stack_up_lines(rejected_log) == []
     assert accepted.returncode == 0, accepted.stderr
     assert len(_full_stack_up_lines(accepted_log)) == 1
-    assert f"v2-image agent {ROLLBACK_AGENT_DIGEST} <none>" in accepted_log
+    expected = _execution_manifest_fingerprint(
+        ROOT / "contracts" / "agent-execution" / "manifest.json"
+    )
+    assert (f"v2-image agent sha256:{'6' * 64} " + expected) in accepted_log
 
 
-def test_allowlist_manifest_rejects_older_rollback_before_deploy(
+def test_allowlist_rejects_rollback_agent_with_older_execution_manifest(
     tmp_path: Path,
 ) -> None:
     result, log = _run_deploy(
@@ -1821,8 +1325,8 @@ def test_allowlist_manifest_rejects_older_rollback_before_deploy(
     )
 
     assert result.returncode != 0
-    assert "allowlist rollback execution manifest fingerprint 不兼容" in result.stderr
-    assert log == ""
+    assert "回滚镜像与冻结 execution manifest 不兼容" in result.stderr
+    assert f"v2-image agent sha256:{'6' * 64}" in log
     assert _full_stack_up_lines(log) == []
 
 
@@ -1840,11 +1344,11 @@ def test_allowlist_requires_a_complete_compatible_rollback_snapshot(
     )
 
     assert result.returncode != 0
-    assert "verifiedDrain 前置门禁找不到当前 Core" in result.stderr
+    assert "allowlist canary 必须先冻结" in result.stderr
     assert _full_stack_up_lines(log) == []
 
 
-def test_route_off_fingerprint_switch_requires_verified_drain_evidence(
+def test_v2_aware_route_off_rollback_combination_remains_deployable(
     tmp_path: Path,
 ) -> None:
     result, log = _run_deploy(
@@ -1856,16 +1360,18 @@ def test_route_off_fingerprint_switch_requires_verified_drain_evidence(
         durable_route_mode="off",
         rollback_agent_manifest_fingerprint="b" * 64,
         active_v2_run_count=0,
-        verified_drain=False,
     )
 
-    assert result.returncode != 0
-    assert "verifiedDrain 不能由当前不可变 control bundle 复验" in result.stderr
-    assert "durable-migration active-v2-count novelwriter" not in log
-    assert _full_stack_up_lines(log) == []
+    assert result.returncode == 0, result.stderr
+    assert "v2-image core inkforge-core-api:new-tag" in log
+    assert "v2-image agent inkforge-agent-service:new-tag" in log
+    assert f"v2-image core sha256:{'5' * 64}" in log
+    assert f"v2-image agent sha256:{'6' * 64} <none>" in log
+    assert "durable-migration active-v2-count novelwriter" in log
+    assert len(_full_stack_up_lines(log)) == 1
 
 
-def test_active_v2_count_cannot_replace_verified_drain_evidence(
+def test_route_off_rejects_different_manifest_while_any_v2_run_is_active(
     tmp_path: Path,
 ) -> None:
     result, log = _run_deploy(
@@ -1877,12 +1383,11 @@ def test_active_v2_count_cannot_replace_verified_drain_evidence(
         durable_route_mode="off",
         rollback_agent_manifest_fingerprint="b" * 64,
         active_v2_run_count=1,
-        verified_drain=False,
     )
 
     assert result.returncode != 0
-    assert "verifiedDrain 不能由当前不可变 control bundle 复验" in result.stderr
-    assert "durable-migration active-v2-count novelwriter" not in log
+    assert "仍有 V2 非终态 Run" in result.stderr
+    assert "durable-migration active-v2-count novelwriter" in log
     assert _full_stack_up_lines(log) == []
 
 
@@ -1902,7 +1407,7 @@ def test_target_route_off_does_not_override_running_allowlist_during_manifest_sw
     )
 
     assert result.returncode != 0
-    assert "当前运行 Core 未精确证明 V1/V2 新建入口关闭" in result.stderr
+    assert "当前运行 Core 未精确证明 route=off" in result.stderr
     assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE" in log
     assert "durable-migration active-v2-count novelwriter" not in log
     assert _full_stack_up_lines(log) == []

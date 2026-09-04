@@ -708,8 +708,10 @@ CLI 当前不是 148 个公共 API 的逐接口镜像，明确缺口包括：
 - 伏笔只有列表，没有手工写命令；
 - 健康检查和 OpenAPI 文档不包装为业务命令。
 
-当前生产 CLI 凭据后端只允许 Windows Credential Manager 的 `WinVaultKeyring`，不会回退到明文文件。
-因此 macOS/Linux 不能直接作为当前生产 CLI 的受支持凭据平台；这也是 Java CLI 重写必须明确解决的产品选择。
+当前生产 wrapper 仍调用 Python CLI。Python CLI 直接运行时的凭据后端只允许 Windows Credential Manager 的
+`WinVaultKeyring`，不会回退到明文文件；macOS 生产 Skill 通过受控 wrapper 注入 Keychain，同样禁止明文回退。
+Java CLI 候选已实现 macOS Keychain 与 Windows Credential Manager，但逐命令差异矩阵、真实环境验收和 Skill
+切换完成前还不是生产 executable。Linux 仍不是受支持的生产凭据平台。
 
 完整 125 命令及字段见 `tools/inkforge-cli/README.md`，注册表是命令存在性的权威。
 
@@ -857,7 +859,8 @@ CLI 当前不是 148 个公共 API 的逐接口镜像，明确缺口包括：
 ### 14.5 自动化与平台
 
 - CLI 不是公共 API 全量镜像；
-- 当前生产 CLI 凭据仅支持 Windows Credential Manager；
+- 当前生产 wrapper 仍调用 Python CLI：Windows 使用 Credential Manager，macOS 由 Skill wrapper 注入 Keychain；
+  Java CLI 只是尚未切换的候选；
 - 生产是单机 2 核 2 GB 预算，不是多地域、高可用或水平扩展架构；
 - PostgreSQL schema 默认冻结，应用不能自动迁移；
 - 当前没有公开 Webhook、第三方插件市场或外部开发者 API 产品。

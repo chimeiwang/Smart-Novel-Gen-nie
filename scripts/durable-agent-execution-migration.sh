@@ -20,16 +20,13 @@ pre_contract="$app_dir/apps/core-api-java/src/main/resources/db/pre-durable-agen
 post_contract="$app_dir/apps/core-api-java/src/main/resources/db/post-durable-agent-v2/schema-contract.json"
 contract_evidence_builder="$app_dir/scripts/durable_agent_contract_evidence.py"
 joint_drain_builder="$app_dir/scripts/durable_agent_joint_drain.py"
-boundary_builder="$app_dir/scripts/durable_agent_release_boundary.py"
 v1_queue_snapshot_lua="$app_dir/scripts/durable_agent_v1_queue_snapshot.lua"
 v2_execution_snapshot_lua="$app_dir/scripts/durable_agent_v2_execution_snapshot.lua"
-v1_pre_activation_snapshot_lua="$app_dir/scripts/durable_agent_v1_pre_activation_snapshot.lua"
-v2_pre_activation_snapshot_lua="$app_dir/scripts/durable_agent_v2_pre_activation_snapshot.lua"
 v1_drain_index_initialize_lua="$app_dir/scripts/durable_agent_v1_drain_index_initialize.lua"
 v2_drain_index_initialize_lua="$app_dir/scripts/durable_agent_v2_drain_index_initialize.lua"
 
 case "$action" in
-  status|active-v2-count|initialize-drain-indexes|drain-status|verify-drain|boundary-drain|backup|forward|rollback|export-contract|verify-contract) ;;
+  status|active-v2-count|initialize-drain-indexes|drain-status|verify-drain|backup|forward|rollback|export-contract|verify-contract) ;;
   *) echo "耐久 Agent 迁移动作无效" >&2; exit 2 ;;
 esac
 case "$target_database" in
@@ -73,6 +70,25 @@ verify_fixed_file "$post_contract" "$post_contract_sha" || {
   exit 1
 }
 
+case "$action" in
+  backup|forward|rollback|initialize-drain-indexes)
+    command -v flock >/dev/null 2>&1 || { echo "耐久 Agent 迁移缺少 flock" >&2; exit 1; }
+    deployment_lock_file="$app_dir/.inkforge-production.lock"
+    if [ -e "$deployment_lock_file" ] || [ -L "$deployment_lock_file" ]; then
+      [ -f "$deployment_lock_file" ] && [ ! -L "$deployment_lock_file" ] || {
+        echo "耐久 Agent 生产互斥锁无效" >&2
+        exit 1
+      }
+    fi
+    exec 9>>"$deployment_lock_file"
+    chmod 600 "$deployment_lock_file"
+    flock -n 9 || {
+      echo "已有其他生产部署或迁移在运行" >&2
+      exit 1
+    }
+    ;;
+esac
+
 temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/inkforge-durable-agent-migration.XXXXXX")"
 case "$temp_dir" in
   "${TMPDIR:-/tmp}"/inkforge-durable-agent-migration.*) ;;
@@ -89,12 +105,9 @@ cleanup() {
     "$temp_dir/drain-runtime-before.json" "$temp_dir/drain-postgres-before.json" \
     "$temp_dir/drain-v1-redis.json" "$temp_dir/drain-v2-redis.json" \
     "$temp_dir/drain-postgres-after.json" "$temp_dir/drain-runtime-after.json" \
-    "$temp_dir/drain-report.json" "$temp_dir/boundary-runtime-before.json" \
-    "$temp_dir/boundary-runtime-after.json" \
-    "$temp_dir/boundary-postgres-before.json" \
-    "$temp_dir/boundary-postgres-after.json" \
-    "$temp_dir/boundary-v1-redis.json" "$temp_dir/boundary-v2-redis.json" \
-    "$temp_dir/boundary-joint-report.json"
+    "$temp_dir/drain-report.json" "$temp_dir/forward-postgres-before.json" \
+    "$temp_dir/forward-postgres-after.json" "$temp_dir/forward-v1-redis.json" \
+    "$temp_dir/forward-v2-redis.json"
   [ -z "$operation_sql_file" ] || rm -f -- "$operation_sql_file"
   if [ -n "$contract_evidence_temp_dir" ]; then
     rm -f -- \
@@ -660,6 +673,7 @@ allowed = {
     "DURABLE_AGENT_EXECUTION_ROUTE_MODE",
     "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST",
     "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST",
+    "V1_FRESH_AGENT_STARTS_ENABLED",
 }
 values: dict[str, str] = {}
 for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
@@ -680,15 +694,17 @@ for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
 
 schema_ready = values.get("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "false").lower()
 route_mode = values.get("DURABLE_AGENT_EXECUTION_ROUTE_MODE", "off").lower()
+v1_fresh_starts = values.get("V1_FRESH_AGENT_STARTS_ENABLED", "true").lower()
 if schema_ready not in {"true", "false"} or route_mode not in {
     "off", "allowlist", "all"
-}:
+} or v1_fresh_starts not in {"true", "false"}:
     print("rollout-config:invalid", file=sys.stderr)
     raise SystemExit(1)
 print(schema_ready)
 print(route_mode)
 print("present" if values.get("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "").strip() else "absent")
 print("present" if values.get("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "").strip() else "absent")
+print(v1_fresh_starts)
 PY
 }
 
@@ -696,10 +712,22 @@ require_pre_migration_route_off() {
   config="$(read_rollout_config)" || { echo "耐久 Agent 发布配置无法安全解析" >&2; exit 1; }
   schema_ready="$(printf '%s\n' "$config" | sed -n '1p')"
   route_mode="$(printf '%s\n' "$config" | sed -n '2p')"
-  [ "$schema_ready" = "false" ] && [ "$route_mode" = "off" ] || {
-    echo "DDL 操作要求 schemaReady=false 且 V2 route=off" >&2
+  v1_fresh_starts="$(printf '%s\n' "$config" | sed -n '5p')"
+  [ "$schema_ready" = "false" ] && [ "$route_mode" = "off" ] \
+    && [ "$v1_fresh_starts" = "false" ] || {
+    echo "DDL 操作要求 schemaReady=false、V2 route=off 且 V1 fresh=false" >&2
     exit 1
   }
+  running_config="$(read_running_core_drain_config)" || {
+    echo "无法读取运行 Core 的 DDL 关闭配置" >&2
+    exit 1
+  }
+  [ "$(printf '%s\n' "$running_config" | sed -n '1p')" = "false" ] \
+    && [ "$(printf '%s\n' "$running_config" | sed -n '2p')" = "off" ] \
+    && [ "$(printf '%s\n' "$running_config" | sed -n '3p')" = "false" ] || {
+      echo "运行 Core 未精确证明 schemaReady=false、route=off、V1 fresh=false" >&2
+      exit 1
+    }
 }
 
 compose() {
@@ -712,19 +740,6 @@ require_joint_drain_assets() {
   [ -r "$v2_execution_snapshot_lua" ] || { echo "V2 execution Redis drain 快照不可读" >&2; exit 1; }
   [ -r "$v1_drain_index_initialize_lua" ] || { echo "V1 drain 索引初始化脚本不可读" >&2; exit 1; }
   [ -r "$v2_drain_index_initialize_lua" ] || { echo "V2 drain 索引初始化脚本不可读" >&2; exit 1; }
-}
-
-require_boundary_drain_assets() {
-  require_joint_drain_assets
-  [ -r "$boundary_builder" ] || { echo "boundary drain 构建器不可读" >&2; exit 1; }
-  [ -r "$v1_pre_activation_snapshot_lua" ] || {
-    echo "V1 pre-activation Redis 快照不可读" >&2
-    exit 1
-  }
-  [ -r "$v2_pre_activation_snapshot_lua" ] || {
-    echo "V2 pre-activation Redis 快照不可读" >&2
-    exit 1
-  }
 }
 
 resolve_compose_container_identity() {
@@ -762,7 +777,6 @@ read_running_core_drain_config() {
   timeout 10 docker compose --env-file "$env_file" -f "$compose_file" \
     exec -T core-api /bin/sh -ec '
     grep -aFq "V1FreshAgentStartGate.class" /app/inkforge-core-api.jar
-    grep -aFq "V1_FRESH_AGENT_STARTS_ENABLED" /app/inkforge-core-api.jar
     normalize_bool() {
       value=$(printf "%s" "$1" | tr "[:upper:]" "[:lower:]")
       case "$value" in
@@ -1018,58 +1032,199 @@ joint_drain_report() {
     --runtime-after "$temp_dir/drain-runtime-after.json"
 }
 
-boundary_drain_report() {
-  require_boundary_drain_assets
+read_pre_ddl_v1_redis() {
+  output_path=$1
+  lua_source="$(cat <<'LUA'
+-- inkforge-pre-ddl-v1-counts
+local prefix = 'inkforge:runs'
+local ready_key = prefix .. ':ready'
+local processing_key = prefix .. ':processing'
+local statuses_key = prefix .. ':statuses'
+local queued = redis.call('ZCARD', ready_key)
+local running = redis.call('ZCARD', processing_key)
+local active_statuses = 0
+local statuses = redis.call('HVALS', statuses_key)
+for _, status in ipairs(statuses) do
+  if status == 'queued' or status == 'running' then
+    active_statuses = active_statuses + 1
+  end
+end
+local server_info = redis.call('INFO', 'server')
+local redis_run_id = string.match(server_info, 'run_id:([0-9a-f]+)')
+if not redis_run_id then
+  return cjson.encode({error = 'v1_redis_run_id_missing'})
+end
+local current = redis.call('TIME')
+return cjson.encode({
+  sourceVersion = '2',
+  redisRunId = redis_run_id,
+  observedAtMs = current[1] .. string.format('%03d', math.floor(current[2] / 1000)),
+  queued = queued,
+  running = running,
+  activeStatuses = active_statuses
+})
+LUA
+)"
+  timeout 20 docker compose --env-file "$env_file" -f "$compose_file" \
+    exec -T redis redis-cli --raw EVAL_RO "$lua_source" 0 > "$output_path"
+  [ -s "$output_path" ] || { echo "V1 queue drain 返回空快照" >&2; return 1; }
+}
+
+read_pre_ddl_v2_redis() {
+  output_path=$1
+  lua_source="$(cat <<'LUA'
+-- inkforge-pre-ddl-v2-counts
+local prefix = 'inkforge:executions'
+local keys = {
+  active = prefix .. ':drain:active',
+  pending = prefix .. ':callbacks:pending',
+  leased = prefix .. ':callbacks:leased',
+  rejected = prefix .. ':callbacks:rejected'
+}
+local known = {
+  [keys.active] = true,
+  [keys.pending] = true,
+  [keys.leased] = true,
+  [keys.rejected] = true,
+  [prefix .. ':drain:index-version'] = true
+}
+local cursor = '0'
+local seen = 0
+if redis.call('EXISTS', prefix .. ':restore:quarantine') == 1 then
+  return cjson.encode({error = 'execution_restore_quarantine'})
+end
+repeat
+  local page = redis.call('SCAN', cursor, 'MATCH', prefix .. ':*', 'COUNT', 128)
+  cursor = page[1]
+  for _, key in ipairs(page[2]) do
+    seen = seen + 1
+    if seen > 256 then
+      return cjson.encode({error = 'pre_ddl_execution_resource_limit'})
+    end
+    if not known[key] then
+      return cjson.encode({error = 'pre_ddl_execution_unknown_key'})
+    end
+  end
+until cursor == '0'
+local server_info = redis.call('INFO', 'server')
+local redis_run_id = string.match(server_info, 'run_id:([0-9a-f]+)')
+if not redis_run_id then
+  return cjson.encode({error = 'execution_redis_run_id_missing'})
+end
+local current = redis.call('TIME')
+return cjson.encode({
+  sourceVersion = '2',
+  redisRunId = redis_run_id,
+  observedAtMs = current[1] .. string.format('%03d', math.floor(current[2] / 1000)),
+  active = redis.call('ZCARD', keys.active),
+  pending = redis.call('ZCARD', keys.pending),
+  leased = redis.call('ZCARD', keys.leased),
+  rejected = redis.call('ZCARD', keys.rejected),
+  quarantined = false
+})
+LUA
+)"
+  timeout 20 docker compose --env-file "$env_file" -f "$compose_file" \
+    exec -T execution-redis redis-cli --raw EVAL_RO "$lua_source" 0 > "$output_path"
+  [ -s "$output_path" ] || { echo "V2 execution drain 返回空快照" >&2; return 1; }
+}
+
+require_pre_ddl_joint_drain() {
+  expected_state=$1
+  case "$expected_state" in
+    unmigrated) postgres_query=query_pre_contract_drain_postgres ;;
+    migrated-empty-v2) postgres_query=query_joint_drain_postgres ;;
+    *) echo "DDL joint drain 不接受当前 schema 状态" >&2; return 1 ;;
+  esac
   command -v docker >/dev/null 2>&1 || { echo "缺少 docker" >&2; return 1; }
   docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; return 1; }
-  current_state="$(query_schema_state)" || return 1
-  core_config="$(read_running_core_drain_config)" || return 1
-  schema_ready="$(printf '%s\n' "$core_config" | sed -n '1p')"
-  route_mode="$(printf '%s\n' "$core_config" | sed -n '2p')"
-  v1_fresh="$(printf '%s\n' "$core_config" | sed -n '3p')"
-  [ "$route_mode" = off ] && [ "$v1_fresh" = false ] || {
-    echo "boundary drain 要求 route-off 与 V1 fresh=false" >&2
-    return 1
-  }
-  write_runtime_topology "$temp_dir/boundary-runtime-before.json" || return 1
-  case "$current_state:$schema_ready" in
-    unmigrated:false)
-      query_before=query_pre_contract_drain_postgres
-      build_state=unmigrated
-      ;;
-    migrated-empty-v2:false)
-      query_before=query_joint_drain_postgres
-      build_state=migrated-empty-v2-closed
-      ;;
-    migrated-empty-v2:true|migrated-with-v2:true)
-      joint_drain_report > "$temp_dir/boundary-joint-report.json" || return 1
-      write_runtime_topology "$temp_dir/boundary-runtime-after.json" || return 1
-      python3 "$boundary_builder" build-live \
-        --database "$target_database" --schema-state "$current_state" \
-        --topology-before "$temp_dir/boundary-runtime-before.json" \
-        --topology-after "$temp_dir/boundary-runtime-after.json" \
-        --joint-report "$temp_dir/boundary-joint-report.json"
-      return
-      ;;
-    partial:*) echo "schema-state:partial" >&2; return 1 ;;
-    *) echo "boundary drain schema/config 不兼容" >&2; return 1 ;;
-  esac
-  "$query_before" > "$temp_dir/boundary-postgres-before.json" || return 1
+  "$postgres_query" > "$temp_dir/forward-postgres-before.json" || return 1
   require_joint_drain_redis_health
-  read_joint_drain_redis redis "$v1_pre_activation_snapshot_lua" \
-    "$temp_dir/boundary-v1-redis.json" || return 1
-  read_joint_drain_redis execution-redis "$v2_pre_activation_snapshot_lua" \
-    "$temp_dir/boundary-v2-redis.json" || return 1
-  "$query_before" > "$temp_dir/boundary-postgres-after.json" || return 1
-  write_runtime_topology "$temp_dir/boundary-runtime-after.json" || return 1
-  python3 "$boundary_builder" build-live \
-    --database "$target_database" --schema-state "$build_state" \
-    --topology-before "$temp_dir/boundary-runtime-before.json" \
-    --topology-after "$temp_dir/boundary-runtime-after.json" \
-    --postgres-before "$temp_dir/boundary-postgres-before.json" \
-    --postgres-after "$temp_dir/boundary-postgres-after.json" \
-    --ordinary-redis "$temp_dir/boundary-v1-redis.json" \
-    --execution-redis "$temp_dir/boundary-v2-redis.json"
+  read_pre_ddl_v1_redis "$temp_dir/forward-v1-redis.json" || return 1
+  read_pre_ddl_v2_redis "$temp_dir/forward-v2-redis.json" || return 1
+  "$postgres_query" > "$temp_dir/forward-postgres-after.json" || return 1
+  python3 - "$expected_state" "$target_database" \
+    "$temp_dir/forward-postgres-before.json" \
+    "$temp_dir/forward-postgres-after.json" \
+    "$temp_dir/forward-v1-redis.json" \
+    "$temp_dir/forward-v2-redis.json" <<'PY'
+import json
+import re
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate")
+        result[key] = value
+    return result
+
+
+def load(path):
+    value = json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=unique)
+    if not isinstance(value, dict) or "error" in value:
+        raise ValueError("source")
+    return value
+
+
+def instant(value):
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        raise ValueError("timezone")
+    return parsed.astimezone(UTC)
+
+
+state, database = sys.argv[1:3]
+before, after, v1, v2 = (load(path) for path in sys.argv[3:])
+v1_metrics = {
+    "v1WritingTasksActive",
+    "v1WritingTasksAwaitingUser",
+    "v1WritingTasksRecoverable",
+    "v1CommandsActive",
+    "v1OutboxUndelivered",
+    "v1ArtifactsAwaitingUser",
+    "v1ArtifactsRecoverable",
+}
+v2_metrics = {
+    "v2RunsActive",
+    "v2StepsActive",
+    "v2BillingReserved",
+    "v2BillingReconciliationRequired",
+}
+expected_metrics = v1_metrics if state == "unmigrated" else v1_metrics | v2_metrics
+for source in (before, after):
+    if (
+        source.get("sourceVersion") != "2"
+        or source.get("database") != database
+        or set(source.get("metrics", {})) != expected_metrics
+        or any(value != [] for value in source["metrics"].values())
+    ):
+        raise ValueError("postgres-drain")
+if before.get("identity") != after.get("identity"):
+    raise ValueError("postgres-identity")
+started = instant(before["observedAt"])
+finished = instant(after["observedAt"])
+if finished < started or finished - started > timedelta(seconds=30):
+    raise ValueError("postgres-window")
+for source, keys in (
+    (v1, {"queued", "running", "activeStatuses"}),
+    (v2, {"active", "pending", "leased", "rejected"}),
+):
+    if source.get("sourceVersion") != "2" or any(source.get(key) != 0 for key in keys):
+        raise ValueError("redis-drain")
+    if re.fullmatch(r"[0-9a-f]{40}", str(source.get("redisRunId"))) is None:
+        raise ValueError("redis-run-id")
+    observed = datetime.fromtimestamp(int(source["observedAtMs"]) / 1000, tz=UTC)
+    if observed < started - timedelta(seconds=1) or observed > finished + timedelta(seconds=1):
+        raise ValueError("redis-window")
+if v2.get("quarantined") is not False:
+    raise ValueError("execution-quarantine")
+PY
 }
 
 require_compatible_core_and_exact_contract() {
@@ -1475,29 +1630,9 @@ apply_sql() {
     } > "$operation_sql_file"
     chmod 600 "$operation_sql_file"
     execution_sql="$operation_sql_file"
-    boundary_driver="${DURABLE_AGENT_BOUNDARY_DRIVER:-}"
-    ddl_boundary="${DURABLE_AGENT_DDL_BOUNDARY:-}"
-    [ -n "$boundary_driver" ] || {
-      echo "生产 DDL 必须设置 boundary driver" >&2
-      exit 1
-    }
-    [ -n "$ddl_boundary" ] || {
-      echo "生产 DDL 必须设置唯一 boundary" >&2
-      exit 1
-    }
-    [ "$boundary_driver" = "$app_dir/scripts/durable-agent-v2-release.sh" ] \
-      && [ -f "$boundary_driver" ] && [ ! -L "$boundary_driver" ] \
-      && [ -r "$boundary_driver" ] || {
-      echo "生产 DDL boundary driver 不是当前 trusted control driver" >&2
-      exit 1
-    }
-    sh "$boundary_driver" consume-live-boundary "$ddl_boundary" >/dev/null
   fi
   PGOPTIONS="$pg_options" timeout 240 psql -X -v ON_ERROR_STOP=1 \
     "$database_url" -f "$execution_sql" >/dev/null
-  if [ "$target_database" = "novelwriter" ]; then
-    sh "$boundary_driver" mark-live-boundary-applied "$ddl_boundary" >/dev/null
-  fi
 }
 
 case "$action" in
@@ -1519,9 +1654,6 @@ case "$action" in
       exit 1
     }
     python3 "$joint_drain_builder" verify --report "$temp_dir/drain-report.json"
-    ;;
-  boundary-drain)
-    boundary_drain_report
     ;;
   backup)
     command -v docker >/dev/null 2>&1 || { echo "缺少 docker" >&2; exit 1; }
@@ -1580,6 +1712,7 @@ case "$action" in
     if [ "$target_database" = "novelwriter" ]; then
       require_production_confirmation apply
     fi
+    require_pre_ddl_joint_drain "$current_state"
     apply_sql "$forward_sql" 'novelwriter:20260831:apply'
     [ "$(query_schema_state)" = "migrated-empty-v2" ] || {
       echo "耐久 Agent forward 后没有达到完整空 V2 结构" >&2
@@ -1719,6 +1852,7 @@ PY
     if [ "$target_database" = "novelwriter" ]; then
       require_production_confirmation rollback-empty-v2
     fi
+    require_pre_ddl_joint_drain "$current_state"
     apply_sql "$rollback_sql" 'novelwriter:20260831:rollback-empty-v2'
     [ "$(query_schema_state)" = "unmigrated" ] || {
       echo "耐久 Agent rollback 后没有恢复完整迁移前结构" >&2

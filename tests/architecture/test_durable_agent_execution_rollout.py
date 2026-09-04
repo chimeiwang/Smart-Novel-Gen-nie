@@ -95,6 +95,7 @@ _DRAIN_POSTGRES_METRICS = {
 def _drain_source_files(
     root: Path,
     *,
+    database: str = "novelwriterdev",
     postgres_metric: str | None = None,
     ordinary_category: str | None = None,
     execution_category: str | None = None,
@@ -124,7 +125,7 @@ def _drain_source_files(
         ]
     postgres = {
         "sourceVersion": "2",
-        "database": "novelwriterdev",
+        "database": database,
         "identity": {
             "databaseOid": 16_384,
             "serverAddress": "127.0.0.1",
@@ -136,7 +137,7 @@ def _drain_source_files(
         "walLsn": "0/16B6A00",
         "metrics": postgres_metrics,
     }
-    ordinary = {
+    ordinary: dict[str, object] = {
         "sourceVersion": "2",
         "indexVersion": index_version,
         "redisRunId": ordinary_run_id,
@@ -184,6 +185,52 @@ def _drain_source_files(
             encoding="utf-8",
         )
         files["FAKE_DRAIN_POSTGRES_AFTER_FILE"] = _posix_path(path)
+    return files
+
+
+def _pre_ddl_redis_files(
+    root: Path,
+    *,
+    v1_metric: str | None = None,
+    v2_metric: str | None = None,
+    quarantined: bool = False,
+    skew_seconds: int = 0,
+) -> dict[str, str]:
+    observed = datetime(2026, 9, 1, 3, tzinfo=UTC)
+    observed_ms = str(round((observed.timestamp() + skew_seconds) * 1000))
+    v1 = {
+        "sourceVersion": "2",
+        "redisRunId": "a" * 40,
+        "observedAtMs": observed_ms,
+        "queued": 0,
+        "running": 0,
+        "activeStatuses": 0,
+    }
+    v2 = {
+        "sourceVersion": "2",
+        "redisRunId": "b" * 40,
+        "observedAtMs": observed_ms,
+        "active": 0,
+        "pending": 0,
+        "leased": 0,
+        "rejected": 0,
+        "quarantined": quarantined,
+    }
+    if v1_metric is not None:
+        v1[v1_metric] = 1
+    if v2_metric is not None:
+        v2[v2_metric] = 1
+    files: dict[str, str] = {}
+    for name, value in (
+        ("FAKE_PRE_DDL_V1_REDIS_FILE", v1),
+        ("FAKE_PRE_DDL_V2_REDIS_FILE", v2),
+    ):
+        path = root / f"{name.lower()}.json"
+        path.write_text(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        files[name] = _posix_path(path)
     return files
 
 
@@ -274,11 +321,8 @@ class MigrationFixture:
         )
         for drain_asset in (
             "durable_agent_joint_drain.py",
-            "durable_agent_release_boundary.py",
             "durable_agent_v1_queue_snapshot.lua",
             "durable_agent_v2_execution_snapshot.lua",
-            "durable_agent_v1_pre_activation_snapshot.lua",
-            "durable_agent_v2_pre_activation_snapshot.lua",
             "durable_agent_v1_drain_index_initialize.lua",
             "durable_agent_v2_drain_index_initialize.lua",
         ):
@@ -292,11 +336,28 @@ class MigrationFixture:
             "DATABASE_URL="
             f"postgresql+asyncpg://writer:{encoded_password}@{host}:5432/{database}\n"
             "DURABLE_AGENT_EXECUTION_SCHEMA_READY=false\n"
-            "DURABLE_AGENT_EXECUTION_ROUTE_MODE=off\n",
+            "DURABLE_AGENT_EXECUTION_ROUTE_MODE=off\n"
+            "V1_FRESH_AGENT_STARTS_ENABLED=false\n",
             encoding="utf-8",
         )
         self.state_path.write_text("unmigrated\n", encoding="utf-8")
         self.v2_path.write_text("empty-v2\n", encoding="utf-8")
+        pre_sources_dir = tmp_path / "default-pre-contract-sources"
+        migrated_sources_dir = tmp_path / "default-migrated-sources"
+        pre_sources_dir.mkdir()
+        migrated_sources_dir.mkdir()
+        self.pre_contract_sources = {
+            **_drain_source_files(
+                pre_sources_dir,
+                database=database,
+                pre_contract=True,
+            ),
+            **_pre_ddl_redis_files(pre_sources_dir),
+        }
+        self.migrated_sources = {
+            **_drain_source_files(migrated_sources_dir, database=database),
+            **_pre_ddl_redis_files(migrated_sources_dir),
+        }
         self._write_commands()
 
     def _write_commands(self) -> None:
@@ -383,6 +444,12 @@ esac
         )
         _write_executable(self.bin_dir / "pg_restore", "#!/bin/sh\nexit 0\n")
         _write_executable(
+            self.bin_dir / "flock",
+            "#!/bin/sh\n"
+            "printf 'flock %s\\n' \"$*\" >> \"$MIGRATION_LOG\"\n"
+            'exit "${FAKE_FLOCK_STATUS:-0}"\n',
+        )
+        _write_executable(
             self.bin_dir / "docker",
             r"""#!/bin/sh
 printf 'docker %s\n' "$*" >> "$MIGRATION_LOG"
@@ -402,6 +469,14 @@ case " $* " in
     printf 'aof_enabled:1\naof_last_write_status:ok\n' ;;
   *' compose '*' exec -T execution-redis redis-cli --raw INFO stats '*)
     printf 'evicted_keys:%s\n' "${FAKE_EXECUTION_EVICTED_KEYS:-0}" ;;
+  *' compose '*' exec -T redis redis-cli --raw EVAL_RO '*'inkforge-pre-ddl-v1-counts'*)
+    [ "${FAKE_DRAIN_REDIS_FAILURE:-false}" != true ] || exit 45
+    [ -n "${FAKE_PRE_DDL_V1_REDIS_FILE:-}" ] || exit 46
+    sed -n '1p' "$FAKE_PRE_DDL_V1_REDIS_FILE" ;;
+  *' compose '*' exec -T execution-redis redis-cli --raw EVAL_RO '*'inkforge-pre-ddl-v2-counts'*)
+    [ "${FAKE_DRAIN_REDIS_FAILURE:-false}" != true ] || exit 47
+    [ -n "${FAKE_PRE_DDL_V2_REDIS_FILE:-}" ] || exit 48
+    sed -n '1p' "$FAKE_PRE_DDL_V2_REDIS_FILE" ;;
   *' compose '*' exec -T redis redis-cli --raw EVAL_RO '*)
     [ "${FAKE_DRAIN_REDIS_FAILURE:-false}" != true ] || exit 45
     [ -n "${FAKE_V1_REDIS_FILE:-}" ] || exit 46
@@ -457,6 +532,13 @@ esac
         evidence_dir: Path | None = None,
         extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        schema_state = self.state_path.read_text(encoding="utf-8").strip()
+        default_sources = (
+            self.migrated_sources
+            if schema_state == "migrated"
+            else self.pre_contract_sources
+        )
+        ddl_closed = action in {"backup", "forward", "rollback"}
         env = {
             **os.environ,
             "PATH": f"{self.bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -473,6 +555,13 @@ esac
                 self.drain_postgres_read_count
             ),
             "TARGET_DATABASE": self.database,
+            **default_sources,
+            "FAKE_FLOCK_STATUS": "0",
+            "FAKE_RUNNING_CORE_SCHEMA_READY": (
+                "false" if ddl_closed else "true"
+            ),
+            "FAKE_RUNNING_CORE_ROUTE_MODE": "off",
+            "FAKE_RUNNING_CORE_V1_FRESH_STARTS": "false",
             "FAKE_SCHEMA_GUARD_FINGERPRINT": json.loads(
                 POST_CONTRACT.read_text(encoding="utf-8")
             )["fingerprint"],
@@ -822,114 +911,113 @@ def test_joint_drain_source_skew_and_invalid_json_fail_closed(tmp_path: Path) ->
     assert fixture.password not in invalid_result.stderr
 
 
-def test_unmigrated_boundary_drain_uses_honest_pre_contract_profile(
+def test_forward_runs_embedded_pre_ddl_joint_drain_without_boundary_driver(
     tmp_path: Path,
 ) -> None:
     fixture = MigrationFixture(tmp_path)
-    source_dir = tmp_path / "pre-contract-sources"
-    source_dir.mkdir()
-    sources = _drain_source_files(
-        source_dir,
-        index_version="pre-activation",
-        pre_contract=True,
-    )
+    backup_dir = fixture.backup()
 
-    result = fixture.run(
-        "boundary-drain",
-        extra_env={
-            **sources,
-            "FAKE_RUNNING_CORE_SCHEMA_READY": "false",
-            "FAKE_RUNNING_CORE_ROUTE_MODE": "off",
-            "FAKE_RUNNING_CORE_V1_FRESH_STARTS": "false",
-        },
-    )
+    result = fixture.run("forward", backup_dir=backup_dir)
 
     assert result.returncode == 0, result.stderr
-    document = json.loads(result.stdout)
-    assert document["format"] == "inkforge-durable-agent-v2-live-drain/1"
-    assert document["mode"] == "pre-contract"
-    assert document["schemaState"] == "unmigrated"
-    assert document["zeroDrain"] is True
-    assert document["coreRuntime"] == {
-        "containerId": "0" * 63 + "1",
-        "imageId": "sha256:" + "0" * 63 + "4",
-        "routeMode": "off",
-        "schemaReady": False,
-        "v1FreshStartsEnabled": False,
-    }
-    assert _psql_file_execution_count(fixture) == 0
-
-
-def test_migrated_schema_with_closed_core_uses_post_contract_closed_profile(
-    tmp_path: Path,
-) -> None:
-    fixture = MigrationFixture(tmp_path)
-    fixture.state_path.write_text("migrated\n", encoding="utf-8")
-    fixture.v2_path.write_text("empty-v2\n", encoding="utf-8")
-    source_dir = tmp_path / "post-contract-closed-sources"
-    source_dir.mkdir()
-    sources = _drain_source_files(
-        source_dir,
-        index_version="pre-activation",
-    )
-
-    result = fixture.run(
-        "boundary-drain",
-        extra_env={
-            **sources,
-            "FAKE_RUNNING_CORE_SCHEMA_READY": "false",
-            "FAKE_RUNNING_CORE_ROUTE_MODE": "off",
-            "FAKE_RUNNING_CORE_V1_FRESH_STARTS": "false",
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    document = json.loads(result.stdout)
-    assert document["mode"] == "post-contract-closed"
-    assert document["schemaState"] == "migrated-empty-v2-closed"
-    assert document["coreRuntime"]["schemaReady"] is False
-    assert _psql_file_execution_count(fixture) == 0
+    assert result.stdout.strip() == "forward-ok"
+    log = fixture.log_path.read_text(encoding="utf-8")
+    assert "activeStatuses" in log
+    assert "execution_restore_quarantine" in log
+    assert _psql_file_execution_count(fixture) == 1
 
 
 @pytest.mark.parametrize(
-    "attack",
-    ("postgres", "ordinary-redis", "execution-redis", "pending-callback"),
+    "runtime_override",
+    [
+        {"FAKE_RUNNING_CORE_SCHEMA_READY": "true"},
+        {"FAKE_RUNNING_CORE_ROUTE_MODE": "allowlist"},
+        {"FAKE_RUNNING_CORE_V1_FRESH_STARTS": "true"},
+    ],
 )
-def test_pre_contract_boundary_identity_or_callback_drift_fails_before_ddl(
+def test_forward_requires_running_core_route_and_both_start_gates_closed(
     tmp_path: Path,
-    attack: str,
+    runtime_override: dict[str, str],
 ) -> None:
     fixture = MigrationFixture(tmp_path)
-    source_dir = tmp_path / "attack-sources"
-    source_dir.mkdir()
-    options: dict[str, object] = {
-        "index_version": "pre-activation",
-        "pre_contract": True,
-    }
-    if attack == "postgres":
-        options["postgres_after_identity"] = {
-            "databaseOid": 16_384,
-            "serverAddress": "127.0.0.1",
-            "serverPort": 6432,
-            "serverVersionNum": 140019,
-        }
-    elif attack == "ordinary-redis":
-        options["ordinary_run_id"] = "c" * 40
-    elif attack == "execution-redis":
-        options["execution_run_id"] = "d" * 40
-    elif attack == "pending-callback":
-        options["execution_category"] = "pending"
-    sources = _drain_source_files(source_dir, **options)  # type: ignore[arg-type]
+    backup_dir = fixture.backup()
 
     result = fixture.run(
-        "boundary-drain",
-        extra_env={
-            **sources,
-            "FAKE_RUNNING_CORE_SCHEMA_READY": "false",
-            "FAKE_RUNNING_CORE_ROUTE_MODE": "off",
-            "FAKE_RUNNING_CORE_V1_FRESH_STARTS": "false",
-        },
+        "forward",
+        backup_dir=backup_dir,
+        extra_env=runtime_override,
     )
+
+    assert result.returncode != 0
+    assert "运行 Core 未精确证明" in result.stderr
+    assert _psql_file_execution_count(fixture) == 0
+
+
+def test_forward_requires_env_v1_fresh_start_gate_closed(tmp_path: Path) -> None:
+    fixture = MigrationFixture(tmp_path)
+    backup_dir = fixture.backup()
+    env_file = fixture.app_dir / ".env"
+    env_file.write_text(
+        env_file.read_text(encoding="utf-8").replace(
+            "V1_FRESH_AGENT_STARTS_ENABLED=false",
+            "V1_FRESH_AGENT_STARTS_ENABLED=true",
+        ),
+        encoding="utf-8",
+    )
+
+    result = fixture.run("forward", backup_dir=backup_dir)
+
+    assert result.returncode != 0
+    assert "V1 fresh=false" in result.stderr
+    assert _psql_file_execution_count(fixture) == 0
+
+
+def test_migration_flock_blocks_overlap_before_database_or_docker(
+    tmp_path: Path,
+) -> None:
+    fixture = MigrationFixture(tmp_path)
+
+    result = fixture.run("backup", extra_env={"FAKE_FLOCK_STATUS": "73"})
+
+    assert result.returncode != 0
+    assert "已有其他生产部署或迁移在运行" in result.stderr
+    assert fixture.log_path.read_text(encoding="utf-8").splitlines() == [
+        "flock -n 9"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "metric"),
+    [
+        ("postgres", "v1WritingTasksActive"),
+        ("v1-redis", "queued"),
+        ("v2-redis", "pending"),
+        ("v2-quarantine", None),
+    ],
+)
+def test_forward_rejects_each_pre_ddl_drain_source_before_sql(
+    tmp_path: Path,
+    source: str,
+    metric: str | None,
+) -> None:
+    fixture = MigrationFixture(tmp_path)
+    backup_dir = fixture.backup()
+    source_dir = tmp_path / "blocked-source"
+    source_dir.mkdir()
+    if source == "postgres":
+        sources = _drain_source_files(
+            source_dir,
+            postgres_metric=metric,
+            pre_contract=True,
+        )
+    elif source == "v1-redis":
+        sources = _pre_ddl_redis_files(source_dir, v1_metric=metric)
+    elif source == "v2-redis":
+        sources = _pre_ddl_redis_files(source_dir, v2_metric=metric)
+    else:
+        sources = _pre_ddl_redis_files(source_dir, quarantined=True)
+
+    result = fixture.run("forward", backup_dir=backup_dir, extra_env=sources)
 
     assert result.returncode != 0
     assert result.stdout == ""
@@ -1053,7 +1141,7 @@ def test_partial_state_fails_closed_before_backup_or_sql(tmp_path: Path) -> None
     assert status.stdout.strip() == "partial"
     assert backup.returncode != 0
     assert list(fixture.backup_root.iterdir()) == []
-    assert " -f " not in fixture.log_path.read_text(encoding="utf-8")
+    assert _psql_file_execution_count(fixture) == 0
 
 
 def test_wrong_sql_hash_is_rejected_before_database_access(tmp_path: Path) -> None:
@@ -1127,7 +1215,7 @@ def test_forward_is_repeatable_with_one_verified_backup(tmp_path: Path) -> None:
     assert fixture.forward_count.read_text(encoding="utf-8").strip() == "2"
 
 
-def test_production_forward_requires_confirmation_and_trusted_live_boundary(
+def test_production_forward_requires_private_exact_confirmation(
     tmp_path: Path,
 ) -> None:
     fixture = MigrationFixture(tmp_path, database="novelwriter")
@@ -1140,7 +1228,7 @@ def test_production_forward_requires_confirmation_and_trusted_live_boundary(
     rejected = fixture.run("forward", backup_dir=backup_dir, confirm_file=wrong)
     rejected_mode = fixture.run("forward", backup_dir=backup_dir, confirm_file=wrong_mode)
     wrong_mode.chmod(0o600)
-    missing_boundary = fixture.run(
+    accepted = fixture.run(
         "forward",
         backup_dir=backup_dir,
         confirm_file=wrong_mode,
@@ -1152,68 +1240,28 @@ def test_production_forward_requires_confirmation_and_trusted_live_boundary(
     assert "confirmation-token:mismatch" in rejected.stderr
     assert rejected_mode.returncode != 0
     assert "confirmation-file:invalid" in rejected_mode.stderr
-    assert missing_boundary.returncode != 0
-    assert "必须设置 boundary driver" in missing_boundary.stderr
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout.strip() == "forward-ok"
     assert "novelwriter:20260831:apply" not in fixture.log_path.read_text(
         encoding="utf-8"
     )
-    assert _psql_file_execution_count(fixture) == 0
+    assert _psql_file_execution_count(fixture) == 1
 
 
-def test_production_forward_rejects_arbitrary_boundary_driver_before_sql(
-    tmp_path: Path,
-) -> None:
-    fixture = MigrationFixture(tmp_path, database="novelwriter")
-    backup_dir = fixture.backup()
-    confirmation = fixture.confirm("novelwriter:20260831:apply")
-    arbitrary = tmp_path / "arbitrary-boundary-driver.sh"
-    arbitrary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    arbitrary.chmod(0o755)
+def test_migration_helper_has_no_external_boundary_driver_or_action() -> None:
+    source = HELPER.read_text(encoding="utf-8")
 
-    result = fixture.run(
-        "forward",
-        backup_dir=backup_dir,
-        confirm_file=confirmation,
-        extra_env={
-            "DURABLE_AGENT_BOUNDARY_DRIVER": _posix_path(arbitrary),
-            "DURABLE_AGENT_DDL_BOUNDARY": "ddl-forward-1",
-        },
-    )
-
-    assert result.returncode != 0
-    assert "不是当前 trusted control driver" in result.stderr
-    assert _psql_file_execution_count(fixture) == 0
-
-
-def test_production_forward_propagates_stale_boundary_rejection_before_sql(
-    tmp_path: Path,
-) -> None:
-    fixture = MigrationFixture(tmp_path, database="novelwriter")
-    backup_dir = fixture.backup()
-    confirmation = fixture.confirm("novelwriter:20260831:apply")
-    trusted_path = fixture.app_dir / "scripts" / "durable-agent-v2-release.sh"
-    trusted_path.write_text(
-        "#!/bin/sh\n"
-        "[ \"$1\" = consume-live-boundary ] || exit 2\n"
-        "echo 'release-boundary:error:live drain 已超过一次性授权窗口' >&2\n"
-        "exit 17\n",
-        encoding="utf-8",
-    )
-    trusted_path.chmod(0o755)
-
-    result = fixture.run(
-        "forward",
-        backup_dir=backup_dir,
-        confirm_file=confirmation,
-        extra_env={
-            "DURABLE_AGENT_BOUNDARY_DRIVER": _posix_path(trusted_path),
-            "DURABLE_AGENT_DDL_BOUNDARY": "ddl-forward-1",
-        },
-    )
-
-    assert result.returncode == 17
-    assert "live drain 已超过" in result.stderr
-    assert _psql_file_execution_count(fixture) == 0
+    for removed in (
+        "boundary-drain",
+        "DURABLE_AGENT_BOUNDARY_DRIVER",
+        "DURABLE_AGENT_DDL_BOUNDARY",
+        "durable_agent_release_boundary.py",
+        "consume-live-boundary",
+    ):
+        assert removed not in source
+    assert 'grep -aFq "V1_FRESH_AGENT_STARTS_ENABLED"' not in source
+    assert "pre_ddl_execution_unknown_key" in source
+    assert "SCAN', cursor, 'MATCH', prefix .. ':*'" in source
 
 
 def test_rollback_is_refused_forever_after_any_v2_fact(tmp_path: Path) -> None:
@@ -1875,6 +1923,8 @@ def test_image_verifier_runs_without_network_secrets_or_volumes() -> None:
     assert source.count("--read-only") == 2
     assert "--env" not in source
     assert "--mount" not in source
+    assert "RoutingWritingRunStarter.class" in source
+    assert "V1FreshAgentStartGate.class" in source
     assert "WorkflowsController.class" in source
     assert "load_execution_registry" in source
     assert "manifest_fingerprint" in source

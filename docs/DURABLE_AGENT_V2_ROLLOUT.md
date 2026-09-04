@@ -1,17 +1,21 @@
 # 耐久 Agent V2 数据库迁移与分阶段发布 Runbook
 
-状态：受保护发布工作流内部参考；尚未执行服务器开发库、正式库迁移或生产部署，不是人工操作手册
+状态：个人项目人工迁移与 canary 手册；尚未执行服务器开发库、正式库迁移或生产部署
 
 权威规格：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
 
+发布范围：`docs/specs/2026-09-04-personal-durable-agent-release-scope.md`
+
 ## 1. 适用边界
 
-生产唯一入口是受保护的 Durable Agent V2 GitHub release workflow，以及它验证并上传的不可变 control bundle。
-本文件中的服务器命令只用于解释 control bundle 内部状态机和停止条件，Operator Skill、开发者或值班人员不得在
-服务器 shell 手工复制执行，也不得直接调用迁移、Compose、route、boundary、receipt 或数据库子命令。当前开发证据、
-SSH attestation/broker 与 genesis receipt 任一门禁未满足时，工作流必须在 SSH 前失败；不能把本 Runbook 当作旁路。
+普通应用发布继续由 `.github/workflows/build.yml` 构建并上传精确提交的三张镜像和源码 bundle，再调用
+`scripts/deploy-production.sh` 完成服务器切换。普通发布不执行 Durable Agent V2 DDL。本手册只描述由单一可信维护者
+在明确维护窗口中执行的迁移、contract 复验、联合 drain 和 canary；这些动作不能由普通 `main` push 隐式触发。
+正常 `route=off` 发布仍允许 `V1_FRESH_AGENT_STARTS_ENABLED=true` 继续提供 V1 写作；只有进入本手册的迁移或
+联合 drain 阶段才必须显式关闭 V1 fresh start。
 
-公共业务 canary 仍只能使用固定环境的公共 CLI/Operator Skill。发布控制面永远不得加入 Skill wrapper 白名单。
+公共业务 canary 只能使用固定环境的公共 CLI；Operator Skill 必须等 canary 与其目标范围门禁通过后才能开放。
+迁移、Compose、数据库和服务器脚本不得加入 Skill wrapper 白名单。
 
 本 Runbook 只操作具名迁移：
 
@@ -21,8 +25,8 @@ SSH attestation/broker 与 genesis receipt 任一门禁未满足时，工作流�
 它不授权其他 DDL、不恢复 PostgreSQL 备份、不修改正式作品内容、不启用视频，也不把 202、容器 healthy 或
 schema 表存在当作 V2 canary 成功。数据库目标必须显式为 `novelwriterdev` 或 `novelwriter`，不能使用别名。
 
-所有服务器动作都必须在本地全量门禁、隔离 PostgreSQL 14 + pgvector 验证、发布清单、人工审批和维护窗口完成后
-执行。当前仓库中的脚本与测试不代表任何远程数据库已迁移。
+所有服务器动作都必须在本地全量门禁、隔离 PostgreSQL 14 + pgvector 验证、发布清单和维护窗口准备完成后执行。
+当前仓库中的脚本与测试不代表任何远程数据库已迁移。
 
 ## 2. 固定工具与输出
 
@@ -30,9 +34,12 @@ schema 表存在当作 V2 canary 成功。数据库目标必须显式为 `novelw
 
 ```text
 scripts/durable-agent-execution-migration.sh \
-  <status|active-v2-count|backup|forward|rollback|export-contract|verify-contract> \
+  <status|active-v2-count|initialize-drain-indexes|drain-status|verify-drain|backup|forward|rollback|export-contract|verify-contract> \
   <novelwriterdev|novelwriter>
 ```
+
+其中 `initialize-drain-indexes`、`drain-status`、`verify-drain` 通常由下方 rollout gate 统一调用；列在这里是为了
+完整记录脚本命令面，不能把它们加入产品 CLI 或 Operator Skill。
 
 只读 `status` 只允许以下四种输出：
 
@@ -58,6 +65,25 @@ scripts/durable-agent-v2-rollout-gate.sh \
 
 门禁同时验证结构状态、`.env` 路由组合、双 contract/V2-aware 镜像、Java 精确 schema guard、Core/Agent
 readiness、execution Redis AOF、quarantine 和 eviction。任何一项失败都不得手工跳过。
+
+### 2.1 已退役控制面与替代入口
+
+个人项目不再提供独立的 Durable Agent release/development-evidence Workflow，也不再提供
+`durable-agent-v2-release.sh` 及其 control bundle、release manifest、release receipt、boundary ledger、SSH
+broker/trust 或 GitHub evidence 命令。这些命令不是改成空成功，而是已从当前分支删除：
+
+- 普通应用部署改回 `.github/workflows/build.yml` → `scripts/deploy-production.sh`；
+- V2 数据库状态、备份、forward/rollback 和 contract 导出统一使用
+  `scripts/durable-agent-execution-migration.sh`；
+- V1/V2 入口关闭、联合 drain、schema/route 和 allowlist 检查统一使用
+  `scripts/durable-agent-v2-rollout-gate.sh`；
+- 原 `boundary-drain`、`consume-live-boundary`、`mark-live-boundary-applied`、发布事务恢复及 receipt 动作没有兼容
+  别名。对应可靠性由 `drain-status`/`verify-drain`、0600 生产确认文件、迁移四态和应用镜像回滚承担；
+- 文件型 release guard 及其 Compose 挂载不再存在。fresh V2 仍必须同时通过 `schemaReady`、route、用户/小说
+  allowlist、Agent readiness、会话归属、幂等和互斥检查。
+
+CLI 与 Skills 不应调用任何已退役命令；CLI 变化和结果恢复只以
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 为准。
 
 ## 3. 准备发布清单
 
@@ -109,10 +135,10 @@ DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST=
 V1_FRESH_AGENT_STARTS_ENABLED=false
 ```
 
-受保护工作流先部署同一套包含 V1 fresh-start gate 的 V2-aware 三服务镜像，但不迁移数据库、不装配 V2
+先用普通应用部署入口部署同一套包含 V1 fresh-start gate 的 V2-aware 三服务镜像，但不迁移数据库、不装配 V2
 repository/worker、不创建新 V2 Run。`pre-contract` 门禁要求 `V1_FRESH_AGENT_STARTS_ENABLED=false`，与
-`durable-agent-v2-rollout-gate.sh` 的可执行契约一致；旧 Core 缺该门禁时必须先走受保护 bootstrap，不能把值改回
-`true` 维持可写。以下命令只表示 control bundle 内部执行的动作：
+`durable-agent-v2-rollout-gate.sh` 的可执行契约一致；旧 Core 缺该门禁时必须先升级兼容镜像，不能把值改回
+`true` 维持可写。以下命令由维护者在服务器维护窗口执行：
 
 ```sh
 APP_DIR=/srv/smart-novel-gen \
@@ -131,7 +157,7 @@ quarantine/eviction。不能先迁移再补部署兼容镜像。
 
 ## 5. 阶段 B：创建 PostgreSQL 与 execution journal 联合备份
 
-`backup` 只允许在 `unmigrated + schemaReady=false + route=off` 下执行。它强制从当前独立 execution Redis
+`backup` 只允许在 `unmigrated + schemaReady=false + route=off + V1 fresh=false` 下执行。它强制从当前独立 execution Redis
 生成并校验 RDB 快照；没有 journal 容器、AOF 异常、RDB 校验失败或任何恢复边界元数据缺失都会失败。
 
 ```sh
@@ -158,6 +184,10 @@ APP_DIR=/srv/smart-novel-gen \
 DURABLE_AGENT_MIGRATION_BACKUP_DIR=/受保护备份目录/inkforge-时间戳 \
   sh scripts/durable-agent-execution-migration.sh forward novelwriterdev
 ```
+
+`forward` 和空 V2 状态下的 `rollback` 不只依赖稍后的发布门禁：helper 会在执行 SQL 前再次读取两轮 PostgreSQL
+快照，要求 V1/V2 活动业务事实均为零，并同时要求 V1 queue 与 V2 execution journal 的活动项为零；四个来源任一非零、
+不一致或不可读都会在 DDL 前停止。
 
 首次 forward 后，原兼容实例必须在不重启、不启用 V2 worker 的情况下继续 ready：
 
@@ -284,10 +314,10 @@ APP_DIR=/srv/smart-novel-gen \
   sh scripts/durable-agent-v2-rollout-gate.sh allowlist novelwriter
 ```
 
-随后只通过公共 HTTPS 或受支持 CLI 验证指定账号与新建隔离小说，顺序为：身份只读、一次问答、一次完整候选
+随后只通过受支持的公共 CLI 验证指定账号与新建隔离小说，顺序为：身份只读、一次问答、一次完整候选
 discard、一次 approve、一次 cancel、SSE 重连和唯一用量。内部接口、数据库直写和旧作品均不得用于 canary。
 问答命令、V2 JSONL、权威消息关联、恢复竞态和凭据边界统一遵守
-`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`；canary 期间只允许发布流程冻结的 user/novel scope，
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`；canary 期间只允许维护者明确配置的 user/novel scope，
 不得因此提前把 `answer_question` 加入通用 Production Skill。
 观察至少 30～60 分钟或足量样本。任何协议错误、重复产物/计费、不可恢复 Step、终态缺失、manifest 漂移或
 SLO 硬失败立即停止新建路由。

@@ -50,10 +50,9 @@ execution Redis 组合后的恢复语义。尤其需要证明模型已经返回�
 
 ## 隔离编排
 
-Core 初始必须以 `route=off` 和 canonical `off` release guard 启动，以便只创建测试用户、小说与章节。bootstrap 得到精确
-userId/novelId 后，本地 runner 计算 canonical scope SHA，发布 0444 committed guard（绑定当前 execution manifest
-fingerprint），把 Core 原子重建为精确单 user+单 novel `allowlist` 后才允许创建 fresh V2 Run。E2E 禁止 `route=all`，guard
-目录只读挂载；这只证明本地隔离协议，不生成生产 receipt 或生产授权。
+Core 初始必须以 `route=off` 启动，以便只创建测试用户、小说与章节。bootstrap 得到精确 userId/novelId 后，本地
+runner 把 Core 原子重建为精确单 user+单 novel `allowlist`，并继续校验当前 execution manifest fingerprint，随后才
+允许创建 fresh V2 Run。E2E 禁止 `route=all`；这只证明本地隔离协议，不表示任何远程环境已经迁移或启用。
 
 - 新增独立 Compose overlay 和测试 harness；不得修改 `infra/compose.yaml` 的生产行为。
 - PostgreSQL 固定使用 14 系列且包含 pgvector。数据库从冻结 pre-contract 重建，再只执行已批准的
@@ -141,7 +140,7 @@ generation Step 完成，公共会话恰为一问一答，同幂等键返回原 
 network/volume 标签查询写入报告，因此该历史报告本身不能证明网络与卷为零，后续 runner 必须补齐三类资源的独立
 查询退出码和残留计数。该结果只完成本规格的
 `happy` 阶段；后续 `minimum` 必须在同一隔离栈继续证明 callback 丢回执/AOF、Agent 重启、Core 重启和取消竞争。
-真实供应商与真实 2 核 2 GB 整机门禁仍由独立 development evidence 解除，不能由本地 Fake 场景替代。
+真实供应商与真实 2 核 2 GB 整机验收仍须在开发环境独立执行，不能由本地 Fake 场景替代。
 
 ### Minimum fault matrix 负面证据
 
@@ -163,8 +162,16 @@ network/volume 标签查询写入报告，因此该历史报告本身不能证�
   容器重建冒充同一实例重启。
 
 三份失败报告都记录了 `status=failed`、`composeDownExitCode=0`、残留容器为零和临时密钥目录已删除；前两版报告未记录
-network/volume 查询，第三版已证明容器、网络、卷查询成功且残留均为零。截至本规格本次静态收口，新的完整 `minimum` 动态矩阵
-尚未通过，不得宣称 Agent/Core 重启、取消与 AOF 已动态全绿。
+network/volume 查询，第三版已证明容器、网络、卷查询成功且残留均为零。这些负面证据继续保留，不能被后续成功报告覆盖。
+
+2026-09-04 本地动态收口报告为
+`output/durable-agent-v2-e2e/20260904T091808Z-67a649f1/report.json`。首次 Compose 启动出现一次本地 Docker
+基础设施瞬态失败，因此最终报告显式记录 `infrastructureRetry=1`；成功运行复用此前本轮重建的镜像，并对 `app.py`、
+execution journal/replayer/service 与 queue repository 五个关键源码逐一验证镜像 SHA-256 相等。报告状态为 `passed`，
+五个场景全部完成：四个执行场景各只有一次 Provider 物理调用，提交前取消为零次；Agent/Core 重启均保留原 fence 并由
+新回放取得合法 receipt；execution Redis 重启前后 AOF 配置、四个 delivered tombstone、Provider 集合和 PostgreSQL
+脱敏事实哈希完全一致；清理后容器、网络和卷残留均为零。该结果把本地隔离 Fake Provider 的完整 `minimum` 矩阵闭环，
+但报告仍明确标记 `twoCoreTwoGiBHostGate=not_proven`，不代表真实供应商、开发/生产环境或真实 2 核 2 GB 整机验收已经完成。
 
 Java Core 实际 `ExecutionStepRequest` 还必须经过独立跨语言 wire golden：Java 从隔离 PostgreSQL fixture 领取
 `answer_question` Step，并由生产 `ObjectMapper` 写入临时 JSON；Python 只能使用
@@ -266,9 +273,18 @@ count、`StartedAt`、同一 callback 身份与 Core receipt。Agent 重启场�
 `held_before_forward`；旧 Agent 的 HTTP 连接可能随进程退出被代理取消，因此合法终态是新回放唯一获得
 `accepted`，或旧请求也已提交时得到 `accepted + duplicate`。不得强迫已断开的旧请求一定抵达 Core；
 accepted-only 只有在新 Agent 已校验完整 Core receipt 并把相同身份 journal 标为 `delivered` 后才合法；
-`duplicate` 的确定性证明由独立的“Core 已提交但回执丢失”场景承担。取消场景必须先在透明 execution submit proxy 的确定性 gate 停住请求，完成
-公共取消后再以 abort 释放该 submit，证明 Agent/provider 从未接收，而不是依赖调度快慢。`--rebuild-agent` 只允许重建本地测试
-Agent 镜像，且必须在启动栈前通过当前 `execution/journal.py`、`queue/repository.py` 与镜像内源码 SHA-256 精确相等
+在 Agent 或 Core 重启故障场景中，若旧连接一直存活到 callback claim 过期，原请求绑定时间戳可能已经超过 Core
+当前 10 秒验签容差并得到 401；E2E 代理不把该状态码进一步归因为某个具体鉴权错误，只允许一条与新回放
+完全相同身份、无 receipt 的该类旧连接记录，且仍必须同时看到新回放取得合法 `accepted`、journal 压缩为
+`delivered`。401 本身不构成成功证据，也不得放宽新回放的身份和 receipt 校验。
+`duplicate` 的确定性证明由独立的“Core 已提交但回执丢失”场景承担。该确定性场景依赖生产代码中的租约顺序：
+15 秒 callback HTTP 超时 `<` 20 秒 callback claim lease `<` 30 秒 Core Step lease；若 claim 与 Core lease 同时到期并
+出现新 fence，测试必须失败并暴露配置回归，不能仅因 Provider 仍然幂等而放宽成另一条恢复路径。取消场景必须先在透明 execution submit proxy 的确定性 gate 停住请求，完成
+公共取消后再以 abort 释放该 submit，证明 Agent/provider 从未接收，而不是依赖调度快慢；取消后的 Redis
+`HGETALL` 空结果必须归一化为 journal 不存在，不能把 `redis-cli --raw` 的单个空输出行误解析成损坏的键值对。
+`--rebuild-agent` 只允许重建本地测试
+Agent 镜像，且必须在启动栈前通过当前 `app.py`、`execution/journal.py`、`execution/replayer.py`、
+`execution/service.py`、`queue/repository.py` 与镜像内源码 SHA-256 精确相等
 门禁；`--reuse-built-images` 不得用于掩盖源码与镜像漂移。
 
 execution Redis AOF 场景必须对该容器使用同一套重启运行事实门禁，重启前后分别复验 AOF 配置与写状态，并证明全部

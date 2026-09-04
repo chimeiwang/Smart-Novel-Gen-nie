@@ -36,7 +36,6 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     private final WritingCommandRepository legacy;
     private final LongSerialDurableRunStarter durable;
     private final CommandIdempotencyStore idempotency;
-    private final DurableAgentReleaseGuard releaseGuard;
     private final CoreSettings settings;
     private final DurableAgentExecutionReadiness agentReadiness;
     private final ObjectMapper json;
@@ -48,7 +47,6 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             WritingCommandRepository legacy,
             LongSerialDurableRunStarter durable,
             CommandIdempotencyStore idempotency,
-            DurableAgentReleaseGuard releaseGuard,
             CoreSettings settings,
             DurableAgentExecutionReadiness agentReadiness,
             ObjectMapper json,
@@ -57,7 +55,6 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         this.legacy = Objects.requireNonNull(legacy);
         this.durable = Objects.requireNonNull(durable);
         this.idempotency = Objects.requireNonNull(idempotency);
-        this.releaseGuard = Objects.requireNonNull(releaseGuard);
         this.settings = Objects.requireNonNull(settings);
         this.agentReadiness = Objects.requireNonNull(agentReadiness);
         this.json = Objects.requireNonNull(json);
@@ -103,10 +100,6 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 throw writingSessionRequired();
             });
         }
-        if (routeDurable) {
-            releaseGuard.requireFreshStart(
-                    userId, durableRequest(request).getNovelId());
-        }
         // 网络握手必须发生在 advisory/Run/章节锁之外。稍后会在原用户事务内二次解析，
         // 因此并发同标识即使同时通过握手，也只会创建一个 Run。
         boolean agentCompatible = !routeDurable || agentReadiness.check();
@@ -131,11 +124,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                     requireNoActiveDurableMutation(transaction, scope.chapterId());
                 }
                 LongSerialStartWritingRunRequest durableRequest = durableRequest(request);
-                return durable.startFresh(
-                        userId,
-                        durableRequest,
-                        () -> releaseGuard.requireFreshStart(
-                                userId, durableRequest.getNovelId()));
+                return durable.startFresh(userId, durableRequest);
             }
             if (locked && isLegacyMutation(request)) {
                 requireNoActiveDurableMutation(transaction, scope.chapterId());

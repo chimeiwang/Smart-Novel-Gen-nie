@@ -56,17 +56,9 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
 
     @Override
     public WorkflowRunStartResult start(WorkflowStartPlan plan) {
-        return start(plan, () -> {});
-    }
-
-    @Override
-    public WorkflowRunStartResult start(
-            WorkflowStartPlan plan, Runnable finalFreshStartAuthorization) {
         Objects.requireNonNull(plan, "Workflow start plan 不能为空");
-        Objects.requireNonNull(finalFreshStartAuthorization, "最终 fresh start 授权不能为空");
         try {
-            return database.transactionResult(
-                    transaction -> start(transaction, plan, finalFreshStartAuthorization));
+            return database.transactionResult(transaction -> start(transaction, plan));
         } catch (DataAccessException exception) {
             if (hasConstraint(exception, FOREGROUND_CONSTRAINT)) {
                 throw new ApiException(
@@ -78,10 +70,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
         }
     }
 
-    private WorkflowRunStartResult start(
-            DSLContext transaction,
-            WorkflowStartPlan plan,
-            Runnable finalFreshStartAuthorization) {
+    private WorkflowRunStartResult start(DSLContext transaction, WorkflowStartPlan plan) {
         transaction.execute(
                 "SELECT pg_catalog.pg_advisory_xact_lock(?)",
                 CommandIdempotency.advisoryLockKey(
@@ -135,9 +124,6 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                 outputSchema,
                 stepBudget));
 
-        // advisory/idempotency 与所有 Novel/Chapter/Session 锁均已取得，正文派生、canonical
-        // 与 hash 也已完成；此行到首条 INSERT 之间不再允许任何可阻塞或无界工作。
-        finalFreshStartAuthorization.run();
         insertRun(transaction, plan, runId, now);
         insertEvidence(
                 transaction,

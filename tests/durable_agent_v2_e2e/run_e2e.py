@@ -261,7 +261,6 @@ class ComposeStack:
         self.temp_dir = Path(tempfile.mkdtemp(prefix="inkforge-dav2-e2e-"))
         os.chmod(self.temp_dir, 0o700)
         self.keys_dir = self.temp_dir / "keys"
-        self.release_guard_dir = self.temp_dir / "release-guard"
         self.core_port = _port()
         self.control_port = _port()
         self.control_token = secrets.token_urlsafe(36)
@@ -273,101 +272,13 @@ class ComposeStack:
             "E2E_CONTROL_PORT": str(self.control_port),
             "E2E_CORE_PORT": str(self.core_port),
             "E2E_KEYS_DIR": str(self.keys_dir),
-            "E2E_RELEASE_GUARD_DIR": str(self.release_guard_dir),
             "E2E_IMAGE_TAG": "durable-v2-e2e",
         }
         self.evidence_dir = evidence_dir
         self._started = False
         self.last_service_restart: dict[str, object] = {}
 
-    def _write_release_guard(
-        self,
-        *,
-        state: str,
-        user_id: str | None = None,
-        novel_id: str | None = None,
-    ) -> None:
-        from scripts.durable_agent_v2_release_manifest import (
-            execution_manifest_fingerprint,
-        )
-
-        self.release_guard_dir.mkdir(mode=0o755, exist_ok=True)
-        os.chmod(self.release_guard_dir, 0o755)  # noqa: S103 - 容器只读挂载需可遍历
-        fields: dict[str, object] = {
-            "canaryScopeSha256": None,
-            "committedReceiptSha256": None,
-            "controlBundleSha256": None,
-            "executionManifestFingerprint": None,
-            "expiresAt": None,
-            "format": "inkforge-durable-agent-v2-release-guard/1",
-            "issuedAt": None,
-            "leaseId": None,
-            "lockId": None,
-            "manifestSha256": None,
-            "runAttempt": None,
-            "runId": None,
-            "state": state,
-        }
-        if state == "committed":
-            if user_id is None or novel_id is None:
-                raise ValueError("committed E2E guard 缺少精确 scope")
-            scope = hashlib.sha256(
-                json.dumps(
-                    {"novelId": novel_id, "userId": user_id},
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
-            fields.update(
-                {
-                    "canaryScopeSha256": scope,
-                    "committedReceiptSha256": hashlib.sha256(
-                        b"isolated-e2e-receipt"
-                    ).hexdigest(),
-                    "controlBundleSha256": hashlib.sha256(
-                        b"isolated-e2e-control"
-                    ).hexdigest(),
-                    "executionManifestFingerprint": execution_manifest_fingerprint(
-                        ROOT / "contracts" / "agent-execution" / "manifest.json"
-                    ),
-                    "issuedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                    "leaseId": hashlib.sha256(b"isolated-e2e-lease").hexdigest(),
-                    "lockId": hashlib.sha256(b"isolated-e2e-lock").hexdigest(),
-                    "manifestSha256": hashlib.sha256(
-                        b"isolated-e2e-release-manifest"
-                    ).hexdigest(),
-                    "runAttempt": "1",
-                    "runId": "1",
-                }
-            )
-        payload = (
-            json.dumps(
-                fields,
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            + "\n"
-        ).encode("utf-8")
-        path = self.release_guard_dir / "guard.json"
-        temporary = self.release_guard_dir / ".guard.json.partial"
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(payload)
-            output.flush()
-            os.fsync(output.fileno())
-        os.chmod(temporary, 0o444)
-        os.replace(temporary, path)
-        descriptor = os.open(self.release_guard_dir, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-
     def activate_durable_scope(self, *, user_id: str, novel_id: str) -> None:
-        self._write_release_guard(state="committed", user_id=user_id, novel_id=novel_id)
         self.environment.update(
             {
                 "E2E_DURABLE_ROUTE_MODE": "allowlist",
@@ -431,7 +342,6 @@ class ComposeStack:
 
     def start(self, *, build: bool) -> None:
         self.prepare_keys()
-        self._write_release_guard(state="off")
         arguments = ["up"]
         if build:
             arguments.append("--build")
@@ -477,7 +387,10 @@ class ComposeStack:
             image_ids[name] = completed.stdout.strip()
 
         relative_paths = (
+            "app.py",
             "execution/journal.py",
+            "execution/replayer.py",
+            "execution/service.py",
             "queue/repository.py",
         )
         host_root = ROOT / "apps" / "agent-service" / "src" / "inkforge_agents"
@@ -1237,6 +1150,10 @@ class Acceptance:
 
     def journal_facts(self, step_id: str) -> dict[str, object]:
         values = self.stack.redis("HGETALL", f"inkforge:executions:{step_id}")
+        if values == [""]:
+            values = []
+        if len(values) % 2 != 0:
+            raise AssertionError("execution journal HGETALL 返回了不完整的键值对")
         entry = dict(zip(values[::2], values[1::2], strict=True))
         raw_fence = entry.get("fencing_token")
         try:
@@ -1288,6 +1205,7 @@ class Acceptance:
         step: dict[str, object],
         journal: dict[str, object],
         attempts: list[dict[str, object]],
+        allow_one_unauthenticated_inflight_request: bool = False,
     ) -> None:
         expected = (
             run_id,
@@ -1297,6 +1215,7 @@ class Acceptance:
             step.get("requestHash"),
             step.get("resultHash"),
         )
+        unauthenticated_inflight_requests = 0
         for attempt in attempts:
             actual = (
                 attempt.get("run_id"),
@@ -1313,7 +1232,18 @@ class Acceptance:
                 or attempt.get("receipt_identity_matches") is not True
                 or attempt.get("receipt_status") not in {"accepted", "duplicate"}
             ):
+                if (
+                    allow_one_unauthenticated_inflight_request
+                    and attempt.get("action") == "forwarded"
+                    and attempt.get("core_status") == 401
+                    and attempt.get("receipt_status") is None
+                    and attempt.get("receipt_identity_matches") is False
+                ):
+                    unauthenticated_inflight_requests += 1
+                    continue
                 raise AssertionError("terminal callback 的 Core 回执或身份无效")
+        if unauthenticated_inflight_requests > 1:
+            raise AssertionError("重启后出现多条未通过鉴权的旧 callback 请求")
 
     def database_facts(self, run_id: str, session_id: str) -> dict[str, object]:
         sql = """
@@ -1727,7 +1657,14 @@ class Acceptance:
             forwarded = [
                 item for item in matching if item.get("action") == "forwarded"
             ]
-            if forwarded:
+            accepted = [
+                item
+                for item in forwarded
+                if item.get("core_status") == 200
+                and item.get("receipt_identity_matches") is True
+                and item.get("receipt_status") in {"accepted", "duplicate"}
+            ]
+            if accepted:
                 break
             time.sleep(0.1)
         held = [
@@ -1753,6 +1690,7 @@ class Acceptance:
             step=facts["steps"][0],
             journal=facts["journal"],
             attempts=matching,
+            allow_one_unauthenticated_inflight_request=True,
         )
         return Scenario(
             name="agent_restart_terminal_journal_replay",
@@ -1817,6 +1755,7 @@ class Acceptance:
             step=facts["steps"][0],
             journal=facts["journal"],
             attempts=attempts,
+            allow_one_unauthenticated_inflight_request=True,
         )
         return Scenario(
             name="core_restart_before_terminal_callback",

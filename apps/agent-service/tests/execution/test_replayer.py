@@ -11,7 +11,10 @@ from inkforge_agents.execution.callbacks import (
     ExecutionCallbackError,
 )
 from inkforge_agents.execution.journal import AsyncJournalRedis, RedisExecutionJournal
-from inkforge_agents.execution.replayer import TerminalCallbackReplayer
+from inkforge_agents.execution.replayer import (
+    DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE,
+    TerminalCallbackReplayer,
+)
 from inkforge_contracts.execution import (
     ExecutionCallbackReceipt,
     ExecutionStepFailure,
@@ -79,6 +82,12 @@ def _journal(prefix: str) -> RedisExecutionJournal:
         cast(AsyncJournalRedis, fakeredis.aioredis.FakeRedis()),
         prefix=prefix,
     )
+
+
+def test_default_callback_claim_lease_precedes_core_step_lease() -> None:
+    assert DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE == timedelta(seconds=20)
+    assert timedelta(seconds=15) < DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE
+    assert DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE < timedelta(seconds=30)
 
 
 async def _terminal(journal: RedisExecutionJournal) -> ExecutionStepResult:

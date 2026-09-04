@@ -263,6 +263,87 @@ def test_agent_restart_rejects_receipts_that_do_not_prove_first_commit(
         _assert_agent_restart_receipts(receipts)
 
 
+def _terminal_callback_attempt(
+    *,
+    core_status: int,
+    receipt_status: str | None,
+    receipt_identity_matches: bool,
+) -> dict[str, object]:
+    return {
+        "action": "forwarded",
+        "run_id": "run-1",
+        "step_id": "step-1",
+        "job_id": "job-1",
+        "fencing_token": 1,
+        "request_hash": "request-hash",
+        "result_hash": "result-hash",
+        "core_status": core_status,
+        "receipt_status": receipt_status,
+        "receipt_identity_matches": receipt_identity_matches,
+    }
+
+
+def _assert_restart_callback_bindings(
+    attempts: list[dict[str, object]],
+    *,
+    allow_unauthenticated: bool,
+) -> None:
+    Acceptance.assert_callback_attempt_bindings(
+        run_id="run-1",
+        step={
+            "id": "step-1",
+            "fencingToken": 1,
+            "requestHash": "request-hash",
+            "resultHash": "result-hash",
+        },
+        journal={"jobId": "job-1"},
+        attempts=attempts,
+        allow_one_unauthenticated_inflight_request=allow_unauthenticated,
+    )
+
+
+def test_agent_restart_allows_one_unauthenticated_old_callback_with_live_receipt() -> None:
+    attempts = [
+        _terminal_callback_attempt(
+            core_status=401,
+            receipt_status=None,
+            receipt_identity_matches=False,
+        ),
+        _terminal_callback_attempt(
+            core_status=200,
+            receipt_status="accepted",
+            receipt_identity_matches=True,
+        ),
+    ]
+
+    _assert_restart_callback_bindings(attempts, allow_unauthenticated=True)
+
+
+def test_callback_binding_rejects_unauthenticated_request_outside_restart() -> None:
+    attempt = _terminal_callback_attempt(
+        core_status=401,
+        receipt_status=None,
+        receipt_identity_matches=False,
+    )
+
+    with pytest.raises(AssertionError, match="Core 回执或身份无效"):
+        _assert_restart_callback_bindings([attempt], allow_unauthenticated=False)
+
+
+def test_restart_rejects_multiple_unauthenticated_old_callbacks() -> None:
+    unauthenticated = _terminal_callback_attempt(
+        core_status=401,
+        receipt_status=None,
+        receipt_identity_matches=False,
+    )
+
+    with pytest.raises(AssertionError, match="多条未通过鉴权"):
+        _assert_restart_callback_bindings(
+            [unauthenticated, unauthenticated],
+            allow_unauthenticated=True,
+        )
+
+
 def _usage() -> dict[str, object]:
     return {
         "usageStatus": "partial",
@@ -394,3 +475,21 @@ def test_database_facts_saves_scrubbed_billing_before_business_assertion() -> No
     assert "usageRaw" not in facts["steps"][0]
     assert acceptance.safe_diagnostics["billing"] == facts["billing"]
     _assert_fake_billing_evidence(facts["billing"])
+
+
+def test_missing_execution_journal_normalizes_redis_cli_empty_line() -> None:
+    acceptance = cast(
+        Acceptance,
+        SimpleNamespace(stack=SimpleNamespace(redis=lambda *_args: [""])),
+    )
+
+    assert Acceptance.journal_facts(acceptance, "step-missing") == {
+        "present": False,
+        "state": None,
+        "callbackDelivery": None,
+        "requestHash": None,
+        "resultHash": None,
+        "jobId": None,
+        "fencingToken": None,
+        "terminalPayloadPresent": False,
+    }

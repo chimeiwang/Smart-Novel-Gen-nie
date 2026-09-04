@@ -17,6 +17,7 @@ from .journal import (
 )
 
 DeliveryOutcome = Literal["delivered", "rejected", "retry", "quarantined"]
+DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE = timedelta(seconds=20)
 
 
 class TerminalCallbackReplayer:
@@ -28,7 +29,7 @@ class TerminalCallbackReplayer:
         callbacks: ExecutionCallbackClient,
         *,
         batch_size: int = 1,
-        claim_lease: timedelta = timedelta(seconds=30),
+        claim_lease: timedelta = DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE,
         poll_interval_seconds: float = 0.5,
         retry_base_seconds: float = 0.5,
         retry_max_seconds: float = 30.0,

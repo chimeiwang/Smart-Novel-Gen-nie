@@ -282,13 +282,11 @@ services:
       DURABLE_AGENT_EXECUTION_ROUTE_MODE: ${E2E_DURABLE_ROUTE_MODE:-off}
       DURABLE_AGENT_EXECUTION_USER_ALLOWLIST: ${E2E_DURABLE_USER_ID:-bootstrap-disabled-user}
       DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST: ${E2E_DURABLE_NOVEL_ID:-bootstrap-disabled-novel}
-      DURABLE_AGENT_RELEASE_GUARD_PATH: /run/inkforge-release-guard/guard.json
     ports:
       - "127.0.0.1:${E2E_CORE_PORT:?必须配置本地 Core 端口}:8000"
     volumes:
       - ${E2E_KEYS_DIR:?必须配置临时服务密钥目录}/core-to-agent-private.pem:/run/inkforge-keys/core-to-agent-private.pem:ro
       - ${E2E_KEYS_DIR:?必须配置临时服务密钥目录}/agent-to-core-jwks.json:/run/inkforge-keys/agent-to-core-jwks.json:ro
-      - ${E2E_RELEASE_GUARD_DIR:?必须配置临时 release guard 目录}:/run/inkforge-release-guard:ro
     tmpfs:
       - /tmp:size=32m,mode=1777
       - /data/uploads:size=16m,uid=10001,gid=10001

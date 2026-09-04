@@ -618,6 +618,10 @@ Redis 写入或持久化不可用时必须停止新模型调用并使 readiness 
 保留完整终态并退避等待新 fence，确定性 4xx 转入
 rejected 隔离队列并使 readiness 失败，可重试错误使用带抖动的有界指数退避。领取、下次重试时间和 pending/rejected
 迁移必须由 Redis 原子脚本维护；进程启动、回调响应丢失、Core 重启与 replayer 重启都不得重复模型调用或丢失终报。
+当前回调 HTTP 总超时为 15 秒，terminal callback claim lease 固定为 20 秒，必须严格短于 Core 的 30 秒 Step
+执行租约：这样进程在持有 callback claim 时退出后，新 replayer 会先按原 `jobId + fencingToken` 取得终态，再到 Core
+执行租约到期。该顺序用于缩短恢复时间并避免把普通 callback 重放不必要地升级为 Core lease recovery；极端调度停顿下
+若 Core 已先换新 fence，仍按上文 `stale` 与同 `requestHash` 原子重绑规则恢复，绝不再次调用模型。
 
 execution journal 必须使用独立的内部 Redis 实例与独立持久卷，并采用 `appendonly yes + appendfsync always +
 aof-load-truncated no + noeviction`。现有队列、SSE 唤醒、登录防重放和普通缓存 Redis 不得因为 V2 journal 被整体切换为
@@ -1117,7 +1121,7 @@ PostgreSQL 14.19 + pgvector 0.8.0 以当前 86 表契约重建、重复执行最
 ### 可执行迁移、备份与恢复门禁
 
 具名操作入口固定为 `scripts/durable-agent-execution-migration.sh`，动作包括
-`status|active-v2-count|backup|forward|rollback|export-contract|verify-contract`，完整步骤见
+`status|active-v2-count|initialize-drain-indexes|drain-status|verify-drain|backup|forward|rollback|export-contract|verify-contract`，完整步骤见
 `docs/DURABLE_AGENT_V2_ROLLOUT.md`。入口必须把目标数据库显式限定为 `novelwriterdev` 或 `novelwriter`，并把
 实时状态判定为 `unmigrated`、`migrated-empty-v2`、`migrated-with-v2` 或 `partial`；`partial` 对所有写动作
 fail closed。结构对象状态只能决定迁移代次，forward/rollback 前还必须由已经运行的双 contract Java 镜像执行

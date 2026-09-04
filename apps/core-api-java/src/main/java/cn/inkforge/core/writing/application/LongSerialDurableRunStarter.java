@@ -14,9 +14,6 @@ public interface LongSerialDurableRunStarter {
     WritingRunV2Response replayExisting(
             String userId, LongSerialStartWritingRunRequest request);
 
-    /** 最后一把 PostgreSQL 锁取得后、第一条 V2 INSERT 前再次执行发布授权。 */
     WritingRunV2Response startFresh(
-            String userId,
-            LongSerialStartWritingRunRequest request,
-            Runnable finalFreshStartAuthorization);
+            String userId, LongSerialStartWritingRunRequest request);
 }

@@ -63,7 +63,6 @@ public final class CoreSettings {
     private final boolean v1FreshAgentStartsEnabled;
     private final Set<String> durableAgentUserAllowlist;
     private final Set<String> durableAgentNovelAllowlist;
-    private final Path durableAgentReleaseGuardPath;
     private final Path uploadsRoot;
     private final boolean videoPreviewEnabled;
     private final boolean videoDispatchEnabled;
@@ -122,8 +121,6 @@ public final class CoreSettings {
         this.durableAgentNovelAllowlist = idAllowlist(
                 value.apply("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST"),
                 "耐久 Agent 小说 allowlist");
-        this.durableAgentReleaseGuardPath = optionalPath(
-                value.apply("DURABLE_AGENT_RELEASE_GUARD_PATH"));
         this.uploadsRoot = absolutePath(nonBlankOrDefault(value.apply("UPLOADS_ROOT"), "/data/uploads"));
         this.videoPreviewEnabled = bool(value, "VIDEO_PREVIEW_ENABLED", false);
         this.videoDispatchEnabled = bool(value, "VIDEO_DISPATCH_ENABLED", false);
@@ -274,11 +271,6 @@ public final class CoreSettings {
 
     public Set<String> durableAgentNovelAllowlist() {
         return durableAgentNovelAllowlist;
-    }
-
-    /** 服务器发布事务持久 guard 的只读挂载路径；缺失时 fresh V2 必须关闭。 */
-    public Path durableAgentReleaseGuardPath() {
-        return durableAgentReleaseGuardPath;
     }
 
     /** 开关只决定新 Run 的路由；既有 V2 Run 必须继续由 V2 引擎收敛。 */

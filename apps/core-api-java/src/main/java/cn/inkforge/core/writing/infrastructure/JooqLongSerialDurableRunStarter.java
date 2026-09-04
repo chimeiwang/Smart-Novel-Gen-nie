@@ -80,7 +80,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     request.getClientRequestId(),
                     normalized.fingerprint());
             if (replay == null) {
-                throw new IllegalStateException("既有 V2 幂等身份不可见，拒绝绕过 fresh guard");
+                throw new IllegalStateException("既有 V2 幂等身份不可见，拒绝创建新 Run");
             }
             return replay;
         });
@@ -88,9 +88,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
 
     @Override
     public WritingRunV2Response startFresh(
-            String userId,
-            LongSerialStartWritingRunRequest request,
-            Runnable finalFreshStartAuthorization) {
+            String userId, LongSerialStartWritingRunRequest request) {
         String operationKey = operationKey(request);
         EvidencePlanner planner = planners.get(operationKey);
         if (planner == null) {
@@ -138,8 +136,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                             operation.generatorProfile(),
                             operation.generatorStepBudget(),
                             operation.outputSchema()));
-            WorkflowRunStartResult result = workflows.startFresh(
-                    plan, finalFreshStartAuthorization);
+            WorkflowRunStartResult result = workflows.startFresh(plan);
             if (result.replayed()) {
                 WritingRunV2Response concurrentReplay = replay(
                         transaction,

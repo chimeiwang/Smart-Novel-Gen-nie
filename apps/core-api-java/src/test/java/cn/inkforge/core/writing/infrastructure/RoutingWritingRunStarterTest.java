@@ -34,7 +34,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.jooq.Record;
@@ -314,8 +313,7 @@ class RoutingWritingRunStarterTest {
             @Override
             public WritingRunV2Response startFresh(
                     String userId,
-                    cn.inkforge.contracts.api.LongSerialStartWritingRunRequest request,
-                    Runnable finalFreshStartAuthorization) {
+                    cn.inkforge.contracts.api.LongSerialStartWritingRunRequest request) {
                 throw new AssertionError("装配失败前不应调用 handler");
             }
         };
@@ -325,7 +323,6 @@ class RoutingWritingRunStarterTest {
                         legacy,
                         incomplete,
                         new CommandIdempotencyStore(json, true),
-                        (userId, novelId) -> {},
                         CoreSettings.from(Map.of(
                                 "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
                                 "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "off")),
@@ -722,193 +719,6 @@ class RoutingWritingRunStarterTest {
     }
 
     @Test
-    void freshV2发布Guard失败早于readiness且绝不回退V1() {
-        Fixture fixture = fixture("route-release-guard-closed");
-        ParsedWritingRunStartRequest request = request(
-                fixture, "request-release-guard-closed-01", "不得创建 V2");
-        AtomicInteger guardChecks = new AtomicInteger();
-        AtomicInteger readinessChecks = new AtomicInteger();
-        DurableAgentReleaseGuard missingGuard = new FileDurableAgentReleaseGuard(
-                null, CLOCK, registry.manifestFingerprint());
-
-        assertThatThrownBy(() -> router(
-                                fixture,
-                                "allowlist",
-                                true,
-                                () -> {
-                                    readinessChecks.incrementAndGet();
-                                    return true;
-                                },
-                                (userId, novelId) -> {
-                                    guardChecks.incrementAndGet();
-                                    missingGuard.requireFreshStart(userId, novelId);
-                                })
-                        .start(fixture.userId(), request))
-                .isInstanceOfSatisfying(ApiException.class, error -> {
-                    assertThat(error.statusCode()).isEqualTo(503);
-                    assertThat(error.code())
-                            .isEqualTo("DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE");
-                    assertThat(error.details()).isNull();
-                });
-
-        assertThat(guardChecks).hasValue(1);
-        assertThat(readinessChecks).hasValue(0);
-        assertThat(workflowFacts(fixture.userId())).isZero();
-        assertThat(count(
-                        "SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?",
-                        fixture.novelId()))
-                .isZero();
-    }
-
-    @Test
-    void freshV2关键事务内二次Guard漂移时零写入() {
-        Fixture fixture = fixture("route-release-guard-drift");
-        ParsedWritingRunStartRequest request = request(
-                fixture, "request-release-guard-drift-01", "二检前替换 guard");
-        AtomicInteger guardChecks = new AtomicInteger();
-        AtomicInteger readinessChecks = new AtomicInteger();
-
-        assertThatThrownBy(() -> router(
-                                fixture,
-                                "allowlist",
-                                true,
-                                () -> {
-                                    readinessChecks.incrementAndGet();
-                                    return true;
-                                },
-                                (userId, novelId) -> {
-                                    if (guardChecks.incrementAndGet() == 2) {
-                                        throw releaseGuardUnavailable();
-                                    }
-                                })
-                        .start(fixture.userId(), request))
-                .isInstanceOfSatisfying(ApiException.class, error ->
-                        assertThat(error.code())
-                                .isEqualTo("DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE"));
-
-        assertThat(guardChecks).hasValue(2);
-        assertThat(readinessChecks).hasValue(1);
-        assertThat(workflowFacts(fixture.userId())).isZero();
-        assertThat(count(
-                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
-                        fixture.sessionId()))
-                .isZero();
-    }
-
-    @Test
-    void freshV2首检后等待数据库锁期间Guard关闭则最终校验零写入且不回退V1()
-            throws Exception {
-        Fixture fixture = fixture("route-release-guard-lock-wait");
-        String clientRequestId = "request-release-guard-lock-wait-01";
-        ParsedWritingRunStartRequest request = request(
-                fixture, clientRequestId, "锁等待后不得穿透 guard");
-        CountDownLatch lockHeld = new CountDownLatch(1);
-        CountDownLatch releaseLock = new CountDownLatch(1);
-        CountDownLatch readinessReached = new CountDownLatch(1);
-        AtomicBoolean guardOpen = new AtomicBoolean(true);
-        AtomicInteger guardChecks = new AtomicInteger();
-        CompletableFuture<Void> blocker = CompletableFuture.runAsync(() ->
-                database.transactionResult(transaction -> {
-                    transaction.fetchOne(
-                            "SELECT id FROM public.\"Novel\" WHERE id = ? FOR UPDATE",
-                            fixture.novelId());
-                    lockHeld.countDown();
-                    try {
-                        if (!releaseLock.await(2, TimeUnit.SECONDS)) {
-                            throw new IllegalStateException("测试 advisory 锁未及时释放");
-                        }
-                    } catch (InterruptedException exception) {
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("测试 advisory 锁等待被中断", exception);
-                    }
-                    return null;
-                }));
-        assertThat(lockHeld.await(2, TimeUnit.SECONDS)).isTrue();
-
-        RoutingWritingRunStarter starter = router(
-                fixture,
-                "allowlist",
-                true,
-                () -> {
-                    readinessReached.countDown();
-                    return true;
-                },
-                (userId, novelId) -> {
-                    guardChecks.incrementAndGet();
-                    if (!guardOpen.get()) throw releaseGuardUnavailable();
-                });
-        CompletableFuture<Object> start = CompletableFuture.supplyAsync(() ->
-                captureFailure(() -> starter.start(fixture.userId(), request)));
-        assertThat(readinessReached.await(2, TimeUnit.SECONDS)).isTrue();
-        assertThat(guardChecks).hasValue(1);
-        long waitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        boolean waitingOnOwnedResource = false;
-        while (System.nanoTime() < waitDeadline) {
-            int waiters = database.dsl()
-                    .fetchOne(
-                            """
-                            SELECT count(*) AS count
-                            FROM pg_catalog.pg_stat_activity
-                            WHERE datname = pg_catalog.current_database()
-                              AND wait_event_type = 'Lock'
-                              AND query LIKE '%SELECT id FROM public."Novel"%'
-                            """)
-                    .get("count", Integer.class);
-            if (waiters > 0) {
-                waitingOnOwnedResource = true;
-                break;
-            }
-            Thread.sleep(10);
-        }
-        assertThat(waitingOnOwnedResource).isTrue();
-        guardOpen.set(false);
-        releaseLock.countDown();
-
-        blocker.get(2, TimeUnit.SECONDS);
-        Object failure = start.get(2, TimeUnit.SECONDS);
-        assertThat(failure)
-                .isInstanceOfSatisfying(ApiException.class, error ->
-                        assertThat(error.code())
-                                .isEqualTo("DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE"));
-        assertThat(guardChecks).hasValue(2);
-        assertThat(workflowFacts(fixture.userId())).isZero();
-        assertThat(count(
-                        "SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?",
-                        fixture.novelId()))
-                .isZero();
-    }
-
-    @Test
-    void 既有V2幂等重放早于失效发布Guard() {
-        Fixture fixture = fixture("route-release-guard-replay");
-        ParsedWritingRunStartRequest request = request(
-                fixture, "request-release-guard-replay-01", "先创建再重放");
-        WritingRunV2Response first = (WritingRunV2Response) router(fixture, "allowlist").start(
-                fixture.userId(), request);
-        AtomicInteger guardChecks = new AtomicInteger();
-
-        WritingRunV2Response replay = (WritingRunV2Response) router(
-                        fixture,
-                        "allowlist",
-                        true,
-                        () -> {
-                            throw new AssertionError("幂等重放不应探测 Agent");
-                        },
-                        (userId, novelId) -> {
-                            guardChecks.incrementAndGet();
-                            throw releaseGuardUnavailable();
-                        })
-                .start(fixture.userId(), request);
-
-        assertThat(replay.getRunId()).isEqualTo(first.getRunId());
-        assertThat(guardChecks).hasValue(0);
-        assertThat(count(
-                        "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"userId\" = ?",
-                        fixture.userId()))
-                .isEqualTo(1);
-    }
-
-    @Test
     void 并发同幂等标识均在无锁握手后仍只创建一个V2Run() throws Exception {
         Fixture fixture = fixture("route-concurrent-v2");
         ParsedWritingRunStartRequest request = request(
@@ -1097,34 +907,28 @@ class RoutingWritingRunStarterTest {
 
     private static RoutingWritingRunStarter router(
             String mode, DurableAgentExecutionReadiness readiness) {
-        return router(null, mode, true, readiness, (userId, novelId) -> {});
+        return router(null, mode, true, readiness);
     }
 
     private static RoutingWritingRunStarter router(
             Fixture scope,
             String mode,
             DurableAgentExecutionReadiness readiness) {
-        return router(scope, mode, true, readiness, (userId, novelId) -> {});
+        return router(scope, mode, true, readiness);
     }
 
     private static RoutingWritingRunStarter router(
             String mode,
             boolean freshStartsEnabled,
             DurableAgentExecutionReadiness readiness) {
-        return router(
-                null,
-                mode,
-                freshStartsEnabled,
-                readiness,
-                (userId, novelId) -> {});
+        return router(null, mode, freshStartsEnabled, readiness);
     }
 
     private static RoutingWritingRunStarter router(
             Fixture scope,
             String mode,
             boolean freshStartsEnabled,
-            DurableAgentExecutionReadiness readiness,
-            DurableAgentReleaseGuard releaseGuard) {
+            DurableAgentExecutionReadiness readiness) {
         Map<String, String> settings = new java.util.LinkedHashMap<>();
         settings.put("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true");
         settings.put("DURABLE_AGENT_EXECUTION_ROUTE_MODE", mode);
@@ -1141,18 +945,10 @@ class RoutingWritingRunStarterTest {
                 legacy,
                 durable,
                 new CommandIdempotencyStore(json, true),
-                releaseGuard,
                 CoreSettings.from(settings),
                 readiness,
                 json,
                 registry);
-    }
-
-    private static ApiException releaseGuardUnavailable() {
-        return new ApiException(
-                503,
-                "DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE",
-                "耐久 Agent 发布保护当前不可用");
     }
 
     private static Object captureFailure(java.util.concurrent.Callable<?> operation) {

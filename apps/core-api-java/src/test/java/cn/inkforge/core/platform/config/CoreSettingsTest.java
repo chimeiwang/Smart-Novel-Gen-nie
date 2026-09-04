@@ -29,7 +29,6 @@ class CoreSettingsTest {
                 .isEqualTo(CoreSettings.DurableAgentRouteMode.OFF);
         assertThat(settings.durableAgentExecutionSchemaReady()).isFalse();
         assertThat(settings.v1FreshAgentStartsEnabled()).isTrue();
-        assertThat(settings.durableAgentReleaseGuardPath()).isNull();
         assertThat(settings.agentMaxConcurrency()).isEqualTo(3);
         assertThat(settings.routesNewDurableAgentRun("user-1", "novel-1")).isFalse();
     }
@@ -186,19 +185,6 @@ class CoreSettingsTest {
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "V1_FRESH_AGENT_STARTS_ENABLED", "draining")))
                 .hasMessageContaining("V1_FRESH_AGENT_STARTS_ENABLED");
-    }
-
-    @Test
-    void 发布Guard路径只能使用绝对路径且缺失不阻断Core启动() {
-        assertThat(CoreSettings.from(Map.of(
-                                "DURABLE_AGENT_RELEASE_GUARD_PATH",
-                                "/run/inkforge-release-guard/guard.json"))
-                        .durableAgentReleaseGuardPath())
-                .isEqualTo(java.nio.file.Path.of(
-                        "/run/inkforge-release-guard/guard.json"));
-        assertThatThrownBy(() -> CoreSettings.from(Map.of(
-                        "DURABLE_AGENT_RELEASE_GUARD_PATH", "relative/guard.json")))
-                .hasMessageContaining("绝对路径");
     }
 
     @Test

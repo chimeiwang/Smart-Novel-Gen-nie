@@ -4,10 +4,9 @@
 
 - 日期：2026-09-01
 - 终审更新：2026-09-04
-- 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。对应发布提交进入
-  `main` 和 canary 通过都只是必要条件，不是生产 Skill 的充分开放条件；仓外不可变 controller、OIDC
-  短期单 operation capability、真实双角色流式 broker、专用公钥轮换和 sealed genesis/current 任一未完成时，
-  生产 Skill 必须继续拒绝 `answer_question`。
+- 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
+  实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
+  user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
 - 本次不新增 CLI 命令名，只扩展现有 `long.agent.start` 的一个显式 Operation。
 - 上述两个现有 wrapper 当前实际调用 `tools/inkforge-cli` 的 Python CLI；Java CLI 是迁移目标但尚不能
@@ -33,7 +32,7 @@
 Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成稳定的
 `SECURE_CREDENTIAL_BACKEND_REQUIRED`，不再把它吞成泛化 `UNEXPECTED_ERROR`。该变化没有增加命令白名单、
 不会读取或打印密码，也没有明文、环境变量或文件凭据回退。更新者必须在目标发布提交进入 `main`、本节测试由该提交
-复跑、下文生产启用门禁满足后，才按“Skill 文件更新清单”开放问答；不得直接从当前工作树复制未发布业务行为。
+复跑、下文对应环境启用门禁满足后，才按“Skill 文件更新清单”开放问答；不得直接从当前工作树复制未发布业务行为。
 
 ### 凭据后端诊断契约
 
@@ -180,7 +179,7 @@ Skill 不得把这些本地输入错误自动改写成另一种 Operation、scop
 | 同一幂等键对应不同请求 | `IDEMPOTENCY_KEY_REUSED` | 4 | 停止；不得改正文后继续复用，也不得换新 ID 猜测重试 |
 | 会话不属于同一小说或章节 | `WRITING_SESSION_MISMATCH` | 4 | 重新读取原会话、小说和章节身份并报告；不得自动替换会话 |
 | 同一会话已有前台 Run | `WORKFLOW_FOREGROUND_RUN_EXISTS` | 4 | `long.task.list/get` 定位并观察已有 Run；不能假定它就是本次问题，也不能立即换 ID 新建 |
-| V2 Operation/执行器/发布 guard 不可用 | `DURABLE_OPERATION_NOT_ENABLED`、`DURABLE_AGENT_EXECUTION_UNAVAILABLE`、`DURABLE_AGENT_RELEASE_GUARD_UNAVAILABLE` | 4 或 5，以 CLI 原值为准 | 停止；不得回落 V1。门禁恢复后只允许用原请求与原 `clientRequestId` 对账/重放 |
+| V2 Operation/执行器不可用 | `DURABLE_OPERATION_NOT_ENABLED`、`DURABLE_AGENT_EXECUTION_UNAVAILABLE` | 4 或 5，以 CLI 原值为准 | 停止；不得回落 V1。服务恢复后只允许用原请求与原 `clientRequestId` 对账/重放 |
 | V1 fresh-start 正在 drain | `AGENT_FRESH_STARTS_DRAINING` | 5 | 停止；不得用新 ID、其他 Operation 或非公共入口绕过 |
 
 CLI 本地 `WRITING_SESSION_REQUIRED`、`INVALID_TARGET`、`INVALID_SCOPE`、`INVALID_USER_INSTRUCTION` 与
@@ -228,57 +227,31 @@ CLI 本地 `WRITING_SESSION_REQUIRED`、`INVALID_TARGET`、`INVALID_SCOPE`、`IN
 `python -m unittest discover -s <skill-directory>/tests`。两项离线门禁与上述干净上下文 forward-test 全部通过，
 才可把更新视为可安装；生产 Skill 仍须额外满足下一节的生产启用门禁。
 
-## 发布控制面变化（Skill 维护者必读）
+## 退役发布控制面（Skill 维护者必读）
 
-公共 Python/Java CLI 的命令名、参数和凭据边界没有因本次发布安全改造而变化；Skill 不需要新增 SSH、部署或
-数据库命令，也不得把下列服务器 driver 动作加入 wrapper 白名单。变化只发生在受保护 GitHub 发布工作流和
-服务器端控制面：
+个人项目范围纠正见 `docs/specs/2026-09-04-personal-durable-agent-release-scope.md`。独立 Durable Agent
+release/development-evidence Workflow，以及 control bundle、release manifest/receipt、boundary、SSH broker/trust、
+GitHub evidence 和文件型 release guard 已删除；不存在可供 Skill 调用的兼容命令或替代别名。
 
-- development evidence v2 与 SSH/genesis 信任根分别见
-  `docs/specs/2026-09-01-durable-agent-v2-development-evidence-v2.md`、
-  `docs/specs/2026-09-01-durable-agent-v2-ssh-genesis-trust-root.md`。其中新增的离线 helper/broker 都不是产品 CLI，
-  不得加入 Skill 命令清单；未来若真实 provider canary 的公共 CLI 输入、JSONL 或恢复语义变化，必须先改本文件再改 Skill。
-
-- allowlist 发布改为单个 `finalize-allowlist-transaction` 进程串行完成 route-off → 精确 allowlist、postflight、
-  receipt prepare、current commit point 与锁清理；runner 断联后的恢复只调用同 owner 的
-  `transaction-status` / `reconcile-transaction`，不得人工重跑某条 DDL、Compose 或重新签发 lease；
-- 每个 Compose、allowlist Core recreate 和每次生产 `psql -f` 前都会即时重采 live PG/Core/普通 Redis/
-  execution Redis 身份与零 drain，并消费具名一次性 boundary。`claimed` 但没有 `applied` 表示结果未知，
-  必须保留锁并进入具名恢复，禁止换 ID、复用旧 evidence 或直接重试破坏性命令；
-- allowlist guard 状态只允许 `off → pending → committed` 或 commit point 前 `pending → off`。pending 绑定
-  lock/run/manifest/control/scope/execution fingerprint、最长 120 秒且不可续租；Core 对 fresh V2 在幂等重放后、
-  所有业务锁后紧贴首条 INSERT 再复验，失效时稳定 503 且不回落 V1；
-- receipt 的唯一 commit point 是 current 指针原子替换、receipt 根目录 fsync 和精确重读。current 已精确指向
-  本事务 candidate 后，只能补完 committed/finalize，绝不能写 `failed`、切回 route-off 或倒退 current；
-- 当前 guard v1 只支持单 user + 单 novel allowlist，`route=all` 稳定拒绝。通用 Production Skill 因此仍不能
-  把 canary 能力当作全量开放；缺 guard 文件/挂载时所有 fresh V2 同样稳定 503。
-
-首次受保护发布还需要仓外、具名 bootstrap：必须已有可复验的受保护 current receipt，且当前生产 Core 必须真实
-包含 V1 fresh-start gate。仓库不能证明任一条件时发布保持阻断；不得用裸 `git HEAD`、任意 40 位 SHA、手写
-genesis receipt 或“人工先改 `.env`/重启”绕过。生产 SSH 还必须完成旧 key 撤销与新专用 forced-command/最小权限
-证据；任一外部证据缺失时 SSH 步骤数必须为 0。
-
-当前仓内 Workflow、checkout 前 guard 和 verifier 都来自候选可修改的 `github.sha`，不能成为自身信任根。生产 P0
-只能由候选提交无法修改或取消的仓外执行根闭合：独立且受 ruleset 保护的 release repository，或其中 full-SHA 固定的
-required reusable workflow，并叠加 custom deployment protection；外部执行器按 GitHub OIDC 的精确
-repository/workflow/ref/SHA/run subject 换取短期、单 operation broker capability。真实双角色流式 broker、
-`authorized_keys` 专用公钥轮换、旧 key 撤销、sealed genesis/current receipt 链和上述策略的仓外 API/攻击演练证据也
-必须同时存在。仓内语义 attestation、environment 审批、main 合并或 canary 全绿都不能替代该 P0。
+这些删除没有改变公共 Python/Java CLI 的命令名、参数、JSONL、SSE、退出码或凭据边界。Skill 不得新增 SSH、部署、
+数据库、Compose 或内部 API 命令，也不得把服务器端 `deploy-production.sh`、
+`durable-agent-execution-migration.sh`、`durable-agent-v2-rollout-gate.sh` 加入 wrapper 白名单。普通应用部署继续使用
+项目既有入口；V2 迁移和 canary 是维护者在 Skill 外执行的运维步骤。未来若公共 CLI 输入、JSONL 或恢复语义变化，
+必须先更新本文件，再更新两份 Skill。
 
 ## 生产启用门禁
 
-只有当上述仓外不可变执行根、OIDC 短期 capability、真实 broker、公钥轮换和 sealed genesis/current P0 全部闭合，
-且发布清单冻结的 Python CLI、Java CLI、Core 与 Agent 来自同一提交，两种 CLI 的同契约与跨语言差异门禁全绿，
+只有当 Python CLI、Java CLI、Core 与 Agent 来自同一已部署提交，两种 CLI 的同契约与跨语言差异门禁全绿，
 开发库迁移与真实 provider canary 已通过、生产 route-off 迁移完成，并且生产路由已经能保证该 Skill 接受的每个
 `answer_question` 都创建 V2 Run 时，Production Skill 才能同时更新 `SKILL.md` 与 wrapper Operation 允许集合。
 
-单用户与单小说交集 allowlist 只授权发布流程做 canary，不足以更新通用生产 Skill：allowlist 外小说当前可能
-回落到 V1，而 V1 的 outcome/消息身份不是本契约。canary 必须使用发布流程冻结 userId/novelId 的公共 Python CLI
-调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary 通过并切到能覆盖该 Skill 全部目标的 V2 路由后，
-且上述仓外 P0 全部闭合，才按本文件更新 Production Skill。Local Skill 不依赖生产 SSH 信任根，但也只能在其固定
-本地运行副本、Core 配置以及该 Skill 可操作的全部用户/小说目标都保证 fresh 问答创建 V2 Run，并完成对应本地 canary
-后开放；单一 allowlist canary 或代码存在都不足以修改 Local wrapper 允许集合。
+单用户与单小说交集 allowlist 只授权维护者做 canary，不足以更新通用生产 Skill：allowlist 外小说当前可能
+回落到 V1，而 V1 的 outcome/消息身份不是本契约。canary 必须使用维护者明确配置 userId/novelId 后的公共 Python
+CLI 调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary 通过并切到能覆盖该 Skill 全部目标的 V2 路由后，
+才按本文件更新 Production Skill。Local Skill 也只能在其固定本地运行副本、Core 配置以及该 Skill 可操作的全部
+用户/小说目标都保证 fresh 问答创建 V2 Run，并完成对应本地 canary 后开放；单一 allowlist canary 或代码存在都
+不足以修改 Local wrapper 允许集合。
 
-当前仓内发布 Workflow 在 streaming broker/sealed genesis 门禁处固定失败，`route=all` 也未开放，所以当前时点两份
-已安装 Skill 都必须继续拒绝 `answer_question`。任何一步失败都保持 route-off 或回滚兼容镜像，不用 SSH、数据库、
-内部 API 或自拼 HTTP 绕过公共 CLI。
+当前提交尚未部署，且 `route=all` 也未开放，所以当前时点两份已安装 Skill 都必须继续拒绝
+`answer_question`。任何一步失败都保持 route-off 或回滚兼容镜像，不用 SSH、数据库、内部 API 或自拼 HTTP
+绕过公共 CLI。

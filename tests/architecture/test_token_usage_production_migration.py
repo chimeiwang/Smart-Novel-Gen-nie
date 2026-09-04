@@ -181,8 +181,8 @@ def test_production_helper_keeps_password_out_of_argv_and_pins_artifacts() -> No
 def test_general_deploy_only_reads_completed_token_usage_migration_state() -> None:
     source = DEPLOY.read_text(encoding="utf-8")
 
-    assert 'migration_state="$(APP_DIR="$token_control" sh "$migration_helper" status)"' in source
-    assert 'unmigrated) echo "受保护 Durable Agent 发布禁止夹带 TokenUsage DDL"' in source
+    assert 'migration_state="$(sh "$migration_helper" status)"' in source
+    assert 'echo "普通部署不执行 TokenUsage DDL，请使用具名迁移流程"' in source
     assert 'partial)' in source
     for forbidden in (
         'migration_applied_by_deploy="1"',

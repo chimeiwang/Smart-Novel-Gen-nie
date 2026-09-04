@@ -3,6 +3,19 @@ set -u
 
 printf 'tag=%s|docker %s\n' "${INKFORGE_IMAGE_TAG:-}" "$*" >> "$FAKE_DOCKER_LOG"
 
+if [ "${FAKE_ASSERT_ROLLOUT_ENV_UNSET:-false}" = "true" ]; then
+  if [ "${DATABASE_URL+x}" = "x" ] \
+    || [ "${EXECUTION_REDIS_URL+x}" = "x" ] \
+    || [ "${DURABLE_AGENT_EXECUTION_SCHEMA_READY+x}" = "x" ] \
+    || [ "${DURABLE_AGENT_EXECUTION_ROUTE_MODE+x}" = "x" ] \
+    || [ "${DURABLE_AGENT_EXECUTION_USER_ALLOWLIST+x}" = "x" ] \
+    || [ "${DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST+x}" = "x" ] \
+    || [ "${V1_FRESH_AGENT_STARTS_ENABLED+x}" = "x" ]; then
+    printf '%s\n' '受控 Compose 环境仍被调用进程覆盖' >&2
+    exit 91
+  fi
+fi
+
 target_web_digest="${FAKE_TARGET_WEB_DIGEST:-sha256:1111111111111111111111111111111111111111111111111111111111111111}"
 target_core_digest="${FAKE_TARGET_CORE_DIGEST:-sha256:2222222222222222222222222222222222222222222222222222222222222222}"
 target_agent_digest="${FAKE_TARGET_AGENT_DIGEST:-sha256:3333333333333333333333333333333333333333333333333333333333333333}"

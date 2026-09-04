@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import yaml
@@ -9,6 +10,32 @@ CONTROL = ROOT / "tests" / "durable_agent_v2_e2e" / "control_app.py"
 AGENT_FACTORY = ROOT / "tests" / "durable_agent_v2_e2e" / "agent_app.py"
 PROVIDER = ROOT / "tests" / "durable_agent_v2_e2e" / "controlled_provider.py"
 RUNNER = ROOT / "tests" / "durable_agent_v2_e2e" / "run_e2e.py"
+AGENT_APP_RUNTIME = (
+    ROOT / "apps" / "agent-service" / "src" / "inkforge_agents" / "app.py"
+)
+AGENT_REPLAYER = (
+    ROOT
+    / "apps"
+    / "agent-service"
+    / "src"
+    / "inkforge_agents"
+    / "execution"
+    / "replayer.py"
+)
+JAVA_WORKFLOW_CONFIGURATION = (
+    ROOT
+    / "apps"
+    / "core-api-java"
+    / "src"
+    / "main"
+    / "java"
+    / "cn"
+    / "inkforge"
+    / "core"
+    / "workflows"
+    / "infrastructure"
+    / "WorkflowConfiguration.java"
+)
 
 
 def _document() -> dict[str, object]:
@@ -80,9 +107,10 @@ def test_e2e_only_core_and_control_publish_loopback_ports() -> None:
             assert ports == []
 
 
-def test_e2e_fresh_v2_uses_exact_allowlist_and_read_only_release_guard() -> None:
+def test_e2e_fresh_v2_uses_exact_allowlist_without_release_guard() -> None:
     core = _document()["services"]["core-api"]
     environment = core["environment"]
+    assert environment["DURABLE_AGENT_EXECUTION_SCHEMA_READY"] == "true"
     assert environment["DURABLE_AGENT_EXECUTION_ROUTE_MODE"] == (
         "${E2E_DURABLE_ROUTE_MODE:-off}"
     )
@@ -92,19 +120,11 @@ def test_e2e_fresh_v2_uses_exact_allowlist_and_read_only_release_guard() -> None
     assert environment["DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST"] == (
         "${E2E_DURABLE_NOVEL_ID:-bootstrap-disabled-novel}"
     )
-    assert environment["DURABLE_AGENT_RELEASE_GUARD_PATH"] == (
-        "/run/inkforge-release-guard/guard.json"
-    )
-    guard_mounts = [
-        value for value in core["volumes"] if "release-guard" in value
-    ]
-    assert guard_mounts == [
-        "${E2E_RELEASE_GUARD_DIR:?必须配置临时 release guard 目录}:"
-        "/run/inkforge-release-guard:ro"
-    ]
+    assert "DURABLE_AGENT_RELEASE_GUARD_PATH" not in environment
+    assert all("release-guard" not in value for value in core["volumes"])
     source = RUNNER.read_text(encoding="utf-8")
-    assert '"state": state' in source
-    assert '"executionManifestFingerprint"' in source
+    assert "E2E_RELEASE_GUARD_DIR" not in source
+    assert "_write_release_guard" not in source
     assert '"E2E_DURABLE_ROUTE_MODE": "allowlist"' in source
     assert source.index("acceptance.bootstrap()") < source.index(
         "stack.activate_durable_scope("
@@ -264,9 +284,45 @@ def test_agent_only_rebuild_has_source_hash_preflight_before_stack_start() -> No
     assert 'self.run(["build", "agent-service"]' in source
     assert '"--network",\n                "none"' in source
     assert '"execution/journal.py"' in source
+    assert '"execution/replayer.py"' in source
+    assert '"execution/service.py"' in source
     assert '"queue/repository.py"' in source
+    assert '"app.py"' in source
     assert source.index('report["images"] = stack.image_facts()') < source.index(
         "stack.start(build="
+    )
+
+
+def test_terminal_callback_recovery_lease_precedes_core_step_lease() -> None:
+    app_source = AGENT_APP_RUNTIME.read_text(encoding="utf-8")
+    replayer_source = AGENT_REPLAYER.read_text(encoding="utf-8")
+    core_source = JAVA_WORKFLOW_CONFIGURATION.read_text(encoding="utf-8")
+    callback_timeout = re.search(
+        r"core_http\s*=\s*httpx\.AsyncClient\(.*?"
+        r"timeout=httpx\.Timeout\((\d+)",
+        app_source,
+        re.DOTALL,
+    )
+    callback_claim_lease = re.search(
+        r"DEFAULT_TERMINAL_CALLBACK_CLAIM_LEASE\s*=\s*"
+        r"timedelta\(seconds=(\d+)\)",
+        replayer_source,
+    )
+    core_step_lease = re.search(
+        r"new JooqWorkflowDispatchRepository\(.*?"
+        r"Duration\.ofSeconds\((\d+)\),\s*"
+        r"settings\.agentMaxConcurrency\(\)",
+        core_source,
+        re.DOTALL,
+    )
+    assert callback_timeout is not None
+    assert callback_claim_lease is not None
+    assert core_step_lease is not None
+
+    assert (
+        int(callback_timeout.group(1))
+        < int(callback_claim_lease.group(1))
+        < int(core_step_lease.group(1))
     )
 
 
