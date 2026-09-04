@@ -329,6 +329,11 @@ observer 的两类批量查询还必须使用同一个具名超时配置：Postg
 不记录 SQL 绑定、用户正文或凭据。应用停机必须取消当前查询、关闭共享查询执行器并在 `5s` 内证明 observer worker、
 query worker 和活动查询全部归零；任一对象仍未退出必须以稳定错误明确失败停机，不得静默报告关闭成功。
 
+`Future.get()` 返回只证明 Future 终态已发布，不单独证明包装查询的 worker `finally` 已退出。正常返回和异常
+返回都必须在发布 Future 终态前，由查询 callable 自身关闭完成门并使活动查询计数归零；取消在任务进入
+callable 前竞态成功时，再由 Future 包装层关闭同一幂等门。observer 只能在该门已关闭后清除 `currentQuery`
+并启动下一轮；禁止因 Future 已可读但退出门尚未可见，把一次成功的快速查询误判为查询重叠。
+
 ### Evaluation
 
 新增 `WorkflowEvaluation`：

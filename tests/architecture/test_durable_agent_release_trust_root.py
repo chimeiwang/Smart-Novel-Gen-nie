@@ -9,7 +9,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +24,7 @@ SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import durable_agent_release_trust as trust_module  # noqa: E402
+import github_api_evidence as github_evidence_module  # noqa: E402
 from durable_agent_release_broker import (  # noqa: E402
     ORIGINAL_COMMAND,
     BrokerInvalid,
@@ -37,6 +38,7 @@ from durable_agent_release_trust import (  # noqa: E402
     GITHUB_ARTIFACT_NAMES,
     GITHUB_WORKFLOW_PATHS,
     RETIRED_SECRETS,
+    SSH_EVIDENCE_PAYLOAD_FILES,
     SSH_FORMAT,
     UPLOAD_FORCED_COMMAND,
     SshEvidence,
@@ -46,6 +48,7 @@ from durable_agent_release_trust import (  # noqa: E402
     build_bootstrap_state,
     build_ssh_payload,
     create_artifact,
+    normalize_downloaded_directory,
     validate_bootstrap_transition,
     verify_attestation,
     verify_receipt_chain,
@@ -124,6 +127,25 @@ def _secret_inventory(path: Path, names: tuple[str, ...]) -> Path:
     )
 
 
+def _organization_inventory(
+    path: Path,
+    names: tuple[str, ...],
+    *,
+    owner_type: str = "Organization",
+) -> Path:
+    return _write(
+        path,
+        _canonical(
+            {
+                "format": "inkforge-github-organization-secret-inventory/1",
+                "owner": {"login": "owner", "type": owner_type},
+                "secrets": [{"name": name} for name in names],
+                "total_count": len(names),
+            }
+        ),
+    )
+
+
 def _fixture(tmp_path: Path) -> Fixture:
     host_key, _ = _new_ssh_key(tmp_path / "host.pub")
     execution_key, _ = _new_ssh_key(tmp_path / "execution.pub")
@@ -145,7 +167,7 @@ def _fixture(tmp_path: Path) -> Fixture:
     repository_secrets = _secret_inventory(
         tmp_path / "repository-secrets.json", ("UNRELATED_REPOSITORY_SECRET",)
     )
-    organization_secrets = _secret_inventory(
+    organization_secrets = _organization_inventory(
         tmp_path / "organization-secrets.json", ("UNRELATED_ORG_SECRET",)
     )
     broker = tmp_path / "broker.py"
@@ -220,7 +242,13 @@ def _signed_artifact(
     return directory, digest
 
 
-def _verify_ssh(directory: Path, digest: str, fixture: Fixture) -> None:
+def _verify_ssh(
+    directory: Path,
+    digest: str,
+    fixture: Fixture,
+    *,
+    expected_known_hosts_file: Path | None = None,
+) -> None:
     verify_attestation(
         directory,
         digest,
@@ -233,6 +261,7 @@ def _verify_ssh(directory: Path, digest: str, fixture: Fixture) -> None:
         ssh_evidence=fixture.evidence,
         trusted_public_key=fixture.trusted_public_key,
         expected_key_id=KEY_ID,
+        expected_known_hosts_file=expected_known_hosts_file,
     )
 
 
@@ -260,6 +289,69 @@ def test_signed_ssh_attestation_is_canonical_and_cross_binds_all_evidence(
     assert keys["executionPublicKeySha256"] != keys["uploadPublicKeySha256"]
     assert keys["executionPublicKeySha256"] not in keys["retiredPublicKeySha256"]
     assert keys["uploadPublicKeySha256"] not in keys["retiredPublicKeySha256"]
+
+
+def test_known_hosts_secret_is_compared_inside_the_attestation_snapshot(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    directory, digest = _signed_artifact(tmp_path, fixture)
+    production_known_hosts = _write(
+        tmp_path / "production-known-hosts",
+        fixture.evidence.known_hosts.read_bytes(),
+    )
+    _verify_ssh(
+        directory,
+        digest,
+        fixture,
+        expected_known_hosts_file=production_known_hosts,
+    )
+
+    _write(production_known_hosts, "attacker.example ssh-ed25519 invalid\n")
+    with pytest.raises(TrustInvalid, match="production known_hosts secret"):
+        _verify_ssh(
+            directory,
+            digest,
+            fixture,
+            expected_known_hosts_file=production_known_hosts,
+        )
+
+
+def test_user_owner_requires_canonical_empty_organization_scope(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    user_inventory = _organization_inventory(
+        fixture.evidence.organization_secrets,
+        (),
+        owner_type="User",
+    )
+    user_evidence = replace(fixture.evidence, organization_secrets=user_inventory)
+    build_ssh_payload(
+        repository=REPOSITORY,
+        environment=ENVIRONMENT,
+        host=HOST,
+        port=PORT,
+        user=USER,
+        issued_at=ISSUED_AT,
+        expires_at=EXPIRES_AT,
+        evidence=user_evidence,
+    )
+
+    _organization_inventory(
+        user_inventory,
+        ("UNRELATED_ORG_SECRET",),
+        owner_type="User",
+    )
+    with pytest.raises(TrustInvalid, match="必须不存在"):
+        build_ssh_payload(
+            repository=REPOSITORY,
+            environment=ENVIRONMENT,
+            host=HOST,
+            port=PORT,
+            user=USER,
+            issued_at=ISSUED_AT,
+            expires_at=EXPIRES_AT,
+            evidence=user_evidence,
+        )
 
 
 @pytest.mark.parametrize(
@@ -299,7 +391,7 @@ def test_signed_ssh_attestation_is_canonical_and_cross_binds_all_evidence(
             "repository scope",
         ),
         (
-            lambda fixture: _secret_inventory(
+            lambda fixture: _organization_inventory(
                 fixture.evidence.organization_secrets,
                 (RETIRED_SECRETS[0],),
             ),
@@ -400,6 +492,36 @@ def test_evidence_reader_rejects_symlink_hardlink_and_read_time_drift(
         trust_module._read_regular(target, "drifting evidence")  # noqa: SLF001
 
 
+def test_github_api_reader_rejects_foreign_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _write(tmp_path / "github-api.json", b"{}\n")
+    real_fstat = os.fstat
+
+    def foreign_owner(descriptor: int) -> SimpleNamespace:
+        current = real_fstat(descriptor)
+        return SimpleNamespace(
+            st_ctime_ns=current.st_ctime_ns,
+            st_dev=current.st_dev,
+            st_gid=current.st_gid,
+            st_ino=current.st_ino,
+            st_mode=current.st_mode,
+            st_mtime_ns=current.st_mtime_ns,
+            st_nlink=current.st_nlink,
+            st_size=current.st_size,
+            st_uid=current.st_uid + 1,
+        )
+
+    monkeypatch.setattr(github_evidence_module.os, "fstat", foreign_owner)
+    with pytest.raises(TrustInvalid, match="owner 必须是当前 runner"):
+        github_evidence_module.read_regular(
+            target,
+            "GitHub API evidence",
+            error_type=TrustInvalid,
+        )
+
+
 def test_github_provenance_requires_exact_external_success_run_and_artifact(
     tmp_path: Path,
 ) -> None:
@@ -408,7 +530,7 @@ def test_github_provenance_requires_exact_external_success_run_and_artifact(
         tmp_path / "run.json",
         json.dumps(
             {
-                "conclusion": "success",
+                "conclusion": None,
                 "event": "workflow_dispatch",
                 "head_branch": "main",
                 "head_sha": "a" * 40,
@@ -416,7 +538,7 @@ def test_github_provenance_requires_exact_external_success_run_and_artifact(
                 "path": GITHUB_WORKFLOW_PATHS[SSH_FORMAT],
                 "repository": {"full_name": REPOSITORY},
                 "run_attempt": 1,
-                "status": "completed",
+                "status": "in_progress",
             },
             separators=(",", ":"),
         ),
@@ -430,6 +552,15 @@ def test_github_provenance_requires_exact_external_success_run_and_artifact(
     )
     directory = tmp_path / "github-attestation"
     digest = create_artifact(directory, document)
+    proof = document["proof"]
+    assert "runResponseSha256" not in proof
+    assert proof["runIdentity"]["runId"] == "123"
+    assert len(proof["runIdentitySha256"]) == 64
+
+    run_document = json.loads(run_path.read_text(encoding="utf-8"))
+    run_document["status"] = "completed"
+    run_document["conclusion"] = "success"
+    _write(run_path, json.dumps(run_document, separators=(",", ":")))
     verify_attestation(
         directory,
         digest,
@@ -443,8 +574,24 @@ def test_github_provenance_requires_exact_external_success_run_and_artifact(
         github_run_json=run_path,
     )
 
-    run_document = json.loads(run_path.read_text(encoding="utf-8"))
     run_document["conclusion"] = "failure"
+    _write(run_path, json.dumps(run_document, separators=(",", ":")))
+    with pytest.raises(TrustInvalid, match="provenance"):
+        verify_attestation(
+            directory,
+            digest,
+            expected_repository=REPOSITORY,
+            expected_environment=ENVIRONMENT,
+            expected_host=HOST,
+            expected_port=PORT,
+            expected_user=USER,
+            now=VERIFY_NOW,
+            ssh_evidence=fixture.evidence,
+            github_run_json=run_path,
+        )
+
+    run_document["conclusion"] = "success"
+    run_document["run_attempt"] = 2
     _write(run_path, json.dumps(run_document, separators=(",", ":")))
     with pytest.raises(TrustInvalid, match="provenance"):
         verify_attestation(
@@ -811,12 +958,49 @@ def test_broker_accepts_only_canonical_fixed_role_operation_and_never_shells(
         )
 
 
-def test_new_trust_and_broker_are_frozen_into_control_bundle_but_not_workflow() -> None:
+def test_download_normalizer_preserves_bytes_and_rejects_extra_or_symlink(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "downloaded-evidence"
+    directory.mkdir(mode=0o755)
+    before: dict[str, str] = {}
+    for name in (*SSH_EVIDENCE_PAYLOAD_FILES, "SHA256SUMS"):
+        path = _write(directory / name, f"payload:{name}\n", mode=0o644)
+        before[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    normalize_downloaded_directory(directory.resolve(), "ssh-evidence")
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    for name, digest in before.items():
+        path = directory / name
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+
+    extra = directory / "attacker.sh"
+    _write(extra, "id\n")
+    with pytest.raises(TrustInvalid, match="文件白名单"):
+        normalize_downloaded_directory(directory.resolve(), "ssh-evidence")
+    extra.unlink()
+
+    target = tmp_path / "outside"
+    _write(target, "outside\n", mode=0o644)
+    victim = directory / "authorized_keys"
+    victim.unlink()
+    victim.symlink_to(target)
+    with pytest.raises(TrustInvalid, match="安全打开"):
+        normalize_downloaded_directory(directory.resolve(), "ssh-evidence")
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+
+def test_new_trust_is_in_pre_private_key_workflow_but_broker_stays_offline() -> None:
     payload_files = set(PAYLOAD_FILES)
     assert "scripts/durable_agent_release_trust.py" in payload_files
     assert "scripts/durable_agent_release_broker.py" in payload_files
     workflow = (ROOT / ".github/workflows/durable-agent-v2-release.yml").read_text(encoding="utf-8")
-    assert "durable_agent_release_trust.py" not in workflow
+    production = workflow.split("  production:", 1)[1]
+    assert "durable_agent_release_trust.py verify" in production
+    assert production.index("durable_agent_release_trust.py verify") < production.index(
+        "streaming-broker-and-sealed-genesis-not-implemented"
+    )
+    assert "durable_agent_release_broker.py" not in production
     assert "inkforge-release-broker/1" not in workflow
 
 

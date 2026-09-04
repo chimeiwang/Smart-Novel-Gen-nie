@@ -7,6 +7,7 @@ import runpy
 import shutil
 import stat
 import subprocess
+import sys
 import textwrap
 import time
 from datetime import UTC, datetime
@@ -31,6 +32,8 @@ RECEIPT_HELPER = ROOT / "scripts/durable_agent_v2_release_receipt.py"
 GUARD_HELPER = ROOT / "scripts/durable_agent_release_guard.py"
 BOUNDARY_HELPER = ROOT / "scripts/durable_agent_release_boundary.py"
 DEVELOPMENT_HELPER = ROOT / "scripts/durable_agent_v2_development_evidence.py"
+DEVELOPMENT_CONSUMER = ROOT / "scripts/durable_agent_v2_development_consumer.py"
+DEVELOPMENT_PRODUCER = ROOT / "scripts/durable_agent_v2_development_producer.py"
 ENVIRONMENT_HELPER = ROOT / "scripts/verify_github_environment_policy.py"
 PROVENANCE_HELPER = ROOT / "scripts/verify_github_workflow_run_provenance.py"
 JOINT_DRAIN_HELPER = ROOT / "scripts/durable_agent_joint_drain.py"
@@ -148,36 +151,108 @@ def _boundary_owner_arguments(boundary: str) -> list[str]:
     ]
 
 
-def _write_valid_release_ssh_policy(tmp_path: Path) -> tuple[Path, Path]:
-    secrets_path = tmp_path / "secrets.json"
-    variables_path = tmp_path / "variables.json"
-    secrets_path.write_text(
+def _write_secret_inventory(path: Path, names: list[str]) -> None:
+    path.write_text(
         json.dumps(
             {
-                "total_count": 1,
-                "secrets": [{"name": "DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY"}],
+                "total_count": len(names),
+                "secrets": [{"name": name} for name in names],
             }
         ),
         encoding="utf-8",
     )
-    names = (
-        "DURABLE_AGENT_V2_RELEASE_OLD_KEY_REVOCATION_EVIDENCE_SHA256",
-        "DURABLE_AGENT_V2_RELEASE_FORCED_COMMAND_EVIDENCE_SHA256",
-        "DURABLE_AGENT_V2_RELEASE_MINIMUM_PERMISSION_EVIDENCE_SHA256",
+
+
+def _write_organization_inventory(
+    path: Path,
+    names: list[str],
+    *,
+    owner_type: str = "Organization",
+) -> None:
+    document = {
+        "format": "inkforge-github-organization-secret-inventory/1",
+        "owner": {"login": "owner", "type": owner_type},
+        "secrets": [{"name": name} for name in names],
+        "total_count": len(names),
+    }
+    path.write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_api_pages(
+    path: Path,
+    collection_key: str,
+    pages: list[list[dict[str, Any]]],
+    *,
+    totals: list[int] | None = None,
+) -> None:
+    total = sum(len(page) for page in pages)
+    if totals is None:
+        totals = [total] * len(pages)
+    path.write_text(
+        json.dumps(
+            [
+                {"total_count": page_total, collection_key: page}
+                for page_total, page in zip(totals, pages, strict=True)
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_valid_release_ssh_policy(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, Path, Path]:
+    repository_path = tmp_path / "repository.json"
+    secrets_path = tmp_path / "environment-secrets.json"
+    repository_secrets_path = tmp_path / "repository-secrets.json"
+    organization_secrets_path = tmp_path / "organization-secrets.json"
+    variables_path = tmp_path / "variables.json"
+    repository_path.write_text(
+        json.dumps(
+            {
+                "full_name": "owner/repo",
+                "owner": {"login": "owner", "type": "Organization"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_secret_inventory(
+        secrets_path,
+        [
+            "DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY",
+            "DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY",
+            "DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS",
+            "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN",
+        ],
+    )
+    _write_secret_inventory(repository_secrets_path, ["UNRELATED_REPOSITORY_SECRET"])
+    _write_organization_inventory(organization_secrets_path, ["UNRELATED_ORG_SECRET"])
+    variables = (
+        ("DURABLE_AGENT_V2_RELEASE_SERVER_HOST", "prod.example"),
+        ("DURABLE_AGENT_V2_RELEASE_SERVER_PORT", "22"),
+        ("DURABLE_AGENT_V2_RELEASE_SERVER_USER", "deploy"),
     )
     variables_path.write_text(
         json.dumps(
             {
                 "total_count": 3,
                 "variables": [
-                    {"name": name, "value": str(index) * 64}
-                    for index, name in enumerate(names, 1)
+                    {"name": name, "value": value} for name, value in variables
                 ],
             }
         ),
         encoding="utf-8",
     )
-    return secrets_path, variables_path
+    return (
+        repository_path,
+        secrets_path,
+        repository_secrets_path,
+        organization_secrets_path,
+        variables_path,
+    )
 
 
 def _copy_repository_facts(root: Path) -> None:
@@ -316,95 +391,240 @@ def _create_manifest(
     )
 
 
-def _write_development_evidence(
-    directory: Path,
-    *,
-    provider_status: str,
-    reports_directory: Path | None = None,
-) -> str:
-    directory.mkdir(mode=0o700)
-    pending = provider_status == "pending"
-    report_names = (
-        "fault-injection-report.json",
-        "idempotent-forward-report.json",
-        "live-contract-evidence.json",
-        "migration-backup-evidence.json",
-        "provider-canary-report.json",
-        "resource-constrained-report.json",
-        "rollback-rehearsal-report.json",
+def _write_v2_consumer_fixture(
+    tmp_path: Path,
+) -> tuple[list[str], Path, Path]:
+    fixtures = runpy.run_path(
+        str(ROOT / "tests/architecture/test_durable_agent_v2_development_evidence_v2.py")
     )
-    report_hashes: dict[str, str] = {}
-    if reports_directory is not None:
-        reports_directory.mkdir(mode=0o700)
-        checksum_lines: list[str] = []
-        for name in report_names:
-            path = reports_directory / name
-            payload = _canonical({"format": "test-report/1", "name": name})
-            path.write_bytes(payload)
-            path.chmod(0o600)
-            report_hashes[name] = hashlib.sha256(payload).hexdigest()
-            checksum_lines.append(f"{report_hashes[name]}  {name}\n")
-        checksums = reports_directory / "SHA256SUMS"
-        checksums.write_text("".join(checksum_lines), encoding="ascii")
-        checksums.chmod(0o600)
+    fixture_globals = fixtures["_qualification_reports"].__globals__
+    repository_facts = runpy.run_path(str(MANIFEST_HELPER))["repository_facts"](ROOT)
+    fixture_globals.update(
+        {
+            "FORWARD_SHA": repository_facts["forwardSqlSha256"],
+            "PRE_CONTRACT": repository_facts["preContractFingerprint"],
+            "POST_CONTRACT": repository_facts["postContractFingerprint"],
+            "ROLLBACK_SHA": repository_facts["rollbackSqlSha256"],
+        }
+    )
+    qualification_reports = tmp_path / "qualification-reports"
+    qualification = tmp_path / "qualification"
+    fixtures["_report_source"](
+        qualification_reports,
+        fixtures["_qualification_reports"](),
+        fixtures["QUALIFICATION_FILES"],
+    )
+    qualification_result = fixtures["_run"](
+        fixtures["_qualification_create_args"](
+            qualification_reports,
+            qualification,
+        )
+    )
+    qualification_sha = fixtures["_created_digest"](qualification_result)
 
-    def report_hash(name: str, fallback: str) -> str:
-        return report_hashes.get(name, fallback * 64)
+    candidate_reports = tmp_path / "candidate-reports"
+    candidate = tmp_path / "candidate"
+    fixtures["_report_source"](
+        candidate_reports,
+        fixtures["_candidate_reports"](run_id="200", run_attempt="1"),
+        fixtures["CANDIDATE_FILES"],
+    )
+    candidate_result = fixtures["_run"](
+        fixtures["_candidate_create_args"](
+            candidate_reports,
+            candidate,
+            qualification,
+            qualification_sha,
+            run_id="200",
+            run_attempt="1",
+        )
+    )
+    candidate_sha = fixtures["_created_digest"](candidate_result)
 
-    document = {
-        "canaryScopeSha256": _scope_fingerprint(),
-        "composeValidation": {
-            "faultInjectionReportSha256": report_hash(
-                "fault-injection-report.json", "8"
-            ),
-            "resourceConstrainedReportSha256": report_hash(
-                "resource-constrained-report.json", "9"
-            ),
-        },
-        "developmentMigration": {
-            "backupEvidenceSha256": report_hash(
-                "migration-backup-evidence.json", "a"
-            ),
-            "database": "novelwriterdev",
-            "idempotentForwardReportSha256": report_hash(
-                "idempotent-forward-report.json", "b"
-            ),
-            "liveContractEvidenceSha256": report_hash(
-                "live-contract-evidence.json", "c"
-            ),
-            "rollbackRehearsalReportSha256": report_hash(
-                "rollback-rehearsal-report.json", "d"
-            ),
-        },
-        "executionManifestFingerprint": _source_fingerprint(),
-        "format": "inkforge-durable-agent-v2-development-evidence/1",
-        "images": {
-            "agent": TARGET_AGENT,
-            "core": TARGET_CORE,
-            "web": TARGET_WEB,
-        },
-        "producerRunId": "12345",
-        "providerCanary": {
-            "mode": "unavailable" if pending else "real",
-            "reportSha256": (
-                None if pending else report_hash("provider-canary-report.json", "e")
-            ),
-            "status": provider_status,
-        },
-        "targetReleaseCommit": WORKFLOW_COMMIT,
-    }
-    payload = _canonical(document)
-    evidence = directory / "development-evidence.json"
-    evidence.write_bytes(payload)
-    evidence.chmod(0o600)
-    digest = hashlib.sha256(payload).hexdigest()
-    checksums = directory / "SHA256SUMS"
-    checksums.write_text(
-        f"{digest}  development-evidence.json\n",
+    scripts_path = str(ROOT / "scripts")
+    if scripts_path not in sys.path:
+        sys.path.insert(0, scripts_path)
+    producer_namespace = runpy.run_path(str(DEVELOPMENT_PRODUCER))
+    tree_result = _run(["git", "ls-tree", "-rz", "--full-tree", "HEAD"])
+    assert tree_result.returncode == 0, tree_result.stderr
+    source_tree_manifest = tmp_path / "source-tree.manifest"
+    source_tree_manifest.write_bytes(
+        f"target {fixture_globals['TARGET_COMMIT']}\0".encode("ascii")
+        + tree_result.stdout.encode("utf-8")
+    )
+    source_tree_manifest.chmod(0o600)
+    source_tree_sha = producer_namespace["source_tree_sha256"](
+        source_tree_manifest,
+        target_commit=fixture_globals["TARGET_COMMIT"],
+    )
+    build_definition_sha = producer_namespace["build_definition_sha256"](ROOT)
+
+    images = tmp_path / "images"
+    image_result = _run(
+        [
+            "python3",
+            str(DEVELOPMENT_PRODUCER),
+            "create-images",
+            "--repository",
+            fixture_globals["REPOSITORY"],
+            "--target-release-commit",
+            fixture_globals["TARGET_COMMIT"],
+            "--run-id",
+            "200",
+            "--run-attempt",
+            "1",
+            "--output-dir",
+            str(images),
+            "--web-digest",
+            fixture_globals["WEB_DIGEST"],
+            "--core-digest",
+            fixture_globals["CORE_DIGEST"],
+            "--agent-digest",
+            fixture_globals["AGENT_DIGEST"],
+            "--execution-manifest-fingerprint",
+            fixture_globals["EXECUTION_FINGERPRINT"],
+            "--repository-root",
+            str(ROOT),
+            "--source-tree-manifest",
+            str(source_tree_manifest),
+            "--expected-source-tree-sha256",
+            source_tree_sha,
+            "--expected-build-definition-sha256",
+            build_definition_sha,
+        ]
+    )
+    assert image_result.returncode == 0, image_result.stderr
+    image_sha = image_result.stdout.strip().rsplit(":", 1)[1]
+
+    candidate_run = tmp_path / "candidate-run.json"
+    qualification_run = tmp_path / "qualification-run.json"
+    for path, run_id, head_sha in (
+        (candidate_run, 200, fixture_globals["TARGET_COMMIT"]),
+        (qualification_run, 100, fixture_globals["MIGRATION_COMMIT"]),
+    ):
+        path.write_bytes(
+            _canonical(
+                {
+                    "conclusion": "success",
+                    "event": "workflow_dispatch",
+                    "head_branch": "main",
+                    "head_sha": head_sha,
+                    "id": run_id,
+                    "path": ".github/workflows/durable-agent-v2-development-evidence.yml",
+                    "repository": {"full_name": fixture_globals["REPOSITORY"]},
+                    "run_attempt": 1,
+                    "status": "completed",
+                }
+            )
+        )
+        path.chmod(0o600)
+
+    snapshot = tmp_path / "target-images.current"
+    snapshot.write_text(
+        "".join(
+            (
+                f"targetWebDigest={fixture_globals['WEB_DIGEST']}\n",
+                f"targetCoreDigest={fixture_globals['CORE_DIGEST']}\n",
+                f"targetAgentDigest={fixture_globals['AGENT_DIGEST']}\n",
+                "targetManifestFingerprint="
+                f"{fixture_globals['EXECUTION_FINGERPRINT']}\n",
+            )
+        ),
         encoding="ascii",
     )
-    checksums.chmod(0o600)
-    return digest
+    snapshot.chmod(0o600)
+
+    variables = {
+        "DURABLE_AGENT_V2_DEVELOPMENT_BUILD_DEFINITION_SHA256": build_definition_sha,
+        "DURABLE_AGENT_V2_DEVELOPMENT_CANARY_SCENARIO_FINGERPRINT": fixture_globals[
+            "CANARY_SCENARIO"
+        ],
+        "DURABLE_AGENT_V2_DEVELOPMENT_DEVELOPMENT_SCOPE_SHA256": fixture_globals[
+            "DEVELOPMENT_SCOPE"
+        ],
+        "DURABLE_AGENT_V2_DEVELOPMENT_EXECUTION_MANIFEST_FINGERPRINT": fixture_globals[
+            "EXECUTION_FINGERPRINT"
+        ],
+        "DURABLE_AGENT_V2_DEVELOPMENT_MIGRATION_QUALIFICATION_SHA256": (
+            qualification_sha
+        ),
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_IDENTITY_SHA256": fixture_globals[
+            "PROVIDER_IDENTITY"
+        ],
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_MAX_COMPLETION_TOKENS": "100",
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_MAX_COST_MICROS": "2000",
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_MAX_PROMPT_TOKENS": "200",
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_MAX_REASONING_TOKENS": "40",
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_MAX_TOTAL_TOKENS": "300",
+        "DURABLE_AGENT_V2_DEVELOPMENT_PROVIDER_POLICY_SHA256": fixture_globals[
+            "PROVIDER_POLICY_SHA"
+        ],
+        "DURABLE_AGENT_V2_DEVELOPMENT_PRODUCER_POLICY_VERSION": (
+            "inkforge-durable-agent-v2-development-producer-policy/1"
+        ),
+        "DURABLE_AGENT_V2_DEVELOPMENT_RESOURCE_HOST_IDENTITY_SHA256": fixture_globals[
+            "RESOURCE_HOST_IDENTITY"
+        ],
+        "DURABLE_AGENT_V2_DEVELOPMENT_RESOURCE_POLICY_SHA256": fixture_globals[
+            "RESOURCE_POLICY_SHA"
+        ],
+    }
+    variables_path = tmp_path / "variables.json"
+    variables_path.write_bytes(
+        _canonical(
+            {
+                "total_count": len(variables),
+                "variables": [
+                    {"name": name, "value": value}
+                    for name, value in sorted(variables.items())
+                ],
+            }
+        )
+    )
+    variables_path.chmod(0o600)
+
+    arguments = [
+        "python3",
+        str(DEVELOPMENT_CONSUMER),
+        "--candidate-dir",
+        str(candidate),
+        "--candidate-run-json",
+        str(candidate_run),
+        "--candidate-run-id",
+        "200",
+        "--candidate-run-attempt",
+        "1",
+        "--qualification-dir",
+        str(qualification),
+        "--qualification-run-json",
+        str(qualification_run),
+        "--qualification-run-id",
+        "100",
+        "--qualification-run-attempt",
+        "1",
+        "--qualification-source-root",
+        str(ROOT),
+        "--qualification-source-commit",
+        fixture_globals["MIGRATION_COMMIT"],
+        "--images-dir",
+        str(images),
+        "--target-images-snapshot",
+        str(snapshot),
+        "--repository-root",
+        str(ROOT),
+        "--source-tree-manifest",
+        str(source_tree_manifest),
+        "--variables-json",
+        str(variables_path),
+        "--expected-repository",
+        fixture_globals["REPOSITORY"],
+        "--expected-target-commit",
+        fixture_globals["TARGET_COMMIT"],
+        "--trusted-now",
+        fixture_globals["NOW"],
+    ]
+    assert candidate_sha != image_sha
+    return arguments, candidate, variables_path
 
 
 def test_build_keeps_ci_but_has_no_main_auto_deploy_and_all_production_groups_match() -> None:
@@ -446,8 +666,11 @@ def test_trusted_context_guard_is_before_checkout_and_rejects_malicious_ref(
             "GITHUB_OUTPUT": str(output),
             "INPUT_WORKFLOW_COMMIT": WORKFLOW_COMMIT,
             "RELEASE_ACTION": "route_off_release",
-            "DEVELOPMENT_EVIDENCE_RUN_ID": "123",
-            "DEVELOPMENT_EVIDENCE_SHA256": DEVELOPMENT_SHA,
+            "DEVELOPMENT_CANDIDATE_RUN_ID": "123",
+            "DEVELOPMENT_CANDIDATE_RUN_ATTEMPT": "1",
+            "DEVELOPMENT_QUALIFICATION_RUN_ID": "122",
+            "DEVELOPMENT_QUALIFICATION_RUN_ATTEMPT": "1",
+            "DEVELOPMENT_QUALIFICATION_SOURCE_COMMIT": "b" * 40,
             "RELEASE_MANIFEST_RUN_ID": "",
             "RELEASE_MANIFEST_SHA256": "",
             "CANARY_USER_ID": CANARY_USER,
@@ -461,68 +684,271 @@ def test_trusted_context_guard_is_before_checkout_and_rejects_malicious_ref(
     assert not output.exists()
 
 
-def test_workflow_separates_development_evidence_from_production_and_fails_before_ssh(
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("SSH_ATTESTATION_RUN_ID", ""),
+        ("SSH_ATTESTATION_RUN_ATTEMPT", "0"),
+        ("SSH_ATTESTATION_SHA256", "A" * 64),
+        ("BOOTSTRAP_ATTESTATION_RUN_ID", "1x"),
+        ("BOOTSTRAP_ATTESTATION_RUN_ATTEMPT", ""),
+        ("BOOTSTRAP_ATTESTATION_SHA256", "b" * 63),
+    ],
+)
+def test_trusted_context_guard_rejects_missing_or_malformed_attestation_identity(
+    tmp_path: Path,
+    name: str,
+    value: str,
+) -> None:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    guard = workflow["jobs"]["source"]["steps"][0]["run"]
+    base = os.environ.copy()
+    base.update(
+        {
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_SHA": WORKFLOW_COMMIT,
+            "GITHUB_OUTPUT": str(tmp_path / "output"),
+            "INPUT_WORKFLOW_COMMIT": WORKFLOW_COMMIT,
+            "RELEASE_ACTION": "route_off_release",
+            "SSH_ATTESTATION_RUN_ID": "101",
+            "SSH_ATTESTATION_RUN_ATTEMPT": "2",
+            "SSH_ATTESTATION_SHA256": "1" * 64,
+            "BOOTSTRAP_ATTESTATION_RUN_ID": "202",
+            "BOOTSTRAP_ATTESTATION_RUN_ATTEMPT": "3",
+            "BOOTSTRAP_ATTESTATION_SHA256": "2" * 64,
+            "DEVELOPMENT_CANDIDATE_RUN_ID": "303",
+            "DEVELOPMENT_CANDIDATE_RUN_ATTEMPT": "1",
+            "DEVELOPMENT_QUALIFICATION_RUN_ID": "302",
+            "DEVELOPMENT_QUALIFICATION_RUN_ATTEMPT": "1",
+            "DEVELOPMENT_QUALIFICATION_SOURCE_COMMIT": "b" * 40,
+            "RELEASE_MANIFEST_RUN_ID": "",
+            "RELEASE_MANIFEST_SHA256": "",
+            "CANARY_USER_ID": CANARY_USER,
+            "CANARY_NOVEL_ID": CANARY_NOVEL,
+            "FAILED_LOCK_ID": "",
+            "FAILED_LOCK_CLEANUP_CONFIRM": "",
+            "FAILED_LOCK_OWNER_RUN_ID": "",
+            "FAILED_LOCK_OWNER_RUN_ATTEMPT": "",
+            "FAILED_LOCK_OWNER_ACTION": "",
+            "FAILED_LOCK_OWNER_WORKFLOW_COMMIT": "",
+            "FAILED_LOCK_OWNER_TARGET_COMMIT": "",
+            "FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256": "",
+        }
+    )
+    valid = _run(["bash", "-c", guard], env=base)
+    assert valid.returncode == 0, valid.stderr
+    attacked = dict(base)
+    attacked[name] = value
+    attacked["GITHUB_OUTPUT"] = str(tmp_path / "attacked-output")
+    rejected = _run(["bash", "-c", guard], env=attacked)
+    assert rejected.returncode != 0
+    assert not Path(attacked["GITHUB_OUTPUT"]).exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("DEVELOPMENT_CANDIDATE_RUN_ATTEMPT", "2"),
+        ("DEVELOPMENT_CANDIDATE_RUN_ATTEMPT", "01"),
+        ("DEVELOPMENT_QUALIFICATION_RUN_ATTEMPT", ""),
+        ("DEVELOPMENT_QUALIFICATION_RUN_ID", "0"),
+        ("DEVELOPMENT_QUALIFICATION_SOURCE_COMMIT", "A" * 40),
+    ],
+)
+def test_trusted_context_guard_binds_v2_producer_attempts_before_checkout(
+    tmp_path: Path,
+    name: str,
+    value: str,
+) -> None:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    guard = workflow["jobs"]["source"]["steps"][0]["run"]
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_SHA": WORKFLOW_COMMIT,
+            "GITHUB_OUTPUT": str(tmp_path / "output"),
+            "INPUT_WORKFLOW_COMMIT": WORKFLOW_COMMIT,
+            "RELEASE_ACTION": "route_off_release",
+            "SSH_ATTESTATION_RUN_ID": "101",
+            "SSH_ATTESTATION_RUN_ATTEMPT": "1",
+            "SSH_ATTESTATION_SHA256": "1" * 64,
+            "BOOTSTRAP_ATTESTATION_RUN_ID": "202",
+            "BOOTSTRAP_ATTESTATION_RUN_ATTEMPT": "1",
+            "BOOTSTRAP_ATTESTATION_SHA256": "2" * 64,
+            "DEVELOPMENT_CANDIDATE_RUN_ID": "303",
+            "DEVELOPMENT_CANDIDATE_RUN_ATTEMPT": "1",
+            "DEVELOPMENT_QUALIFICATION_RUN_ID": "302",
+            "DEVELOPMENT_QUALIFICATION_RUN_ATTEMPT": "1",
+            "DEVELOPMENT_QUALIFICATION_SOURCE_COMMIT": "b" * 40,
+            "RELEASE_MANIFEST_RUN_ID": "",
+            "RELEASE_MANIFEST_SHA256": "",
+            "CANARY_USER_ID": CANARY_USER,
+            "CANARY_NOVEL_ID": CANARY_NOVEL,
+            "FAILED_LOCK_ID": "",
+            "FAILED_LOCK_CLEANUP_CONFIRM": "",
+            "FAILED_LOCK_OWNER_RUN_ID": "",
+            "FAILED_LOCK_OWNER_RUN_ATTEMPT": "",
+            "FAILED_LOCK_OWNER_ACTION": "",
+            "FAILED_LOCK_OWNER_WORKFLOW_COMMIT": "",
+            "FAILED_LOCK_OWNER_TARGET_COMMIT": "",
+            "FAILED_LOCK_OWNER_CONTROL_BUNDLE_SHA256": "",
+        }
+    )
+    valid = _run(["bash", "-c", guard], env=environment)
+    assert valid.returncode == 0, valid.stderr
+    environment[name] = value
+    environment["GITHUB_OUTPUT"] = str(tmp_path / "attacked-output")
+    rejected = _run(["bash", "-c", guard], env=environment)
+    assert rejected.returncode != 0
+    assert not Path(environment["GITHUB_OUTPUT"]).exists()
+
+
+def test_workflow_keeps_source_secretless_and_production_fails_before_execution(
     tmp_path: Path,
 ) -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
     workflow = yaml.safe_load(source)
+    source_job = source.split("  source:", 1)[1].split("  candidate_validation:", 1)[0]
     development = workflow["jobs"]["development_evidence"]
     production = workflow["jobs"]["production"]
+    production_source = source.split("  production:", maxsplit=1)[1]
 
     assert development["environment"] == {"name": "development"}
     assert "development_evidence" in production["needs"]
     assert "needs.development_evidence.result == 'success'" in production["if"]
     assert production["environment"] == {"name": "production"}
-    production_source = source.split("  production:", maxsplit=1)[1]
-    assert production_source.index("verify-production") < production_source.index(
-        "准备严格 SSH（所有证据复验之后）"
-    )
-    assert "开发库 route-off 迁移" not in production_source
-    assert "release-database novelwriterdev" not in production_source
-    assert "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN" in source
-    assert "GH_TOKEN:" in source
-    assert "Authorization: Bearer" not in source
-    assert "verify_github_workflow_run_provenance.py" in source
-    assert "durable-agent-v2-development-reports" in source
-    assert '--reports-dir "$reports_dir"' in source
+    assert "secrets." not in source_job
+    assert "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN" not in source_job
+    assert "download-artifact" not in source_job
+    assert "durable_agent_release_trust.py" not in source_job
 
-    producer = yaml.safe_load(DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8"))
+    api_collection = production_source.index(
+        "production approval 后只采集外部 GitHub API 事实"
+    )
+    known_hosts_gate = production_source.index(
+        "固定写入 production known_hosts secret"
+    )
+    semantic_gate = production_source.index(
+        "无 secret 规范化并复验全部 production 信任事实"
+    )
+    fixed_gate = production_source.index(
+        "sealed genesis 与真正流式双角色 broker 未接线"
+    )
+    assert api_collection < known_hosts_gate < semantic_gate < fixed_gate
+    assert "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN" in production_source
+    assert "verify_github_workflow_run_provenance.py" in production_source
+    assert "durable_agent_release_trust.py verify" in production_source
+    assert '--expected-known-hosts-file "$trust_root/production-known-hosts"' in production_source
+    for artifact in (
+        "durable-agent-v2-candidate-evidence",
+        "durable-agent-v2-development-images",
+        "durable-agent-v2-migration-qualification",
+        "durable-agent-v2-target-images",
+    ):
+        assert artifact in source
+    assert "durable_agent_v2_development_consumer.py" in source
+    assert "verify-production" not in source
+    assert "durable-agent-v2-development-reports" not in source
+    assert "development-evidence.json" not in source
+
+    development_api = next(
+        step
+        for step in development["steps"]
+        if step.get("name")
+        == "只采集 development environment 与两个 producer 的外部 GitHub API 事实"
+    )
+    assert str(development_api["env"]["GH_TOKEN"]).endswith(
+        "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN }}"
+    )
+    assert "scripts/" not in development_api["run"]
+    assert "python" not in development_api["run"]
+    assert "actions/runs/$CANDIDATE_RUN_ID" in development_api["run"]
+    assert "actions/runs/$QUALIFICATION_RUN_ID" in development_api["run"]
+    semantic = next(
+        step
+        for step in development["steps"]
+        if step.get("name")
+        == "复验实际镜像与 v2 qualification/candidate 全部语义"
+    )
+    assert "secrets." not in str(semantic.get("env", {}))
+    for binding in (
+        '--candidate-run-attempt "$CANDIDATE_RUN_ATTEMPT"',
+        '--qualification-run-attempt "$QUALIFICATION_RUN_ATTEMPT"',
+        '--qualification-source-commit "$QUALIFICATION_SOURCE_COMMIT"',
+        '--target-images-snapshot "$images_dir/target-images.current"',
+    ):
+        assert binding in semantic["run"]
+
+    api_step = next(
+        step
+        for step in production["steps"]
+        if step.get("name") == "production approval 后只采集外部 GitHub API 事实"
+    )
+    audit_binding = str(api_step["env"]["GH_TOKEN"])
+    assert audit_binding.startswith("${{ secrets.")
+    assert audit_binding.endswith("GH_ENVIRONMENT_POLICY_AUDIT_TOKEN }}")
+    assert "scripts/" not in api_step["run"]
+    assert "python" not in api_step["run"]
+    assert "--paginate --slurp" in api_step["run"]
+    assert '"repos/$GITHUB_REPOSITORY"' in api_step["run"]
+    assert 'case "$owner_type" in' in api_step["run"]
+    semantic_step = next(
+        step
+        for step in production["steps"]
+        if step.get("name") == "无 secret 规范化并复验全部 production 信任事实"
+    )
+    assert "GH_TOKEN" not in semantic_step.get("env", {})
+    assert all(
+        "secrets." not in str(value)
+        for value in semantic_step.get("env", {}).values()
+    )
+
+    forbidden = (
+        "secrets.DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY",
+        "secrets.DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY",
+        "secrets.DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY",
+        "secrets.SERVER_SSH_KEY",
+        "ssh -",
+        "scp ",
+        "docker compose",
+        "release-database",
+        "begin-snapshot",
+        "deploy-production.sh",
+    )
+    for value in forbidden:
+        assert value not in production_source
+
     producer_source = DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8")
     assert "actions/upload-artifact" not in producer_source
     assert "real-provider-identity-not-automated" in producer_source
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    ssh_counter = tmp_path / "ssh-counter"
-    fake_ssh = fake_bin / "ssh"
-    fake_ssh.write_text(
-        "#!/bin/sh\nprintf x >> \"$SSH_COUNTER\"\n",
-        encoding="utf-8",
-    )
-    fake_ssh.chmod(0o755)
+    counter = tmp_path / "external-counter"
+    for command in ("ssh", "scp", "docker", "psql"):
+        fake = fake_bin / command
+        fake.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$0" >> "$EXTERNAL_COUNTER"\n',
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
     environment = os.environ.copy()
     environment.update(
         {
             "PATH": f"{fake_bin}:{environment['PATH']}",
-            "SSH_COUNTER": str(ssh_counter),
-            "GITHUB_EVENT_NAME": "workflow_dispatch",
-            "GITHUB_REF": "refs/heads/main",
-            "GITHUB_SHA": WORKFLOW_COMMIT,
-            "TARGET_RELEASE_COMMIT": WORKFLOW_COMMIT,
+            "EXTERNAL_COUNTER": str(counter),
         }
     )
-    result: subprocess.CompletedProcess[str] | None = None
-    for step in producer["jobs"]["development_evidence"]["steps"]:
-        if "run" not in step:
-            continue
-        result = _run(["bash", "-c", step["run"]], env=environment)
-        if result.returncode != 0:
-            break
-    assert result is not None and result.returncode != 0
-    assert not ssh_counter.exists()
+    fixed = _run(["bash", "-c", production["steps"][-1]["run"]], env=environment)
+    assert fixed.returncode != 0
+    assert "streaming-broker-and-sealed-genesis-not-implemented" in fixed.stderr
+    assert not counter.exists()
 
 
-def test_development_run_provenance_rejects_wrong_workflow_or_commit(
+def test_run_provenance_rejects_wrong_id_attempt_workflow_or_commit(
     tmp_path: Path,
 ) -> None:
     run_path = tmp_path / "run.json"
@@ -535,6 +961,7 @@ def test_development_run_provenance_rejects_wrong_workflow_or_commit(
         "status": "completed",
         "conclusion": "success",
         "repository": {"full_name": "owner/repo"},
+        "run_attempt": 1,
     }
     run_path.write_text(json.dumps(document), encoding="utf-8")
     arguments = [
@@ -546,6 +973,8 @@ def test_development_run_provenance_rejects_wrong_workflow_or_commit(
         "12345",
         "--expected-head-sha",
         WORKFLOW_COMMIT,
+        "--expected-run-attempt",
+        "1",
         "--expected-repository",
         "owner/repo",
         "--expected-workflow-path",
@@ -554,11 +983,20 @@ def test_development_run_provenance_rejects_wrong_workflow_or_commit(
     valid = _run(arguments)
     assert valid.returncode == 0, valid.stderr
 
-    document["head_sha"] = "f" * 40
-    run_path.write_text(json.dumps(document), encoding="utf-8")
-    drifted = _run(arguments)
-    assert drifted.returncode != 0
-    assert "head SHA" in drifted.stderr
+    attacks = (
+        ("id", 99999, "run ID"),
+        ("run_attempt", 2, "run attempt"),
+        ("path", ".github/workflows/attacker.yml", "workflow path"),
+        ("head_sha", "f" * 40, "head SHA"),
+    )
+    for field, value, error in attacks:
+        original = document[field]
+        document[field] = value
+        run_path.write_text(json.dumps(document), encoding="utf-8")
+        drifted = _run(arguments)
+        assert drifted.returncode != 0
+        assert error in drifted.stderr
+        document[field] = original
 
 
 @pytest.mark.parametrize(
@@ -607,18 +1045,32 @@ def test_external_environment_policy_fails_closed(
     policies_path = tmp_path / "policies.json"
     environment_path.write_text(json.dumps(environment), encoding="utf-8")
     policies_path.write_text(json.dumps(policies), encoding="utf-8")
-    secrets_path, variables_path = _write_valid_release_ssh_policy(tmp_path)
+    (
+        repository_path,
+        secrets_path,
+        repository_secrets_path,
+        organization_secrets_path,
+        variables_path,
+    ) = _write_valid_release_ssh_policy(tmp_path)
 
     result = _run(
         [
             "python3",
             str(ENVIRONMENT_HELPER),
+            "--repository-json",
+            str(repository_path),
+            "--expected-repository",
+            "owner/repo",
             "--environment-json",
             str(environment_path),
             "--branch-policies-json",
             str(policies_path),
             "--secrets-json",
             str(secrets_path),
+            "--repository-secrets-json",
+            str(repository_secrets_path),
+            "--organization-secrets-json",
+            str(organization_secrets_path),
             "--variables-json",
             str(variables_path),
         ]
@@ -657,17 +1109,31 @@ def test_external_environment_policy_accepts_exact_main_and_reviewer(
         json.dumps({"total_count": 1, "branch_policies": [{"name": "main"}]}),
         encoding="utf-8",
     )
-    secrets_path, variables_path = _write_valid_release_ssh_policy(tmp_path)
+    (
+        repository_path,
+        secrets_path,
+        repository_secrets_path,
+        organization_secrets_path,
+        variables_path,
+    ) = _write_valid_release_ssh_policy(tmp_path)
     result = _run(
         [
             "python3",
             str(ENVIRONMENT_HELPER),
+            "--repository-json",
+            str(repository_path),
+            "--expected-repository",
+            "owner/repo",
             "--environment-json",
             str(environment_path),
             "--branch-policies-json",
             str(policies_path),
             "--secrets-json",
             str(secrets_path),
+            "--repository-secrets-json",
+            str(repository_secrets_path),
+            "--organization-secrets-json",
+            str(organization_secrets_path),
             "--variables-json",
             str(variables_path),
         ]
@@ -675,13 +1141,221 @@ def test_external_environment_policy_accepts_exact_main_and_reviewer(
     assert result.returncode == 0, result.stderr
 
 
-def test_external_policy_requires_new_ssh_identity_and_three_offline_attestations(
+def test_api_page_normalizer_accepts_user_owner_and_emits_no_org_scope(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository.json"
+    repository.write_text(
+        json.dumps(
+            {
+                "full_name": "owner/repo",
+                "owner": {"login": "owner", "type": "User"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    branch_pages = tmp_path / "branch-pages.json"
+    environment_pages = tmp_path / "environment-pages.json"
+    repository_pages = tmp_path / "repository-pages.json"
+    variable_pages = tmp_path / "variable-pages.json"
+    _write_api_pages(branch_pages, "branch_policies", [[{"name": "main"}]])
+    _write_api_pages(
+        environment_pages,
+        "secrets",
+        [
+            [
+                {"name": "DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY"},
+                {"name": "DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY"},
+                {"name": "DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS"},
+                {"name": "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN"},
+            ]
+        ],
+    )
+    _write_api_pages(repository_pages, "secrets", [[]])
+    _write_api_pages(
+        variable_pages,
+        "variables",
+        [
+            [
+                {"name": "DURABLE_AGENT_V2_RELEASE_SERVER_HOST", "value": "prod.example"},
+                {"name": "DURABLE_AGENT_V2_RELEASE_SERVER_PORT", "value": "22"},
+                {"name": "DURABLE_AGENT_V2_RELEASE_SERVER_USER", "value": "deploy"},
+            ]
+        ],
+    )
+    output = tmp_path / "canonical"
+    output.mkdir(mode=0o700)
+    result = _run(
+        [
+            "python3",
+            str(ENVIRONMENT_HELPER),
+            "normalize-pages",
+            "--repository-json",
+            str(repository),
+            "--expected-repository",
+            "owner/repo",
+            "--branch-policies-pages-json",
+            str(branch_pages),
+            "--environment-secrets-pages-json",
+            str(environment_pages),
+            "--repository-secrets-pages-json",
+            str(repository_pages),
+            "--variables-pages-json",
+            str(variable_pages),
+            "--output-directory",
+            str(output),
+        ]
+    )
+    assert result.returncode == 0, result.stderr
+    organization = json.loads(
+        (output / "organization-secrets.json").read_text(encoding="utf-8")
+    )
+    assert organization == {
+        "format": "inkforge-github-organization-secret-inventory/1",
+        "owner": {"login": "owner", "type": "User"},
+        "secrets": [],
+        "total_count": 0,
+    }
+    environment = tmp_path / "environment.json"
+    environment.write_text(
+        json.dumps(
+            {
+                "deployment_branch_policy": {
+                    "custom_branch_policies": True,
+                    "protected_branches": False,
+                },
+                "name": "production",
+                "protection_rules": [
+                    {
+                        "prevent_self_review": True,
+                        "reviewers": [{"reviewer": {"id": 1}, "type": "User"}],
+                        "type": "required_reviewers",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    verify = _run(
+        [
+            "python3",
+            str(ENVIRONMENT_HELPER),
+            "--repository-json",
+            str(repository),
+            "--expected-repository",
+            "owner/repo",
+            "--environment-json",
+            str(environment),
+            "--branch-policies-json",
+            str(output / "branch-policies.json"),
+            "--secrets-json",
+            str(output / "environment-secrets.json"),
+            "--repository-secrets-json",
+            str(output / "repository-secrets.json"),
+            "--organization-secrets-json",
+            str(output / "organization-secrets.json"),
+            "--variables-json",
+            str(output / "variables.json"),
+        ]
+    )
+    assert verify.returncode == 0, verify.stderr
+
+    organization["owner"]["type"] = "Organization"
+    (output / "organization-secrets.json").write_text(
+        json.dumps(organization, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    owner_drift = _run(verify.args)
+    assert owner_drift.returncode != 0
+    assert "owner 漂移" in owner_drift.stderr
+
+
+def test_api_page_normalizer_merges_all_pages_and_rejects_drift(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository.json"
+    repository.write_text(
+        json.dumps(
+            {
+                "full_name": "owner/repo",
+                "owner": {"login": "owner", "type": "Organization"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    branch_pages = tmp_path / "branch-pages.json"
+    environment_pages = tmp_path / "environment-pages.json"
+    repository_pages = tmp_path / "repository-pages.json"
+    organization_pages = tmp_path / "organization-pages.json"
+    variable_pages = tmp_path / "variable-pages.json"
+    _write_api_pages(branch_pages, "branch_policies", [[{"name": "main"}]])
+    _write_api_pages(environment_pages, "secrets", [[]])
+    repository_items = [{"name": f"UNRELATED_{index:03d}"} for index in range(101)]
+    _write_api_pages(
+        repository_pages,
+        "secrets",
+        [repository_items[:100], repository_items[100:]],
+    )
+    _write_api_pages(organization_pages, "secrets", [[]])
+    _write_api_pages(variable_pages, "variables", [[]])
+
+    def normalize(output: Path) -> subprocess.CompletedProcess[str]:
+        output.mkdir(mode=0o700)
+        return _run(
+            [
+                "python3",
+                str(ENVIRONMENT_HELPER),
+                "normalize-pages",
+                "--repository-json",
+                str(repository),
+                "--expected-repository",
+                "owner/repo",
+                "--branch-policies-pages-json",
+                str(branch_pages),
+                "--environment-secrets-pages-json",
+                str(environment_pages),
+                "--repository-secrets-pages-json",
+                str(repository_pages),
+                "--organization-secrets-pages-json",
+                str(organization_pages),
+                "--variables-pages-json",
+                str(variable_pages),
+                "--output-directory",
+                str(output),
+            ]
+        )
+
+    valid_output = tmp_path / "valid-output"
+    valid = normalize(valid_output)
+    assert valid.returncode == 0, valid.stderr
+    merged = json.loads(
+        (valid_output / "repository-secrets.json").read_text(encoding="utf-8")
+    )
+    assert merged["total_count"] == 101
+    assert len(merged["secrets"]) == 101
+
+    duplicate_pages = [repository_items[:100], [repository_items[0]]]
+    _write_api_pages(repository_pages, "secrets", duplicate_pages)
+    duplicate = normalize(tmp_path / "duplicate-output")
+    assert duplicate.returncode != 0
+    assert "跨页重复" in duplicate.stderr
+
+    _write_api_pages(
+        repository_pages,
+        "secrets",
+        [repository_items[:100], repository_items[100:]],
+        totals=[101, 102],
+    )
+    drift = normalize(tmp_path / "drift-output")
+    assert drift.returncode != 0
+    assert "total_count 漂移" in drift.stderr
+
+
+def test_external_policy_requires_dual_keys_three_scopes_and_semantic_subject(
     tmp_path: Path,
 ) -> None:
     environment_path = tmp_path / "environment.json"
     policies_path = tmp_path / "policies.json"
-    secrets_path = tmp_path / "secrets.json"
-    variables_path = tmp_path / "variables.json"
     environment_path.write_text(
         json.dumps(
             {
@@ -705,98 +1379,111 @@ def test_external_policy_requires_new_ssh_identity_and_three_offline_attestation
         json.dumps({"total_count": 1, "branch_policies": [{"name": "main"}]}),
         encoding="utf-8",
     )
-    secrets_path.write_text(
-        json.dumps(
-            {
-                "total_count": 1,
-                "secrets": [{"name": "DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    variable_names = (
-        "DURABLE_AGENT_V2_RELEASE_OLD_KEY_REVOCATION_EVIDENCE_SHA256",
-        "DURABLE_AGENT_V2_RELEASE_FORCED_COMMAND_EVIDENCE_SHA256",
-        "DURABLE_AGENT_V2_RELEASE_MINIMUM_PERMISSION_EVIDENCE_SHA256",
-    )
-    variables_path.write_text(
-        json.dumps(
-            {
-                "total_count": 3,
-                "variables": [
-                    {"name": name, "value": f"{index}" * 64}
-                    for index, name in enumerate(variable_names, 1)
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    (
+        repository_path,
+        secrets_path,
+        repository_secrets_path,
+        organization_secrets_path,
+        variables_path,
+    ) = _write_valid_release_ssh_policy(tmp_path)
     arguments = [
         "python3",
         str(ENVIRONMENT_HELPER),
+        "--repository-json",
+        str(repository_path),
+        "--expected-repository",
+        "owner/repo",
         "--environment-json",
         str(environment_path),
         "--branch-policies-json",
         str(policies_path),
         "--secrets-json",
         str(secrets_path),
+        "--repository-secrets-json",
+        str(repository_secrets_path),
+        "--organization-secrets-json",
+        str(organization_secrets_path),
         "--variables-json",
         str(variables_path),
     ]
     valid = _run(arguments)
     assert valid.returncode == 0, valid.stderr
+    assert "releaseServerHost=prod.example" in valid.stdout
+    assert "releaseServerPort=22" in valid.stdout
+    assert "releaseServerUser=deploy" in valid.stdout
 
-    secrets_path.write_text(
-        json.dumps(
-            {
-                "total_count": 2,
-                "secrets": [
-                    {"name": "DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY"},
-                    {"name": "SERVER_SSH_KEY"},
-                ],
-            }
-        ),
-        encoding="utf-8",
+    valid_environment_names = [
+        "DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY",
+        "DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY",
+        "DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS",
+        "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN",
+    ]
+    scopes = (
+        (secrets_path, valid_environment_names),
+        (repository_secrets_path, ["UNRELATED_REPOSITORY_SECRET"]),
+        (organization_secrets_path, ["UNRELATED_ORG_SECRET"]),
     )
-    old_key = _run(arguments)
-    assert old_key.returncode != 0
-    assert "旧 SERVER_SSH_KEY 尚未删除" in old_key.stderr
 
-    secrets_path.write_text(
-        json.dumps({"total_count": 0, "secrets": []}), encoding="utf-8"
-    )
-    missing_new_key = _run(arguments)
-    assert missing_new_key.returncode != 0
-    assert "专用 SSH secret" in missing_new_key.stderr
+    def write_scope(path: Path, names: list[str]) -> None:
+        if path == organization_secrets_path:
+            _write_organization_inventory(path, names)
+        else:
+            _write_secret_inventory(path, names)
 
-    secrets_path.write_text(
-        json.dumps(
-            {
-                "total_count": 1,
-                "secrets": [{"name": "DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY"}],
-            }
-        ),
-        encoding="utf-8",
+    for path, base_names in scopes:
+        write_scope(path, [*base_names, "SERVER_SSH_KEY"])
+        residue = _run(arguments)
+        assert residue.returncode != 0
+        assert "retired release SSH secret" in residue.stderr
+        write_scope(path, list(base_names))
+
+    for path, base_names in scopes[1:]:
+        write_scope(
+            path,
+            [*base_names, "DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY"],
+        )
+        broad_active = _run(arguments)
+        assert broad_active.returncode != 0
+        assert "production release 或审计 secret" in broad_active.stderr
+        write_scope(path, list(base_names))
+
+    _write_secret_inventory(secrets_path, valid_environment_names[:-1])
+    missing_audit = _run(arguments)
+    assert missing_audit.returncode != 0
+    assert "审计 token" in missing_audit.stderr
+    _write_secret_inventory(secrets_path, valid_environment_names)
+
+    diagnostic_names = (
+        "DURABLE_AGENT_V2_RELEASE_OLD_KEY_REVOCATION_EVIDENCE_SHA256",
+        "DURABLE_AGENT_V2_RELEASE_FORCED_COMMAND_EVIDENCE_SHA256",
+        "DURABLE_AGENT_V2_RELEASE_MINIMUM_PERMISSION_EVIDENCE_SHA256",
     )
+    variables = [
+        {"name": "DURABLE_AGENT_V2_RELEASE_SERVER_HOST", "value": "prod.example"},
+        {"name": "DURABLE_AGENT_V2_RELEASE_SERVER_PORT", "value": "22"},
+        {"name": "DURABLE_AGENT_V2_RELEASE_SERVER_USER", "value": "deploy"},
+        *[{"name": name, "value": "0" * 64} for name in diagnostic_names],
+    ]
     variables_path.write_text(
-        json.dumps(
-            {
-                "total_count": 3,
-                "variables": [
-                    {"name": name, "value": "0" * 64}
-                    for name in variable_names
-                ],
-            }
-        ),
+        json.dumps({"total_count": len(variables), "variables": variables}),
         encoding="utf-8",
     )
-    placeholder_evidence = _run(arguments)
-    assert placeholder_evidence.returncode != 0
-    assert "SSH 外部证据 hash" in placeholder_evidence.stderr
+    diagnostics_are_not_authorization = _run(arguments)
+    assert diagnostics_are_not_authorization.returncode == 0
+
+    variables[-1]["value"] = "not-a-sha"
+    variables_path.write_text(
+        json.dumps({"total_count": len(variables), "variables": variables}),
+        encoding="utf-8",
+    )
+    malformed_diagnostic = _run(arguments)
+    assert malformed_diagnostic.returncode != 0
+    assert "可选 SSH 诊断 hash" in malformed_diagnostic.stderr
 
 
-def test_external_policy_and_provenance_are_before_any_ssh_and_old_key_is_unreachable() -> None:
+def test_attestation_inputs_provenance_pins_and_private_keys_are_fail_closed() -> None:
     release_source = WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(release_source)
     all_workflows = "\n".join(
         path.read_text(encoding="utf-8")
         for path in (ROOT / ".github" / "workflows").glob("*.yml")
@@ -805,97 +1492,117 @@ def test_external_policy_and_provenance_are_before_any_ssh_and_old_key_is_unreac
         "  candidate_validation:", 1
     )[0]
     production_job = release_source.split("  production:", 1)[1]
-    assert "environments/production/secrets?per_page=100" in source_job
-    assert "--variables-json" in source_job
-    assert "ssh " not in source_job and "scp " not in source_job
-    assert production_job.index("准备严格 SSH") < production_job.index(
-        "事务前上传并复验不可变 trusted control bundle"
-    )
+    inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    for name in (
+        "ssh_attestation_run_id",
+        "ssh_attestation_run_attempt",
+        "ssh_attestation_sha256",
+        "bootstrap_attestation_run_id",
+        "bootstrap_attestation_run_attempt",
+        "bootstrap_attestation_sha256",
+    ):
+        assert inputs[name]["required"] is True
+        assert f"inputs.{name}" in release_source
+    assert "GH_ENVIRONMENT_POLICY_AUDIT_TOKEN" not in source_job
+    assert "secrets." not in source_job
+    for endpoint in (
+        "environments/production/secrets?per_page=100",
+        "repos/$GITHUB_REPOSITORY/actions/secrets?per_page=100",
+        "orgs/$GITHUB_REPOSITORY_OWNER/actions/secrets?per_page=100",
+        "environments/production/variables?per_page=100",
+        "actions/runs/$SSH_ATTESTATION_RUN_ID",
+        "actions/runs/$BOOTSTRAP_ATTESTATION_RUN_ID",
+    ):
+        assert endpoint in production_job
+    for binding in (
+        '--expected-run-id "$SSH_ATTESTATION_RUN_ID"',
+        '--expected-run-attempt "$SSH_ATTESTATION_RUN_ATTEMPT"',
+        '--expected-run-id "$BOOTSTRAP_ATTESTATION_RUN_ID"',
+        '--expected-run-attempt "$BOOTSTRAP_ATTESTATION_RUN_ATTEMPT"',
+        '--expected-head-sha "$WORKFLOW_TRUSTED_COMMIT"',
+        ".github/workflows/durable-agent-v2-ssh-release-attestation.yml",
+        ".github/workflows/durable-agent-v2-release-bootstrap.yml",
+    ):
+        assert binding in production_job
+    assert "durable-agent-v2-ssh-release-attestation" in production_job
+    assert "durable-agent-v2-ssh-release-evidence" in production_job
+    assert "durable-agent-v2-release-bootstrap-attestation" in production_job
     assert "secrets.SERVER_SSH_KEY" not in all_workflows
     assert "SERVER_SSH_KEY:" not in all_workflows
-    assert "secrets.DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY" in release_source
+    assert "secrets.DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY" not in release_source
+    assert "secrets.DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY" not in release_source
+    assert "secrets.DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY" not in release_source
+
+    expected_pins = {
+        "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/setup-python": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "actions/download-artifact": "634f93cb2916e3fdff6788551b99b062d0335ce0",
+        "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+        "astral-sh/setup-uv": "37802adc94f370d6bfd71619e3f0bf239e1f3b78",
+    }
+    assert "ubuntu-latest" not in release_source
+    for job in workflow["jobs"].values():
+        assert job["runs-on"] == "ubuntu-24.04"
+        for step in job["steps"]:
+            uses = step.get("uses")
+            if uses is None:
+                continue
+            repository, revision = uses.split("@", 1)
+            assert revision == expected_pins[repository]
 
 
-def test_pending_provider_evidence_is_recordable_but_never_production_grade(
+def test_v2_consumer_binds_completed_runs_images_scope_and_qualification(
     tmp_path: Path,
 ) -> None:
-    directory = tmp_path / "pending"
-    digest = _write_development_evidence(directory, provider_status="pending")
-    common = [
-        "--evidence-dir",
-        str(directory),
-        "--expected-sha256",
-        digest,
-        "--expected-run-id",
-        "12345",
-        "--expected-target-commit",
-        WORKFLOW_COMMIT,
-    ]
-    ordinary = _run(["python3", str(DEVELOPMENT_HELPER), "verify", *common])
-    production = _run(
-        ["python3", str(DEVELOPMENT_HELPER), "verify-production", *common]
-    )
-    assert ordinary.returncode == 0, ordinary.stderr
-    assert production.returncode != 0
-    assert "pending provider" in production.stderr
-
-
-def test_passed_real_provider_evidence_binds_commit_scope_and_images(
-    tmp_path: Path,
-) -> None:
-    directory = tmp_path / "passed"
-    reports = tmp_path / "reports"
-    digest = _write_development_evidence(
-        directory,
-        provider_status="passed",
-        reports_directory=reports,
-    )
-    result = _run(
-        [
-            "python3",
-            str(DEVELOPMENT_HELPER),
-            "verify-production",
-            "--evidence-dir",
-            str(directory),
-            "--expected-sha256",
-            digest,
-            "--expected-run-id",
-            "12345",
-            "--expected-target-commit",
-            WORKFLOW_COMMIT,
-            "--expected-canary-scope-sha256",
-            _scope_fingerprint(),
-            "--expected-execution-fingerprint",
-            _source_fingerprint(),
-            "--expected-web-digest",
-            TARGET_WEB,
-            "--expected-core-digest",
-            TARGET_CORE,
-            "--expected-agent-digest",
-            TARGET_AGENT,
-            "--reports-dir",
-            str(reports),
-        ]
-    )
+    arguments, _candidate, _variables = _write_v2_consumer_fixture(tmp_path)
+    result = _run(arguments)
     assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("development-v2-consumer-ok:")
 
-    drifted = _run(
-        [
-            "python3",
-            str(DEVELOPMENT_HELPER),
-            "verify-production",
-            "--evidence-dir",
-            str(directory),
-            "--expected-sha256",
-            digest,
-            "--expected-target-commit",
-            "f" * 40,
-            "--reports-dir",
-            str(reports),
-        ]
+    attacked = list(arguments)
+    attacked[attacked.index("--candidate-run-attempt") + 1] = "2"
+    mismatch = _run(attacked)
+    assert mismatch.returncode != 0
+    assert "runAttempt=1" in mismatch.stderr
+
+
+def test_v2_consumer_rejects_legacy_test_report_even_when_hashes_match(
+    tmp_path: Path,
+) -> None:
+    arguments, candidate, _variables_path = _write_v2_consumer_fixture(tmp_path)
+    fault_path = candidate / "fault-injection-report.json"
+    fault = json.loads(fault_path.read_text(encoding="utf-8"))
+    fault["format"] = "test-report/1"
+    fault_payload = _canonical(fault)
+    fault_path.write_bytes(fault_payload)
+    fault_path.chmod(0o600)
+
+    summary_path = candidate / "candidate-evidence.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["reports"]["faultInjectionSha256"] = hashlib.sha256(
+        fault_payload
+    ).hexdigest()
+    summary_payload = _canonical(summary)
+    summary_path.write_bytes(summary_payload)
+    summary_path.chmod(0o600)
+    checksums = candidate / "SHA256SUMS"
+    payloads = {
+        path.name: path.read_bytes()
+        for path in candidate.iterdir()
+        if path.name != "SHA256SUMS"
+    }
+    checksums.write_text(
+        "".join(
+            f"{hashlib.sha256(payloads[name]).hexdigest()}  {name}\n"
+            for name in sorted(payloads)
+        ),
+        encoding="ascii",
     )
-    assert drifted.returncode != 0
-    assert "target commit" in drifted.stderr
+    checksums.chmod(0o600)
+
+    rejected = _run(arguments)
+    assert rejected.returncode != 0
+    assert "fault-injection report format 无效" in rejected.stderr
 
 
 def test_manifest_v3_is_canonical_and_old_artifact_uses_its_own_commit(
@@ -1051,6 +1758,58 @@ def test_control_bundle_binds_both_commits_and_rejects_helper_tampering(
     assert "SHA256SUMS" in tampered.stderr
 
 
+def test_control_bundle_create_enforces_private_modes_under_umask_022(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "control-bundle-umask-022"
+    arguments = [
+        sys.executable,
+        str(CONTROL_BUNDLE_HELPER),
+        "create",
+        "--repository-root",
+        str(ROOT),
+        "--output-dir",
+        str(directory),
+        "--workflow-trusted-commit",
+        WORKFLOW_COMMIT,
+        "--target-release-commit",
+        WORKFLOW_COMMIT,
+        "--producer-run-id",
+        "123",
+        "--producer-run-attempt",
+        "1",
+    ]
+    created = _run(
+        [
+            POSIX_SHELL,
+            "-c",
+            'umask 022\nexec "$@"',
+            "control-bundle-umask-022",
+            *arguments,
+        ]
+    )
+    assert created.returncode == 0, created.stderr
+    digest = created.stdout.strip().removeprefix("control-bundle-created:")
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    for path in directory.rglob("*"):
+        assert not path.is_symlink()
+        expected_mode = 0o700 if path.is_dir() else 0o600
+        assert stat.S_IMODE(path.stat().st_mode) == expected_mode
+
+    verified = _run(
+        [
+            sys.executable,
+            str(CONTROL_BUNDLE_HELPER),
+            "verify",
+            "--bundle-dir",
+            str(directory),
+            "--expected-sha256",
+            digest,
+        ]
+    )
+    assert verified.returncode == 0, verified.stderr
+
+
 def test_rollback_producer_provenance_accepts_old_success_after_main_progresses(
     tmp_path: Path,
 ) -> None:
@@ -1095,17 +1854,27 @@ def test_rollback_producer_provenance_accepts_old_success_after_main_progresses(
     assert "conclusion" in failed.stderr
 
 
-def test_server_control_never_uses_mutable_app_helpers_after_checkout() -> None:
+def test_production_workflow_has_no_mutable_remote_execution_path() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     driver = DRIVER.read_text(encoding="utf-8")
     deploy = DEPLOY.read_text(encoding="utf-8")
     production = workflow.split("  production:", 1)[1]
-    assert production.index("事务前上传并复验不可变 trusted control bundle") < production.index(
-        "route-off/allowlist 建锁并冻结回滚起点"
-    )
-    assert "sh -s" not in production
-    assert "< scripts/durable-agent-v2-release.sh" not in production
-    assert "< scripts/deploy-production.sh" not in production
+    for forbidden in (
+        "sh -s",
+        "< scripts/durable-agent-v2-release.sh",
+        "< scripts/deploy-production.sh",
+        "upload-durable-agent-v2-control-bundle.sh",
+        "upload-durable-agent-v2-release-manifest.sh",
+        "upload-deploy-source.sh",
+        "remote_command",
+        "docker load",
+        "docker compose",
+        "psql ",
+        "transition-runtime-config",
+    ):
+        assert forbidden not in production
+    assert "streaming-broker-and-sealed-genesis-not-implemented" in production
+
     assert 'migration_helper="$control_dir/scripts/durable-agent-execution-migration.sh"' in driver
     assert 'joint_drain_helper="$control_dir/scripts/durable_agent_joint_drain.py"' in driver
     assert (
@@ -1118,27 +1887,27 @@ def test_server_control_never_uses_mutable_app_helpers_after_checkout() -> None:
     ) < deploy.index('safe_git reset --hard "$DEPLOY_SHA"')
     assert '--project-directory "$control_dir/infra"' in deploy
     assert 'SERVICE_KEYS_DIR="$APP_DIR/infra/secrets"' in deploy
-    assert '"infra/redis/execution-redis.conf"' in CONTROL_BUNDLE_HELPER.read_text(
-        encoding="utf-8"
-    )
+    control_source = CONTROL_BUNDLE_HELPER.read_text(encoding="utf-8")
+    assert '"infra/redis/execution-redis.conf"' in control_source
+    assert '"scripts/durable_agent_release_trust.py"' in control_source
+    assert '"scripts/durable_agent_release_broker.py"' in control_source
 
 
-def test_workflow_owns_route_state_transitions_and_rollback_never_reopens_allowlist() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8").split("  production:", 1)[1]
-    off_transition = source.index("transition-runtime-config off")
-    deploy = source.index("按 manifest 与服务器锁部署冻结 digest")
-    allowlist_transition = source.index("finalize-allowlist-transaction")
-    postflight = source.index("统一 runtime postflight")
-    assert off_transition < deploy < allowlist_transition < postflight
-    assert "DEPLOY_RUNTIME_ROUTE_MODE: off" in source
-    allowlist_step = source.split(
-        "单服务器进程完成 allowlist、receipt commit point 与 finalize", 1
-    )[1].split("rollback 后 V2-aware route-off 门禁", 1)[0]
-    assert "if: inputs.action == 'allowlist_release'" in allowlist_step
-    rollback_step = source.split("rollback 后 V2-aware route-off 门禁", 1)[1].split(
-        "统一 runtime postflight", 1
-    )[0]
-    assert "transition-runtime-config allowlist" not in rollback_step
+def test_workflow_cannot_reach_route_transition_until_streaming_broker_exists() -> None:
+    production = WORKFLOW.read_text(encoding="utf-8").split("  production:", 1)[1]
+    for unreachable in (
+        "transition-runtime-config off",
+        "transition-runtime-config allowlist",
+        "finalize-allowlist-transaction",
+        "rollback-postflight",
+        "transaction-postflight",
+        "commit-transaction",
+        "mark-transaction-failed",
+        "cleanup-failed-transaction",
+    ):
+        assert unreachable not in production
+    assert production.rstrip().endswith("exit 1")
+
     driver = DRIVER.read_text(encoding="utf-8")
     assert "allowlist_failure_trap" in driver
     assert "force_allowlist_route_off" in driver
@@ -1551,6 +2320,10 @@ def test_server_lock_is_non_stealable_failure_retained_and_cleanup_is_exact(
     token_partial.mkdir(mode=0o700)
     (token_partial / ".env").write_text("DATABASE_URL=redacted\n", encoding="utf-8")
     (token_partial / ".env").chmod(0o600)
+    owner_sha = hashlib.sha256(owner.read_bytes()).hexdigest()
+    state_partial = lock_dir / f".state-{owner_sha}-failed.partial"
+    state_partial.write_text("failed\n", encoding="ascii")
+    state_partial.chmod(0o600)
 
     second = _run(["sh", str(driver), "begin-snapshot"], cwd=root, env=environment)
     assert second.returncode != 0
@@ -1687,7 +2460,7 @@ def _write_fake_runtime(root: Path, fake_bin: Path, log: Path) -> None:
                 while [ ! -e "$FAKE_COMPOSE_BLOCK_RELEASE" ]; do sleep 0.02; done
                 : > "$FAKE_COMPOSE_BLOCK_MARKER.done"
               fi
-              exit 0
+              exit "${FAKE_COMPOSE_STATUS:-0}"
             fi
             if [ "$1" = ps ]; then
               case "$*" in
@@ -2218,6 +2991,240 @@ def test_allowlist_current_advanced_fault_never_rolls_back_or_marks_failed(
     assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE=allowlist" in (
         root / ".env"
     ).read_text(encoding="utf-8")
+
+
+def test_mark_failed_reports_outcome_unknown_when_force_off_fails(
+    tmp_path: Path,
+) -> None:
+    root, driver, environment, base_receipt = _prepare_allowlist_transaction(tmp_path)
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    failed = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env={**environment, "FAKE_COMPOSE_STATUS": "67"},
+    )
+
+    assert failed.returncode != 0
+    assert "durable-release:error:transaction-outcome-unknown" in failed.stderr
+    assert (lock_dir / "state").read_text(encoding="ascii") == "active\n"
+    assert (root / ".durable-agent-v2-release-receipts" / "current").read_text(
+        encoding="ascii"
+    ).strip() == base_receipt
+    assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE=off" in (
+        root / ".env"
+    ).read_text(encoding="utf-8")
+    assert (root / ".durable-agent-v2-release-transaction.lock").is_file()
+
+
+def test_mark_failed_preserves_ambiguous_advanced_current_and_route(
+    tmp_path: Path,
+) -> None:
+    root, driver, environment, base_receipt = _prepare_allowlist_transaction(tmp_path)
+    interrupted = _run(
+        ["sh", str(driver), "finalize-allowlist-transaction"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "after-current-root-fsync",
+        },
+    )
+    assert interrupted.returncode == 90, interrupted.stderr
+    receipt_root = root / ".durable-agent-v2-release-receipts"
+    current = (receipt_root / "current").read_text(encoding="ascii").strip()
+    assert current != base_receipt
+    env_before = (root / ".env").read_bytes()
+    log_path = Path(environment["FAKE_LOG"])
+    compose_before = log_path.read_text(encoding="utf-8").count("docker:compose ")
+
+    recovered = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env={**environment, "FAKE_ROLLBACK_CORE": ROLLBACK_CORE},
+    )
+
+    assert recovered.returncode != 0
+    assert "durable-release:error:transaction-outcome-unknown" in recovered.stderr
+    assert (receipt_root / "current").read_text(encoding="ascii").strip() == current
+    assert (root / ".env").read_bytes() == env_before
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    assert (lock_dir / "state").read_text(encoding="ascii") != "failed\n"
+    assert log_path.read_text(encoding="utf-8").count("docker:compose ") == (
+        compose_before
+    )
+
+
+def test_mark_failed_preserves_commit_recoverable_when_confirmation_fails(
+    tmp_path: Path,
+) -> None:
+    root, driver, environment, base_receipt = _prepare_allowlist_transaction(tmp_path)
+    interrupted = _run(
+        ["sh", str(driver), "finalize-allowlist-transaction"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "after-current-root-fsync",
+        },
+    )
+    assert interrupted.returncode == 90, interrupted.stderr
+    receipt_root = root / ".durable-agent-v2-release-receipts"
+    current = (receipt_root / "current").read_text(encoding="ascii").strip()
+    assert current != base_receipt
+    env_before = (root / ".env").read_bytes()
+
+    recovered = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "after-current-reread",
+        },
+    )
+
+    assert recovered.returncode != 0
+    assert "durable-release:test-fault:after-current-reread" in recovered.stderr
+    assert "durable-release:error:transaction-outcome-unknown" in recovered.stderr
+    assert (receipt_root / "current").read_text(encoding="ascii").strip() == current
+    assert (root / ".env").read_bytes() == env_before
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    assert (lock_dir / "state").read_text(encoding="ascii") != "failed\n"
+
+
+def test_mark_failed_preserves_committed_current_when_finalize_fails(
+    tmp_path: Path,
+) -> None:
+    root, driver, environment, base_receipt = _prepare_allowlist_transaction(tmp_path)
+    interrupted = _run(
+        ["sh", str(driver), "finalize-allowlist-transaction"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "before-lock-cleanup",
+        },
+    )
+    assert interrupted.returncode == 90, interrupted.stderr
+    receipt_root = root / ".durable-agent-v2-release-receipts"
+    current = (receipt_root / "current").read_text(encoding="ascii").strip()
+    assert current != base_receipt
+    env_before = (root / ".env").read_bytes()
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    assert (lock_dir / "state").read_text(encoding="ascii") == (
+        "committed_cleanup_pending\n"
+    )
+
+    recovered = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "before-lock-cleanup",
+        },
+    )
+
+    assert recovered.returncode != 0
+    assert "durable-release:test-fault:before-lock-cleanup" in recovered.stderr
+    assert "durable-release:error:transaction-outcome-unknown" in recovered.stderr
+    assert (receipt_root / "current").read_text(encoding="ascii").strip() == current
+    assert (root / ".env").read_bytes() == env_before
+    assert (lock_dir / "state").read_text(encoding="ascii") == (
+        "committed_cleanup_pending\n"
+    )
+
+
+def test_lock_state_partial_is_owner_bound_durable_and_recoverable(
+    tmp_path: Path,
+) -> None:
+    root, driver, environment, _ = _prepare_allowlist_transaction(tmp_path)
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    interrupted = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "state-after-partial-fsync",
+        },
+    )
+
+    assert interrupted.returncode != 0
+    assert "durable-release:test-fault:state-after-partial-fsync" in (
+        interrupted.stderr
+    )
+    assert "durable-release:error:transaction-outcome-unknown" in interrupted.stderr
+    assert (lock_dir / "state").read_text(encoding="ascii") == "active\n"
+    owner_sha = hashlib.sha256((lock_dir / "owner").read_bytes()).hexdigest()
+    partials = list(lock_dir.glob(".state-*.partial"))
+    assert [path.name for path in partials] == [
+        f".state-{owner_sha}-failed.partial"
+    ]
+    assert partials[0].read_text(encoding="ascii") == "failed\n"
+    assert stat.S_IMODE(partials[0].stat().st_mode) == 0o600
+
+    recovered = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env=environment,
+    )
+    assert recovered.returncode == 0, recovered.stderr
+    assert "release-transaction-failed" in recovered.stdout
+    assert (lock_dir / "state").read_text(encoding="ascii") == "failed\n"
+    assert list(lock_dir.glob(".state-*.partial")) == []
+
+
+def test_lock_state_replace_fault_is_fsynced_before_failed_success(
+    tmp_path: Path,
+) -> None:
+    root, driver, environment, _ = _prepare_allowlist_transaction(tmp_path)
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    recovered = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env={
+            **environment,
+            "DURABLE_AGENT_RELEASE_FAULT_POINT": "state-after-replace",
+        },
+    )
+
+    assert recovered.returncode == 0, recovered.stderr
+    assert "durable-release:test-fault:state-after-replace" in recovered.stderr
+    assert "release-transaction-failed" in recovered.stdout
+    assert (lock_dir / "state").read_text(encoding="ascii") == "failed\n"
+    assert list(lock_dir.glob(".state-*.partial")) == []
+
+
+@pytest.mark.parametrize("partial_kind", ("symlink", "foreign-owner", "multiple"))
+def test_lock_state_rejects_untrusted_partials_without_ttl_takeover(
+    tmp_path: Path,
+    partial_kind: str,
+) -> None:
+    root, driver, environment, _ = _prepare_allowlist_transaction(tmp_path)
+    lock_dir = root / ".durable-agent-v2-release-transactions" / LOCK_ID
+    owner_sha = hashlib.sha256((lock_dir / "owner").read_bytes()).hexdigest()
+    expected = lock_dir / f".state-{owner_sha}-failed.partial"
+    if partial_kind == "symlink":
+        expected.symlink_to(lock_dir / "owner")
+    elif partial_kind == "foreign-owner":
+        expected = lock_dir / f".state-{'f' * 64}-failed.partial"
+        expected.write_text("failed\n", encoding="ascii")
+        expected.chmod(0o600)
+        os.utime(expected, (1, 1))
+    else:
+        expected.write_text("failed\n", encoding="ascii")
+        expected.chmod(0o600)
+        second = lock_dir / f".state-{owner_sha}-prepared.partial"
+        second.write_text("prepared\n", encoding="ascii")
+        second.chmod(0o600)
+
+    rejected = _run(
+        ["sh", str(driver), "mark-transaction-failed"],
+        cwd=root,
+        env=environment,
+    )
+
+    assert rejected.returncode != 0
+    assert "durable-release:error:transaction-outcome-unknown" in rejected.stderr
+    assert (lock_dir / "state").read_text(encoding="ascii") == "active\n"
+    assert os.path.lexists(expected)
+    if partial_kind == "foreign-owner":
+        assert expected.stat().st_mtime_ns == 1_000_000_000
 
 
 def test_mark_failed_is_read_only_idempotent_only_for_exact_failed_lock_owner(

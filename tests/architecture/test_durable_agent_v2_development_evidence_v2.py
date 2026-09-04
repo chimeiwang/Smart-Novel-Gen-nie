@@ -17,7 +17,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/durable_agent_v2_development_evidence_v2.py"
 DEVELOPMENT_WORKFLOW = ROOT / ".github/workflows/durable-agent-v2-development-evidence.yml"
-RELEASE_WORKFLOW = ROOT / ".github/workflows/durable-agent-v2-release.yml"
 
 NOW = "2026-09-01T12:00:00Z"
 QUALIFICATION_ISSUED = "2026-09-01T11:00:00Z"
@@ -36,7 +35,7 @@ EXECUTION_FINGERPRINT = "9" * 64
 RESOURCE_POLICY_SHA = "3" * 64
 PROVIDER_POLICY_SHA = "4" * 64
 RESOURCE_HOST_IDENTITY = "1" * 64
-PROVIDER_IDENTITY = "0" * 64
+PROVIDER_IDENTITY = "e" * 64
 WEB_DIGEST = "sha256:" + "a" * 64
 CORE_DIGEST = "sha256:" + "b" * 64
 AGENT_DIGEST = "sha256:" + "c" * 64
@@ -281,6 +280,7 @@ def _candidate_reports(
                 "duplicateTokenUsage": 0,
                 "executionRedisAofRestartPassed": True,
                 "happyIdempotencyPassed": True,
+                "routeOffCleanupPassed": True,
                 "sseCursorReconnectPassed": True,
                 "status": "passed",
             },
@@ -628,13 +628,11 @@ def test_fingerprints_separate_development_topology_from_canary_scenario() -> No
     assert len(scope.stdout.strip()) == len(scenario.stdout.strip()) == 64
 
 
-def test_v2_foundation_does_not_unlock_existing_workflows() -> None:
+def test_v2_foundation_does_not_unlock_development_workflow() -> None:
     development = DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8")
-    release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
     assert "real-provider-identity-not-automated" in development
     assert "actions/upload-artifact" not in development
     assert "durable_agent_v2_development_evidence_v2.py" not in development
-    assert "durable_agent_v2_development_evidence_v2.py" not in release
 
 
 def test_builds_and_verifies_two_immutable_semantic_bundles(tmp_path: Path) -> None:
@@ -803,6 +801,12 @@ def test_candidate_rejects_wrong_source_image_run_or_semantics(
     ("report_type", "field", "value", "error_fragment"),
     [
         ("fault-injection", "cleanupPassed", False, "cleanupPassed"),
+        (
+            "fault-injection",
+            "routeOffCleanupPassed",
+            False,
+            "routeOffCleanupPassed",
+        ),
         ("fault-injection", "allResourcesRemoved", False, "allResourcesRemoved"),
         (
             "fault-injection",

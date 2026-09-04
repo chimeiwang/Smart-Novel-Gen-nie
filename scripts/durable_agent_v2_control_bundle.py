@@ -143,6 +143,16 @@ def _validate_modes(root: Path) -> None:
             raise BundleInvalid("控制包文件权限必须为 0600")
 
 
+def _create_private_subdirectories(root: Path, parent: Path) -> None:
+    current = root
+    for part in parent.relative_to(root).parts:
+        current /= part
+        current.mkdir(mode=0o700, exist_ok=True)
+        if current.is_symlink() or not current.is_dir():
+            raise BundleInvalid("控制包子目录无效")
+        os.chmod(current, 0o700)
+
+
 def _fsync_path(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY)
     try:
@@ -248,8 +258,7 @@ def create(arguments: argparse.Namespace) -> str:
             if source.is_symlink() or not source.is_file():
                 raise BundleInvalid(f"控制包源文件缺失：{relative}")
             target = temporary / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            os.chmod(target.parent, 0o700)
+            _create_private_subdirectories(temporary, target.parent)
             shutil.copyfile(source, target)
             os.chmod(target, 0o600)
         checksums = _checksum_payload(temporary)

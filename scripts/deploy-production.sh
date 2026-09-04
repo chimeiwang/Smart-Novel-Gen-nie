@@ -1063,9 +1063,7 @@ esac
 version_switch_started="0"
 
 mark_release_transaction_failed() {
-  printf 'failed\n' > "$release_lock_dir/.state.deploy-failed.partial"
-  chmod 600 "$release_lock_dir/.state.deploy-failed.partial"
-  mv -f "$release_lock_dir/.state.deploy-failed.partial" "$release_lock_dir/state"
+  sh "$durable_release_driver" mark-transaction-failed >/dev/null
 }
 
 rollback() {
@@ -1115,6 +1113,8 @@ rollback() {
   fi
 
   if [ "$rollback_status" -eq 0 ]; then
+    # 旧镜像、Nginx 与 runtime 已完整复验，但锁仍必须保持 active，先结算同一
+    # claimed compound boundary；事务失败终态只能在本调用明确成功或失败后写入。
     DURABLE_AGENT_BOUNDARY_OUTCOME=compensated \
       sh "$durable_release_driver" mark-live-boundary-applied \
         "compose-$durable_release_operation" >/dev/null

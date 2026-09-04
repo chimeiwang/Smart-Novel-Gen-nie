@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,11 @@ ROOT = Path(__file__).parents[2]
 UPLOAD = ROOT / "scripts" / "upload-docker-images.sh"
 SOURCE_UPLOAD = ROOT / "scripts" / "upload-deploy-source.sh"
 DEPLOY = ROOT / "scripts" / "deploy-production.sh"
+RELEASE_DRIVER = ROOT / "scripts" / "durable-agent-v2-release.sh"
 RELEASE_MANIFEST_HELPER = ROOT / "scripts" / "durable_agent_v2_release_manifest.py"
+RELEASE_BOUNDARY_HELPER = ROOT / "scripts" / "durable_agent_release_boundary.py"
+RELEASE_GUARD_HELPER = ROOT / "scripts" / "durable_agent_release_guard.py"
+JOINT_DRAIN_HELPER = ROOT / "scripts" / "durable_agent_joint_drain.py"
 ROLLBACK_DRILL = ROOT / "scripts" / "rollback_drill.sh"
 BACKUP = ROOT / "scripts" / "backup.sh"
 EXECUTION_RESTORE = ROOT / "scripts" / "restore-execution-journal.sh"
@@ -511,6 +516,8 @@ def _run_deploy(
     verified_drain: bool = True,
     boundary_consume_status: int = 0,
     boundary_applied_status: int = 0,
+    real_release_driver: bool = False,
+    release_fault_point: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     control_dir = tmp_path / "control"
@@ -672,6 +679,18 @@ def _run_deploy(
         'case "$1" in\n'
         "  status) printf '%s\\n' \"$FAKE_DURABLE_MIGRATION_STATE\" ;;\n"
         "  active-v2-count) printf '%s\\n' \"$FAKE_ACTIVE_V2_RUN_COUNT\" ;;\n"
+        "  boundary-drain)\n"
+        "    [ -n \"${FAKE_DRAIN_REPORT:-}\" ] || exit 1\n"
+        "    python3 - \"$FAKE_DRAIN_REPORT\" <<'PY'\n"
+        "import json\n"
+        "import sys\n"
+        "from datetime import UTC, datetime\n"
+        "from pathlib import Path\n"
+        "document = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
+        "document['capturedAt'] = datetime.now(UTC).isoformat().replace('+00:00', 'Z')\n"
+        "print(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':')))\n"
+        "PY\n"
+        "    ;;\n"
         "  *) exit 2 ;;\n"
         "esac\n",
     )
@@ -731,30 +750,72 @@ def _run_deploy(
         "import os\n"
         "print('control-bundle-verified:' + os.environ['DURABLE_AGENT_CONTROL_BUNDLE_SHA256'])\n",
     )
-    _write_executable(
-        control_dir / "scripts" / "durable-agent-v2-release.sh",
-        "#!/bin/sh\n"
-        'printf \'release-driver %s %s\\n\' "$1" "${2:-}" >> "$FAKE_DOCKER_LOG"\n'
-        'case "$1" in\n'
-        "  verify-drain-binding)\n"
-        '    [ -n "${VERIFIED_DRAIN_SHA256:-}" ] || exit 1\n'
-        "    printf 'verified-drain-binding-ok:%s\\n' \"$VERIFIED_DRAIN_SHA256\" ;;\n"
-        "  consume-live-boundary) exit \"${FAKE_BOUNDARY_CONSUME_STATUS:-0}\" ;;\n"
-        "  mark-live-boundary-applied)\n"
-        '    state="$APP_DIR/.durable-agent-v2-release-transactions/'
-        '$DURABLE_AGENT_RELEASE_LOCK_ID/state"\n'
-        '    state_value=$(sed -n \'1p\' "$state")\n'
-        '    outcome=${DURABLE_AGENT_BOUNDARY_OUTCOME:-succeeded}\n'
-        '    printf \'release-boundary-state %s %s\\n\' "$state_value" "$outcome" '
-        '>> "$FAKE_DOCKER_LOG"\n'
-        '    [ "$state_value" = active ] || exit 41\n'
-        '    [ "${FAKE_BOUNDARY_APPLIED_STATUS:-0}" -eq 0 ] '
-        '|| exit "$FAKE_BOUNDARY_APPLIED_STATUS"\n'
-        '    printf \'release-boundary-applied %s\\n\' "$outcome" '
-        '>> "$FAKE_DOCKER_LOG" ;;\n'
-        "  *) exit 2 ;;\n"
-        "esac\n",
-    )
+    if real_release_driver:
+        shutil.copy2(RELEASE_DRIVER, control_dir / "scripts" / RELEASE_DRIVER.name)
+        shutil.copy2(
+            RELEASE_BOUNDARY_HELPER,
+            control_dir / "scripts" / RELEASE_BOUNDARY_HELPER.name,
+        )
+        shutil.copy2(
+            RELEASE_GUARD_HELPER,
+            control_dir / "scripts" / RELEASE_GUARD_HELPER.name,
+        )
+        shutil.copy2(
+            JOINT_DRAIN_HELPER,
+            control_dir / "scripts" / JOINT_DRAIN_HELPER.name,
+        )
+        (control_dir / "control-bundle.json").write_text(
+            json.dumps(
+                {
+                    "workflowTrustedCommit": deploy_sha,
+                    "targetReleaseCommit": deploy_sha,
+                    "producerRunId": "123",
+                    "producerRunAttempt": "1",
+                }
+            ),
+            encoding="utf-8",
+        )
+    else:
+        _write_executable(
+            control_dir / "scripts" / "durable-agent-v2-release.sh",
+            "#!/bin/sh\n"
+            'printf \'release-driver %s %s\\n\' "$1" "${2:-}" '
+            '>> "$FAKE_DOCKER_LOG"\n'
+            'case "$1" in\n'
+            "  verify-drain-binding)\n"
+            '    [ -n "${VERIFIED_DRAIN_SHA256:-}" ] || exit 1\n'
+            "    printf 'verified-drain-binding-ok:%s\\n' "
+            '"$VERIFIED_DRAIN_SHA256" ;;\n'
+            "  consume-live-boundary) exit \"${FAKE_BOUNDARY_CONSUME_STATUS:-0}\" ;;\n"
+            "  mark-live-boundary-applied)\n"
+            '    state="$APP_DIR/.durable-agent-v2-release-transactions/'
+            '$DURABLE_AGENT_RELEASE_LOCK_ID/state"\n'
+            '    state_value=$(sed -n \'1p\' "$state")\n'
+            '    outcome=${DURABLE_AGENT_BOUNDARY_OUTCOME:-succeeded}\n'
+            '    printf \'release-boundary-state %s %s\\n\' '
+            '"$state_value" "$outcome" >> "$FAKE_DOCKER_LOG"\n'
+            '    [ "$state_value" = active ] || exit 41\n'
+            '    [ "${FAKE_BOUNDARY_APPLIED_STATUS:-0}" -eq 0 ] '
+            '|| exit "$FAKE_BOUNDARY_APPLIED_STATUS"\n'
+            '    printf \'release-boundary-applied %s\\n\' "$outcome" '
+            '>> "$FAKE_DOCKER_LOG" ;;\n'
+            "  mark-transaction-failed)\n"
+            '    state="$APP_DIR/.durable-agent-v2-release-transactions/'
+            '$DURABLE_AGENT_RELEASE_LOCK_ID/state"\n'
+            '    state_value=$(sed -n \'1p\' "$state")\n'
+            '    printf \'release-failed-state %s\\n\' "$state_value" '
+            '>> "$FAKE_DOCKER_LOG"\n'
+            '    case "$state_value" in\n'
+            "      active)\n"
+            '        printf \'failed\\n\' > "${state}.partial"\n'
+            '        chmod 600 "${state}.partial"\n'
+            '        mv -f "${state}.partial" "$state" ;;\n'
+            "      failed) ;;\n"
+            "      *) exit 41 ;;\n"
+            "    esac ;;\n"
+            "  *) exit 2 ;;\n"
+            "esac\n",
+        )
     shutil.copy2(FAKE_DOCKER, bin_dir / "docker")
     (bin_dir / "docker").chmod(0o755)
     _write_executable(
@@ -767,7 +828,14 @@ def _run_deploy(
     )
     _write_executable(
         bin_dir / "stat",
-        '#!/bin/sh\ncase "$*" in *%u*) echo 10001;; *%g*) echo 10001;; *%a*) echo 600;; esac\n',
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        "  *%u*) echo 10001 ;;\n"
+        "  *%g*) echo 10001 ;;\n"
+        "  *%a*)\n"
+        '    for path in "$@"; do :; done\n'
+        '    if [ -d "$path" ]; then echo 700; else echo 600; fi ;;\n'
+        "esac\n",
     )
     _write_executable(
         bin_dir / "curl",
@@ -783,6 +851,49 @@ def _run_deploy(
     migration_up_count_path = tmp_path / "migration-up-count"
     snapshot_state_dir = tmp_path / "snapshot-state"
     snapshot_state_dir.mkdir()
+    drain_report_path = tmp_path / "live-drain.json"
+    drain_report_path.write_text(
+        json.dumps(
+            {
+                "capturedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "coreRuntime": {
+                    "containerId": "c" * 64,
+                    "imageId": ROLLBACK_CORE_DIGEST,
+                    "routeMode": "off",
+                    "schemaReady": False,
+                    "v1FreshStartsEnabled": False,
+                },
+                "database": "novelwriter",
+                "executionRedisIdentity": {
+                    "containerId": "e" * 64,
+                    "imageId": "sha256:" + "8" * 64,
+                    "redisRunId": "9" * 40,
+                },
+                "format": "inkforge-durable-agent-v2-live-drain/1",
+                "mode": "pre-contract",
+                "postgresIdentity": {
+                    "databaseOid": "1",
+                    "serverAddress": "127.0.0.1",
+                    "serverPort": "5432",
+                    "serverVersionNum": "170000",
+                },
+                "redisIdentity": {
+                    "containerId": "d" * 64,
+                    "imageId": "sha256:" + "7" * 64,
+                    "redisRunId": "8" * 40,
+                },
+                "runtimeTopologySha256": "a" * 64,
+                "schemaState": "unmigrated",
+                "sourceReportSha256": "b" * 64,
+                "zeroDrain": True,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     # 必须使用与生产脚本相同的固定目录，SHA 让并行测试互不覆盖。
     bundle_root = Path("/tmp")  # noqa: S108
     bundle_path = bundle_root / f"inkforge-deploy-{deploy_sha}.bundle"
@@ -820,12 +931,17 @@ def _run_deploy(
         state = lock_dir / "state"
         state.write_text("active\n", encoding="ascii")
         state.chmod(0o600)
+        if real_release_driver:
+            base_receipt = lock_dir / "base-receipt.sha256"
+            base_receipt.write_text("0" * 64 + "\n", encoding="ascii")
+            base_receipt.chmod(0o600)
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
         "DEPLOY_SHA": deploy_sha,
         "INKFORGE_IMAGE_TAG": "new-tag",
         "DURABLE_AGENT_RELEASE_MANIFEST_DIR": _posix_path(manifest_dir),
+        "RELEASE_MANIFEST_DIR": _posix_path(manifest_dir),
         "DURABLE_AGENT_RELEASE_OPERATION": "release",
         "WORKFLOW_TRUSTED_COMMIT": deploy_sha,
         "TARGET_RELEASE_COMMIT": deploy_sha,
@@ -864,6 +980,7 @@ def _run_deploy(
         "FAKE_MIGRATION_UP_FAIL_ATTEMPT": str(migration_up_fail_attempt),
         "FAKE_MIGRATION_DOWN_STATUS": str(migration_down_status),
         "FAKE_DURABLE_MIGRATION_STATE": durable_migration_state,
+        "FAKE_DRAIN_REPORT": _posix_path(drain_report_path),
         "FAKE_CORE_V2_AWARE_STATUS": str(core_v2_aware_status),
         "FAKE_AGENT_V2_AWARE_STATUS": str(agent_v2_aware_status),
         "FAKE_TARGET_AGENT_MANIFEST_FINGERPRINT": target_agent_manifest_fingerprint,
@@ -894,12 +1011,41 @@ def _run_deploy(
         "SMOKE_AGENT_REQUIRED_SUCCESSES": "1",
         "SMOKE_AGENT_POLL_SECONDS": "0",
     }
+    if release_fault_point:
+        env["DURABLE_AGENT_RELEASE_FAULT_POINT"] = release_fault_point
+        env["INKFORGE_LOCAL_RELEASE_TEST_MODE"] = "true"
+    if real_release_driver:
+        env["PATH"] = f"{Path(sys.executable).parent}:{env['PATH']}"
     if deploy_bundle:
         env["DEPLOY_BUNDLE_PATH"] = bundle_path.as_posix()
-    if verified_drain:
+    if verified_drain and real_release_driver and protected_lock and protected_manifest:
+        prepared = subprocess.run(  # noqa: S603 - 隔离 fake runtime 下执行真实发布 driver
+            [
+                POSIX_SHELL,
+                str(control_dir / "scripts" / RELEASE_DRIVER.name),
+                "prepare-release",
+            ],
+            cwd=ROOT,
+            env={**env, "PATH": f"{bin_dir}:{env['PATH']}"},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        if prepared.returncode != 0:
+            bundle_path.unlink(missing_ok=True)
+            return prepared, log_path.read_text(encoding="utf-8")
+        prefix = "prepare-release-ok:verifiedDrain:"
+        if not prepared.stdout.startswith(prefix):
+            bundle_path.unlink(missing_ok=True)
+            return prepared, log_path.read_text(encoding="utf-8")
+        env["VERIFIED_DRAIN_SHA256"] = prepared.stdout.strip().removeprefix(prefix)
+    elif verified_drain:
         env["VERIFIED_DRAIN_SHA256"] = "a" * 64
     if not protected_manifest:
         env.pop("DURABLE_AGENT_RELEASE_MANIFEST_DIR", None)
+        env.pop("RELEASE_MANIFEST_DIR", None)
     if not protected_lock:
         lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     result = subprocess.run(  # noqa: S603 - 仅执行仓库内固定脚本和测试夹具
@@ -916,7 +1062,7 @@ def _run_deploy(
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=20,
+        timeout=60 if real_release_driver else 20,
         check=False,
     )
     bundle_path.unlink(missing_ok=True)
@@ -1222,6 +1368,9 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
     assert boundary_marker in log
     assert log.index(" exec -T core-api python -c") < log.index(boundary_marker)
     assert "release-boundary-applied compensated" in log
+    assert log.index("release-boundary-applied compensated") < log.index(
+        "release-failed-state active"
+    )
     lock_state = (
         tmp_path
         / "app"
@@ -1234,6 +1383,63 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
     assert "生产编排已启动" not in result.stdout
 
 
+@pytest.mark.parametrize("durable_route_mode", ("off", "allowlist"))
+def test_real_release_driver_settles_compensation_before_failed_without_receipt(
+    tmp_path: Path,
+    durable_route_mode: str,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        new_status=23,
+        rollback_status=0,
+        real_release_driver=True,
+        durable_route_mode=durable_route_mode,
+    )
+
+    assert result.returncode == 23
+    up_lines = _full_stack_up_lines(log)
+    assert [line.split("|", 1)[0] for line in up_lines] == [
+        "tag=new-tag",
+        f"tag={_protected_rollback_tag(tmp_path)}",
+    ]
+    nginx_lines = _nginx_refresh_lines(log)
+    assert [line.split("|", 1)[0] for line in nginx_lines] == [
+        f"tag={_protected_rollback_tag(tmp_path)}"
+    ]
+    runtime_probe = " exec -T core-api python -c"
+    assert runtime_probe in log
+    assert log.index(nginx_lines[0]) < log.index(runtime_probe)
+    assert "--no-deps --force-recreate core-api" not in log
+
+    lock_dir = (
+        tmp_path
+        / "app"
+        / ".durable-agent-v2-release-transactions"
+        / ("d" * 64)
+    )
+    state = lock_dir / "state"
+    assert state.read_text(encoding="ascii") == "failed\n"
+    evidence_dir = lock_dir / "boundary-evidence"
+    claimed = list(evidence_dir.glob("*-compose-release.claimed.json"))
+    applied = list(evidence_dir.glob("*-compose-release.applied.json"))
+    assert len(claimed) == len(applied) == 1
+    assert json.loads(applied[0].read_text(encoding="utf-8")) == {
+        "boundary": "compose-release",
+        "evidenceSha256": hashlib.sha256(claimed[0].read_bytes()).hexdigest(),
+        "format": "inkforge-durable-agent-v2-boundary-applied/1",
+        "lockId": "d" * 64,
+        "outcome": "compensated",
+        "sequence": 1,
+    }
+    # 真实 driver 只允许 active lock 落 applied；最终 state 的替换必须发生在其后。
+    assert applied[0].stat().st_mtime_ns <= state.stat().st_mtime_ns
+    receipt_root = tmp_path / "app" / ".durable-agent-v2-release-receipts"
+    assert not receipt_root.exists()
+    assert "新版本部署失败，旧版本已恢复" in result.stdout
+    assert "生产编排已启动" not in result.stdout
+
+
 def test_failed_new_version_does_not_claim_proven_compensation_when_marker_fails(
     tmp_path: Path,
 ) -> None:
@@ -1242,13 +1448,12 @@ def test_failed_new_version_does_not_claim_proven_compensation_when_marker_fails
         previous_state="valid",
         new_status=23,
         rollback_status=0,
-        boundary_applied_status=37,
+        real_release_driver=True,
+        release_fault_point="boundary-before-applied",
     )
 
     assert result.returncode == 23
     assert len(_full_stack_up_lines(log)) == 2
-    assert "release-boundary-state active compensated" in log
-    assert "release-boundary-applied compensated" not in log
     lock_state = (
         tmp_path
         / "app"
@@ -1257,8 +1462,12 @@ def test_failed_new_version_does_not_claim_proven_compensation_when_marker_fails
         / "state"
     )
     assert lock_state.read_text(encoding="ascii") == "failed\n"
+    evidence_dir = lock_state.parent / "boundary-evidence"
+    assert len(list(evidence_dir.glob("*-compose-release.claimed.json"))) == 1
+    assert list(evidence_dir.glob("*-compose-release.applied.json")) == []
+    assert not (tmp_path / "app" / ".durable-agent-v2-release-receipts").exists()
     assert "旧版本已恢复" not in result.stdout
-    assert "自动回滚也失败（退出码：37）" in result.stderr
+    assert "自动回滚也失败（退出码：90）" in result.stderr
 
 
 def test_failed_new_version_restores_previous_java_with_java_guard(

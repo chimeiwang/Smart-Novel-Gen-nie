@@ -46,6 +46,7 @@ from durable_agent_v2_release_receipt import (
 SSH_FORMAT = "inkforge-ssh-release-attestation/1"
 BOOTSTRAP_FORMAT = "inkforge-release-bootstrap-attestation/1"
 BOOTSTRAP_STATE_FORMAT = "inkforge-release-bootstrap-state/1"
+ORGANIZATION_INVENTORY_FORMAT = "inkforge-github-organization-secret-inventory/1"
 SSH_FILENAME = "ssh-release-attestation.json"
 BOOTSTRAP_FILENAME = "release-bootstrap-attestation.json"
 GITHUB_ARTIFACT_NAMES = {
@@ -55,6 +56,21 @@ GITHUB_ARTIFACT_NAMES = {
 GITHUB_WORKFLOW_PATHS = {
     SSH_FORMAT: ".github/workflows/durable-agent-v2-ssh-release-attestation.yml",
     BOOTSTRAP_FORMAT: ".github/workflows/durable-agent-v2-release-bootstrap.yml",
+}
+SSH_EVIDENCE_PAYLOAD_FILES = (
+    "authorized_keys",
+    "broker-executable",
+    "execution-public-key.pub",
+    "host-public-key.pub",
+    "known_hosts",
+    "retired-public-key-broad-v2.pub",
+    "retired-public-key-server.pub",
+    "upload-public-key.pub",
+)
+DOWNLOAD_LAYOUTS = {
+    "bootstrap-attestation": (BOOTSTRAP_FILENAME, "SHA256SUMS"),
+    "ssh-attestation": (SSH_FILENAME, "SHA256SUMS"),
+    "ssh-evidence": (*SSH_EVIDENCE_PAYLOAD_FILES, "SHA256SUMS"),
 }
 MAX_EVIDENCE_BYTES = 1_048_576
 MAX_TTL = timedelta(hours=24)
@@ -292,6 +308,106 @@ def _read_regular(path: Path, label: str, *, private: bool = True) -> bytes:
         os.close(descriptor)
 
 
+def normalize_downloaded_directory(directory: Path, kind: str) -> None:
+    """将 artifact action 丢失的权限元数据安全收紧到 canonical 模式。"""
+
+    expected = DOWNLOAD_LAYOUTS.get(kind)
+    if expected is None:
+        raise TrustInvalid("downloaded artifact kind 无效")
+    if not directory.is_absolute():
+        raise TrustInvalid("downloaded artifact 目录必须是绝对路径")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if nofollow is None or directory_flag is None:
+        raise TrustInvalid("当前平台缺少安全 artifact 目录打开能力")
+    try:
+        directory_descriptor = os.open(
+            directory,
+            os.O_RDONLY | nofollow | directory_flag | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError as error:
+        raise TrustInvalid("无法安全打开 downloaded artifact 目录") from error
+    try:
+        directory_before = os.fstat(directory_descriptor)
+        directory_mode = stat.S_IMODE(directory_before.st_mode)
+        if (
+            not stat.S_ISDIR(directory_before.st_mode)
+            or directory_before.st_uid != os.geteuid()
+            or directory_mode & 0o022
+            or directory_mode & (stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX)
+        ):
+            raise TrustInvalid("downloaded artifact 目录身份或权限无效")
+        names = set(os.listdir(directory_descriptor))
+        if names != set(expected):
+            raise TrustInvalid("downloaded artifact 文件白名单无效")
+        for name in expected:
+            try:
+                descriptor = os.open(
+                    name,
+                    os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=directory_descriptor,
+                )
+            except OSError as error:
+                raise TrustInvalid(f"无法安全打开 downloaded artifact 文件：{name}") from error
+            try:
+                before = os.fstat(descriptor)
+                _validate_regular_stat(before, f"downloaded artifact {name}", private=False)
+                if before.st_uid != os.geteuid():
+                    raise TrustInvalid(f"downloaded artifact 文件 owner 无效：{name}")
+                path_before = os.stat(
+                    name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+                if _stat_fingerprint(path_before) != _stat_fingerprint(before):
+                    raise TrustInvalid(f"downloaded artifact 文件路径漂移：{name}")
+                os.fchmod(descriptor, 0o600)
+                after = os.fstat(descriptor)
+                path_after = os.stat(
+                    name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+                _validate_regular_stat(after, f"downloaded artifact {name}", private=True)
+                stable_before = (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                    before.st_nlink,
+                )
+                stable_after = (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                    after.st_nlink,
+                )
+                if (
+                    stable_before != stable_after
+                    or _stat_fingerprint(path_after) != _stat_fingerprint(after)
+                ):
+                    raise TrustInvalid(f"downloaded artifact 文件在收紧权限时漂移：{name}")
+            except OSError as error:
+                raise TrustInvalid(f"无法稳定收紧 downloaded artifact 文件：{name}") from error
+            finally:
+                os.close(descriptor)
+        if set(os.listdir(directory_descriptor)) != names:
+            raise TrustInvalid("downloaded artifact 目录内容漂移")
+        os.fchmod(directory_descriptor, 0o700)
+        directory_after = os.fstat(directory_descriptor)
+        if (
+            directory_after.st_dev != directory_before.st_dev
+            or directory_after.st_ino != directory_before.st_ino
+            or stat.S_IMODE(directory_after.st_mode) != 0o700
+        ):
+            raise TrustInvalid("downloaded artifact 目录在收紧权限时漂移")
+    except OSError as error:
+        raise TrustInvalid("无法稳定收紧 downloaded artifact 目录") from error
+    finally:
+        os.close(directory_descriptor)
+
+
 def _decode_json(payload: bytes, label: str) -> dict[str, Any]:
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -365,8 +481,16 @@ def _verify_known_hosts(
     host: str,
     port: int,
     expected_host_key_sha: str,
+    expected_known_hosts_file: Path | None = None,
 ) -> str:
     payload = _read_regular(evidence.known_hosts, "known_hosts")
+    if expected_known_hosts_file is not None:
+        actual_payload = _read_regular(
+            expected_known_hosts_file,
+            "production known_hosts secret",
+        )
+        if actual_payload != payload:
+            raise TrustInvalid("production known_hosts secret 与 signed evidence 不一致")
     _normalized, actual_key_sha = _public_key_hash(evidence.host_public_key, "host public key")
     if actual_key_sha != expected_host_key_sha:
         raise TrustInvalid("host public key SHA 与 attestation 不一致")
@@ -450,9 +574,32 @@ def _verify_authorized_keys(
     return _sha256(payload)
 
 
-def _secret_inventory(path: Path, label: str) -> tuple[set[str], str]:
+def _secret_inventory(
+    path: Path,
+    label: str,
+    *,
+    organization_repository: str | None = None,
+) -> tuple[set[str], str]:
     payload = _read_regular(path, label)
     document = _decode_json(payload, label)
+    if organization_repository is not None:
+        parts = organization_repository.split("/")
+        if len(parts) != 2 or any(not part or part in {".", ".."} for part in parts):
+            raise TrustInvalid("organization inventory repository 格式无效")
+        if set(document) != {"format", "owner", "secrets", "total_count"}:
+            raise TrustInvalid("organization secret inventory 字段无效")
+        if document.get("format") != ORGANIZATION_INVENTORY_FORMAT:
+            raise TrustInvalid("organization secret inventory format 无效")
+        owner = document.get("owner")
+        if (
+            not isinstance(owner, dict)
+            or set(owner) != {"login", "type"}
+            or owner.get("login") != parts[0]
+            or owner.get("type") not in {"User", "Organization"}
+        ):
+            raise TrustInvalid("organization secret inventory owner 漂移")
+        if payload != _canonical(document):
+            raise TrustInvalid("organization secret inventory 必须是 canonical JSON")
     total = document.get("total_count")
     items = document.get("secrets")
     if (
@@ -471,24 +618,82 @@ def _secret_inventory(path: Path, label: str) -> tuple[set[str], str]:
         names.append(name)
     if len(names) != len(set(names)):
         raise TrustInvalid(f"{label} secret 名称重复")
+    if organization_repository is not None:
+        owner = document["owner"]
+        if isinstance(owner, dict) and owner.get("type") == "User" and names:
+            raise TrustInvalid("User owner 的 organization secret scope 必须不存在")
     return set(names), _sha256(payload)
 
 
-def _verify_secret_layers(evidence: SshEvidence) -> tuple[str, str, str]:
+def load_ssh_evidence_bundle(
+    directory: Path,
+    *,
+    environment_secrets: Path,
+    repository_secrets: Path,
+    organization_secrets: Path,
+) -> SshEvidence:
+    if (
+        not directory.is_absolute()
+        or directory.is_symlink()
+        or not directory.is_dir()
+        or stat.S_IMODE(directory.stat().st_mode) != 0o700
+    ):
+        raise TrustInvalid("SSH evidence bundle 必须是 0700 普通绝对目录")
+    expected_names = {*SSH_EVIDENCE_PAYLOAD_FILES, "SHA256SUMS"}
+    actual_names = {path.name for path in directory.iterdir()}
+    if actual_names != expected_names:
+        raise TrustInvalid("SSH evidence bundle 文件白名单无效")
+    payloads: dict[str, bytes] = {}
+    for name in SSH_EVIDENCE_PAYLOAD_FILES:
+        payloads[name] = _read_regular(
+            directory / name,
+            f"SSH evidence {name}",
+            private=name != "broker-executable",
+        )
+    expected_checksums = "".join(
+        f"{_sha256(payloads[name])}  {name}\n" for name in SSH_EVIDENCE_PAYLOAD_FILES
+    ).encode("ascii")
+    actual_checksums = _read_regular(
+        directory / "SHA256SUMS", "SSH evidence SHA256SUMS"
+    )
+    if actual_checksums != expected_checksums:
+        raise TrustInvalid("SSH evidence bundle SHA256SUMS 无效")
+    return SshEvidence(
+        known_hosts=directory / "known_hosts",
+        host_public_key=directory / "host-public-key.pub",
+        authorized_keys=directory / "authorized_keys",
+        retired_public_keys=(
+            directory / "retired-public-key-broad-v2.pub",
+            directory / "retired-public-key-server.pub",
+        ),
+        execution_public_key=directory / "execution-public-key.pub",
+        upload_public_key=directory / "upload-public-key.pub",
+        environment_secrets=environment_secrets,
+        repository_secrets=repository_secrets,
+        organization_secrets=organization_secrets,
+        broker_executable=directory / "broker-executable",
+    )
+
+
+def _verify_secret_layers(
+    evidence: SshEvidence, *, repository: str
+) -> tuple[str, str, str]:
     environment, environment_sha = _secret_inventory(
         evidence.environment_secrets, "environment secret inventory"
     )
-    repository, repository_sha = _secret_inventory(
+    repository_names, repository_sha = _secret_inventory(
         evidence.repository_secrets, "repository secret inventory"
     )
     organization, organization_sha = _secret_inventory(
-        evidence.organization_secrets, "organization secret inventory"
+        evidence.organization_secrets,
+        "organization secret inventory",
+        organization_repository=repository,
     )
     active = set(ACTIVE_SECRETS)
     retired = set(RETIRED_SECRETS)
     if not active.issubset(environment) or environment.intersection(retired):
         raise TrustInvalid("environment secret scope 未完成新旧 key 切换")
-    if repository.intersection(active | retired):
+    if repository_names.intersection(active | retired):
         raise TrustInvalid("repository scope 仍包含 release SSH secret")
     if organization.intersection(active | retired):
         raise TrustInvalid("organization scope 仍包含 release SSH secret")
@@ -505,6 +710,7 @@ def build_ssh_payload(
     issued_at: str,
     expires_at: str,
     evidence: SshEvidence,
+    expected_known_hosts_file: Path | None = None,
 ) -> dict[str, Any]:
     execution_normalized, execution_sha = _public_key_hash(
         evidence.execution_public_key, "execution public key"
@@ -528,7 +734,11 @@ def build_ssh_payload(
     _host_normalized, host_key_sha = _public_key_hash(evidence.host_public_key, "host public key")
     del _host_normalized
     known_hosts_sha = _verify_known_hosts(
-        evidence, host=host, port=port, expected_host_key_sha=host_key_sha
+        evidence,
+        host=host,
+        port=port,
+        expected_host_key_sha=host_key_sha,
+        expected_known_hosts_file=expected_known_hosts_file,
     )
     authorized_sha = _verify_authorized_keys(
         evidence,
@@ -536,7 +746,9 @@ def build_ssh_payload(
         upload_sha=upload_sha,
         retired_shas=retired,
     )
-    environment_sha, repository_sha, organization_sha = _verify_secret_layers(evidence)
+    environment_sha, repository_sha, organization_sha = _verify_secret_layers(
+        evidence, repository=repository
+    )
     broker_sha = _sha256(
         _read_regular(evidence.broker_executable, "broker executable", private=False)
     )
@@ -588,6 +800,7 @@ def validate_ssh_payload(
     expected_port: int,
     expected_user: str,
     now: datetime,
+    expected_known_hosts_file: Path | None = None,
 ) -> dict[str, Any]:
     document = _require_exact_keys(payload, SSH_PAYLOAD_KEYS, "SSH payload")
     expected = build_ssh_payload(
@@ -599,6 +812,7 @@ def validate_ssh_payload(
         issued_at=str(document["issuedAt"]),
         expires_at=str(document["expiresAt"]),
         evidence=evidence,
+        expected_known_hosts_file=expected_known_hosts_file,
     )
     expected_host_key_sha = str(expected["server"]["hostPublicKeySha256"])
     _require_subject(
@@ -735,10 +949,48 @@ def _signed_proof(
     }
 
 
-def _load_github_run(path: Path) -> tuple[dict[str, Any], str]:
+def _load_github_run(path: Path) -> dict[str, Any]:
     payload = _read_regular(path, "GitHub run API response")
     document = _decode_json(payload, "GitHub run API response")
-    return document, _sha256(payload)
+    return document
+
+
+def _github_run_identity(
+    format_name: str,
+    payload: dict[str, Any],
+    run: dict[str, Any],
+) -> dict[str, str]:
+    def required(value: Any) -> str:
+        if not isinstance(value, str) or not value:
+            raise TrustInvalid("GitHub stable run identity 字段缺失")
+        return value
+
+    repository = run.get("repository")
+    repository_name = repository.get("full_name") if isinstance(repository, dict) else None
+    identity: dict[str, str] = {
+        "event": required(run.get("event")),
+        "headBranch": required(run.get("head_branch")),
+        "headSha": required(run.get("head_sha")),
+        "repository": required(repository_name),
+        "runAttempt": str(run.get("run_attempt")),
+        "runId": str(run.get("id")),
+        "workflowPath": required(run.get("path")),
+    }
+    _require_hex(identity["headSha"], 40, "GitHub run head SHA")
+    if identity["repository"] != payload.get("repository"):
+        raise TrustInvalid("GitHub run repository 与 attestation subject 不一致")
+    if identity["workflowPath"] != GITHUB_WORKFLOW_PATHS[format_name]:
+        raise TrustInvalid("GitHub attestation workflow path 无效")
+    if identity["headBranch"] != "main" or identity["event"] != "workflow_dispatch":
+        raise TrustInvalid("GitHub attestation run 不是 main workflow_dispatch")
+    for field, label in (
+        ("runId", "GitHub run ID"),
+        ("runAttempt", "GitHub run attempt"),
+    ):
+        value = identity[field]
+        if not value.isdigit() or value.startswith("0"):
+            raise TrustInvalid(f"{label} 无效")
+    return identity
 
 
 def _github_proof(
@@ -750,31 +1002,15 @@ def _github_proof(
 ) -> dict[str, Any]:
     if artifact_name != GITHUB_ARTIFACT_NAMES[format_name]:
         raise TrustInvalid("GitHub attestation artifact 名称无效")
-    run, response_sha = _load_github_run(github_run_json)
-    repository = run.get("repository")
-    repository_name = repository.get("full_name") if isinstance(repository, dict) else None
+    run = _load_github_run(github_run_json)
+    identity = _github_run_identity(format_name, payload, run)
     values = {
         "artifactName": artifact_name,
-        "headSha": run.get("head_sha"),
         "kind": "github-actions-run",
-        "repository": repository_name,
-        "runAttempt": str(run.get("run_attempt")),
-        "runId": str(run.get("id")),
-        "runResponseSha256": response_sha,
+        "runIdentity": identity,
+        "runIdentitySha256": _sha256(_canonical(identity)),
         "subjectSha256": _sha256(_unsigned_payload(format_name, payload)),
-        "workflowPath": run.get("path"),
     }
-    if any(not isinstance(value, str) or not value for value in values.values()):
-        raise TrustInvalid("GitHub run provenance 字段缺失")
-    _require_hex(values["headSha"], 40, "GitHub run head SHA")
-    if values["repository"] != payload.get("repository"):
-        raise TrustInvalid("GitHub run repository 与 attestation subject 不一致")
-    if values["workflowPath"] != GITHUB_WORKFLOW_PATHS[format_name]:
-        raise TrustInvalid("GitHub attestation workflow path 无效")
-    for field, label in (("runId", "GitHub run ID"), ("runAttempt", "GitHub run attempt")):
-        value = values[field]
-        if not isinstance(value, str) or not value.isdigit() or value.startswith("0"):
-            raise TrustInvalid(f"{label} 无效")
     return values
 
 
@@ -850,43 +1086,31 @@ def _verify_proof(
         raise TrustInvalid("attestation proof kind 无效")
     expected_keys = {
         "artifactName",
-        "headSha",
         "kind",
-        "repository",
-        "runAttempt",
-        "runId",
-        "runResponseSha256",
+        "runIdentity",
+        "runIdentitySha256",
         "subjectSha256",
-        "workflowPath",
     }
     if set(proof) != expected_keys or github_run_json is None:
         raise TrustInvalid("GitHub proof 缺少外部 run provenance")
     if proof.get("artifactName") != GITHUB_ARTIFACT_NAMES[document["format"]]:
         raise TrustInvalid("GitHub attestation artifact 名称漂移")
-    if proof.get("workflowPath") != GITHUB_WORKFLOW_PATHS[document["format"]]:
-        raise TrustInvalid("GitHub attestation workflow path 漂移")
-    run, response_sha = _load_github_run(github_run_json)
-    repository = run.get("repository")
+    run = _load_github_run(github_run_json)
+    identity = _github_run_identity(document["format"], document["payload"], run)
     expected = {
         "artifactName": proof["artifactName"],
-        "headSha": run.get("head_sha"),
         "kind": "github-actions-run",
-        "repository": repository.get("full_name") if isinstance(repository, dict) else None,
-        "runAttempt": str(run.get("run_attempt")),
-        "runId": str(run.get("id")),
-        "runResponseSha256": response_sha,
+        "runIdentity": identity,
+        "runIdentitySha256": _sha256(_canonical(identity)),
         "subjectSha256": _sha256(unsigned),
-        "workflowPath": run.get("path"),
     }
     if proof != expected:
         raise TrustInvalid("GitHub run provenance 与 attestation 不一致")
     if (
-        run.get("head_branch") != "main"
-        or run.get("event") != "workflow_dispatch"
-        or run.get("status") != "completed"
+        run.get("status") != "completed"
         or run.get("conclusion") != "success"
     ):
-        raise TrustInvalid("GitHub run 不是 main dispatch success")
+        raise TrustInvalid("GitHub run provenance 不是 completed success")
     if trusted_public_key is not None or expected_key_id is not None:
         raise TrustInvalid("GitHub proof 不接受签名参数混用")
 
@@ -991,6 +1215,7 @@ def verify_attestation(
     trusted_public_key: Path | None = None,
     expected_key_id: str | None = None,
     github_run_json: Path | None = None,
+    expected_known_hosts_file: Path | None = None,
 ) -> tuple[dict[str, Any], str]:
     document, digest = load_artifact(directory, expected_sha256)
     _verify_proof(
@@ -1011,6 +1236,7 @@ def verify_attestation(
             expected_port=expected_port,
             expected_user=expected_user,
             now=now,
+            expected_known_hosts_file=expected_known_hosts_file,
         )
     else:
         if expected_ssh_attestation_sha256 is None:
@@ -1167,16 +1393,34 @@ def _parse_now(value: str | None) -> datetime:
 
 
 def _evidence_from_arguments(arguments: argparse.Namespace) -> SshEvidence | None:
-    values = (
+    bundle = arguments.ssh_evidence_dir
+    direct_values = (
         arguments.known_hosts_file,
         arguments.host_public_key_file,
         arguments.authorized_keys_file,
         arguments.execution_public_key_file,
         arguments.upload_public_key_file,
+        arguments.broker_executable,
+    )
+    inventories = (
         arguments.environment_secrets_json,
         arguments.repository_secrets_json,
         arguments.organization_secrets_json,
-        arguments.broker_executable,
+    )
+    if bundle is not None:
+        if any(value is not None for value in direct_values) or arguments.retired_public_key_file:
+            raise TrustInvalid("SSH evidence bundle 不得与单文件参数混用")
+        if any(value is None for value in inventories):
+            raise TrustInvalid("SSH evidence bundle 缺少三层 live secret inventory")
+        return load_ssh_evidence_bundle(
+            bundle,
+            environment_secrets=arguments.environment_secrets_json,
+            repository_secrets=arguments.repository_secrets_json,
+            organization_secrets=arguments.organization_secrets_json,
+        )
+    values = (
+        *direct_values,
+        *inventories,
     )
     if all(value is None for value in values) and not arguments.retired_public_key_file:
         return None
@@ -1197,6 +1441,7 @@ def _evidence_from_arguments(arguments: argparse.Namespace) -> SshEvidence | Non
 
 
 def _add_evidence_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--ssh-evidence-dir", type=Path)
     parser.add_argument("--known-hosts-file", type=Path)
     parser.add_argument("--host-public-key-file", type=Path)
     parser.add_argument("--authorized-keys-file", type=Path)
@@ -1221,6 +1466,10 @@ def _add_subject_arguments(parser: argparse.ArgumentParser) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     actions = parser.add_subparsers(dest="action", required=True)
+    normalize = actions.add_parser("normalize-download")
+    normalize.add_argument("--directory", type=Path, required=True)
+    normalize.add_argument("--kind", choices=tuple(DOWNLOAD_LAYOUTS), required=True)
+
     create = actions.add_parser("create")
     create.add_argument("--format", choices=(SSH_FORMAT, BOOTSTRAP_FORMAT), required=True)
     create.add_argument("--payload-json", type=Path, required=True)
@@ -1239,6 +1488,7 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--trusted-public-key", type=Path)
     verify.add_argument("--expected-key-id")
     verify.add_argument("--github-run-json", type=Path)
+    verify.add_argument("--expected-known-hosts-file", type=Path)
     verify.add_argument("--expected-ssh-attestation-sha256")
     _add_subject_arguments(verify)
     _add_evidence_arguments(verify)
@@ -1282,7 +1532,10 @@ def _validate_payload_for_arguments(
 def main() -> int:
     arguments = _parser().parse_args()
     try:
-        if arguments.action == "create":
+        if arguments.action == "normalize-download":
+            normalize_downloaded_directory(arguments.directory, arguments.kind)
+            print(f"release-trust-download-normalized:{arguments.kind}")
+        elif arguments.action == "create":
             payload = _decode_json(
                 _read_regular(arguments.payload_json, "attestation payload JSON"),
                 "attestation payload",
@@ -1314,6 +1567,7 @@ def main() -> int:
                 trusted_public_key=arguments.trusted_public_key,
                 expected_key_id=arguments.expected_key_id,
                 github_run_json=arguments.github_run_json,
+                expected_known_hosts_file=arguments.expected_known_hosts_file,
             )
             print(f"release-attestation-verified:{document['format']}:{digest}")
         return 0

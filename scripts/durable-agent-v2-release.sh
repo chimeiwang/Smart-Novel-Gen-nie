@@ -572,14 +572,145 @@ PY
 
 write_lock_state() {
   wanted="$1"
-  temporary="$release_lock_dir/.state.partial"
   case "$wanted" in active|prepared|committed_cleanup_pending|failed) ;;
     *) exit 2 ;;
   esac
-  [ ! -e "$temporary" ] || exit 1
-  printf '%s\n' "$wanted" > "$temporary"
-  chmod 600 "$temporary"
-  mv -f "$temporary" "$release_lock_state"
+  python3 - "$release_lock_dir" "$release_lock_owner" "$release_lock_file" \
+    "$release_lock_state" "$wanted" \
+    "${DURABLE_AGENT_RELEASE_FAULT_POINT:-}" \
+    "${INKFORGE_LOCAL_RELEASE_TEST_MODE:-}" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+directory, owner, fixed, state_path = map(Path, sys.argv[1:5])
+wanted, fault_point, test_mode = sys.argv[5:8]
+states = {"active", "prepared", "committed_cleanup_pending", "failed"}
+partial_pattern = re.compile(
+    r"\.state-([0-9a-f]{64})-(active|prepared|committed_cleanup_pending|failed)\.partial\Z"
+)
+
+
+def fail(code: str) -> None:
+    print(f"durable-release:error:{code}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def fault(point: str) -> None:
+    if fault_point != point:
+        return
+    if test_mode != "true":
+        fail("production-fault-injection-disabled")
+    print(f"durable-release:test-fault:{point}", file=sys.stderr)
+    raise SystemExit(90)
+
+
+def private_regular(path: Path, mode: int) -> bool:
+    return (
+        path.exists()
+        and not path.is_symlink()
+        and path.is_file()
+        and stat.S_IMODE(path.stat().st_mode) == mode
+    )
+
+
+if wanted not in states:
+    fail("lock-state-target")
+if (
+    not directory.exists()
+    or directory.is_symlink()
+    or not directory.is_dir()
+    or stat.S_IMODE(directory.stat().st_mode) != 0o700
+):
+    fail("lock-state-directory")
+if not private_regular(owner, 0o600) or not private_regular(fixed, 0o600):
+    fail("lock-state-owner")
+try:
+    if not owner.samefile(fixed):
+        fail("lock-state-owner-inode")
+except OSError:
+    fail("lock-state-owner-inode")
+
+owner_sha = hashlib.sha256(owner.read_bytes()).hexdigest()
+expected_name = f".state-{owner_sha}-{wanted}.partial"
+state_partials = [
+    path
+    for path in directory.iterdir()
+    if path.name.startswith(".state") and path.name.endswith(".partial")
+]
+if len(state_partials) > 1:
+    fail("lock-state-multiple-partials")
+partial: Path | None = state_partials[0] if state_partials else None
+if partial is not None:
+    match = partial_pattern.fullmatch(partial.name)
+    if (
+        match is None
+        or partial.name != expected_name
+        or match.group(1) != owner_sha
+        or match.group(2) != wanted
+    ):
+        fail("lock-state-foreign-partial")
+    if not private_regular(partial, 0o600):
+        fail("lock-state-partial")
+    if partial.read_bytes() != f"{wanted}\n".encode("ascii"):
+        fail("lock-state-partial-content")
+
+if state_path.exists() or state_path.is_symlink():
+    if not private_regular(state_path, 0o600):
+        fail("lock-state-file")
+    current = state_path.read_text(encoding="ascii")
+    if current not in {f"{value}\n" for value in states}:
+        fail("lock-state-content")
+    if current == f"{wanted}\n":
+        if partial is not None:
+            fail("lock-state-ambiguous-partial")
+        descriptor = os.open(state_path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        parent = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+        raise SystemExit(0)
+elif wanted != "active":
+    fail("lock-state-missing")
+
+if partial is None:
+    partial = directory / expected_name
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(partial, flags, 0o600)
+    except OSError:
+        fail("lock-state-partial-create")
+    with os.fdopen(descriptor, "wb") as output:
+        os.fchmod(output.fileno(), 0o600)
+        output.write(f"{wanted}\n".encode("ascii"))
+        output.flush()
+        os.fsync(output.fileno())
+else:
+    descriptor = os.open(partial, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+fault("state-after-partial-fsync")
+os.replace(partial, state_path)
+fault("state-after-replace")
+parent = os.open(directory, os.O_RDONLY)
+try:
+    os.fsync(parent)
+finally:
+    os.close(parent)
+PY
 }
 
 write_private_line_no_replace() {
@@ -755,6 +886,74 @@ mark_lock_failed() {
   require_release_lock
   write_lock_state failed
 }
+
+mark_settled_compensation_failed() (
+  case "$RELEASE_ACTION" in
+    rollback) expected_boundary=compose-rollback ;;
+    route_off_release|allowlist_release) expected_boundary=compose-release ;;
+    *) return 1 ;;
+  esac
+  base_file="$release_lock_dir/base-receipt.sha256"
+  [ -f "$base_file" ] && [ ! -L "$base_file" ] || return 2
+  require_sha256 "$(cat "$base_file")" base-receipt-sha256
+  for receipt_path in \
+    "$release_lock_dir/expected-receipt.sha256" \
+    "$release_lock_dir/receipt-intent.json" \
+    "$release_lock_dir/release-receipt-candidate" \
+    "$release_lock_dir/receipt-current-unfsynced" \
+    "$release_lock_dir/receipt-commit-confirmed"
+  do
+    [ ! -e "$receipt_path" ] && [ ! -L "$receipt_path" ] || return 2
+  done
+  [ -d "$boundary_evidence_dir" ] && [ ! -L "$boundary_evidence_dir" ] \
+    || return 2
+  # shellcheck disable=SC2086
+  set -- "$boundary_evidence_dir/"[0-9][0-9][0-9][0-9][0-9][0-9]-"$expected_boundary".applied.json
+  [ "$#" -eq 1 ] && [ -f "$1" ] && [ ! -L "$1" ] || {
+    [ ! -e "$1" ] && return 2
+    return 1
+  }
+  ledger="$(python3 "$boundary_helper" ledger \
+    --evidence-dir "$boundary_evidence_dir" \
+    --lock-id "$release_lock_id" 2>/dev/null)" || return 1
+  validation_status=0
+  python3 - "$ledger" "$release_lock_id" "$expected_boundary" <<'PY' \
+    || validation_status=$?
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+if set(document) != {"entries", "format", "lockId"}:
+    raise SystemExit(1)
+if (
+    document["format"] != "inkforge-durable-agent-v2-boundary-ledger/1"
+    or document["lockId"] != sys.argv[2]
+    or not isinstance(document["entries"], list)
+    or not document["entries"]
+):
+    raise SystemExit(1)
+entries = document["entries"]
+matches = [entry for entry in entries if entry.get("boundary") == sys.argv[3]]
+if len(matches) != 1:
+    raise SystemExit(1)
+entry = matches[0]
+if entry.get("outcome") == "succeeded":
+    raise SystemExit(2)
+if entry.get("outcome") != "compensated" or entry is not entries[-1]:
+    raise SystemExit(1)
+PY
+  case "$validation_status" in
+    0) ;;
+    2) return 2 ;;
+    *) return 1 ;;
+  esac
+  runtime_group="$(boundary_runtime_group "$expected_boundary")"
+  EXPECTED_RUNTIME_ROUTE_MODE=off runtime_preflight "$runtime_group" || return 1
+  current_core_config_snapshot off "$(manifest_read canary-scope-sha256)" false \
+    >/dev/null || return 1
+  [ "$(cat "$release_lock_state")" = active ] || return 1
+  write_lock_state failed
+)
 
 current_receipt_sha() (
   current="$release_receipt_root/current"
@@ -1145,6 +1344,7 @@ mark_live_boundary_applied() (
   claimed="$1"
   evidence_sha="$(sha256sum "$claimed" | cut -d ' ' -f 1)"
   boundary_helper_sha="$(sha256sum "$boundary_helper" | cut -d ' ' -f 1)"
+  inject_release_fault boundary-before-applied
   output="$(python3 "$boundary_helper" mark-applied \
     --evidence-dir "$boundary_evidence_dir" --claimed-file "$claimed" \
     --expected-sha256 "$evidence_sha" --outcome "$outcome" \
@@ -1470,7 +1670,7 @@ PY
       --env-file "$transition_env_file" --project-directory "$control_dir/infra" \
       -f "$control_dir/infra/compose.yaml" -f "$guard_compose_file" \
       up --no-build -d --wait --no-deps \
-      --force-recreate core-api
+      --force-recreate core-api || exit $?
     transition_after_core="$(current_service_digest core-api inkforge-core-api)"
     [ "$transition_after_core" = "$transition_before_core" ]
     current_core_config_snapshot "$transition_wanted_route" "$transition_scope" \
@@ -2368,15 +2568,41 @@ case "$action" in
     if [ -f "$release_lock_state" ] && [ ! -L "$release_lock_state" ] \
       && [ "$(cat "$release_lock_state")" = failed ]; then
       require_failed_release_lock
+      # 内容不变；仅补齐 replace 后可能未完成的 state/父目录 fsync。
+      write_lock_state failed
       printf 'release-transaction-failed:%s\n' "$release_lock_id"
       exit 0
     fi
     require_release_lock
-    if reconcile_transaction_internal; then
+    compensation_status=0
+    mark_settled_compensation_failed || compensation_status=$?
+    case "$compensation_status" in
+      0)
+        printf 'release-transaction-failed:%s\n' "$release_lock_id"
+        exit 0
+        ;;
+      2) ;;
+      *)
+        echo "durable-release:error:settled-compensation-invalid" >&2
+        exit 1
+        ;;
+    esac
+    reconcile_status=0
+    reconcile_transaction_internal || reconcile_status=$?
+    if [ "$reconcile_status" -eq 0 ]; then
       printf 'release-transaction-already-committed:%s\n' "$release_lock_id"
-    else
-      printf 'release-transaction-failed:%s\n' "$release_lock_id"
+      exit 0
     fi
+    if [ -f "$release_lock_state" ] && [ ! -L "$release_lock_state" ] \
+      && [ "$(cat "$release_lock_state")" = failed ] \
+      && (require_failed_release_lock); then
+      if write_lock_state failed; then
+        printf 'release-transaction-failed:%s\n' "$release_lock_id"
+        exit 0
+      fi
+    fi
+    echo "durable-release:error:transaction-outcome-unknown" >&2
+    exit 1
     ;;
 
   cleanup-failed-transaction)
@@ -2463,13 +2689,27 @@ case "$action" in
       echo "durable-release:error:cleanup-owner-evidence" >&2
       exit 1
     }
+    cleanup_owner_path=""
+    for candidate in "$release_lock_owner" "$release_lock_file" \
+      "$release_lock_partial_owner"
+    do
+      if [ -f "$candidate" ] && [ ! -L "$candidate" ]; then
+        cleanup_owner_path="$candidate"
+        break
+      fi
+    done
+    [ -n "$cleanup_owner_path" ] || exit 1
+    cleanup_owner_sha="$(sha256sum "$cleanup_owner_path" | cut -d ' ' -f 1)"
+    require_sha256 "$cleanup_owner_sha" cleanup-owner-sha256
     if [ -d "$release_lock_dir" ]; then
-      python3 - "$release_lock_dir" <<'PY'
+      python3 - "$release_lock_dir" "$cleanup_owner_sha" <<'PY'
+import re
 import stat
 import sys
 from pathlib import Path
 
 directory = Path(sys.argv[1])
+owner_sha = sys.argv[2]
 allowed_files = {
     ".current-receipt.partial",
     ".current-receipt.restore.partial",
@@ -2481,8 +2721,6 @@ allowed_files = {
     ".boundary-live-ddl-forward-2.partial",
     ".env.restore.partial",
     ".env.transition.partial",
-    ".state.deploy-failed.partial",
-    ".state.partial",
     "allowlist-lease-id",
     "base-receipt.sha256",
     "boundary-ledger.json",
@@ -2507,6 +2745,30 @@ allowed_directories = {
     "token-usage-control",
 }
 children = {path.name: path for path in directory.iterdir()}
+state_partials = [
+    name
+    for name in children
+    if name.startswith(".state") and name.endswith(".partial")
+]
+if len(state_partials) > 1:
+    raise SystemExit("lock-state-multiple-partials")
+if state_partials:
+    name = state_partials[0]
+    match = re.fullmatch(
+        r"\.state-([0-9a-f]{64})-(active|prepared|committed_cleanup_pending|failed)\.partial",
+        name,
+    )
+    if match is None or match.group(1) != owner_sha:
+        raise SystemExit("lock-state-foreign-partial")
+    partial = children[name]
+    if (
+        partial.is_symlink()
+        or not partial.is_file()
+        or stat.S_IMODE(partial.stat().st_mode) != 0o600
+        or partial.read_bytes() != f"{match.group(2)}\n".encode("ascii")
+    ):
+        raise SystemExit("lock-state-partial")
+    allowed_files.add(name)
 if set(children) - allowed_files - allowed_directories:
     raise SystemExit("lock-directory-extra-files")
 for name, path in children.items():
@@ -2577,6 +2839,9 @@ PY
         done
         rmdir "$boundary_evidence_dir"
       fi
+      for path in "$release_lock_dir"/.state-*.partial; do
+        [ ! -e "$path" ] || rm -f -- "$path"
+      done
       for path in \
         "$release_lock_dir/.current-receipt.partial" \
         "$release_lock_dir/.current-receipt.restore.partial" \
@@ -2588,8 +2853,6 @@ PY
         "$release_lock_dir/.boundary-live-ddl-forward-2.partial" \
         "$release_lock_dir/.env.restore.partial" \
         "$release_lock_dir/.env.transition.partial" \
-        "$release_lock_dir/.state.deploy-failed.partial" \
-        "$release_lock_dir/.state.partial" \
         "$release_lock_dir/allowlist-lease-id" \
         "$release_lock_dir/base-receipt.sha256" \
         "$release_lock_dir/boundary-ledger.json" \

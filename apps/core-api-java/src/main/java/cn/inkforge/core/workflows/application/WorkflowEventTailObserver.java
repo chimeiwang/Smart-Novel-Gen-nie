@@ -452,6 +452,10 @@ public final class WorkflowEventTailObserver implements AutoCloseable {
                         return operation.apply(execution.cancellation);
                     } finally {
                         activeQueries.decrementAndGet();
+                        // FutureTask 会先发布终态并唤醒 get()，再执行 done/run finally。
+                        // 完成门必须在 callable 返回前关闭，否则 observer 可能在这个窗口
+                        // 保留旧 currentQuery，并把下一次顺序 tail 查询误判为重叠。
+                        execution.finishOnce();
                     }
                 });
                 execution.future = task;

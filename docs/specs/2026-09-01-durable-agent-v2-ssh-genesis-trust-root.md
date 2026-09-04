@@ -1,7 +1,9 @@
 # Durable Agent V2 SSH 与 genesis 发布信任根
 
-状态：基础纵切实施中；canonical 证据、离线校验器和 broker 协议已冻结，但尚未接入真实
-`authorized_keys`、GitHub production Workflow 或生产 receipt 根，因此生产发布必须继续 fail closed
+状态：发布前语义信任门禁实施中；canonical 证据和离线 broker 协议已冻结，仓内当前诚实版本的 production release
+Workflow 已在任何 SSH 私钥读取前消费并复验外部 attestation，但该 Workflow 与 verifier 仍来自可变的 `github.sha`，
+不能自证自身未被恶意 main 候选替换。仓外不可变信任执行器、真实双角色流式 broker、`authorized_keys` 与 sealed
+genesis 均未接线，因此 Workflow 在私钥/SSH/Compose/DDL 前固定失败，且不得启用生产
 
 日期：2026-09-01
 
@@ -62,10 +64,13 @@ broker。release receipt 虽然形成 `previousReceiptSha256` 链，但缺少可
 `issuedAt`/`expiresAt` 使用 UTC 秒精度 `YYYY-MM-DDTHH:MM:SSZ`；签发时间最多允许比 verifier 时钟快 300 秒，
 TTL 必须大于 0 且不超过 24 小时，过期即失败。生产审批和执行不得跨过过期边界。
 
-GitHub provenance envelope 使用 `kind=github-actions-run`，proof 必须冻结 repository、固定 workflow path、
-run ID/attempt、main head SHA、`workflow_dispatch`、success conclusion、artifact 名及 unsigned subject SHA。verifier
-必须同时得到从 API 读取的 run JSON，并在下载精确 run artifact 的同一可信 job 中复验；缺外部 run JSON 或把文件
-复制到另一个 run 后均失败。该模式不能由候选仓库脚本或输入布尔值自证。
+GitHub provenance envelope 使用 `kind=github-actions-run`。proof 必须冻结 artifact 名、unsigned subject SHA，以及只含
+repository、固定 workflow path、run ID/attempt、main head SHA、head branch 与 `workflow_dispatch` event 的 canonical
+stable run identity projection 及其 SHA-256。producer 在 run 尚为 `in_progress` 时可以构造该 projection；不得把会在
+run 收尾时变化的完整 REST 响应、`status`、`conclusion`、`updated_at` 或原始响应字节 SHA 写进 proof。verifier 必须同时
+得到从 API 读取的同一 run JSON，重算 stable identity，并另外要求消费时已经 `completed/success`；在下载精确 run
+artifact 的同一可信 job 中复验，缺外部 run JSON 或把文件复制到另一个 run 后均失败。该模式不能由候选仓库脚本或
+输入布尔值自证。
 
 ## 5. SSH release attestation
 
@@ -126,11 +131,14 @@ run ID/attempt、main head SHA、`workflow_dispatch`、success conclusion、arti
 `restrict,command="/usr/local/libexec/inkforge-release-broker upload"`。额外 release key、不同命令、缺 `restrict`、
 `no-pty` 的不完整拼接或允许 forwarding 均失败。非 release 管理 key 可以存在，但不能复用 active/retired key。
 
-GitHub API secret inventory 必须完整分页并交叉验证：
+GitHub API secret inventory 必须使用有界分页采集，逐页拒绝重复 key、重复名称、计数漂移、超过 100 项的单页和超过
+总页数/总项数上限的响应，再合并成 canonical inventory 并交叉验证。repository metadata 必须同时证明
+`full_name`、`owner.login` 与 `owner.type`：
 
 - environment scope 只允许存在两个新角色 key，且两个 retired secret 均不存在；
-- repository 与 organization scope 必须同时不存在两个新 key与两个 retired secret，防止历史 workflow 从更宽
-  scope 继续取到生产私钥；
+- repository scope 必须不存在两个新 key与两个 retired secret；owner 为 `Organization` 时还必须完整读取并验证
+  organization scope，owner 为 `User` 时 GitHub 不存在 organization secret scope，必须生成绑定 owner login/type 的
+  canonical `no-org-scope` 证据，禁止静默跳过或请求必定 404 的 organization API；
 - inventory 文件 SHA 与 attestation 逐项相等，API 权限不足、`total_count` 不完整或重复名称都失败。
 
 ## 6. 固定 broker 协议
@@ -185,11 +193,37 @@ absent
 
 ## 8. 本轮仓内集成与 fail-closed 边界
 
+- 仓内 Workflow、checkout 前 shell 与 verifier 都不是自身的信任根：它们来自同一个可变 `github.sha`。本轮攻击测试只
+  证明当前诚实版本的静态结构和执行顺序，不能证明恶意 main 候选仍会保留这些门禁。production environment 审批、
+  CODEOWNERS 或仓内 required check 单独都不能消除这条自证循环。
 - 新 validator/builder 和 broker policy 文件进入 control bundle 白名单，但不被远端执行。
-- 当前 production environment policy verifier 仍只有裸 hash 门禁，生产 Workflow 也尚未下载 semantic attestation、
-  repository/org secret inventory 或调用本 verifier；因此这两处明确保持“未完成”，不能把现有 Workflow 视为安全
-  发布入口。本轮不为赶发布接线，后续必须先加入 semantic trust 严格模式并用攻击测试证明失败时 SSH 次数为 0。
-- 旧三个 `*_EVIDENCE_SHA256` 只能作为历史诊断，不再足以通过严格模式。
+- 每个 release/rollback/cleanup dispatch 必须提交 SSH attestation producer run ID、run attempt、artifact SHA，以及
+  bootstrap attestation producer 的同组三项精确输入；任一缺失、格式无效或与外部 GitHub API run provenance 不一致，
+  都必须在 artifact 下载和 production job 前失败。
+- source job 只验证无 secret 的 dispatch 格式、`github.sha` 与 trusted checkout，不读取任何自定义 secret，也不下载
+  trust artifact。production environment 审批通过后，production job 才按精确 producer run 下载
+  `durable-agent-v2-ssh-release-attestation`、固定文件白名单 evidence bundle 和
+  `durable-agent-v2-release-bootstrap-attestation`，并使用当前 trusted checkout 的 verifier 复验 canonical、artifact SHA、
+  producer repository/workflow/main/dispatch/success/run attempt、subject、TTL、known_hosts、host/user、双公钥、旧公钥
+  撤销与 broker policy；候选 artifact 内的脚本不执行。
+- environment policy verifier 必须同时消费 repository metadata，以及 environment、repository 与 owner-aware organization
+  三层完整 secret inventory；两个
+  新角色 private key 只允许存在于 production environment，旧 `SERVER_SSH_KEY` 与旧通用 V2 key 在三层都必须不存在。
+  server host/port/user 只从 GitHub environment variables 外部读取并与 signed subject 比较，不能来自 dispatch 自报。
+- `GH_ENVIRONMENT_POLICY_AUDIT_TOKEN` 只能存放在 production environment secret，repository/organization scope 必须均
+  不存在；只有 production 审批后的 job 能读取。它必须是独立于执行/上传 SSH key 的只读 GitHub App installation token
+  或 fine-grained token，权限只覆盖本仓 actions run 元数据、repository environment/secrets/variables 与 organization
+  Actions secret inventory 的读取，不得拥有 contents/workflows/secrets/environments 写权限。带该 token 的 step 只能执行
+  固定 GitHub API 采集与固定本地 JSON 路由，禁止执行 checkout 中的脚本；policy、provenance 与 trust verifier 必须在
+  后续未注入 token 的 step 执行。source job 只使用 GitHub 自动生成的最小 `github.token` 完成固定 SHA checkout，不得
+  引用该自定义审计 token。
+- 旧三个 `*_EVIDENCE_SHA256` 可继续作为历史诊断变量，但不再参与授权判断，也不能替代 semantic artifact。
+- production job 重新下载 source 已复验的 trust input。production known_hosts secret 只能由固定无仓库脚本 step 写入
+  0600 临时文件；trust verifier 必须在同一次 descriptor-bound 验证中读取该文件与 evidence `known_hosts` snapshot，
+  同时完成逐字节比较、host/key 解析和 attestation hash 绑定，禁止先验证后另起 `cmp` 形成跨 step TOCTOU。随后因为真正
+  的双角色流式 broker dispatcher和 sealed current/genesis 链仍未接线，执行一个稳定、无旁路的
+  pre-private-key fail-closed gate。仓库当前 Workflow 不读取任何 release private key，也不保留 inline remote shell、
+  SCP/SFTP、`docker load` stdin、Compose 或 DDL step；上述能力只能在后续规格与攻击测试完成后按固定 broker 协议重建。
 - release receipt 通用 helper 拒绝 `previousReceiptSha256=null`；当前无 genesis 的服务器仍然无法
   `begin-snapshot`。
 - 本轮不变更产品 CLI，因此 operator Skill 暂不调整命令映射。未来 SSH broker、Workflow 输入或发布操作方式接线时，
@@ -206,9 +240,25 @@ absent
    `authorized_keys`；
 4. 在独立受保护 bootstrap 流程采集运行镜像、配置、fingerprint 和 receipt subject，签发 bootstrap attestation；
 5. 受控安装唯一 genesis receipt 与 sealed 状态，完成断电/重复/篡改/链遍历演练；
-6. 把 Workflow 改为下载并验证上述 artifact，使用分离 key 与固定 broker 请求，删除所有 inline remote shell、scp/SFTP
-   和宽权限 stdin 路径；
-7. GitHub production environment、main ruleset、reviewer、bypass/audit 日志与固定 action/runner 供应链另行复验。
+6. 实现流式、有界、content-addressed、no-replace 的 upload broker 和固定 execution dispatcher，并证明两个 private key
+   与 attestation 公钥匹配后，才允许 Workflow 在语义门禁后读取分离 key；
+7. 将 sealed bootstrap/current receipt 链验证接入 `begin-snapshot` 前置 broker operation；
+8. GitHub production environment、main ruleset、reviewer、bypass/audit 日志仍需仓外复验。仓内 Workflow runner 固定为
+   `ubuntu-24.04`，Action 固定到 2026-09-02 从官方仓库 tag ref 只读解析出的 commit：
+   `actions/checkout@v7` → `3d3c42e5aac5ba805825da76410c181273ba90b1`、
+   `actions/setup-python@v6` → `ece7cb06caefa5fff74198d8649806c4678c61a1`、
+   `actions/download-artifact@v5` → `634f93cb2916e3fdff6788551b99b062d0335ce0`、
+   `actions/upload-artifact@v4` → `ea165f8d65b6e75b540449e92b4886f43607fa02`；
+   `astral-sh/setup-uv@v7` 是 annotated tag，固定到解引用后的 commit
+   `37802adc94f370d6bfd71619e3f0bf239e1f3b78`（tag object
+   `94527f2e458b27549849d47d273a16bec83a01e9`）。证据来源为对应官方仓库的
+   `git ls-remote <official-repository> refs/tags/<tag> refs/tags/<tag>^{}`，测试锁定完整 40 位 SHA，禁止恢复 major tag。
+9. 生产启用前必须把授权根移出本仓可变 `github.sha`：使用独立、规则集保护且候选提交无写权限的 release repository，
+   或由该仓托管 full-SHA 固定的 required reusable workflow，并配合不可由候选取消的 custom deployment protection。
+   外部执行器必须依据 GitHub OIDC 的 repository/workflow/ref/SHA/run subject 换取短期、单 operation broker capability；
+   静态 SSH private key 不得直接注入本仓候选可声明的 environment job。必须保存 main ruleset、CODEOWNERS、required
+   workflow/deployment protection、environment reviewer、bypass/audit 与 OIDC policy 的仓外 API 证据并演练恶意 main
+   修改/删除门禁仍无法取得 capability。当前仓内 workflow 即使 semantic attestation 全绿也不满足此条件。
 
 完成这些条件前，不得把本基础纵切描述为“生产发布通道已安全”“forced-command 已安装”或“genesis 已建立”。
 
@@ -217,7 +267,7 @@ absent
 - signed SSH/bootstrap attestation 的 create/verify、canonical、TTL 和 subject 比对通过；
 - signed `server.hostPublicKeySha256` 缺失或与独立 host key/known_hosts 任一不一致均失败；known_hosts host/key
   交换、authorized_keys 旧 key/缺 restrict/命令漂移、三层旧 secret 任一残留均失败；
-- 所有证据读取使用 `O_NOFOLLOW` 打开的单链接普通文件描述符；mode/size/nlink 受限，读取前后
+- 所有 artifact 与 GitHub API 证据读取使用同一个 `O_NOFOLLOW` 安全 reader 打开的单链接普通文件描述符；mode/size/nlink 受限，读取前后
   dev/ino/size/mode/mtime_ns/ctime_ns 任一漂移均失败；
 - 签名、payload、proof、SHA、时间或外部 GitHub run provenance 任一漂移均失败；
 - bootstrap 状态跳步、换 attestation、第二个 genesis、receipt 断链/环/第二个 null 均失败；

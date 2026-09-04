@@ -22,11 +22,14 @@ artifact 被当前 `main` 错误解释、两个发布会话交错，以及 canar
    `github.sha`。之后 workflow/control-plane checkout 固定为 `${{ github.sha }}`，不能 checkout 用户给出的任意 SHA。
 2. `production` environment 必须由 GitHub API 外部事实证明：至少一名 required reviewer、禁止自审，并且自定义部署
    分支策略精确只允许 `main`。API 使用独立最小权限 audit token；token 只进入环境变量，不进入 argv、日志或 artifact。
-   API 不可达、权限不足、分页不完整或字段漂移一律失败。
+API 不可达、权限不足、owner 身份不一致、分页不完整或字段漂移一律失败。列表 API 必须有界遍历全部页面、拒绝跨页
+重复和 `total_count` 漂移，再输出 canonical 合并结果；不能只请求 `per_page=100` 后把超过 100 项永久当成不可部署。
 3. 本地候选验证、真实 remote development 和 production approval 是三个独立阶段。生产 job 绝不先部署生产再补开发库
    迁移、故障注入或真实供应商 canary。
-4. route-off 与 allowlist 发布必须在任何 SSH 前下载并复验一个独立 GitHub run 产生的 canonical development evidence
-   artifact。`providerCanary.status=pending` 允许保存为开发记录，但永远不能满足生产 verifier。
+4. route-off 与 allowlist 发布必须在任何 SSH 前下载并复验独立 GitHub run 产生的 v2 migration qualification、candidate
+   evidence、development image provenance 与目标镜像 artifact。旧
+   `inkforge-durable-agent-v2-development-evidence/1`、`test-report/1` 或只校验文件 hash 的报告一律不能满足生产
+   consumer。
 5. 所有声明 `environment: production` 或会触发生产动作的 job 使用同一并发组 `production`，且
    `cancel-in-progress: false`。服务器还持有独立事务锁，GitHub concurrency 不能代替服务器锁。
 6. `scripts/deploy-production.sh` 强制要求 release manifest、可信 dispatch context 和匹配的服务器事务锁；不保留无
@@ -62,38 +65,80 @@ artifact 被当前 `main` 错误解释、两个发布会话交错，以及 canar
 ```text
 trusted-context-guard
   -> checkout(github.sha)
-  -> external-environment-policy
   -> candidate-validation
-  -> development-evidence-download-and-verify
+  -> development-v2-bundles-download-and-semantic-verify
   -> production(environment approval, concurrency=production)
+  -> exact-attestation-download-and-file-whitelist-normalize
+  -> token-only-live-api-collection-and-owner-routing
+  -> fixed-known-hosts-secret-materialization
+  -> secretless-canonical-pagination-and-policy/provenance/trust-verify
+  -> fixed-pre-private-key-denial
 ```
 
 `trusted-context-guard` 必须是 `source` 的第一个 step。它不能执行候选仓库中的脚本。恶意候选提交即使把
 `scripts/durable-agent-v2-release.sh` 改成永远成功，也不能让非 main、非 dispatch 或 input/SHA 不一致的运行到达
 checkout。
 
-环境策略由 workflow 用 `GH_ENVIRONMENT_POLICY_AUDIT_TOKEN` 调用 GitHub REST API 读取：
+但该结论只描述当前诚实 Workflow 的顺序，不构成根信任：Workflow YAML、checkout 前 shell 与 verifier 都来自可变的
+`github.sha`，恶意 main 候选可以同时删除门禁并声明 production environment。生产启用必须另有候选无法修改或取消的
+仓外执行根：独立受规则集保护的 release repository，或其中 full-SHA 固定的 required reusable workflow，再叠加 custom
+deployment protection；该执行根按 GitHub OIDC repository/workflow/ref/SHA/run subject 只签发短期单操作 broker
+capability。静态 SSH private key 不得直接暴露给本仓候选 Workflow。main ruleset、CODEOWNERS、required workflow、
+environment 审批、bypass/audit 与 OIDC policy 都必须保留仓外 API 证据。当前仓内固定失败不能替代此根，只能保证当前
+已审核版本不执行生产动作。
+
+`source` 不读取任何自定义 secret；它只做 dispatch/input 格式、trusted commit 与 checkout 复验。只有 production
+environment 审批通过后的 job 才能读取 `GH_ENVIRONMENT_POLICY_AUDIT_TOKEN`。带 token 的 step 只允许固定调用 GitHub
+REST API、把响应写入 0600 文件，并用固定 `jq` 读取 repository owner type 以决定是否请求 organization endpoint；禁止
+执行任何 checkout 中的 Python/shell verifier。canonical 分页合并、policy、provenance 与 trust verifier 必须在后续没有
+secret env 的 step 中运行：
 
 - `GET /repos/{owner}/{repo}/environments/production`；
+- `GET /repos/{owner}/{repo}`；
 - `GET /repos/{owner}/{repo}/environments/production/deployment-branch-policies?per_page=100`。
 - `GET /repos/{owner}/{repo}/environments/production/secrets?per_page=100`；
+- `GET /repos/{owner}/{repo}/actions/secrets?per_page=100`；
+- owner type 为 `Organization` 时才调用 `GET /orgs/{owner}/actions/secrets?per_page=100`；owner type 为 `User` 时生成并
+  复验 canonical `no-org-scope` 证据；
 - `GET /repos/{owner}/{repo}/environments/production/variables?per_page=100`。
+- `GET /repos/{owner}/{repo}/actions/runs/{sshProducerRunId}`；
+- `GET /repos/{owner}/{repo}/actions/runs/{bootstrapProducerRunId}`。
 
-本地 verifier 消费 API 返回的四个只读 JSON 文件。production environment 必须启用
+所有列表调用使用 `gh api --paginate --slurp` 保存有界 page array；无 token normalizer 要求每页 `total_count` 一致、
+单页不超过 100、聚合计数精确、名称不重复且页数/项数未越界，再写出 canonical 单 inventory。本地 verifier 使用
+`O_NOFOLLOW` descriptor reader 消费 API 返回文件。repository metadata 的 `full_name` 必须等于本次 repository，
+`owner.login` 必须等于 repository owner，`owner.type` 只能为 `User|Organization`。production environment 必须启用
 `custom_branch_policies=true`、`protected_branches=false`，branch policy 列表只能有精确名称 `main`，并存在至少一名
 required reviewer 且 `prevent_self_review=true`。仓库内的变量、manifest、候选脚本或普通 `GITHUB_TOKEN` 布尔输入不能
 自证这些设置。仓库外还必须保存 environment 配置截图或 API 响应摘要作为上线审批证据；响应本身不得混入 token。
 
-同一外部校验还必须证明旧 `SERVER_SSH_KEY` 已从 `production` environment 删除，新专用
-`DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY` 已存在，并且以下三个 environment variable 均为 64 位小写 SHA-256：
+`GH_ENVIRONMENT_POLICY_AUDIT_TOKEN` 必须只存在于 production environment，repository/organization scope 都不得存在。
+它必须是与发布 SSH key 隔离的只读 GitHub App installation token 或 fine-grained token，最小权限只允许读取本仓
+Actions run、repository environment/secrets/variables 与 organization Actions secret inventory；禁止 contents、workflow、
+secret 或 environment 写权限。source job 不得引用它。
+
+同一外部校验必须证明 production environment 存在且只在该 scope 暴露两个新角色 key
+`DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY`、
+`DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY` 及
+`DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS`；旧 `DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY` 与
+`SERVER_SSH_KEY` 在 environment/repository/organization 三层都不存在，两个新 key、known_hosts 与 audit token 在
+repository/organization 也不存在。服务器 host/port/user 只读取三个 production environment variable 并与签名 subject
+逐项相等。以下三个旧变量只允许作为可选的 64 位小写 SHA-256 诊断值，不再参与授权：
 
 - `DURABLE_AGENT_V2_RELEASE_OLD_KEY_REVOCATION_EVIDENCE_SHA256`：服务器 `authorized_keys` 已撤销旧 key 的离线证据；
 - `DURABLE_AGENT_V2_RELEASE_FORCED_COMMAND_EVIDENCE_SHA256`：新 key 使用 forced-command 的离线证据；
 - `DURABLE_AGENT_V2_RELEASE_MINIMUM_PERMISSION_EVIDENCE_SHA256`：部署账号/命令白名单/文件权限最小化证据。
 
-任一 API 响应、分页、secret 名或上述外部证据 hash 缺失时，所有 job 都必须在准备 SSH 私钥、`ssh`、`scp`、Compose
-或 DDL 之前失败。删除仓库当前 Workflow 中的旧 secret 引用不能阻止历史 run rerun；GitHub 侧删除旧 secret 与服务器
-侧撤销旧公钥两项必须同时完成，才算关闭历史 Workflow 的生产通道。
+dispatch 对 SSH 与 bootstrap attestation 各要求精确 producer run ID、run attempt 与 artifact SHA。production job 按
+run ID 下载固定名称 artifact。GitHub proof 只绑定 canonical stable run identity projection 与 identity SHA，不绑定会在
+producer 完成时变化的完整 REST 响应 SHA；producer 可用 `in_progress` 响应生成，production 用 `completed/success` 响应
+重算同一 identity，并用当前 trusted checkout 复验 producer workflow/head SHA/main/dispatch/success、canonical
+artifact SHA、TTL、repository/environment/host/port/user、known_hosts/host key、双公钥、完整 `authorized_keys`、三层
+inventory 与 broker policy；任何额外/缺失文件或字段都失败。known_hosts secret 由固定无仓库脚本 step 落入 0600 文件，
+并由同一次 trust verifier descriptor snapshot 完成 evidence 比对、host/key 解析与 attestation hash 绑定，不保留独立
+`cmp`。三个诊断 hash 缺失不影响授权，semantic artifact 或任一外部 API 事实缺失则必须在准备 SSH 私钥、`ssh`、
+`scp`、Compose 或 DDL 前失败。当前流式双角色 broker 与 sealed
+genesis/current 尚未接线，production 在上述复验后仍固定失败，且 workflow 不引用 private key 或远端执行路径。
 
 ## 4.1 不可变 control bundle
 
@@ -111,67 +156,77 @@ filesSha256=<SHA256SUMS 的 SHA-256>
 ```
 
 上传只写服务器 `.partial` 目录；当前 trusted uploader 先校验内嵌 verifier 的 SHA，再由 `.partial` 内已复验 verifier
-检查精确文件白名单、普通文件、0700/0600 权限、全部 SHA 和元数据，并通过 `renameat2(RENAME_NOREPLACE)`（macOS
+检查精确文件白名单、普通文件、0700/0600 权限、全部 SHA 和元数据。构建器必须对根目录和每一层新建子目录显式设置
+`0700`，对每个文件显式设置 `0600`，不得依赖 runner 的 ambient umask；在 `umask=022` 下构建后的自校验与
+独立复验仍必须通过。
+通过 `renameat2(RENAME_NOREPLACE)`（macOS
 构建侧为 `renamex_np(RENAME_EXCL)`）原子发布为
 `${APP_DIR}/.durable-agent-v2-control-bundles/<workflowTrustedCommit>/<bundleSha256>`。既有同名 bundle 只能逐字节复验，
 不能覆盖。事务 owner、release manifest、verifiedDrain 与 release receipt 都冻结同一 bundle SHA。后续远程命令直接执行
 该目录内 driver；即使应用 bundle 随后 reset `APP_DIR`，也不能改写控制逻辑。rollback 可 checkout 旧应用 bundle，但
 rollback preflight、配置转换、drain、Compose 切换、postflight 和 receipt 只能运行当前 trusted control bundle。
 
-## 5. Development evidence
+## 5. Development evidence v2 consumer
 
-artifact 固定包含 `development-evidence.json` 和单行 `SHA256SUMS`，格式为
-`inkforge-durable-agent-v2-development-evidence/1`。目录权限为 0700、文件为 0600、UTF-8 canonical JSON、禁止重复
-key/浮点/未知字段/symlink，发布时还必须匹配 dispatch 输入的 artifact SHA-256 与 producer GitHub run ID。
+生产发布只消费 `docs/specs/2026-09-01-durable-agent-v2-development-evidence-v2.md` 定义的两层语义证据。固定 artifact
+名称和来源为：
 
-同一 producer run 还必须提供不可变 `durable-agent-v2-development-reports` artifact，精确包含 migration backup、live
-contract、两次 forward、rollback rehearsal、fault injection、2C2G resource-constrained 与 real provider canary 七份
-不含敏感正文的报告及其 `SHA256SUMS`。production verifier 必须实际下载这些文件并逐字节计算 SHA，与下列 evidence
-JSON 引用逐项相等；只提交 hash 而报告缺失同样失败。
+- candidate producer run：`durable-agent-v2-candidate-evidence`、
+  `durable-agent-v2-development-images` 与 `durable-agent-v2-target-images`；
+- qualification producer run：`durable-agent-v2-migration-qualification`。
 
-冻结字段至少包括：
+dispatch 必须显式提供 candidate run ID/run attempt，以及 qualification run ID/run attempt/source commit。两个
+run attempt 都必须精确为 `1`；source 前置门禁对缺失、零、前导零、非十进制、非 40 位小写 commit 或 rollback/cleanup
+携带这些发布输入全部失败。production consumer 通过 GitHub Actions API 对两个 run 分别复验 repository、固定
+workflow path、main head、`workflow_dispatch`、`completed/success` 和精确 run attempt。candidate head 必须等于本次
+`workflowTrustedCommit`；qualification head 必须等于输入的历史 migration source commit。只在 artifact JSON 里自报
+`runAttempt`，或只对 candidate 复验 attempt，均不构成 provenance。
 
-```json
-{
-  "canaryScopeSha256": "<64 hex>",
-  "composeValidation": {
-    "faultInjectionReportSha256": "<64 hex>",
-    "resourceConstrainedReportSha256": "<64 hex>"
-  },
-  "developmentMigration": {
-    "backupEvidenceSha256": "<64 hex>",
-    "database": "novelwriterdev",
-    "idempotentForwardReportSha256": "<64 hex>",
-    "liveContractEvidenceSha256": "<64 hex>",
-    "rollbackRehearsalReportSha256": "<64 hex>"
-  },
-  "executionManifestFingerprint": "<64 hex>",
-  "format": "inkforge-durable-agent-v2-development-evidence/1",
-  "images": {
-    "agent": "sha256:<64 hex>",
-    "core": "sha256:<64 hex>",
-    "web": "sha256:<64 hex>"
-  },
-  "producerRunId": "<decimal GitHub run ID>",
-  "providerCanary": {
-    "mode": "real|unavailable",
-    "reportSha256": "<64 hex>|null",
-    "status": "passed|pending"
-  },
-  "targetReleaseCommit": "<40 hex>"
-}
-```
+所有由 dispatch 提供的十进制 run ID/run attempt，包括 SSH、bootstrap、development candidate、qualification、rollback
+manifest 与失败锁 owner，都必须在首个 checkout 前按无前导零正十进制验证；后续 verifier 的重复校验不能替代此前置
+门禁。固定为 `1` 的 candidate/qualification attempt 继续只接受字面量 `1`。
 
-普通 schema verifier 可接受 `pending + unavailable + null`，以便开发阶段诚实冻结尚未完成的记录；production verifier
-只接受 `passed + real + 64 位 report SHA`。生产 verifier 还精确比较 target commit、三个目标镜像 digest、execution
-fingerprint 与 canary scope hash。缺 artifact、run ID 不同、artifact SHA 不同、任一开发证据 hash 缺失或 provider
-pending，production job 均不能装配，且不得准备 SSH。
+artifact 的静态可信期望不由 artifact 自证，也不接受操作者预填尚未产生的当前 run hash。`development` environment
+的受保护 variables 必须通过只读 audit token 从 GitHub API 取得，并由无 token step 按 producer policy 精确白名单
+复验；它冻结：
 
-真实 development evidence 的 producer 必须是另一个声明 `environment: development` 的受保护 job；不得在
-production-approved job 中生成。consumer 还要通过 GitHub Actions API 复验 producer run 的 ID、repository、固定
-workflow path、main head SHA、dispatch 事件和 success conclusion，不能只相信 evidence JSON 自报的 run ID。当前
-`.github/workflows/durable-agent-v2-development-evidence.yml` 是显式 fail-closed 骨架：仓库尚无安全的真实 provider 身份
-和完整 producer，因此只能由离线工具生成/保留 pending 记录，不能上传可供生产使用的 passed artifact。
+- 既有 qualification bundle SHA；
+- development scope、canary scenario、execution manifest fingerprint 与 build definition SHA；
+- resource/provider policy SHA、resource host/provider identity SHA；
+- provider prompt/completion/reasoning/total token 与 cost 上限。
+
+当前 candidate/image provenance SHA 与三镜像 digest 是本 run 完成后才存在的事实，禁止循环预填进 environment
+variables。consumer 从已完成、固定名称、绑定精确 run/attempt 的下载 bundle 现场计算 candidate/image SHA；从复验并
+实际加载的目标镜像 snapshot 取得三个 digest，再要求这些动态事实与 candidate/image provenance 逐项相等。未来独立
+controller 还必须把计算值与 GitHub artifact service 的 digest/provenance 对齐；当前仓内固定失败不冒充该外部根。
+
+带 audit token 的 step 只能固定调用 `gh api` 写 0600 响应，不能运行 checkout 中的脚本；后续无 token step 才运行
+policy、run provenance 和 v2 semantic consumer。目标镜像 archive 仍须先按自身 `SHA256SUMS` 复验、加载，并由当前
+trusted checkout 重新生成 `target-images.current`；它必须逐字节等于 producer snapshot。consumer 再同时要求 actual
+web/core/agent digest 与 execution fingerprint 精确等于 development image provenance、candidate 汇总和受保护
+variables 中的 execution/build 事实，任一漂移都失败。consumer 还从可信 target checkout 生成 NUL 分隔的完整 Git tree
+manifest，重算 source tree 与冻结 build definition；image provenance 的 source/build 自报不能直接通过。
+目标镜像 artifact 在 checksum、`docker load` 或再次上传前，顶层成员必须精确只有 `SHA256SUMS`、
+`target-images.snapshot` 与 `target-images.tar.gz` 三个单链接普通文件；额外目录、symlink、socket、FIFO、设备或其他特殊
+节点全部失败，不能因只枚举 `-type f` 而被漏过。现场生成的 `target-images.current` 只能在上述白名单复验后加入本次
+release 的短期已复验输入。
+
+qualification bundle 必须完整包含四份 v2 migration report；consumer 使用只读 checkout 的 qualification source commit
+重新计算具名 forward/rollback SQL SHA、pre/post contract fingerprint，并把这些事实、development scope、producer
+repository/run/attempt/head 与 qualification SHA 一次传给语义 verifier。candidate bundle 必须完整包含三份 v2 report，
+并把 target commit、candidate producer run/attempt、qualification SHA、scope、scenario、actual images、execution
+fingerprint、policy、subject 与 token/cost caps 一次传给语义 verifier。verifier 必须检查 exact schema、canonical JSON、
+文件白名单、权限/链接、checksum、TTL 以及全部报告语义；`status=passed` 或报告文件 hash 相等本身不够。
+
+旧 `development-evidence.json`、`durable-agent-v2-development-reports`、
+`inkforge-durable-agent-v2-development-evidence/1`、`test-report/1`、pending/unavailable provider 以及缺任一 v2 report 的
+artifact 全部明确失败。release manifest v3 的历史字段 `developmentEvidenceSha256` 从本版本起只承载已复验的
+`candidate-evidence.json` SHA；它不再表示 v1 汇总，也不能替代 qualification/image provenance 复验。
+
+真实 v2 producer 必须是另一个声明 `environment: development` 的受保护 job，不得在 production-approved job 中补做
+迁移、2C2G 或 provider canary。当前 `.github/workflows/durable-agent-v2-development-evidence.yml` 在 artifact upload 前
+固定失败且没有 upload action，因此当前真实 release 必然在 v2 artifact acquisition 阶段失败；即使测试提供完整合法
+fixture，production 仍在 streaming broker/sealed genesis 门禁固定失败，本文不授权 SSH、部署或生产 DDL。
 
 ## 6. Canonical release manifest v3 与 artifact provenance
 
@@ -414,7 +469,7 @@ barrier，不能把 release 文件锁宣传为基础设施屏障。
 
 生产动作：
 
-- `route_off_release`：先验证 development evidence 与锁；若起点为 allowlist，workflow 原子保存 `.env` 前像、写入
+- `route_off_release`：先验证 development evidence v2 与锁；若起点为 allowlist，workflow 原子保存 `.env` 前像、写入
   `route=off + V1 fresh=false`、以当前冻结 Core digest 重启并验证，再生成 drain。只允许先完成真实 development 证据
   的目标进入生产。生产迁移在部署/结构状态允许时执行，不能在 production job 内补做 development migration。同一动作
   必须按当前权威状态选择且只选择一个合法 gate：迁移前/迁移后 route-off、schema-ready route-off、初始化 drain indexes
@@ -436,6 +491,17 @@ receipt。自动补偿必须先完成旧栈健康复验，并在 release lock �
 claimed/failed 锁并进入 outcome-unknown，禁止再次自动 Compose。Workflow 的失败收口可在完整复验同一 owner、inode 与
 control bundle 后，把已是 `failed` 的同一事务视为只读幂等成功；该兼容不得让任何其他命令在 terminal lock 上继续执行。
 
+`mark-transaction-failed` 的成功输出必须对应磁盘权威事实：只允许“已提交并完成恢复”或“同一 owner/inode 的锁已精确
+落为 `failed`”两种结果。`reconcile` 非零后若 state 仍不是可复验的 `failed`，包括 `ambiguous-advanced`、route-off
+补救失败、commit-recoverable 确认失败或 committed finalize 失败，都必须返回
+`durable-release:error:transaction-outcome-unknown` 非零并原样保留 lock/current/route，禁止把未知结果打印成成功失败终态。
+
+锁 state 的每次转换必须使用同目录、`O_EXCL` 创建且名称同时绑定完整 owner SHA 与目标 state 的唯一 partial；partial
+内容只能是目标 state 单行。写入后依次执行 0600、文件 fsync、`os.replace` 与父目录 fsync。崩溃恢复只接受同 owner、
+同目标、严格白名单名称且内容/权限精确的唯一 partial；symlink、异 owner、异目标或多个 partial 一律拒绝，绝不按 TTL
+删除、接管或“偷锁”。replace 已完成而父目录 fsync 未完成时，同 owner 对磁盘目标 state 的重试必须只补 fsync 并成功。
+失败清理只能在复验 owner 后识别并移除上述具名 partial，不再接受历史固定 `.state.partial` 或 deploy 自写 state 临时文件。
+
 `.env` 写入使用同一 APP_DIR 文件系统内事务目录的具名 0600 临时文件、fsync 和 `os.replace`，拒绝重复键；前像及 SHA
 保存在事务状态目录，恢复前再次核对 SHA。每次重启前后
 都冻结 Core digest/container/config。release 成功 receipt 记录最终配置；失败清理只清锁，不擅自改回业务路由。任何人工
@@ -447,9 +513,12 @@ control bundle 后，把已是 `failed` 的同一事务视为只读幂等成功�
 - 所有 production job 的 concurrency group 精确为 `production`，取消策略为 false。
 - 非 dispatch、非 main、input/SHA 不同的恶意候选在 checkout 和任何仓库脚本之前失败。
 - environment API 缺 audit token、required reviewer、prevent-self-review 或精确 main branch policy 时稳定失败。
-- environment API 未证明旧 `SERVER_SSH_KEY` 删除、新专用 key 存在，或三份 key 轮换/forced-command/最小权限
-  离线证据 hash 缺失时，SSH 调用次数精确为 0。
-- dev artifact 缺失、SHA/run ID 错、provider pending 或 target/scope/digest 漂移时在 SSH 前失败。
+- environment API、三层 secret inventory 或 semantic attestation 任一权威事实缺失时，SSH 调用次数精确为 0；旧三个
+  轮换/forced-command/最小权限诊断 hash 缺失不影响授权，但若存在而不是 64 位小写十六进制则稳定失败。
+- v2 candidate/qualification/image artifact 缺失、SHA/run ID/run attempt 错、旧 `test-report/1`、报告语义错误或
+  target/scope/scenario/policy/subject/digest 漂移时在 SSH 前失败。
+- 所有 dispatch 十进制 run ID/attempt 的前导零在首个 checkout 前失败；目标镜像 artifact 含额外目录、symlink 或特殊
+  节点时在 checksum、`docker load` 和已复验输入上传前失败。
 - rollback artifact 的 producer run/workflow/main commit/conclusion/attempt 任一不符时 SSH 为 0；main 前进后，合法旧
   manifest 仍按自己的 trusted/target commit + artifact SHA 复验，不能被当前仓库 facts 错杀或替换。
 - 服务器 APP_DIR 中植入恶意同名 drain/helper、在 deploy reset 后植入旧 helper，都不能被执行；control bundle 缺文件、
@@ -462,6 +531,10 @@ control bundle 后，把已是 `failed` 的同一事务视为只读幂等成功�
   失败保留 owner；错 lock/错确认不能清理；成功 postflight + receipt 才释放。
 - canary scope 在 manifest、部署前 Core、部署后 Core 任一处漂移都在路由/后续动作前失败。
 - fingerprint/rollback 无 canonical `verifiedDrain` 时在 Compose/DDL 前失败。
+- deploy 自动补偿必须用真实 release driver 做跨脚本回归：目标切换失败后只允许一次目标 Compose 与一次冻结起点
+  Compose；旧镜像、Nginx 和 runtime 复验完成时锁仍为 `active`，随后同一 claimed `compose-release` boundary 先落盘
+  `applied(outcome=compensated)`，最后才把事务标为 `failed`。回归必须同时证明返回最初的目标部署错误码、未生成新
+  receipt，且 terminal `failed` 锁除精确同 owner/inode 的 `mark-transaction-failed` 只读重试外拒绝任何一般破坏性命令。
 - 初始 drain 后切换 PostgreSQL identity、任一 Redis container/image/run-id，或注入 execution pending/leased/rejected
   callback 时，下一 boundary 必须重采失败；git reset、mutating Compose、allowlist env replace 与 `psql -f` 计数为 0。
 - unmigrated 只接受 `pre-contract`；直接调用 `release-database`/migration `forward` 时缺 boundary、旧 sequence 或伪造
@@ -479,10 +552,17 @@ control bundle 后，把已是 `failed` 的同一事务视为只读幂等成功�
 commit 仍必须与新发布 target commit 相同。因此 CLI skill 不需要命令映射迁移。需要更新的是生产 operator skill：
 
 - 只能触发 `durable-agent-v2-release.yml` 的四个具名 action；旧 TokenUsage 一次性迁移 Workflow 已永久退役且必定失败；
-- 使用新的 `DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY`/`DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS`，不得重新创建
-  `SERVER_SSH_KEY`；
-- release/rollback/cleanup 输入必须按本规格提供 exact commit、artifact SHA、producer run/attempt、lock owner 与确认串；
-- 缺 production environment API 证据、旧公钥撤销、forced-command 或最小权限离线证据时，不得把“代码已实现”解释为
-  可运行生产发布。
+- production environment 使用分离的
+  `DURABLE_AGENT_V2_RELEASE_EXECUTION_SSH_PRIVATE_KEY`、
+  `DURABLE_AGENT_V2_RELEASE_UPLOAD_SSH_PRIVATE_KEY` 与
+  `DURABLE_AGENT_V2_RELEASE_SSH_KNOWN_HOSTS`；不得在 repository/organization 复制，也不得重新创建
+  `DURABLE_AGENT_V2_RELEASE_SSH_PRIVATE_KEY` 或 `SERVER_SSH_KEY`；
+- route-off/allowlist 输入必须提供 exact workflow commit、candidate run/attempt、qualification run/attempt/source commit 与
+  canary user/novel；candidate/qualification 两个 attempt 都必须为 `1`。candidate/image SHA 和镜像 digest 由完成 run 的
+  固定 artifact 现场计算，不再使用旧 `development_evidence_run_id/development_evidence_sha256` 输入。rollback/cleanup
+  必须拒绝携带任何 development v2 producer 输入；原有 manifest SHA、lock owner 与确认串规则不变；
+- SSH/bootstrap run/attempt/SHA 六项输入为所有 action 必填；缺 production environment API、三层 inventory、semantic
+  attestation、旧公钥撤销、双 forced-command、sealed genesis 或真正流式 broker 时，不得把“代码已实现”解释为可运行
+  生产发布。
 
 完整 operator skill 更新清单另见 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。

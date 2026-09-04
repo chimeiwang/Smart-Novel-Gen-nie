@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from github_api_evidence import read_regular
+
 
 class ProvenanceInvalid(ValueError):
     """GitHub Workflow run 不是获准的 development evidence producer。"""
@@ -25,15 +27,23 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _load(path: Path) -> dict[str, Any]:
     try:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > 1_048_576:
-            raise ProvenanceInvalid("Workflow run API 响应文件无效")
         document = json.loads(
-            path.read_text(encoding="utf-8"),
+            read_regular(
+                path,
+                "Workflow run API 响应",
+                error_type=ProvenanceInvalid,
+            ).decode("utf-8"),
             object_pairs_hook=_unique_object,
+            parse_float=lambda _raw: (_ for _ in ()).throw(
+                ProvenanceInvalid("Workflow run API 响应禁止浮点数")
+            ),
+            parse_constant=lambda raw: (_ for _ in ()).throw(
+                ProvenanceInvalid(f"Workflow run API 响应包含非法数字：{raw}")
+            ),
         )
     except ProvenanceInvalid:
         raise
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    except (UnicodeError, json.JSONDecodeError) as error:
         raise ProvenanceInvalid("Workflow run API 响应不是有效 JSON") from error
     if not isinstance(document, dict):
         raise ProvenanceInvalid("Workflow run API 响应顶层不是对象")

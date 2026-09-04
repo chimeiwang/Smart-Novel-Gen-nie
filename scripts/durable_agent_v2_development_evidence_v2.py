@@ -196,6 +196,7 @@ FAULT_OBSERVATION_KEYS = {
     "duplicateTokenUsage",
     "executionRedisAofRestartPassed",
     "happyIdempotencyPassed",
+    "routeOffCleanupPassed",
     "sseCursorReconnectPassed",
     "status",
 }
@@ -894,6 +895,7 @@ def _validate_candidate_observations(report_type: str, value: Any) -> None:
             "coreRestartCallbackReplayPassed",
             "executionRedisAofRestartPassed",
             "happyIdempotencyPassed",
+            "routeOffCleanupPassed",
             "sseCursorReconnectPassed",
         ):
             _require_value(observations[key], True, key)
