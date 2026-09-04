@@ -42,6 +42,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import org.jooq.Record;
+import org.openapitools.jackson.nullable.JsonNullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -109,6 +110,146 @@ class JooqWorkflowCallbackRepositoryTest {
     @AfterAll
     static void closeDatabase() {
         if (database != null) database.close();
+    }
+
+    @Test
+    void 自然业务准备被确定性拒绝时保留解析费用并以原业务错误结束() {
+        Flow flow = runningIntentFlow("intent-preparation-rejected");
+        var repository = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json,
+                registry, Duration.ofSeconds(30), new JooqWorkflowExecutionContextReader(json),
+                () -> (userId, novelId, chapterId, sessionId, instruction, words, plan) -> {
+                    throw new ApiException(409, "CHAPTER_GROUP_MAPPING_CONFLICT", "章节结构需要先由作者修正");
+                });
+        var result = intentResult(flow.request(), new cn.inkforge.contracts.api.ProposedCommand(new java.math.BigDecimal("0.99"))
+                .workflow("long_serial").operation("answer_question"));
+        assertThat(repository.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(repository.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(database.dsl().fetchOne("SELECT status::text AS status, \"errorCode\" FROM public.\"WorkflowRun\" WHERE id = ?", flow.runId())
+                .intoMap()).containsEntry("status", "failed").containsEntry("errorCode", "CHAPTER_GROUP_MAPPING_CONFLICT");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND status = 'completed'", flow.runId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND status = 'settled'", flow.runId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(1);
+        assertThat(eventTypes(flow.runId())).endsWith("step_finished", "failed");
+    }
+
+    @Test
+    void 自然业务准备的临时或未知异常不伪装成业务终态() {
+        List<RuntimeException> failures = List.of(new ApiException(503, "TEMPORARY_FAILURE", "暂时不可用"),
+                new ApiException(429, "RATE_LIMITED", "稍后重试"), new IllegalStateException("准备程序异常"));
+        for (int index = 0; index < failures.size(); index++) {
+            var failure = failures.get(index);
+            Flow flow = runningIntentFlow("intent-preparation-retry-" + index);
+            var repository = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json,
+                    registry, Duration.ofSeconds(30), new JooqWorkflowExecutionContextReader(json),
+                    () -> (userId, novelId, chapterId, sessionId, instruction, words, plan) -> { throw failure; });
+            var result = intentResult(flow.request(), new cn.inkforge.contracts.api.ProposedCommand(new java.math.BigDecimal("0.99"))
+                    .workflow("long_serial").operation("answer_question"));
+            assertThatThrownBy(() -> repository.result(result)).isSameAs(failure);
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE id = ? AND status = 'running'", flow.runId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", flow.runId())).isZero();
+            cancellations.request(flow.userId(), flow.runId(), "intent-preparation-retry-cancel-" + index);
+            assertThat(repository.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        }
+    }
+
+    @Test
+    void 自然意图成功后同Run冻结业务来源且完整问答仅结算一次() {
+        Flow flow = runningIntentFlow("intent-answer");
+        var repository = intentCallbacks();
+        var result = intentResult(flow.request(), new cn.inkforge.contracts.api.ProposedCommand(new java.math.BigDecimal("0.95"))
+                .workflow("long_serial").operation("answer_question"));
+        assertThat(repository.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(repository.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE id = ? AND operation IS NULL", flow.runId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'intent_selection'", flow.runId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(2);
+        var generation = dispatches.claimNext().orElseThrow();
+        assertThat(generation.getRunId()).isEqualTo(flow.runId());
+        assertThat(generation.getOperation()).isEqualTo("answer_question");
+        assertThat(generation.getInput()).containsEntry("userInstruction", "  分析这一章的视角\n");
+        accept(generation);
+        repository.progress(progress(generation, unknownUsage()));
+        repository.result(answerResult(generation, "  完整的问答结果\n"));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE id = ? AND status = 'completed'", flow.runId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(2);
+        assertThat(eventTypes(flow.runId())).containsSubsequence("step_finished", "intent_resolved", "evidence_ready", "step_queued", "completed");
+    }
+
+    @Test
+    void 自然意图澄清保存完整问题并等待作者而不是生成候选() {
+        Flow flow = runningIntentFlow("intent-question");
+        var command = new cn.inkforge.contracts.api.ProposedCommand(new java.math.BigDecimal("0.5"))
+                .clarification(new cn.inkforge.contracts.api.CommandClarification("need_intent", "  你想分析还是修改？\n"));
+        var result = intentResult(flow.request(), command);
+        assertThat(intentCallbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(intentCallbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        var clarification = new JooqWorkflowExecutionContextReader(json).pendingClarification(database.dsl(), flow.runId(), "waiting_user");
+        assertThat(clarification.getPrompt()).isEqualTo("  你想分析还是修改？\n");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND status IN ('pending','running')", flow.runId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND content = ?", flow.sessionId(), clarification.getPrompt())).isEqualTo(1);
+        assertThat(eventTypes(flow.runId())).endsWith("step_finished", "clarification_required");
+    }
+
+    @Test
+    void 自然意图非法目标零续接且确定性失败与取消不会创建业务Step() {
+        Flow flow = runningIntentFlow("intent-invalid");
+        var result = intentResult(flow.request(), new cn.inkforge.contracts.api.ProposedCommand(new java.math.BigDecimal("0.99"))
+                .workflow("long_serial").operation("answer_question").targetType("chapter").targetId("other-chapter"));
+        assertThatThrownBy(() -> intentCallbacks().result(result)).isInstanceOf(ApiException.class);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(1);
+        assertThat(intentCallbacks().failure(preProviderFailure(flow.request())).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(eventTypes(flow.runId())).endsWith("step_finished", "failed");
+        Flow cancelled = runningIntentFlow("intent-cancelled");
+        cancellations.request(cancelled.userId(), cancelled.runId(), "intent-cancel-request-0001");
+        var late = intentResult(cancelled.request(), new cn.inkforge.contracts.api.ProposedCommand(new java.math.BigDecimal("0.99"))
+                .workflow("long_serial").operation("answer_question"));
+        assertThat(intentCallbacks().result(late).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", cancelled.runId())).isEqualTo(1);
+        assertThat(eventTypes(cancelled.runId())).endsWith("step_finished", "cancelled");
+    }
+
+    private static JooqWorkflowCallbackRepository intentCallbacks() {
+        CuidV1Generator ids = new CuidV1Generator(CLOCK);
+        return new JooqWorkflowCallbackRepository(database, ids, CLOCK, json, registry, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> (userId, novelId, chapterId, sessionId, instruction, words, plan) -> {
+                    // 此处只提供派发/回调的业务准备夹具；真实写作端口由跨模块集成另验。
+                    var chapter = database.dsl().fetchOne("SELECT content FROM public.\"Chapter\" WHERE id = ? AND \"novelId\" = ?", chapterId, novelId);
+                    return new cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation.Prepared(
+                            Map.of("userInstruction", instruction), List.of(new WorkflowEvidenceItemPlan("chapter_content", chapterId,
+                                    true, null, API_NOW, chapter.get("content", String.class), null, null, null, Map.of())), plan.generator());
+                });
+    }
+
+    private static Flow runningIntentFlow(String prefix) {
+        Fixture fixture = fixture(prefix);
+        var intent = cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot.freeze(registry, List.of("long_serial.answer_question"));
+        var system = registry.resolveSystemPurpose("resolve_intent");
+        Map<String, Object> input = Map.of("userInstruction", "  分析这一章的视角\n", "clarifications", List.of());
+        var initial = new WorkflowInitialStepPlan("resolve_intent", system.purpose().lane(), input,
+                system.modelProfile(), system.stepBudget(), system.outputSchema());
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request-0001", sha256(prefix),
+                "long_serial", null, registry.catalogVersion(), "chat", fixture.novelId(), fixture.chapterId(), fixture.sessionId(),
+                "chapter", fixture.chapterId(), Map.of("inputMode", "natural", "userInstruction", input.get("userInstruction"), "targetWordCount", 4000),
+                system.purpose().evidencePolicy(), List.of(new WorkflowEvidenceItemPlan("intent_context", fixture.chapterId(), true, null, API_NOW,
+                        null, Map.of("workflow", "long_serial", "novelId", fixture.novelId(), "chapterId", fixture.chapterId(), "chapterTitle", "第一章",
+                                "availableOperations", List.of(Map.of("operation", "answer_question", "description", "回答当前章节的问题", "targetType", "chapter", "scopeKind", "chapter"))),
+                        null, null, Map.of())), intent.runBudget(), null, initial, intent));
+        var request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        assertThat(request.getOperation()).isNull();
+        accept(request);
+        assertThat(intentCallbacks().progress(progress(request, unknownUsage())).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        return new Flow(started.runId(), fixture.userId(), fixture.sessionId(), request);
+    }
+
+    private static ExecutionStepResult intentResult(ExecutionStepRequest request, cn.inkforge.contracts.api.ProposedCommand command) {
+        var result = answerResult(request, "不会使用的输出");
+        result.setOutput(JsonNullable.undefined());
+        result.setResultKind(ExecutionStepResult.ResultKindEnum.PROPOSED_COMMAND);
+        result.setProposedCommand(command);
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
     }
 
     @Test

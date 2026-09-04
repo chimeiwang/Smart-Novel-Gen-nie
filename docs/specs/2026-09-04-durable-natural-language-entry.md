@@ -1,6 +1,6 @@
 # 普通聊天的耐久意图解析与澄清
 
-日期：2026-09-04。状态：实施中；普通聊天尚未切换，不代表生产开放。
+日期：2026-09-04。状态：本阶段仓内接线及本地验收完成；安装包与生产尚未切换。
 
 ## 目标与范围
 
@@ -66,6 +66,37 @@ Run，Core 先派发低成本、无工具的 `resolve_intent`，再在同一 Run
   未解析时保守视为可能写，不能绕过章节互斥；解析后沿用已选操作的正式审核及应用规则。
 - 新 Run 仍受 schema、route、用户和作品 allowlist、实时 Agent fingerprint、归属及会话校验；既有幂等
   重放优先，不因 Agent 暂时离线失效。自然分支未完整接通前不能开启 Web 入口或报告全量切换。
+- resolver 已完成但业务来源准备被确定性业务错误拒绝时，保留该解析 Step 的成功结果及计费，并将 Run
+  以对应稳定业务错误结束，不让整条回调回滚后停留在 running。数据库、未知程序异常和临时服务错误仍
+  原样失败重试，不冒充业务终态；准备端口只读，不得在失败前修改正式内容。
+
+### 同 Run 接线的持久材料
+
+- 初始 Run 固定当前章节的 targetType=chapter/targetId，operation 保持 null，兼容 kind=chat；解析不能
+  换章节。原始自然请求、字数和会话在 input 中冻结，intent_context 以当前章节 ID 为 resourceId。
+- 唯一 `intent_selection` 是已完成的 persistence/control Step，不含模型身份或 BillingReservation。
+  其 input 使用 `durable.intent-selection.v1`，保存 runId、operationKey、operationPlanSha256、
+  resolverStepId、resolverResultHash、intentEvidenceBundleId、targetType、targetId、scopeKind。
+  inputHash 绑定完整材料；查到重复 selection、错误目标或计划哈希必须拒绝，不从最后一个 Step 猜操作。
+- 每个 `intent_clarification` 是已完成的 user_confirmation/control 问题事实，其 input 保存
+  schema=durable.intent-clarification.v1、runId、resolverStepId、resolverResultHash、intentEvidenceBundleId、
+  clarificationCode 和完整 prompt。其 Step ID 即 decisionStepId；是否仍待回答以 Run waiting_user 和后续
+  回答事实共同判断，不能保留 pending control Step 冒充活动模型任务。
+- `intent_clarification_answer` 是已完成的 user_confirmation/control 决定，保存稳定 clientRequestId、
+  expectedRevision、decisionStepId、完整 userMessage；inputHash 绑定完整输入，受理响应只在 output 保存一次，
+  resultHash 绑定该完整响应。Run 锁内对账后才追加新 resolver，
+  不改写原问题或旧回答。相同请求重放保存的响应，不随后续任务进度漂移。
+  回答 Step 使用真实 completed user_confirmation/control 与 fencingToken=1；同事务发既有
+  `step_finished{stepId:answerStepId,fencingToken:1,status:completed,errorCode:null}`；受理响应携带真实 pending
+  resolver，既有 dispatch 成功领取后再以真实 attempt/fence 发标准 step_queued，不新增数据库事件类型。
+  回答方以 API 权威响应清除 clarification；其他观察者在待澄清期间
+  收到未知 step_finished 时回读 snapshot，不从该事件猜测新状态或当成 Artifact 决定。
+- 新业务 Step 的 userInstruction 在无澄清时原样沿用原指令；有澄清时使用 Core 确定性生成的完整 JSON 文本
+  `{initialInstruction,clarifications:[{prompt,userMessage}]}`，保留所有原文。模型不能另造规范指令或参数。
+  新业务 Evidence 在解析受理事务中冻结，首个模型 Step 的幂等键仍为 runId.stepId。
+- 统一有效执行上下文只解析初始冻结计划与唯一 selection 事实，公开 operation 可投影为所选短名；数据库
+  operation 仍为空。业务 generation/review 使用所选子计划，resolve_intent 使用初始 resolver。外层总计费
+  始终统计全部模型 Step，业务子预算只统计业务阶段，不抹去解析费用或挤占原有六调用上限。
 
 ## CLI、文档与验收
 
@@ -85,7 +116,7 @@ Run，Core 先派发低成本、无工具的 `resolve_intent`，再在同一 Run
 
 阶段结果必须分别记录执行器支持、Core 接线、Web/CLI 可用和真实环境验收，不能用基础层单测代替入口完成。
 
-## 当前实现状态
+## 前一检查点状态（提交 6db43a0）
 
 已实现自然入口所需的共享契约、执行器与 Core 计划/裁决基础：
 
@@ -104,7 +135,7 @@ Run，Core 先派发低成本、无工具的 `resolve_intent`，再在同一 Run
   `7405feccad1c014edbae8833ce260e2db67772b96d90d2814af9892203382142`。
   业务 Catalog 仍为 4/21 已接通，新增的是一个系统用途的执行器支持，不增加业务操作或生产开放范围。
 
-尚未完成、必须继续接通的本阶段工作：
+该检查点尚未完成的工作（后续结果见文末）：
 
 1. 自然输入公共分支及 Core start/replay、同 Run 意图结果持久化、业务 Evidence/Step 续接；
 2. dispatch/callback/billing/review/query/SSE 统一读取初始外层计划与所选业务子计划，保留解析费用和各自预算；
@@ -112,7 +143,7 @@ Run，Core 先派发低成本、无工具的 `resolve_intent`，再在同一 Run
 4. Web 普通新消息/澄清/草案返工三分流、Java/Python CLI watcher 和输入模式、对应 Skill 更新说明；
 5. 本规格列明的 PostgreSQL 与完整跨进程自然入口 E2E。
 
-当前没有新建自然 Run 的公共入口，既有普通聊天仍走 V1；没有修改 CLI 命令实现或本机已安装的 Skill
+该检查点没有新建自然 Run 的公共入口，既有普通聊天仍走 V1；没有修改 CLI 命令实现或本机已安装的 Skill
 运行包，没有推送、部署、远程数据库变更或真实模型调用。这是实施检查点，不是自然入口、整体 Agent
 重构或生产验收完成；其余原定业务迁移和 V1 退役仍须继续。
 
@@ -133,3 +164,49 @@ Run，Core 先派发低成本、无工具的 `resolve_intent`，再在同一 Run
 
 上述验证包含既有 PostgreSQL Testcontainers 回归，但不包含尚未接通的自然入口数据库状态推进、真实
 Core/Agent 端到端澄清、真实供应商或生产验收；这些仍在前述未完成清单中。
+
+## 当前接线与本地验收结果
+
+本轮在同一分支追加自然公共入口、同 Run 解析结果收敛、澄清决定和客户端接线。Core 保持初始 Run 身份
+不可变，通过控制 Step 保存问题、完整回答与业务选择；业务 Evidence 在选定操作时冻结，派发、预算、
+查询、SSE 和审核使用同一个有效执行上下文。自然回调的成功、等待、失败和取消已纳入 PostgreSQL 定向测试。
+
+通用 Java/Python CLI 已接自然启动、澄清回答与等待原因；Web 已区分新请求、当前澄清、草案返工和明确的
+旧 V1 恢复。受限 Operator 仍拒绝这两个新输入模式，不扩大现有命令或操作允许集合。CLI 行为示例和
+Skill 更新要求见两份 CLI README 及 `2026-09-01-durable-agent-v2-operator-skill-update.md`。
+
+本地最终验证如下：
+
+- 完整 `./mvnw --batch-mode --no-transfer-progress verify`：5/5 模块成功，服务身份 11、服务契约 5、
+  Core 837（3 项环境门控跳过）、CLI 125 项，无失败。证据 `/tmp/inkforge-natural-maven-verify-final.log`。
+- 完整 Python：4467 passed、3 skipped，仅既有 Starlette 弃用警告，证据
+  `/tmp/inkforge-natural-python-final-5scenarios.log`。首轮 4 个失败是旧 API 数量断言，已按真实生成结果
+  修正为公共 119 路径/152 操作、完整 154 路径/187 操作；不是修改业务行为迎合旧数字。
+- Web 335 项及 API 客户端 3 项、typecheck、lint、生产构建、api:check 全部通过。日志分别为
+  `/tmp/inkforge-natural-web-tests.log`、`/tmp/inkforge-natural-typecheck-final.log`、
+  `/tmp/inkforge-natural-web-lint.log`、`/tmp/inkforge-natural-build.log` 和
+  `/tmp/inkforge-natural-api-check-final-20260904.log`。
+- 全仓 Ruff、服务 Mypy 280 个文件、CLI long Mypy 24 个文件及新增跨进程测试模块的 Mypy 通过。
+- 独立复核复现并修复了“resolver 成功后业务准备被拒绝，回滚整个终报而卡住”的问题。先行行为红灯在
+  `/tmp/inkforge-natural-preparation-red.log`；修复后 34 项回调测试通过，证据
+  `/tmp/inkforge-natural-preparation-green.log`。确定性业务拒绝保留解析结算并结束 Run，临时/未知异常
+  不被吞掉；取消中的迟到意图结果不会新建业务 Step。
+
+真实隔离 Core/Agent/PostgreSQL/Fake Provider 的 `natural-entry` 五场景全部通过：
+
+1. 自然问答在同一个 Run 完成；
+2. 同会话相同完整原文、不同 clientRequestId 创建两个独立 Run，旧 start 重放仍指向原 Run；
+3. Core 重启后恢复澄清，回答后同 Run 生成规划、编辑复审并由作者批准；
+4. 两次回答仍不明确时第三个 resolver 结束为 `INTENT_UNRESOLVED`，不再创建问题或业务；
+5. 自然正文生成、双复审及作者采用，正式内容按既有业务规则写入。
+
+上述场景逐模型 Step 核验唯一物理 Provider 调用、TokenUsage/Reservation 绑定、完整原文和历史、
+不同业务 Evidence、不可变初始 operation=null 与公开有效操作，并证明控制 Step 不占模型或计费。
+首轮四场景报告为 `output/durable-agent-v2-e2e/20260904-natural-entry-1/report.json`，补齐连续消息后的
+最终报告为 `output/durable-agent-v2-e2e/20260904-natural-entry-2/report.json`。第二轮复用与首轮完全一致的
+Core/Agent 镜像 ID；两轮均未访问开发服务器数据库、生产或真实模型供应商，隔离容器、网络、卷和临时密钥
+目录已完整清理。测试宿主机并非实际 2 核 2 GB，报告中的该整机性能验收仍为 not_proven，不冒充生产性能证据。
+
+这只完成本规格的三项自然可选业务入口；Catalog 仍为 4/21 已接通。本轮未更新本机已安装 JAR 或活动
+Skill，未推送、部署、修改数据库结构或执行远程写入。原总目标的其余 17 项业务迁移、V1 退役、真实
+开发/生产具名迁移和真实供应商验收仍须继续，不能把本地 Fake 通过说成整体 Agent 重构或生产交付完成。

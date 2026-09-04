@@ -226,6 +226,21 @@ class OperatorMainTest {
         assertThat(calls).containsExactly("GET /api/v1/auth/me", "POST /api/v1/writing/runs");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "production"})
+    void 受限Skill不因既有命令名而开放自然启动或澄清(String environment) throws Exception {
+        install(environment, "作者");
+        for (String command : List.of("long.agent.start", "long.task.resume")) {
+            calls.clear();
+            String inputMode = command.equals("long.agent.start") ? "natural" : "clarification";
+            Result result = invoke(command,
+                    "{\"inputMode\":\"" + inputMode + "\",\"operation\":\"plan_chapter\"}");
+            assertThat(result.exit()).isEqualTo(2);
+            assertThat(result.error()).contains("OPERATOR_INPUT_MODE_NOT_ALLOWED");
+            assertThat(calls).containsExactly("GET /api/v1/auth/me");
+        }
+    }
+
     @Test
     void 本地登录先ready再读取密码并绑定用户名() throws Exception {
         install("production", null);

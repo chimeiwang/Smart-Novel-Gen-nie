@@ -38,6 +38,8 @@ import cn.inkforge.core.writing.application.WritingRunReconciler;
 import cn.inkforge.core.writing.application.WritingRunService;
 import cn.inkforge.core.writing.application.WritingRunStartRequestParser;
 import cn.inkforge.core.writing.application.WritingRunStarter;
+import cn.inkforge.core.writing.application.WritingRunClarificationStore;
+import cn.inkforge.core.writing.application.WritingRunClarificationService;
 import cn.inkforge.core.writing.application.WritingSemanticReferenceReader;
 import cn.inkforge.core.writing.application.WritingSessionRepository;
 import cn.inkforge.core.writing.application.WritingSessionService;
@@ -47,6 +49,8 @@ import cn.inkforge.core.writing.domain.WritingRunCursor;
 import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import jakarta.validation.Validator;
 import java.time.Clock;
@@ -100,13 +104,15 @@ class WritingConfiguration {
             CoreDatabase database,
             WritingRunStatusProjector projector,
             ObjectMapper objectMapper,
-            CoreSettings settings) {
+            CoreSettings settings,
+            ObjectProvider<WorkflowExecutionContextReader> executionContexts) {
         return new JooqWritingRunQueryRepository(
                 database,
                 projector,
                 new WritingRunCursor(objectMapper),
                 objectMapper,
-                settings.durableAgentExecutionSchemaReady());
+                settings.durableAgentExecutionSchemaReady(),
+                settings.durableAgentExecutionSchemaReady() ? executionContexts.getObject() : null);
     }
 
     @Bean
@@ -150,9 +156,40 @@ class WritingConfiguration {
             Clock coreClock,
             ObjectMapper objectMapper,
             ChapterPlanEvidenceReader chapterPlanningSources,
-            ChapterWritingEvidenceReader chapterWritingSources) {
+            ChapterWritingEvidenceReader chapterWritingSources,
+            WorkflowExecutionContextReader executionContexts) {
         return new JooqLongSerialDurableRunStarter(
-                database, assembler, workflows, registry, ids, coreClock, objectMapper, chapterPlanningSources, chapterWritingSources);
+                database, assembler, workflows, registry, ids, coreClock, objectMapper,
+                chapterPlanningSources, chapterWritingSources, executionContexts);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY", havingValue = "true")
+    WorkflowIntentBusinessPreparation workflowIntentBusinessPreparation(
+            ObjectProvider<LongSerialDurableRunStarter> durableStarters) {
+        // 回调只依赖 workflows 自己的准备端口，调用时才解析 writing 实现，避免装配环。
+        return (userId, novelId, chapterId, writingSessionId, instruction, words, plan) -> {
+            LongSerialDurableRunStarter starter = durableStarters.getObject();
+            if (!(starter instanceof JooqLongSerialDurableRunStarter preparation)) {
+                throw new IllegalStateException("自然入口业务准备端口未装配");
+            }
+            return preparation.prepare(userId, novelId, chapterId, writingSessionId, instruction, words, plan);
+        };
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY", havingValue = "true")
+    WritingRunClarificationStore writingRunClarificationStore(CoreDatabase database, CuidV1Generator ids,
+            Clock coreClock, ObjectMapper objectMapper, CommandIdempotencyStore writingCommandIdempotencyStore,
+            WorkflowExecutionContextReader executionContexts, WritingRunQueryRepository queries) {
+        return new JooqWritingRunClarificationStore(database, ids, coreClock, objectMapper,
+                writingCommandIdempotencyStore, executionContexts, queries);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY", havingValue = "true")
+    WritingRunClarificationService writingRunClarificationService(WritingRunClarificationStore store) {
+        return new WritingRunClarificationService(store);
     }
 
     @Bean
@@ -164,7 +201,8 @@ class WritingConfiguration {
             CommandIdempotencyStore writingCommandIdempotencyStore,
             CoreSettings settings,
             ObjectMapper objectMapper,
-            ExecutionRegistry registry) {
+            ExecutionRegistry registry,
+            ObjectProvider<WorkflowExecutionContextReader> executionContexts) {
         if (!settings.durableAgentExecutionSchemaReady()) {
             return new V1FreshWritingRunStarter(
                     database,
@@ -188,7 +226,8 @@ class WritingConfiguration {
                     return readiness != null && readiness.check();
                 },
                 objectMapper,
-                registry);
+                registry,
+                executionContexts.getObject());
     }
 
     @Bean

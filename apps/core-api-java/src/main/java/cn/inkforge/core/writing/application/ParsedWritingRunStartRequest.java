@@ -1,12 +1,17 @@
 package cn.inkforge.core.writing.application;
 
 import cn.inkforge.contracts.api.LongSerialStartWritingRunRequest;
+import cn.inkforge.contracts.api.NaturalStartWritingRunRequest;
 import cn.inkforge.contracts.api.ShortMediumStartWritingRunRequest;
 import cn.inkforge.contracts.api.StartWritingRunRequest;
 import java.util.Objects;
 
 /** 已按冻结联合契约完成严格校验的写作启动请求。 */
 public sealed interface ParsedWritingRunStartRequest {
+
+    record Natural(NaturalStartWritingRunRequest request) implements ParsedWritingRunStartRequest {
+        public Natural { Objects.requireNonNull(request); }
+    }
 
     record Legacy(StartWritingRunRequest request) implements ParsedWritingRunStartRequest {
         public Legacy {

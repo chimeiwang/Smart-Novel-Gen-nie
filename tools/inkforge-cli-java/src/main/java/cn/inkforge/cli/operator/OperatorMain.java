@@ -158,10 +158,16 @@ public final class OperatorMain {
                     return exit;
                 }
                 if (command.equals("long.agent.start")) {
+                    if (payload.has("inputMode")) {
+                        throw input("OPERATOR_INPUT_MODE_NOT_ALLOWED", "当前 Skill 不开放自然启动或澄清模式");
+                    }
                     JsonNode operation = payload.get("operation");
                     if (operation == null || !operation.isTextual() || !OPERATIONS.contains(operation.textValue())) {
                         throw input("OPERATOR_OPERATION_NOT_ALLOWED", "当前 Skill 只允许三种已开放的长篇 operation");
                     }
+                }
+                if (command.equals("long.task.resume") && payload.has("inputMode")) {
+                    throw input("OPERATOR_INPUT_MODE_NOT_ALLOWED", "当前 Skill 不开放自然启动或澄清模式");
                 }
             }
             return application.run(List.of(command), bytes(payload, host.json()), stdout, stderr);

@@ -72,7 +72,7 @@
   `VIDEO_PREVIEW_ENABLED=false`，并拒绝视频调度和真实 Seedance；P0-P3 只获开发库授权，不支持
   图片生成、TTS 或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。
 - 基线提交 `c9afc95` 有 148 个公共 Core 操作、30 个内部 Core 操作和 125 个 CLI 命令；当前公共 Core
-  在此基础上增加 2 个受配置门禁的手机号认证操作和 1 个有界审核摘要操作，共 151 个；当前内部 Core 另增加 3 个 V2 耐久
+  在此基础上增加 2 个受配置门禁的手机号认证操作、1 个有界审核摘要操作和 1 个耐久澄清回答操作，共 152 个；当前内部 Core 另增加 3 个 V2 耐久
   Workflow Step 回调和 1 个受审计计费对账入口，共 34 个。CLI 不是公共 API 全量镜像；macOS 两份 Operator Skill
   已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机入口切换与离线验收，由 `scripts/run.sh`
   启动固定安装的 Java CLI。新入口不依赖 Python 或 uv，仍只访问 Core 公共 API；125 个 CLI 命令与 Skill 的 45 个

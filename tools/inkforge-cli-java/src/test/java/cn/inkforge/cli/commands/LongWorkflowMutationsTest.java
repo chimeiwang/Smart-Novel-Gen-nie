@@ -29,6 +29,53 @@ class LongWorkflowMutationsTest {
     private final JsonMapper json = JsonMapper.builder().build();
 
     @Test
+    void 自然新消息与澄清回答使用独立请求形状并保留原文() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        String natural = """
+                {"inputMode":"natural","clientRequestId":"natural-request-0001",
+                 "novelId":"n1","chapterId":"c1","writingSessionId":"s1",
+                 "userInstruction":"  请先解释。\\r\\n  ","targetWordCount":4000}
+                """;
+        ObjectNode expected = (ObjectNode) json.readTree(natural);
+        expected.put("workflow", "long_serial");
+        assertJsonRequest(application, api, "long.agent.start", natural,
+                "POST", "/api/v1/writing/runs", expected.toString());
+        String clarification = """
+                {"inputMode":"clarification","taskId":"run/1","clientRequestId":"clarify-request-0001",
+                 "expectedRevision":3,"decisionStepId":"decision-1","userMessage":"  只问答。\\r\\n  "}
+                """;
+        ObjectNode answer = (ObjectNode) json.readTree(clarification);
+        answer.remove("inputMode");
+        answer.remove("taskId");
+        assertJsonRequest(application, api, "long.task.resume", clarification,
+                "POST", "/api/v1/writing/runs/run%2F1/clarification", answer.toString());
+    }
+
+    @Test
+    void 自然输入模式不允许混入操作或非法字数且澄清不能夹带草案决定() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        ObjectNode natural = (ObjectNode) json.readTree("""
+                {"inputMode":"natural","clientRequestId":"natural-request-0001",
+                 "novelId":"n1","chapterId":"c1","writingSessionId":"s1","userInstruction":"规划"}
+                """);
+        for (String invalid : List.of("{\"operation\":\"write_chapter\"}",
+                "{\"target\":null}", "{\"targetWordCount\":true}", "{\"targetWordCount\":0}",
+                "{\"writingSessionId\":null}", "{\"userInstruction\":\" \\ufeff\\u0085\"}")) {
+            ObjectNode payload = natural.deepCopy();
+            payload.setAll((ObjectNode) json.readTree(invalid));
+            assertThat(run(application, "long.agent.start", payload.toString()).exit()).isEqualTo(2);
+        }
+        String mixed = """
+                {"inputMode":"clarification","taskId":"run-1","clientRequestId":"clarify-request-0001",
+                 "expectedRevision":3,"decisionStepId":"decision-1","userMessage":"只问答","decision":"revise"}
+                """;
+        assertThat(run(application, "long.task.resume", mixed).exit()).isEqualTo(2);
+        assertThat(api.calls).isEmpty();
+    }
+
+    @Test
     void Agent启动恢复取消保持工作流身份与选区约束() {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);
@@ -546,6 +593,17 @@ class LongWorkflowMutationsTest {
         assertThat(call.method()).isEqualTo(method);
         assertThat(call.path()).isEqualTo(path);
         assertThat(call.body() == null ? null : call.body().toString()).isEqualTo(body);
+    }
+
+    private void assertJsonRequest(
+            CliApplication application, RecordingApi api, String command,
+            String input, String method, String path, String body) {
+        Result result = run(application, command, input);
+        assertThat(result.exit()).as(command + " " + result.stdout()).isZero();
+        Call call = api.calls.getLast();
+        assertThat(call.method()).isEqualTo(method);
+        assertThat(call.path()).isEqualTo(path);
+        assertThat(call.body()).isEqualTo(json.readTree(body));
     }
 
     private CliApplication application(RecordingApi api) {

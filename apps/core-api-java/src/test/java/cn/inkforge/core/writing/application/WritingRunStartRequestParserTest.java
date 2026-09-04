@@ -28,6 +28,33 @@ class WritingRunStartRequestParserTest {
     }
 
     @Test
+    void 自然请求独立分支保留完整原文和默认字数且拒绝业务控制字段() throws Exception {
+        String input = """
+                {"inputMode":"natural","workflow":"long_serial","clientRequestId":"request-natural-0001",
+                 "novelId":"novel-1","chapterId":"chapter-1","writingSessionId":"session-1",
+                 "userInstruction":"  完整原文😀\\r\\n  "}
+                """;
+        var parsed = parse(input);
+        assertThat(parsed).isInstanceOf(ParsedWritingRunStartRequest.Natural.class);
+        var natural = ((ParsedWritingRunStartRequest.Natural) parsed).request();
+        assertThat(natural.getUserInstruction()).isEqualTo("  完整原文😀\r\n  ");
+        assertThat(natural.getTargetWordCount()).isEqualTo(4000);
+        for (String extra : java.util.List.of("operation", "target", "scope", "selectionTarget", "selectedAgents")) {
+            var invalid = (tools.jackson.databind.node.ObjectNode) json.readTree(input);
+            invalid.putNull(extra);
+            assertValidation(invalid.toString());
+        }
+        for (String field : java.util.List.of("writingSessionId", "novelId", "chapterId", "userInstruction")) {
+            var invalid = (tools.jackson.databind.node.ObjectNode) json.readTree(input);
+            invalid.putNull(field);
+            assertValidation(invalid.toString());
+        }
+        var invalid = (tools.jackson.databind.node.ObjectNode) json.readTree(input);
+        invalid.put("userInstruction", "\u0085\uFEFF　");
+        assertValidation(invalid.toString());
+    }
+
+    @Test
     void 解析旧长篇请求并补齐冻结默认值() throws Exception {
         ParsedWritingRunStartRequest parsed = parse("""
                 {

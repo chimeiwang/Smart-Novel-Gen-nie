@@ -104,6 +104,67 @@ def _start_payload(operation: str = "plan_chapter") -> dict[str, Any]:
     }
 
 
+def test_natural_start_preserves_full_input_without_explicit_operation():
+    spec = _spec(_module(), "long.agent.start")
+    api = RecordingApi()
+    payload = {
+        "inputMode": "natural", "clientRequestId": "natural-request-0001",
+        "novelId": "novel-1", "chapterId": "chapter-1", "writingSessionId": "session-1",
+        "userInstruction": "  请先解释。\r\n  ", "targetWordCount": 4000,
+    }
+    spec.handler(_runtime(spec, api), payload)
+    assert api.calls == [("POST", "/api/v1/writing/runs", {
+        "json": payload | {"workflow": "long_serial"},
+    })]
+
+
+def test_clarification_resume_mode_uses_new_endpoint_and_exact_decision_identity():
+    spec = _spec(_module(), "long.task.resume")
+    api = RecordingApi()
+    body = {
+        "clientRequestId": "clarify-request-0001", "decisionStepId": "decision-1",
+        "expectedRevision": 3, "userMessage": "  只做问答。\r\n  ",
+    }
+    spec.handler(_runtime(spec, api), body | {"taskId": "run/1", "inputMode": "clarification"})
+    assert api.calls == [("POST", "/api/v1/writing/runs/run%2F1/clarification", {"json": body})]
+
+
+@pytest.mark.parametrize("changed", [
+    {"operation": "write_chapter"}, {"target": None}, {"scope": None},
+    {"selectedAgents": []}, {"selectionTarget": None}, {"writingSessionId": None},
+    {"inputMode": "other"}, {"inputMode": None}, {"userInstruction": " \ufeff\u0085"},
+    {"targetWordCount": True}, {"targetWordCount": 0}, {"targetWordCount": 10_000_001},
+])
+def test_natural_start_rejects_mixed_or_invalid_fields_before_http(changed):
+    spec = _spec(_module(), "long.agent.start")
+    api = RecordingApi()
+    payload = {
+        "inputMode": "natural", "clientRequestId": "natural-request-0001",
+        "novelId": "novel-1", "chapterId": "chapter-1", "writingSessionId": "session-1",
+        "userInstruction": "规划",
+    }
+    with pytest.raises(CliInputError):
+        spec.handler(_runtime(spec, api), payload | changed)
+    assert not api.calls
+
+
+@pytest.mark.parametrize("changed", [
+    {"expectedRevision": True}, {"expectedRevision": 0}, {"expectedRevision": "3"},
+    {"userMessage": " \ufeff\u0085"}, {"decisionStepId": None},
+    {"writingSessionId": "session-1"}, {"decision": "revise"}, {"inputMode": None},
+])
+def test_clarification_resume_rejects_legacy_and_artifact_fields_before_http(changed):
+    spec = _spec(_module(), "long.task.resume")
+    api = RecordingApi()
+    payload = {
+        "taskId": "run-1", "inputMode": "clarification", "clientRequestId": "clarify-request-0001",
+        "decisionStepId": "decision-1", "expectedRevision": 3, "userMessage": "只问答",
+    }
+    with pytest.raises(CliInputError):
+        spec.handler(_runtime(spec, api), payload | changed)
+    assert not api.calls
+
+
 def test_task_mutation_specs_require_identity_and_stable_request_ids() -> None:
     specs = _module().TASK_MUTATION_COMMAND_SPECS
 

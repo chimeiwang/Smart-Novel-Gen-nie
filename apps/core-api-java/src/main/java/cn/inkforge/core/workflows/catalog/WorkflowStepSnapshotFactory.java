@@ -78,6 +78,59 @@ public final class WorkflowStepSnapshotFactory {
             String latestProgressJson) {
         ExecutionPlanSnapshot.ModelProfile frozen = plan.requireStepProfile(
                 purpose, lane, modelProfile, modelProfileVersion);
+        return modelStep(frozen, stepId, ordinal, purpose, lane, status, attemptCount,
+                fencingToken, errorCode, resolvedModelJson, latestProgressJson);
+    }
+
+    public WorkflowCurrentStepSnapshot modelStep(
+            WorkflowExecutionContext context,
+            String stepId,
+            int ordinal,
+            String purpose,
+            String lane,
+            String status,
+            int attemptCount,
+            long fencingToken,
+            String errorCode,
+            String modelProfile,
+            int modelProfileVersion,
+            String resolvedModelJson) {
+        return modelStep(context, stepId, ordinal, purpose, lane, status, attemptCount,
+                fencingToken, errorCode, modelProfile, modelProfileVersion, resolvedModelJson, null);
+    }
+
+    public WorkflowCurrentStepSnapshot modelStep(
+            WorkflowExecutionContext context,
+            String stepId,
+            int ordinal,
+            String purpose,
+            String lane,
+            String status,
+            int attemptCount,
+            long fencingToken,
+            String errorCode,
+            String modelProfile,
+            int modelProfileVersion,
+            String resolvedModelJson,
+            String latestProgressJson) {
+        ExecutionPlanSnapshot.ModelProfile frozen = context.requireStepProfile(
+                purpose, lane, modelProfile, modelProfileVersion);
+        return modelStep(frozen, stepId, ordinal, purpose, lane, status, attemptCount,
+                fencingToken, errorCode, resolvedModelJson, latestProgressJson);
+    }
+
+    private WorkflowCurrentStepSnapshot modelStep(
+            ExecutionPlanSnapshot.ModelProfile frozen,
+            String stepId,
+            int ordinal,
+            String purpose,
+            String lane,
+            String status,
+            int attemptCount,
+            long fencingToken,
+            String errorCode,
+            String resolvedModelJson,
+            String latestProgressJson) {
         ModelProfileRef logical = logical(frozen);
         ResolvedModelRef resolved = resolved(resolvedModelJson, frozen);
         if ("running".equals(status) && resolved == null) {

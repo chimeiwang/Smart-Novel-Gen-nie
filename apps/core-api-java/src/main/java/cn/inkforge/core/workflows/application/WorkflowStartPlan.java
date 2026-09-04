@@ -2,6 +2,7 @@ package cn.inkforge.core.workflows.application;
 
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot;
 import java.util.List;
 import java.util.Map;
 
@@ -24,7 +25,19 @@ public record WorkflowStartPlan(
         List<WorkflowEvidenceItemPlan> evidenceItems,
         ExecutionRegistry.RunBudget runBudget,
         ExecutionPlanSnapshot executionPlan,
-        WorkflowInitialStepPlan initialStep) {
+        WorkflowInitialStepPlan initialStep,
+        IntentExecutionPlanSnapshot intentPlan) {
+
+    public WorkflowStartPlan(String userId, String clientRequestId, String requestHash,
+            String workflow, String operation, String operationCatalogVersion, String runKind,
+            String novelId, String chapterId, String writingSessionId, String targetType, String targetId,
+            Map<String, Object> normalizedInput, String evidencePolicyVersion,
+            List<WorkflowEvidenceItemPlan> evidenceItems, ExecutionRegistry.RunBudget runBudget,
+            ExecutionPlanSnapshot executionPlan, WorkflowInitialStepPlan initialStep) {
+        this(userId, clientRequestId, requestHash, workflow, operation, operationCatalogVersion, runKind,
+                novelId, chapterId, writingSessionId, targetType, targetId, normalizedInput,
+                evidencePolicyVersion, evidenceItems, runBudget, executionPlan, initialStep, null);
+    }
 
     public WorkflowStartPlan {
         userId = nonBlank(userId, "用户 ID");
@@ -36,7 +49,7 @@ public record WorkflowStartPlan(
             throw new IllegalArgumentException("Run request hash 无效");
         }
         workflow = nonBlank(workflow, "workflow");
-        operation = nonBlank(operation, "operation");
+        if (intentPlan == null) operation = nonBlank(operation, "operation");
         operationCatalogVersion = nonBlank(operationCatalogVersion, "Operation Catalog 版本");
         runKind = nonBlank(runKind, "兼容 Run kind");
         if ((targetType == null) != (targetId == null)) {
@@ -47,13 +60,16 @@ public record WorkflowStartPlan(
         evidenceItems = List.copyOf(evidenceItems);
         if (evidenceItems.isEmpty()) throw new IllegalArgumentException("Run 必须包含 Evidence");
         java.util.Objects.requireNonNull(runBudget, "Run 预算不能为空");
-        java.util.Objects.requireNonNull(executionPlan, "执行计划快照不能为空");
         java.util.Objects.requireNonNull(initialStep, "首个 Step 不能为空");
-        executionPlan.requireOperation(workflow, operation, operationCatalogVersion);
-        if (!runBudget.equals(executionPlan.runBudget())) {
+        if ((executionPlan == null) == (intentPlan == null)) {
+            throw new IllegalArgumentException("Run 必须且只能保存一种初始执行计划");
+        }
+        if (intentPlan == null) executionPlan.requireOperation(workflow, operation, operationCatalogVersion);
+        else intentPlan.requireInitialIdentity(workflow, operation, operationCatalogVersion);
+        if (!runBudget.equals(intentPlan == null ? executionPlan.runBudget() : intentPlan.runBudget())) {
             throw new IllegalArgumentException("Run 预算与冻结执行计划不一致");
         }
-        var frozenStep = executionPlan.requireStep(
+        var frozenStep = intentPlan == null ? executionPlan.requireStep(
                 initialStep.purpose(),
                 initialStep.lane(),
                 initialStep.modelProfile().key(),
@@ -63,10 +79,26 @@ public record WorkflowStartPlan(
                 java.util.Map.of(
                         "profile", initialStep.stepBudget().key(),
                         "version", initialStep.stepBudget().version(),
-                        "budget", frozenBudget(initialStep.stepBudget().budget())));
+                        "budget", frozenBudget(initialStep.stepBudget().budget()))) : intentPlan.resolver();
+        if (intentPlan != null && (!"chat".equals(runKind) || !"chapter".equals(targetType)
+                || !java.util.Objects.equals(chapterId, targetId) || novelId == null || chapterId == null
+                || writingSessionId == null || !frozenStep.purpose().equals(initialStep.purpose())
+                || !frozenStep.lane().equals(initialStep.lane())
+                || !frozenStep.modelProfile().profile().equals(initialStep.modelProfile().key())
+                || frozenStep.modelProfile().version() != initialStep.modelProfile().version()
+                || !frozenStep.outputSchema().name().equals(initialStep.outputSchema().key())
+                || frozenStep.outputSchema().version() != initialStep.outputSchema().version()
+                || !frozenStep.outputSchema().sha256().equals(initialStep.outputSchema().sha256())
+                || !frozenStep.stepBudget().budget().equals(initialStep.stepBudget().budget()))) {
+            throw new IllegalArgumentException("自然 Run 初始身份或解析 Step 与冻结计划不一致");
+        }
         if (!evidencePolicyVersion.equals(frozenStep.evidencePolicy())) {
             throw new IllegalArgumentException("首个 Step 与冻结执行计划不一致");
         }
+    }
+
+    public Map<String, Object> storedExecutionPlan() {
+        return intentPlan == null ? executionPlan.stored() : intentPlan.stored();
     }
 
     private static String nonBlank(String value, String label) {

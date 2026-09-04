@@ -237,16 +237,16 @@ def _decision_body(
                 f"discard 不接受字段：{forbidden[0]}",
             )
     elif body["engineVersion"] == 2:
-        forbidden = {name for name in _EDIT_FIELDS if payload.get(name) is not None}
+        forbidden_v2 = {name for name in _EDIT_FIELDS if payload.get(name) is not None}
         if decision == "approve" and artifact is not None:
             if _is_selection_artifact(artifact):
-                forbidden.difference_update({"editedReplacement", "editedReplacementFile"})
+                forbidden_v2.difference_update({"editedReplacement", "editedReplacementFile"})
             elif _is_writing_artifact(artifact):
-                forbidden.difference_update({"editedContent", "editedContentFile"})
-        if forbidden:
+                forbidden_v2.difference_update({"editedContent", "editedContentFile"})
+        if forbidden_v2:
             raise CliInputError(
                 "V2_EDIT_FIELDS_FORBIDDEN",
-                f"V2 {decision} 不接受字段：{sorted(forbidden)[0]}",
+                f"V2 {decision} 不接受字段：{sorted(forbidden_v2)[0]}",
             )
         if decision == "approve":
             edited_content = _edited_content(payload)

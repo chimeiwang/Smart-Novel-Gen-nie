@@ -14,6 +14,8 @@ import cn.inkforge.core.writing.application.WritingCommandRepository;
 import cn.inkforge.core.writing.application.WritingRunStarter;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +43,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     private final ObjectMapper json;
     private final ExecutionRegistry registry;
     private final Set<String> routableOperationKeys;
+    private final WorkflowExecutionContextReader executionContexts;
 
     RoutingWritingRunStarter(
             CoreDatabase database,
@@ -51,6 +54,13 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             DurableAgentExecutionReadiness agentReadiness,
             ObjectMapper json,
             ExecutionRegistry registry) {
+        this(database, legacy, durable, idempotency, settings, agentReadiness, json, registry, null);
+    }
+
+    RoutingWritingRunStarter(CoreDatabase database, WritingCommandRepository legacy,
+            LongSerialDurableRunStarter durable, CommandIdempotencyStore idempotency, CoreSettings settings,
+            DurableAgentExecutionReadiness agentReadiness, ObjectMapper json, ExecutionRegistry registry,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.legacy = Objects.requireNonNull(legacy);
         this.durable = Objects.requireNonNull(durable);
@@ -59,6 +69,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         this.agentReadiness = Objects.requireNonNull(agentReadiness);
         this.json = Objects.requireNonNull(json);
         this.registry = Objects.requireNonNull(registry);
+        this.executionContexts = executionContexts;
         this.routableOperationKeys = registry.enabledOperationKeys("long_serial", false);
         Set<String> missingHandlers = new HashSet<>(routableOperationKeys);
         missingHandlers.removeAll(durable.supportedOperationKeys());
@@ -81,6 +92,9 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         }
 
         boolean routeDurable = routesDurable(userId, request);
+        if (request instanceof ParsedWritingRunStartRequest.Natural && !routeDurable) {
+            throw new ApiException(409, "DURABLE_NATURAL_ENTRY_NOT_ENABLED", "自然请求需要已授权的耐久执行入口");
+        }
         if (!routeDurable && !settings.v1FreshAgentStartsEnabled()) {
             // 必须位于既有幂等身份重放之后、任何 Agent readiness、业务锁或新写入之前。
             throw V1FreshAgentStartGate.draining();
@@ -123,6 +137,9 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                     requireNoActiveLegacyMutation(transaction, scope.chapterId());
                     requireNoActiveDurableMutation(transaction, scope.chapterId());
                 }
+                if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
+                    return durable.startNatural(userId, natural.request());
+                }
                 LongSerialStartWritingRunRequest durableRequest = durableRequest(request);
                 return durable.startFresh(userId, durableRequest);
             }
@@ -138,9 +155,16 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             ParsedWritingRunStartRequest request,
             String clientRequestId,
             CommandIdempotencyStore.Resolution existing) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
+            if (existing.recordKind() != CommandIdempotencyStore.RecordKind.WORKFLOW_RUN) {
+                throw CommandIdempotencyStore.reused(clientRequestId);
+            }
+            return durable.replayNatural(userId, natural.request());
+        }
         return switch (existing.recordKind()) {
             case WRITING_COMMAND -> legacy.start(userId, request);
             case WORKFLOW_RUN -> durableReplay(userId, request, clientRequestId);
+            case CONTROL_DECISION -> throw CommandIdempotencyStore.reused(clientRequestId);
         };
     }
 
@@ -157,6 +181,10 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
 
     private boolean routesDurable(
             String userId, ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
+            return settings.durableAgentExecutionSchemaReady()
+                    && settings.routesNewDurableAgentRun(userId, natural.request().getNovelId());
+        }
         return isDurableOperation(request)
                 && settings.routesNewDurableAgentRun(
                         userId, durableRequest(request).getNovelId());
@@ -168,6 +196,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     }
 
     private boolean isDurableMutation(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural) return true;
         if (!(request instanceof ParsedWritingRunStartRequest.LongSerial value)) return false;
         return registry.requireKnownOperation(operationKey(value.request())).mutating();
     }
@@ -199,6 +228,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     }
 
     static String clientRequestId(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural value) return value.request().getClientRequestId();
         if (request instanceof ParsedWritingRunStartRequest.Legacy value) {
             return value.request().getClientRequestId();
         }
@@ -211,6 +241,10 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     }
 
     private static StartScope startScope(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural value) {
+            var body = value.request();
+            return new StartScope(body.getNovelId(), body.getChapterId(), body.getWritingSessionId());
+        }
         if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
             LongSerialStartWritingRunRequest body = value.request();
             return new StartScope(
@@ -290,17 +324,21 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             DSLContext transaction, String chapterId) {
         List<Record> active = transaction.fetch(
                 """
-                SELECT id, "modelPolicyJson" FROM public."WorkflowRun"
+                SELECT id, workflow, operation, "operationCatalogVersion", "chapterId", "targetType", "targetId", "modelPolicyJson" FROM public."WorkflowRun"
                 WHERE "engineVersion" = 2 AND "chapterId" = ?
                   AND status IN ('pending', 'running', 'waiting_user')
                 ORDER BY "createdAt", id
-                FOR UPDATE
                 """,
                 chapterId);
         for (Record run : active) {
-            if (executionPlan(run.get("modelPolicyJson", String.class))
-                    .operation()
-                    .mutating()) {
+            boolean mutating = executionContexts == null
+                    ? executionPlan(run.get("modelPolicyJson", String.class)).operation().mutating()
+                    : executionContexts.load(transaction, new WorkflowExecutionContext.RunIdentity(
+                            run.get("id", String.class), run.get("workflow", String.class), run.get("operation", String.class),
+                            run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
+                            run.get("targetType", String.class), run.get("targetId", String.class)),
+                            json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<Map<String, Object>>() {})).conservativeMutating();
+            if (mutating) {
                 throw busy();
             }
         }

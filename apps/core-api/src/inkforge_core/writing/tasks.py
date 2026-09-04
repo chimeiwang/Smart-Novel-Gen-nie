@@ -31,6 +31,7 @@ from .recovery import (
     deserialize_graph_snapshot,
 )
 from .schemas import (
+    NaturalStartWritingRunRequest,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     WritingCommandStatus,
@@ -813,6 +814,11 @@ class WritingTaskService:
     async def start(
         self, user_id: str, request: WritingRunStartRequest
     ) -> WritingRunResponse:
+        if isinstance(request, NaturalStartWritingRunRequest):
+            raise ApiError(
+                status_code=409, code="WORKFLOW_NATURAL_ENTRY_UNSUPPORTED",
+                message="Python 回滚实例不支持耐久自然入口，请使用已接通的 Java Core",
+            )
         response = await self._repository.create_start_with_task(user_id, request)
         await self._kick_dispatcher()
         return response

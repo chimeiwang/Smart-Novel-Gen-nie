@@ -14,6 +14,7 @@ import { CoreAgentIdSchema } from "./agent";
 import { WritingTaskPhaseSchema } from "./workflow";
 import { ReviewArtifactDecisionSchema } from "./review-artifact";
 import { CreativeOperationSchema } from "./creative-operation";
+import { countTextLength } from "@/shared/lib/word-count";
 
 // ============================================
 // 基础事件
@@ -231,6 +232,16 @@ export const WorkflowErrorSnapshotSchema = z.object({
   outcomeUnknown: z.boolean(),
 }).strict();
 
+const WorkflowClarificationPromptSchema = z.string()
+  .refine((value) => countTextLength(value) > 0, "澄清问题不能为空白")
+  .refine((value) => [...value].length <= 2_000, "澄清问题不能超过 2000 个字符");
+
+export const WorkflowClarificationSnapshotSchema = z.object({
+  clarificationCode: WorkflowProtocolCodeSchema,
+  prompt: WorkflowClarificationPromptSchema,
+  decisionStepId: WorkflowIdSchema,
+}).strict() satisfies z.ZodType<components["schemas"]["WorkflowClarificationSnapshot"]>;
+
 export const WorkflowRunSnapshotSchema = z.object({
   workflow: WorkflowProtocolCodeSchema,
   operation: WorkflowProtocolCodeSchema.nullable().optional(),
@@ -241,8 +252,14 @@ export const WorkflowRunSnapshotSchema = z.object({
   lastEventSequence: z.number().int().nonnegative(),
   revision: z.number().int().positive(),
   artifact: WorkflowArtifactSnapshotSchema.nullable().optional(),
+  clarification: WorkflowClarificationSnapshotSchema.nullable().optional(),
   error: WorkflowErrorSnapshotSchema.nullable().optional(),
 }).strict().superRefine((snapshot, context) => {
+  if (snapshot.clarification && (
+    snapshot.status !== "waiting_user" || snapshot.artifact || snapshot.cancelRequestedAt
+  )) {
+    context.addIssue({ code: "custom", message: "澄清只允许等待用户且不得同时绑定草案或取消请求" });
+  }
   const sortedKeys = snapshot.activeSteps
     .map((step) => [step.ordinal, step.stepId] as const)
     .toSorted(([leftOrdinal, leftId], [rightOrdinal, rightId]) => (
@@ -361,11 +378,7 @@ export const WorkflowEventEnvelopeSchema = z.discriminatedUnion("eventType", [
     targetId: WorkflowIdSchema,
     confidence: z.number().min(0).max(1),
   }).strict()),
-  workflowEnvelope("clarification_required", z.object({
-    clarificationCode: WorkflowProtocolCodeSchema,
-    prompt: z.string().trim().min(1).max(2_000),
-    decisionStepId: WorkflowIdSchema,
-  }).strict()),
+  workflowEnvelope("clarification_required", WorkflowClarificationSnapshotSchema),
   workflowEnvelope("evidence_ready", z.object({
     bundleId: WorkflowIdSchema,
     bundleVersion: z.number().int().positive(),

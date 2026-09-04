@@ -13,8 +13,8 @@ public record WorkflowInitialStepPlan(
         ExecutionRegistry.OutputSchema outputSchema) {
 
     public WorkflowInitialStepPlan {
-        if (!java.util.Set.of("generation", "review").contains(purpose)) {
-            throw new IllegalArgumentException("Step purpose 只允许 generation/review");
+        if (!java.util.Set.of("generation", "review", "resolve_intent").contains(purpose)) {
+            throw new IllegalArgumentException("Step purpose 尚未支持");
         }
         if (!java.util.Set.of("interactive", "creative", "batch_media").contains(lane)) {
             throw new IllegalArgumentException("模型 Step lane 无效");

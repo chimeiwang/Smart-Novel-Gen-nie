@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.contracts.api.WritingRunResponse;
+import cn.inkforge.contracts.api.ClarifyWritingRunRequest;
 import cn.inkforge.contracts.api.WritingRunStartResponse;
 import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.core.generated.model.WritingRunStartBody;
@@ -24,6 +25,12 @@ import cn.inkforge.core.workflows.application.DurableWorkflowService;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
+import cn.inkforge.core.workflows.infrastructure.JooqWorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
+import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import cn.inkforge.core.writing.domain.WritingRunCursor;
+import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
+import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import jakarta.validation.Validation;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -111,12 +118,206 @@ class RoutingWritingRunStarterTest {
                 CLOCK,
                 json,
                 new JooqChapterPlanEvidenceReader(json),
-                new JooqChapterWritingEvidenceReader(json));
+                new JooqChapterWritingEvidenceReader(json), new JooqWorkflowExecutionContextReader(json));
     }
 
     @AfterAll
     static void closeDatabase() {
         if (database != null) database.close();
+    }
+
+    @Test
+    void 自然启动只建同章意图Run并在路由关闭及离线时重放() {
+        Fixture fixture = fixture("natural-start");
+        var request = naturalRequest(fixture, "natural-start-request-001", "  请帮助当前章节😀\r\n");
+        var response = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(), request);
+        assertThat(response.getOperation()).isNull();
+        assertThat(response.getCurrentStep().getPurpose()).isEqualTo("resolve_intent");
+        assertThat(response.getCurrentStep().getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v1");
+        Record run = database.dsl().fetchOne("SELECT operation, \"targetType\", \"targetId\", \"modelPolicyJson\", input FROM public.\"WorkflowRun\" WHERE id = ?", response.getRunId());
+        assertThat(run.get("operation")).isNull();
+        assertThat(run.get("targetType", String.class)).isEqualTo("chapter");
+        assertThat(run.get("targetId", String.class)).isEqualTo(fixture.chapterId());
+        assertThat(json.readTree(run.get("modelPolicyJson", String.class)).path("planVersion").asText()).isEqualTo("2");
+        assertThat(json.readTree(run.get("input", String.class)).path("userInstruction").asText()).isEqualTo("  请帮助当前章节😀\r\n");
+        Record item = database.dsl().fetchOne("SELECT \"resourceType\", \"contentJson\" FROM public.\"WorkflowEvidenceItem\" WHERE \"bundleId\" = (SELECT \"currentEvidenceBundleId\" FROM public.\"WorkflowRun\" WHERE id = ?)", response.getRunId());
+        assertThat(item.get("resourceType", String.class)).isEqualTo("intent_context");
+        var context = json.readTree(item.get("contentJson", String.class));
+        assertThat(context.has("content")).isFalse();
+        assertThat(context.path("availableOperations").size()).isEqualTo(3);
+        var queries = queries();
+        assertThat(((WritingRunV2Response) queries.getPublic(fixture.userId(), response.getRunId())).getCurrentStep().getPurpose())
+                .isEqualTo("resolve_intent");
+        assertThat(queries.list(fixture.userId(), fixture.novelId(), null, null, null, null, null, 20).getItems())
+                .hasSize(1).first().isInstanceOf(WritingRunV2Response.class);
+        AtomicInteger probes = new AtomicInteger();
+        var replay = (WritingRunV2Response) router(fixture, "off", () -> { probes.incrementAndGet(); return false; }).start(fixture.userId(), request);
+        assertThat(replay.getRunId()).isEqualTo(response.getRunId());
+        assertThat(probes).hasValue(0);
+        assertThat(count("SELECT count(*) FROM public.\"WritingTask\" WHERE \"chapterId\" = ?", fixture.chapterId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"chapterId\" = ?", fixture.chapterId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?", fixture.sessionId())).isEqualTo(1);
+        assertThatThrownBy(() -> router("off").start(fixture.userId(), naturalRequest(fixture, "natural-start-request-001", "异内容")))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.code()).isEqualTo("IDEMPOTENCY_KEY_REUSED"));
+    }
+
+    @Test
+    void 自然未授权请求明确拒绝且未解析Run仍阻塞同章写入() {
+        Fixture off = fixture("natural-off");
+        assertThatThrownBy(() -> router("off").start(off.userId(), naturalRequest(off, "natural-off-request-0001", "不得降级")))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.code()).isEqualTo("DURABLE_NATURAL_ENTRY_NOT_ENABLED"));
+        assertThat(workflowFacts(off.userId())).isZero();
+        Fixture active = fixture("natural-lock");
+        router(active, "allowlist").start(active.userId(), naturalRequest(active, "natural-lock-request-001", "尚未判断是否写"));
+        assertThatThrownBy(() -> router(active, "allowlist").start(active.userId(), requestWithoutSession(active, "natural-lock-write-0001", "同章新写入")))
+                .isInstanceOf(ApiException.class);
+    }
+
+    private static ParsedWritingRunStartRequest naturalRequest(Fixture fixture, String id, String instruction) {
+        return parser.parse(new WritingRunStartBody(json.valueToTree(Map.of("inputMode", "natural", "workflow", "long_serial",
+                "clientRequestId", id, "novelId", fixture.novelId(), "chapterId", fixture.chapterId(),
+                "writingSessionId", fixture.sessionId(), "userInstruction", instruction))));
+    }
+
+    @Test
+    void 澄清回答同Run冻结完整历史和原回执且全局幂等不漂移() {
+        Fixture fixture = fixture("natural-answer");
+        String original = "  原始指令😀\r\n";
+        var first = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(),
+                naturalRequest(fixture, "natural-answer-start-001", original));
+        String questionId = question(first.getRunId(), "  要规划还是写正文？\r\n");
+        var waiting = (WritingRunV2Response) queries().getPublic(fixture.userId(), first.getRunId());
+        assertThat(waiting.getClarification().getDecisionStepId()).isEqualTo(questionId);
+        var answer = new ClarifyWritingRunRequest().clientRequestId("natural-answer-accepted-001")
+                .expectedRevision(waiting.getRevision()).decisionStepId(questionId).userMessage("  请写完整正文😀\r\n".repeat(2000));
+        var receipt = clarificationStore().accept(fixture.userId(), first.getRunId(), answer);
+        assertThat(receipt.getRunId()).isEqualTo(first.getRunId());
+        assertThat(receipt.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.PENDING);
+        assertThat(receipt.getRevision()).isEqualTo(waiting.getRevision() + 1);
+        assertThat(receipt.getClarification()).isNull();
+        Record resolver = database.dsl().fetchOne("SELECT input, \"evidenceBundleId\" FROM public.\"WorkflowStep\" WHERE id = ?", receipt.getCurrentStep().getStepId());
+        var input = json.readTree(resolver.get("input", String.class));
+        assertThat(input.path("userInstruction").asText()).isEqualTo(original);
+        assertThat(input.path("clarifications").get(0).path("prompt").asText()).isEqualTo("  要规划还是写正文？\r\n");
+        assertThat(input.path("clarifications").get(0).path("userMessage").asText()).isEqualTo(answer.getUserMessage());
+        Record control = database.dsl().fetchOne("SELECT id, input, output, \"inputHash\", \"resultHash\", \"fencingToken\", \"modelProfile\", \"budgetJson\", \"usageJson\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'intent_clarification_answer'", first.getRunId());
+        assertThat(control.get("fencingToken", Long.class)).isEqualTo(1);
+        assertThat(control.get("modelProfile")).isNull();
+        assertThat(control.get("budgetJson")).isNull();
+        assertThat(control.get("usageJson")).isNull();
+        assertThat(control.get("resultHash", String.class)).isEqualTo(ExecutionCanonicalJson.sha256(json.readValue(control.get("output", String.class), Map.class)));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"stepId\" = ?", control.get("id", String.class))).isZero();
+        String second = question(first.getRunId(), "请再明确一次");
+        assertThat(clarificationStore().accept(fixture.userId(), first.getRunId(), answer)).isEqualTo(receipt);
+        assertThat(((WritingRunV2Response) queries().getPublic(fixture.userId(), first.getRunId())).getClarification().getDecisionStepId()).isEqualTo(second);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"chapterId\" = ?", fixture.chapterId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?", fixture.sessionId())).isEqualTo(2);
+        assertThatThrownBy(() -> router("off").start(fixture.userId(), naturalRequest(fixture, answer.getClientRequestId(), "新请求不可复用回答ID")))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.code()).isEqualTo("IDEMPOTENCY_KEY_REUSED"));
+    }
+
+    @Test
+    void 澄清回答越权过期取消及跨start幂等冲突均不追加事实() {
+        Fixture fixture = fixture("natural-answer-reject");
+        var first = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(),
+                naturalRequest(fixture, "natural-reject-start-001", "待澄清"));
+        String decision = question(first.getRunId(), "明确意图");
+        int revision = ((WritingRunV2Response) queries().getPublic(fixture.userId(), first.getRunId())).getRevision();
+        var answer = new ClarifyWritingRunRequest().clientRequestId("natural-answer-reject-001")
+                .expectedRevision(revision).decisionStepId(decision).userMessage("写正文");
+        int before = count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", first.getRunId());
+        assertThatThrownBy(() -> clarificationStore().accept("other-user", first.getRunId(), answer)).isInstanceOf(ApiException.class);
+        answer.expectedRevision(revision - 1);
+        assertThatThrownBy(() -> clarificationStore().accept(fixture.userId(), first.getRunId(), answer)).isInstanceOf(ApiException.class);
+        answer.expectedRevision(revision).clientRequestId("natural-reject-start-001");
+        assertThatThrownBy(() -> clarificationStore().accept(fixture.userId(), first.getRunId(), answer))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.code()).isEqualTo("IDEMPOTENCY_KEY_REUSED"));
+        answer.clientRequestId("natural-answer-reject-001");
+        database.dsl().execute("UPDATE public.\"WorkflowRun\" SET status='cancelled', \"cancelRequestId\"='natural-cancel-request-001', \"cancelRequestedAt\"=?, \"completedAt\"=?, \"updatedAt\"=? WHERE id=?", NOW, NOW, NOW, first.getRunId());
+        assertThatThrownBy(() -> clarificationStore().accept(fixture.userId(), first.getRunId(), answer)).isInstanceOf(ApiException.class);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(before);
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?", fixture.sessionId())).isEqualTo(1);
+    }
+
+    private static JooqWritingRunQueryRepository queries() {
+        return new JooqWritingRunQueryRepository(database, new WritingRunStatusProjector(json, new WritingRunOutcomeProjector(), CLOCK),
+                new WritingRunCursor(json), json, true, new JooqWorkflowExecutionContextReader(json));
+    }
+
+    @Test
+    void 新启动互斥不等待持有Run锁的同Run业务准备() throws Exception {
+        Fixture fixture = fixture("natural-lock-order");
+        var started = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(),
+                naturalRequest(fixture, "natural-lock-order-start-001", "待解析"));
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Void> preparing = CompletableFuture.runAsync(() -> database.transactionResult(transaction -> {
+            transaction.fetchOne("SELECT id FROM public.\"WorkflowRun\" WHERE id=? FOR UPDATE", started.getRunId());
+            locked.countDown();
+            try {
+                if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("未及时释放测试 Run 锁");
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(error);
+            }
+            transaction.fetchOne("SELECT id FROM public.\"Novel\" WHERE id=? FOR UPDATE", fixture.novelId());
+            return null;
+        }));
+        assertThat(locked.await(2, TimeUnit.SECONDS)).isTrue();
+        CompletableFuture<Object> competing = CompletableFuture.supplyAsync(() -> captureFailure(() ->
+                router(fixture, "allowlist").start(fixture.userId(), requestWithoutSession(fixture, "natural-lock-order-other-001", "竞争写入"))));
+        try {
+            assertThat(competing.get(2, TimeUnit.SECONDS)).isInstanceOf(ApiException.class);
+        } finally {
+            release.countDown();
+        }
+        preparing.get(3, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void 澄清回答并发只受理一次且两轮历史完整并拒绝旧决定() throws Exception {
+        Fixture fixture = fixture("natural-answer-race");
+        var started = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(),
+                naturalRequest(fixture, "natural-answer-race-start-001", "原始指令"));
+        String questionId = question(started.getRunId(), "第一问");
+        int revision = ((WritingRunV2Response) queries().getPublic(fixture.userId(), started.getRunId())).getRevision();
+        var answer = new ClarifyWritingRunRequest().clientRequestId("natural-answer-race-001")
+                .expectedRevision(revision).decisionStepId(questionId).userMessage("第一答");
+        CompletableFuture<WritingRunV2Response> first = CompletableFuture.supplyAsync(() -> clarificationStore().accept(fixture.userId(), started.getRunId(), answer));
+        CompletableFuture<WritingRunV2Response> duplicate = CompletableFuture.supplyAsync(() -> clarificationStore().accept(fixture.userId(), started.getRunId(), answer));
+        assertThat(first.get(5, TimeUnit.SECONDS)).isEqualTo(duplicate.get(5, TimeUnit.SECONDS));
+        String secondQuestion = question(started.getRunId(), "第二问\r\n");
+        int secondRevision = ((WritingRunV2Response) queries().getPublic(fixture.userId(), started.getRunId())).getRevision();
+        var second = new ClarifyWritingRunRequest().clientRequestId("natural-answer-race-002")
+                .expectedRevision(secondRevision).decisionStepId(secondQuestion).userMessage("第二答😀");
+        var receipt = clarificationStore().accept(fixture.userId(), started.getRunId(), second);
+        String inputJson = database.dsl().fetchOne("SELECT input FROM public.\"WorkflowStep\" WHERE id=?", receipt.getCurrentStep().getStepId()).get("input", String.class);
+        assertThat(json.readTree(inputJson).path("clarifications").size()).isEqualTo(2);
+        var third = new ClarifyWritingRunRequest().clientRequestId("natural-answer-race-003")
+                .expectedRevision(receipt.getRevision()).decisionStepId(secondQuestion).userMessage("不得复用已答决定");
+        assertThatThrownBy(() -> clarificationStore().accept(fixture.userId(), started.getRunId(), third)).isInstanceOf(ApiException.class);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\"=? AND purpose='intent_clarification_answer'", started.getRunId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\"=?", fixture.sessionId())).isEqualTo(3);
+    }
+
+    private static JooqWritingRunClarificationStore clarificationStore() {
+        return new JooqWritingRunClarificationStore(database, new CuidV1Generator(CLOCK), CLOCK, json,
+                new CommandIdempotencyStore(json, true), new JooqWorkflowExecutionContextReader(json), queries());
+    }
+
+    private static String question(String runId, String prompt) {
+        Record resolver = database.dsl().fetchOne("SELECT id, \"evidenceBundleId\", ordinal FROM public.\"WorkflowStep\" WHERE \"runId\"=? AND purpose='resolve_intent' AND status='pending'", runId);
+        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET status='completed', \"resultHash\"=?, \"completedAt\"=?, \"nextAttemptAt\"=NULL WHERE id=?", "a".repeat(64), NOW, resolver.get("id", String.class));
+        String id = new CuidV1Generator(CLOCK).next();
+        var value = new WorkflowIntentQuestion(runId, resolver.get("id", String.class), "a".repeat(64), resolver.get("evidenceBundleId", String.class), "intent_ambiguous", prompt);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowStep" (id,"runId","stepType",status,input,"createdAt",ordinal,purpose,lane,
+                  "attemptCount","fencingToken","idempotencyKey","requestHash","inputHash","evidenceBundleId","submittedAt","updatedAt","completedAt")
+                VALUES (?,?,'user_confirmation','completed',?,?,?,'intent_clarification','control',0,1,?,?,?,?,?,?,?)
+                """, id, runId, json.writeValueAsString(value.stored()), NOW, resolver.get("ordinal", Integer.class)+1,
+                runId+"."+id, value.inputHash(), value.inputHash(), value.intentEvidenceBundleId(), NOW, NOW, NOW);
+        database.dsl().execute("UPDATE public.\"WorkflowRun\" SET status='waiting_user', revision=revision+1 WHERE id=?", runId);
+        return id;
     }
 
     @Test
@@ -1086,7 +1287,8 @@ class RoutingWritingRunStarterTest {
                 CoreSettings.from(settings),
                 readiness,
                 json,
-                registry);
+                registry,
+                new JooqWorkflowExecutionContextReader(json));
     }
 
     private static Object captureFailure(java.util.concurrent.Callable<?> operation) {

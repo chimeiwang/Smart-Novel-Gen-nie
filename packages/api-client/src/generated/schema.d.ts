@@ -1167,6 +1167,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/writing/runs/{task_id}/clarification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clarify Writing Run */
+        post: operations["clarify_writing_run_api_v1_writing_runs__task_id__clarification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/writing/runs/{task_id}/cancel": {
         parameters: {
             query?: never;
@@ -2851,6 +2868,17 @@ export interface components {
             timelineDurationMs: number;
             /** Sourceranges */
             sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
+        };
+        /** ClarifyWritingRunRequest */
+        ClarifyWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Decisionstepid */
+            decisionStepId: string;
+            /** Usermessage */
+            userMessage: string;
         };
         /** ConfirmAdaptationPlanRequest */
         ConfirmAdaptationPlanRequest: {
@@ -4727,6 +4755,34 @@ export interface components {
             /** Deploymentprofilekey */
             deploymentProfileKey: string;
             promptProfile: components["schemas"]["PromptProfileRef"];
+        };
+        /** NaturalStartWritingRunRequest */
+        NaturalStartWritingRunRequest: {
+            /**
+             * Inputmode
+             * @constant
+             */
+            inputMode: "natural";
+            /**
+             * Workflow
+             * @constant
+             */
+            workflow: "long_serial";
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string;
+            /** Writingsessionid */
+            writingSessionId: string;
+            /** Userinstruction */
+            userInstruction: string;
+            /**
+             * Targetwordcount
+             * @default 4000
+             */
+            targetWordCount: number;
         };
         /** NovelResponse */
         NovelResponse: {
@@ -18683,7 +18739,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StartWritingRunRequest"] | components["schemas"]["ShortMediumStartWritingRunRequest"] | components["schemas"]["LongSerialStartWritingRunRequest"];
+                "application/json": components["schemas"]["StartWritingRunRequest"] | components["schemas"]["ShortMediumStartWritingRunRequest"] | components["schemas"]["LongSerialStartWritingRunRequest"] | components["schemas"]["NaturalStartWritingRunRequest"];
             };
         };
         responses: {
@@ -18926,6 +18982,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResumeWritingRunResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    clarify_writing_run_api_v1_writing_runs__task_id__clarification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClarifyWritingRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingRunV2Response"];
                 };
             };
             /** @description 统一错误响应 */

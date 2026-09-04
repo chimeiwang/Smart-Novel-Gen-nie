@@ -16,6 +16,8 @@ import cn.inkforge.core.workflows.application.WorkflowEventStreamService;
 import cn.inkforge.core.workflows.application.WorkflowEventTailObserver;
 import cn.inkforge.core.workflows.application.WorkflowExecutionCanceller;
 import cn.inkforge.core.workflows.application.WorkflowExecutionSubmitter;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -40,6 +42,11 @@ import tools.jackson.databind.ObjectMapper;
 class WorkflowConfiguration {
 
     WorkflowConfiguration(DurableAgentSchemaGate ignored) {}
+
+    @Bean
+    WorkflowExecutionContextReader workflowExecutionContextReader(ObjectMapper objectMapper) {
+        return new JooqWorkflowExecutionContextReader(objectMapper);
+    }
 
     @Bean
     WorkflowStartRepository workflowStartRepository(
@@ -74,14 +81,16 @@ class WorkflowConfiguration {
             CuidV1Generator ids,
             Clock coreClock,
             ObjectMapper objectMapper,
-            ExecutionRegistry workflowExecutionRegistry) {
+            ExecutionRegistry workflowExecutionRegistry,
+            WorkflowExecutionContextReader contexts,
+            ObjectProvider<WorkflowIntentBusinessPreparation> preparations) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
                 coreClock,
                 objectMapper,
                 workflowExecutionRegistry,
-                Duration.ofSeconds(30));
+                Duration.ofSeconds(30), contexts, preparations::getIfAvailable);
     }
 
     @Bean
@@ -137,12 +146,14 @@ class WorkflowConfiguration {
             CoreDatabase database,
             ObjectMapper objectMapper,
             Validator validator,
-            WorkflowEventObserverTimeouts timeouts) {
+            WorkflowEventObserverTimeouts timeouts,
+            WorkflowExecutionContextReader contexts) {
         return new JooqWorkflowEventStreamRepository(
                 database,
                 new WorkflowEventPayloadCodec(objectMapper, validator),
                 objectMapper,
-                timeouts);
+                timeouts,
+                contexts);
     }
 
     @Bean

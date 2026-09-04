@@ -18,6 +18,8 @@ import cn.inkforge.core.reviews.application.ReviewArtifactState;
 import cn.inkforge.core.reviews.domain.ReviewArtifactRules;
 import cn.inkforge.core.reviews.domain.ReviewDecisionIdentity;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
@@ -59,6 +61,7 @@ final class JooqDurableReviewDecisionStore {
     private final WorkflowStepSnapshotFactory stepSnapshots;
     private final FormalArtifactWriter formalWriter;
     private final CommandIdempotencyStore globalIdempotency;
+    private final WorkflowExecutionContextReader executionContexts;
 
     JooqDurableReviewDecisionStore(
             CoreDatabase database,
@@ -66,6 +69,11 @@ final class JooqDurableReviewDecisionStore {
             Clock clock,
             ObjectMapper json,
             FormalArtifactWriter formalWriter) {
+        this(database, ids, clock, json, formalWriter, WorkflowExecutionContextReader.frozenBusinessPlansOnly());
+    }
+
+    JooqDurableReviewDecisionStore(CoreDatabase database, CuidV1Generator ids, Clock clock, ObjectMapper json,
+            FormalArtifactWriter formalWriter, WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -73,6 +81,7 @@ final class JooqDurableReviewDecisionStore {
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
         this.formalWriter = Objects.requireNonNull(formalWriter);
         this.globalIdempotency = new CommandIdempotencyStore(json, true);
+        this.executionContexts = Objects.requireNonNull(executionContexts);
     }
 
     ArtifactDecisionPublicResponse replay(
@@ -80,6 +89,12 @@ final class JooqDurableReviewDecisionStore {
             String userId,
             String clientRequestId,
             String requestHash) {
+        var global = globalIdempotency.resolve(transaction, userId, clientRequestId, null);
+        if (global != null) {
+            if (global.recordKind() != CommandIdempotencyStore.RecordKind.CONTROL_DECISION) return null;
+            if (!"user_decision".equals(global.metadata().commandKind())
+                    || !requestHash.equals(global.metadata().requestFingerprint())) throw reused(clientRequestId);
+        }
         List<Record> values = transaction.fetch(
                 """
                 SELECT step."requestHash", step.output
@@ -91,7 +106,10 @@ final class JooqDurableReviewDecisionStore {
                 """,
                 userId,
                 decisionKey(clientRequestId));
-        if (values.isEmpty()) return null;
+        if (values.isEmpty()) {
+            if (global != null) throw invalidReceipt();
+            return null;
+        }
         if (values.size() != 1) throw reused(clientRequestId);
         Record value = values.getFirst();
         if (!Objects.equals(requestHash, value.get("requestHash", String.class))) {
@@ -130,10 +148,11 @@ final class JooqDurableReviewDecisionStore {
         Locked locked = lockScope(
                 transaction, userId, artifactId, request.getExpectedRevision());
         requireActionable(locked, request.getExpectedRevision());
-        ExecutionPlanSnapshot executionPlan = executionPlan(locked.run());
+        WorkflowExecutionContext executionContext = executionContext(transaction, locked.run());
+        ExecutionPlanSnapshot executionPlan = executionContext.requireBusinessPlan();
         requireSupported(locked, executionPlan);
         boolean beatPlan = "beat_plan".equals(locked.kind());
-        boolean chapterDraft = "write_chapter".equals(locked.run().get("operation", String.class));
+        boolean chapterDraft = "write_chapter".equals(executionContext.effectiveOperation());
         if (((beatPlan || chapterDraft) && nullable(request.getEditedReplacement()) != null)
                 || (!chapterDraft && nullable(request.getEditedContent()) != null)) {
             throw validation("编辑字段与 Core 权威草案类型不匹配");
@@ -221,7 +240,7 @@ final class JooqDurableReviewDecisionStore {
 
         transitionArtifact(transaction, artifactId, "awaiting_user", "draft", now, false);
         insertRevisionGenerationStep(
-                transaction, locked, executionPlan, revision, request, now);
+                transaction, locked, executionContext, revision, request, now);
         transaction.execute(
                 """
                 UPDATE public."WorkflowRun"
@@ -252,7 +271,7 @@ final class JooqDurableReviewDecisionStore {
         if (runId == null) throw forbidden();
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "userId", "novelId", "chapterId", workflow, operation, input,
+                SELECT id, "userId", "novelId", "chapterId", "targetType", "targetId", workflow, operation, input,
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "currentEvidenceBundleId",
                        "lastEventSequence", revision, "cancelRequestedAt"
@@ -317,15 +336,15 @@ final class JooqDurableReviewDecisionStore {
     private static void requireSupported(
             Locked locked, ExecutionPlanSnapshot executionPlan) {
         boolean operation = "rewrite_chapter_selection"
-                        .equals(locked.run().get("operation", String.class))
+                        .equals(executionPlan.operation().operation())
                 && "chapter_draft".equals(locked.kind())
                 && "long_serial.rewrite_chapter_selection".equals(executionPlan.operation().key())
                 && "apply.chapter_selection.v1".equals(executionPlan.operation().applyHandler());
-        operation |= "plan_chapter".equals(locked.run().get("operation", String.class))
+        operation |= "plan_chapter".equals(executionPlan.operation().operation())
                 && "beat_plan".equals(locked.kind())
                 && "long_serial.plan_chapter".equals(executionPlan.operation().key())
                 && "apply.beat_plan.v1".equals(executionPlan.operation().applyHandler());
-        operation |= "write_chapter".equals(locked.run().get("operation", String.class))
+        operation |= "write_chapter".equals(executionPlan.operation().operation())
                 && "chapter_draft".equals(locked.kind())
                 && "long_serial.write_chapter".equals(executionPlan.operation().key())
                 && "apply.chapter_draft.v1".equals(executionPlan.operation().applyHandler());
@@ -415,7 +434,7 @@ final class JooqDurableReviewDecisionStore {
         Map<String, Object> diff = readObject(locked.revision().get("diffJson", String.class));
         requireHeadMatches(locked, payload, diff);
         var evidence = DurableChapterWritingReviewEvidence.read(tx, json, locked.runId(), sourceBundleId(locked), locked.chapterId());
-        String instruction = readObject(locked.run().get("input", String.class)).get("userInstruction") instanceof String value ? value : null;
+        String instruction = sourceInstruction(tx, locked);
         var current = new JooqChapterWritingEvidenceReader(json).capture(tx, locked.novelId(), locked.chapterId(), instruction);
         if (!ExecutionCanonicalJson.sha256(evidence.context()).equals(ExecutionCanonicalJson.sha256(current.context()))) {
             throw new ApiException(409, "ARTIFACT_SOURCE_VERSION_CONFLICT", "正文草案的冻结来源已变化",
@@ -457,8 +476,7 @@ final class JooqDurableReviewDecisionStore {
         requireHeadMatches(locked, payload, diff);
         DurableChapterPlanReviewEvidence evidence = DurableChapterPlanReviewEvidence.read(transaction,
                 json, locked.runId(), sourceBundleId(locked), locked.chapterId());
-        String instruction = readObject(locked.run().get("input", String.class)).get("userInstruction") instanceof String value
-                ? value : null;
+        String instruction = sourceInstruction(transaction, locked);
         var current = new JooqChapterPlanEvidenceReader(json).capture(
                 transaction, locked.novelId(), locked.chapterId(), instruction);
         if (!ExecutionCanonicalJson.sha256(evidence.context()).equals(ExecutionCanonicalJson.sha256(current.context()))) {
@@ -476,6 +494,22 @@ final class JooqDurableReviewDecisionStore {
                 || !storedDiff.equals(readObject(locked.artifact().get("diffJson", String.class)))) {
             throw new ApiException(409, "ARTIFACT_REVISION_HEAD_INCONSISTENT", "待审核草案 head 与精确修订事实不一致");
         }
+    }
+
+    private String sourceInstruction(DSLContext transaction, Locked locked) {
+        Record generation = transaction.fetchOne("""
+                SELECT input, "inputHash", "evidenceBundleId" FROM public."WorkflowStep"
+                WHERE "runId" = ? AND purpose = 'generation' ORDER BY ordinal, id LIMIT 1
+                """, locked.runId());
+        if (generation == null || !sourceBundleId(locked).equals(generation.get("evidenceBundleId", String.class))) {
+            throw new IllegalStateException("草案缺少绑定同一业务 Evidence 的首个 generation");
+        }
+        Map<String, Object> input = readObject(generation.get("input", String.class));
+        if (!ExecutionCanonicalJson.sha256(input).equals(generation.get("inputHash", String.class))
+                || !(input.get("userInstruction") instanceof String instruction)) {
+            throw new IllegalStateException("草案首个 generation 输入或哈希损坏");
+        }
+        return instruction;
     }
 
     private static Map<String, Object> formalPlanPayload(Map<String, Object> payload) {
@@ -698,14 +732,16 @@ final class JooqDurableReviewDecisionStore {
     private void insertRevisionGenerationStep(
             DSLContext transaction,
             Locked locked,
-            ExecutionPlanSnapshot executionPlan,
+            WorkflowExecutionContext context,
             Revision revision,
             ReviewArtifactDecisionRequest request,
             LocalDateTime now) {
+        ExecutionPlanSnapshot executionPlan = context.requireBusinessPlan();
         long existingModelSteps = transaction.fetchOne(
                 """
                 SELECT count(*) FROM public."WorkflowStep"
                 WHERE "runId" = ? AND "stepType" = CAST('agent' AS "WorkflowStepType")
+                  AND purpose <> 'resolve_intent'
                 """,
                 locked.runId()).get(0, Long.class);
         long generationSteps = transaction.fetchOne(
@@ -723,7 +759,7 @@ final class JooqDurableReviewDecisionStore {
                     "WORKFLOW_REVISION_BUDGET_EXCEEDED",
                     "当前工作流已用完候选返工预算");
         }
-        requireRevisionRoundBudget(transaction, locked, executionPlan);
+        requireRevisionRoundBudget(transaction, locked, context);
         Record original = transaction.fetchOne(
                 """
                 SELECT input FROM public."WorkflowStep"
@@ -739,7 +775,7 @@ final class JooqDurableReviewDecisionStore {
                 : null;
         input.put("originalUserInstruction", originalInstruction);
         input.put("userInstruction", nullable(request.getUserMessage()));
-        if ("write_chapter".equals(locked.run().get("operation", String.class))) {
+        if ("write_chapter".equals(context.effectiveOperation())) {
             input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
                     "artifactRevision", revision.number(), "payload", DurableChapterDraftArtifact.output(revision.storedPayload())));
         } else if ("beat_plan".equals(locked.kind())) {
@@ -769,6 +805,7 @@ final class JooqDurableReviewDecisionStore {
         Map<String, Object> budget = generator.stepBudget().budgetMap();
         String requestHash = ExecutionCanonicalJson.sha256(stepRequestMaterial(
                 locked,
+                context.effectiveOperation(),
                 stepId,
                 idempotencyKey,
                 inputHash,
@@ -818,12 +855,14 @@ final class JooqDurableReviewDecisionStore {
     }
 
     /** Run 已在决定入口锁定；受理前同时为完整生成与全部 Reviewer 核验冻结额度。 */
-    private void requireRevisionRoundBudget(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan) {
+    private void requireRevisionRoundBudget(DSLContext tx, Locked locked, WorkflowExecutionContext context) {
+        ExecutionPlanSnapshot plan = context.requireBusinessPlan();
         List<WorkflowRunBudgetCharge> charges = new ArrayList<>();
         charges.add(WorkflowRunBudgetCharge.active(plan.generator().stepBudget().budget()));
         for (var reviewer : plan.reviewers()) {
             charges.add(WorkflowRunBudgetCharge.active(reviewer.stepBudget().budget()));
         }
+        List<WorkflowRunBudgetCharge> businessCharges = new ArrayList<>(charges);
         for (Record step : tx.fetch("""
                 SELECT step.status::text AS status, step.purpose, step."budgetJson", step."usageJson",
                        reservation.status AS reservation_status
@@ -835,9 +874,12 @@ final class JooqDurableReviewDecisionStore {
             WorkflowStepBudget budget = json.convertValue(
                     readObject(step.get("budgetJson", String.class)).get("budget"), WorkflowStepBudget.class);
             boolean correction = "protocol_correction".equals(step.get("purpose", String.class));
+            boolean resolver = "resolve_intent".equals(step.get("purpose", String.class));
             if (List.of("pending", "running").contains(step.get("status", String.class))
                     || "reconciliation_required".equals(step.get("reservation_status", String.class))) {
-                charges.add(WorkflowRunBudgetCharge.active(budget, correction));
+                WorkflowRunBudgetCharge charge = WorkflowRunBudgetCharge.active(budget, correction);
+                charges.add(charge);
+                if (!resolver) businessCharges.add(charge);
                 continue;
             }
             String usageJson = step.get("usageJson", String.class);
@@ -851,12 +893,15 @@ final class JooqDurableReviewDecisionStore {
                     nullableLong(value, "costMicros"), integer(value, "providerAttempts"),
                     integer(value, "protocolCorrections"), nullableLong(value, "wallTimeMillis"));
             // 与调用前计费核验同口径：零尝试仅计墙钟；未知维度按该 Step 授权上限占用。
-            charges.add(usage.providerAttempts() == 0
+            WorkflowRunBudgetCharge charge = usage.providerAttempts() == 0
                     ? new WorkflowRunBudgetCharge(0, 0, 0, 0, 0, 0, 0, usage.wallTimeMillis(), correction ? 1 : 0)
-                    : WorkflowRunBudgetCharge.terminal(budget, usage, correction));
+                    : WorkflowRunBudgetCharge.terminal(budget, usage, correction);
+            charges.add(charge);
+            if (!resolver) businessCharges.add(charge);
         }
         try {
-            plan.runBudget().toDomain().requireWithin(charges);
+            context.outerRunBudget().toDomain().requireWithin(charges);
+            plan.runBudget().toDomain().requireWithin(businessCharges);
         } catch (WorkflowBudgetExceededException | ArithmeticException exception) {
             throw new ApiException(409, "WORKFLOW_REVISION_BUDGET_EXCEEDED",
                     "当前工作流剩余预算不足以完成整轮生成与复审");
@@ -872,6 +917,7 @@ final class JooqDurableReviewDecisionStore {
 
     private static Map<String, Object> stepRequestMaterial(
             Locked locked,
+            String effectiveOperation,
             String stepId,
             String idempotencyKey,
             String inputHash,
@@ -889,7 +935,7 @@ final class JooqDurableReviewDecisionStore {
         result.put("idempotencyKey", idempotencyKey);
         result.put("inputHash", inputHash);
         result.put("workflow", locked.run().get("workflow", String.class));
-        result.put("operation", locked.run().get("operation", String.class));
+        result.put("operation", effectiveOperation);
         result.put("purpose", "generation");
         result.put("lane", lane);
         result.put("evidenceManifest", Map.of(
@@ -909,7 +955,7 @@ final class JooqDurableReviewDecisionStore {
     private WritingRunV2Response snapshot(DSLContext transaction, String runId) {
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "chapterId", workflow, operation,
+                SELECT id, "chapterId", "targetType", "targetId", workflow, operation,
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "cancelRequestedAt",
                        "lastEventSequence", revision
@@ -953,9 +999,7 @@ final class JooqDurableReviewDecisionStore {
                 ORDER BY "updatedAt" DESC, id DESC LIMIT 1
                 """,
                 runId);
-        ExecutionPlanSnapshot executionPlan = stepRecords.isEmpty()
-                ? null
-                : executionPlan(run);
+        WorkflowExecutionContext executionPlan = executionContext(transaction, run);
         List<WorkflowCurrentStepSnapshot> activeSteps = stepRecords.stream()
                 .map(step -> stepSnapshot(executionPlan, step))
                 .toList();
@@ -985,7 +1029,7 @@ final class JooqDurableReviewDecisionStore {
                                 run.get("status", String.class)),
                         null,
                         run.get("workflow", String.class))
-                .operation(run.get("operation", String.class))
+                .operation(executionPlan.effectiveOperation())
                 .currentStep(current)
                 .cancelRequestedAt(DatabaseTimestamp.api(
                         run.get("cancelRequestedAt", LocalDateTime.class)))
@@ -993,7 +1037,7 @@ final class JooqDurableReviewDecisionStore {
     }
 
     private WorkflowCurrentStepSnapshot stepSnapshot(
-            ExecutionPlanSnapshot executionPlan, Record step) {
+            WorkflowExecutionContext executionPlan, Record step) {
         String lane = step.get("lane", String.class);
         if ("control".equals(lane)) {
             return stepSnapshots.controlStep(
@@ -1157,14 +1201,11 @@ final class JooqDurableReviewDecisionStore {
         }
     }
 
-    private ExecutionPlanSnapshot executionPlan(Record run) {
-        ExecutionPlanSnapshot result = ExecutionPlanSnapshot.fromStored(
+    private WorkflowExecutionContext executionContext(DSLContext transaction, Record run) {
+        return executionContexts.load(transaction, new WorkflowExecutionContext.RunIdentity(run.get("id", String.class),
+                run.get("workflow", String.class), run.get("operation", String.class), run.get("operationCatalogVersion", String.class),
+                run.get("chapterId", String.class), run.get("targetType", String.class), run.get("targetId", String.class)),
                 readObject(run.get("modelPolicyJson", String.class)));
-        result.requireOperation(
-                run.get("workflow", String.class),
-                run.get("operation", String.class),
-                run.get("operationCatalogVersion", String.class));
-        return result;
     }
 
     private static Map<String, Object> map(Object value, String label) {

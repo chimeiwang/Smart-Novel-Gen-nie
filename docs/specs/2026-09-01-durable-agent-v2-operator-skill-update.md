@@ -53,10 +53,24 @@ Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成�
 
 ## 命令面与 Skill 行为变化
 
-2026-09-04 普通聊天迁移补充：`2026-09-04-durable-natural-language-entry.md` 仍在实施。当前只增加了
-共享 clarification 快照和内部意图执行基础，尚未接通通用 CLI 的自然输入/澄清命令，也未修改两份已安装
-Skill 的脚本、说明或固定 JAR。维护者此时不要按新规格发送 inputMode=natural/clarification，不要放开
-Operator 允许集合；待 Core、watcher 与公共入口完整验证后，再按该规格更新实际命令说明和安装包。
+2026-09-04 普通聊天迁移补充：`2026-09-04-durable-natural-language-entry.md` 仍在实施。当前分支已接通
+通用 Java/Python CLI 的自然输入与澄清模式，Web 区分新请求、当前澄清与明确草案返工；完整验收状态以该规格
+为准。本轮没有更新两份已安装 Skill 的脚本、说明或固定 JAR，也没有部署服务器。
+
+后续更新 Skill 说明时，应同步以下变化，但不扩大可调用范围：
+
+- 底层 `long.agent.start` 的 `inputMode=natural` 新建 Run；`long.task.resume` 仅在
+  `inputMode=clarification` 时继续同一 Run 的当前问题，必须携带 `decisionStepId/expectedRevision`。
+  完整命令示例见 `tools/inkforge-cli/README.md` 自然请求专节，不复制为受限 Skill 的可调用示例。
+- 两份 Operator 的 45 命令和三种显式长篇 Operation 不变；这两个命令携带任何 `inputMode` 都被新版仓内
+  Operator 以 `OPERATOR_INPUT_MODE_NOT_ALLOWED` / 2 拒绝。不得用伪装 Operation、裸 CLI 或旧 resume 绕过。
+- watcher 对澄清输出 `type=waiting_user,waitReason=clarification`，包含完整 `prompt`、
+  `decisionStepId/revision/data`，不包含 `artifactId`。受限 Skill 应显示完整问题并报告当前范围不允许回答，
+  不得当 Artifact 返工或自动恢复；原 Artifact 等待、批准与返工规则不变。
+- 新问题/回答不截断、不去空格换行，刷新后以权威 snapshot 恢复；未知控制 Step 完成只能触发回读，不能
+  猜测问题已回答。没有新增 SSE 事件类型或 CLI 命令名。
+- 仓内 README、`SKILL.md`、命令参考和固定 JAR 的升级是不同动作；本轮只提供说明，安装必须另获明确要求，
+  不能把旧包的成功身份验证当作新模式可用。
 
 2026-09-01 问答阶段的 CLI 命令名不变；当时只有 `long.agent.start` 的 Operation 集合增加了 `answer_question`。已有 Operation 的输入和结果
 语义、身份预检、固定 origin/profile、Keychain 与幂等边界保持不变。`long.task.watch` 的命令名和中断语义不变，

@@ -22,6 +22,8 @@ import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
+import cn.inkforge.core.workflows.infrastructure.JooqWorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.infrastructure.IntentSelectedRunTestFixture;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -81,13 +83,52 @@ class JooqDurableReviewDecisionStoreTest {
         CuidV1Generator ids = new CuidV1Generator(CLOCK);
         JooqFormalArtifactWriter formal =
                 new JooqFormalArtifactWriter(database, ids, CLOCK, json);
-        reviews = new JooqReviewRepository(database, ids, CLOCK, json, formal, registry);
+        reviews = new JooqReviewRepository(database, ids, CLOCK, json, formal, registry, true,
+                new JooqWorkflowExecutionContextReader(json));
         starts = new JooqWorkflowStartRepository(database, ids, CLOCK, json);
     }
 
     @AfterAll
     static void closeDatabase() {
         if (database != null) database.close();
+    }
+
+    @Test
+    void 自然规划采用合成澄清指令的来源并投影所选操作() {
+        Fixture fixture = waitingArtifact("natural-plan-approve", false, true, false, false, true);
+        var request = decision("natural-plan-approve-request-1", ReviewArtifactDecisionRequest.DecisionEnum.APPROVE);
+        var response = (WritingRunV2Response) reviews.decide(fixture.userId(), fixture.artifactId(), request);
+        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.COMPLETED);
+        assertThat(response.getOperation()).isEqualTo("plan_chapter");
+        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
+        assertThat(database.dsl().fetchOne("SELECT operation FROM public.\"WorkflowRun\" WHERE id = ?", fixture.runId()).get(0, String.class)).isNull();
+    }
+
+    @Test
+    void 自然正文批准使用首生成完整指令而不是Run未决原文() {
+        Fixture fixture = waitingArtifact("natural-draft-approve", false, false, true, false, true);
+        var request = decision("natural-draft-approve-request-1", ReviewArtifactDecisionRequest.DecisionEnum.APPROVE);
+        var response = (WritingRunV2Response) reviews.decide(fixture.userId(), fixture.artifactId(), request);
+        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.COMPLETED);
+        assertThat(response.getOperation()).isEqualTo("write_chapter");
+        assertThat(chapterContent(fixture.chapterId())).isEqualTo("完整模型正文😀");
+        assertThat(reviews.decide(fixture.userId(), fixture.artifactId(), request)).isEqualTo(response);
+    }
+
+    @Test
+    void 自然正文返工保留六次业务额度并在请求哈希中使用有效操作() {
+        Fixture fixture = waitingArtifact("natural-draft-revise", true, false, true, false, true);
+        var request = decision("natural-draft-revise-request-1", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("保留完整来源继续修订");
+        var response = (WritingRunV2Response) reviews.decide(fixture.userId(), fixture.artifactId(), request);
+        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.RUNNING);
+        assertThat(response.getOperation()).isEqualTo("write_chapter");
+        assertThat(response.getActiveSteps()).hasSize(1);
+        Record generation = database.dsl().fetchOne("SELECT input, \"requestHash\", \"evidenceBundleId\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1", fixture.runId());
+        assertThat(json.readTree(generation.get("input", String.class)).path("originalUserInstruction").asText()).contains("initialInstruction", "clarifications");
+        assertThat(generation.get("evidenceBundleId", String.class)).isEqualTo(fixture.bundleId());
+        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'resolve_intent'", fixture.runId())).isEqualTo(1);
+        assertThat(reviews.decide(fixture.userId(), fixture.artifactId(), request)).isEqualTo(response);
     }
 
     @Test
@@ -657,6 +698,10 @@ class JooqDurableReviewDecisionStoreTest {
     }
 
     private static Fixture waitingArtifact(String prefix, boolean reviewers, boolean beatPlan, boolean chapterDraft, boolean failedReviewer) {
+        return waitingArtifact(prefix, reviewers, beatPlan, chapterDraft, failedReviewer, false);
+    }
+
+    private static Fixture waitingArtifact(String prefix, boolean reviewers, boolean beatPlan, boolean chapterDraft, boolean failedReviewer, boolean natural) {
         String userId = prefix + "-user";
         String novelId = prefix + "-novel";
         String chapterId = prefix + "-chapter";
@@ -720,20 +765,22 @@ class JooqDurableReviewDecisionStoreTest {
                     """, prefix + "-previous-plan", chapterId, NOW, NOW);
             if (chapterDraft) database.dsl().execute("UPDATE public.\"Chapter\" SET status = 'completed', \"completedAt\" = ? WHERE id = ?", NOW, chapterId);
         }
+        if (natural) input.put("userInstruction", new String(ExecutionCanonicalJson.bytes(Map.of(
+                "initialInstruction", "原始未明确的请求", "clarifications", List.of(Map.of("prompt", "请明确要处理本章哪一层", "userMessage", chapterDraft ? "生成正文草案" : "规划本章")))), java.nio.charset.StandardCharsets.UTF_8));
         List<WorkflowEvidenceItemPlan> evidenceItems = chapterDraft
                 ? List.of(new WorkflowEvidenceItemPlan("chapter_writing_context", chapterId, true, null,
                         DatabaseTimestamp.api(NOW), null,
-                        new JooqChapterWritingEvidenceReader(json).capture(database.dsl(), novelId, chapterId, "完整正文原始指令A").context(),
+                        new JooqChapterWritingEvidenceReader(json).capture(database.dsl(), novelId, chapterId, (String) input.get("userInstruction")).context(),
                         null, null, Map.of("role", "chapter_writing_context")))
                 : beatPlan
                 ? List.of(new WorkflowEvidenceItemPlan("chapter_plan_context", chapterId, true, null,
                         DatabaseTimestamp.api(NOW), null,
-                        new JooqChapterPlanEvidenceReader(json).capture(database.dsl(), novelId, chapterId, "规划完整章节").context(),
+                        new JooqChapterPlanEvidenceReader(json).capture(database.dsl(), novelId, chapterId, (String) input.get("userInstruction")).context(),
                         null, null, Map.of("role", "chapter_plan_context")))
                 : List.of(new WorkflowEvidenceItemPlan("chapter_content", chapterId, true, null,
                         DatabaseTimestamp.api(NOW), "甲😀乙", null, 1, 2, Map.of("role", "selection_source",
                         "baseContentHash", ReviewArtifactRules.sha256("甲😀乙"), "selectedTextHash", selectedHash)));
-        var started = starts.start(new WorkflowStartPlan(
+        var startPlan = new WorkflowStartPlan(
                 userId,
                 prefix + "-start-client-0001",
                 ReviewArtifactRules.sha256(prefix),
@@ -758,7 +805,9 @@ class JooqDurableReviewDecisionStoreTest {
                         input,
                         operation.generatorProfile(),
                         operation.generatorStepBudget(),
-                        operation.outputSchema())));
+                        operation.outputSchema()));
+        var started = natural ? IntentSelectedRunTestFixture.start(database, new CuidV1Generator(CLOCK), CLOCK, json, registry, startPlan)
+                : starts.start(startPlan);
         String bundleId = database.dsl().fetchOne(
                         "SELECT \"currentEvidenceBundleId\" FROM public.\"WorkflowRun\" WHERE id = ?",
                         started.runId())
@@ -846,8 +895,8 @@ class JooqDurableReviewDecisionStoreTest {
                 started.stepId());
         if (reviewers) {
             var frozen = ExecutionPlanSnapshot.freeze(registry.catalogVersion(), registry.manifestFingerprint(), operation);
-            insertEvaluation(prefix, started.runId(), bundleId, artifactId, 2, frozen.reviewers().get(0).stepBudget().stored(), failedReviewer);
-            insertEvaluation(prefix, started.runId(), bundleId, artifactId, 3, frozen.reviewers().get(1).stepBudget().stored(), false);
+            insertEvaluation(prefix, started.runId(), bundleId, artifactId, natural ? 4 : 2, frozen.reviewers().get(0).stepBudget().stored(), failedReviewer);
+            insertEvaluation(prefix, started.runId(), bundleId, artifactId, natural ? 5 : 3, frozen.reviewers().get(1).stepBudget().stored(), false);
         }
         database.dsl().execute(
                 """

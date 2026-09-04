@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import cn.inkforge.contracts.api.AgentEvent;
+import cn.inkforge.contracts.api.ClarifyWritingRunRequest;
+import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.contracts.api.CallbackReceipt;
 import cn.inkforge.contracts.api.CheckpointCallback;
 import cn.inkforge.contracts.api.CreateWritingSessionRequest;
@@ -25,6 +27,7 @@ import cn.inkforge.core.writing.application.WritingCallbackRepository;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingEventStreamService;
 import cn.inkforge.core.writing.application.WritingRunService;
+import cn.inkforge.core.writing.application.WritingRunClarificationService;
 import cn.inkforge.core.writing.application.WritingSessionService;
 import cn.inkforge.core.writing.application.WritingToolGateway;
 import cn.inkforge.serviceauth.ServiceScope;
@@ -63,6 +66,24 @@ class WritingControllerTest {
     @AfterEach
     void clearRequest() {
         RequestContextHolder.resetRequestAttributes();
+    }
+
+    @Test
+    void 澄清端点使用当前用户并返回冻结受理回执202() {
+        var clarifications = mock(WritingRunClarificationService.class);
+        var configured = new WritingController(Optional.of(sessions), Optional.of(runs), Optional.of(callbacks),
+                Optional.of(callbackRepository), Optional.of(tools), Optional.of(streams), Optional.of(users),
+                Optional.of(authenticator), Optional.of(clarifications));
+        var request = new ClarifyWritingRunRequest().clientRequestId("clarification-request-001")
+                .expectedRevision(3).decisionStepId("question-1").userMessage("完整回答😀\r\n");
+        var expected = mock(WritingRunV2Response.class);
+        when(clarifications.accept("user-1", "run-1", request)).thenReturn(expected);
+        var response = configured.clarifyWritingRunApiV1WritingRunsTaskIdClarificationPost("run-1", request, "token");
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        assertThat(response.getBody()).isSameAs(expected);
+        verifyNoInteractions(runs, callbacks);
+        assertThatThrownBy(() -> controller.clarifyWritingRunApiV1WritingRunsTaskIdClarificationPost("run-1", request, "token"))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.statusCode()).isEqualTo(503));
     }
 
     @Test

@@ -17,6 +17,7 @@ from .read import (
     require_string,
     validate_read_payload,
 )
+from .workflow_input import has_complete_text
 
 
 def list_tasks(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
@@ -238,7 +239,33 @@ def _workflow_status(snapshot: JsonObject) -> str:
         raise CoreResponseContractError("V2 任务状态响应包含无效的 artifact")
     if error is not None and not isinstance(error, dict):
         raise CoreResponseContractError("V2 任务状态响应包含无效的 error")
+    if snapshot.get("clarification") is not None:
+        _clarification(snapshot)
     return status
+
+
+def _clarification(snapshot: JsonObject) -> JsonObject:
+    value = snapshot.get("clarification")
+    revision = snapshot.get("revision")
+    prompt = value.get("prompt") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"clarificationCode", "decisionStepId", "prompt"}
+        or any(not isinstance(value.get(key), str) or not value[key]
+               for key in ("clarificationCode", "decisionStepId"))
+        or not has_complete_text(prompt)
+        or not isinstance(prompt, str)
+        or len(prompt) > 2000
+        or snapshot.get("status") != "waiting_user"
+        or snapshot.get("artifact") is not None
+        or snapshot.get("activeSteps") != []
+        or snapshot.get("currentStep") is not None
+        or snapshot.get("cancelRequestedAt") is not None
+        or snapshot.get("error") is not None
+        or type(revision) is not int or revision <= 0
+    ):
+        raise CoreResponseContractError("V2 待澄清快照缺少合法问题或生命周期不一致")
+    return value
 
 
 def _waiting_artifact_id(snapshot: JsonObject, engine_version: int) -> str:
@@ -268,6 +295,12 @@ def _terminal_result(
     state: str,
 ) -> tuple[JsonObject, int] | None:
     if state == "waiting_user":
+        if engine_version == 2 and snapshot.get("clarification") is not None:
+            question = _clarification(snapshot)
+            return ({
+                "type": "waiting_user", "taskId": task_id, "waitReason": "clarification",
+                **question, "revision": snapshot["revision"], "data": snapshot,
+            }, 0)
         return (
             {
                 "type": "waiting_user",

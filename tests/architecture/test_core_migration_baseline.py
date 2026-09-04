@@ -40,8 +40,8 @@ def test_public_openapi_baseline_is_complete_and_current() -> None:
     baseline = _json(PUBLIC_OPENAPI)
     runtime = create_app(testing=True).openapi()
 
-    assert len(baseline["paths"]) == 118
-    assert _operation_count(baseline) == 151
+    assert len(baseline["paths"]) == 119
+    assert _operation_count(baseline) == 152
     assert baseline == runtime
 
 
@@ -49,8 +49,8 @@ def test_full_openapi_baseline_covers_every_java_route() -> None:
     full = _json(FULL_OPENAPI)
     java = _json(JAVA_OPENAPI)
 
-    assert len(full["paths"]) == 153
-    assert _operation_count(full) == 186
+    assert len(full["paths"]) == 154
+    assert _operation_count(full) == 187
     assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 34
     assert {
         "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
@@ -141,8 +141,8 @@ def test_public_java_openapi_is_safe_for_cli_generation() -> None:
     assert public["x-inkforge-source-contract"] == (
         "public-openapi-python-baseline.json"
     )
-    assert len(public["paths"]) == 118
-    assert _operation_count(public) == 151
+    assert len(public["paths"]) == 119
+    assert _operation_count(public) == 152
     assert all(not path.startswith("/internal/") for path in public["paths"])
     assert "/api/v1/video/provider-assets/{token}" not in public["paths"]
 
@@ -193,12 +193,33 @@ def test_hidden_and_public_route_inventory_is_complete() -> None:
     assert all(item["path"].startswith("/internal/v1/") for item in internal["endpoints"])
 
     assert inventory["schemaVersion"] == "core-route-inventory/1.0"
-    assert len(inventory["routes"]) == 186
-    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 151
+    assert len(inventory["routes"]) == 187
+    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 152
     assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 34
     assert sum(item["exposure"] == "provider_media" for item in inventory["routes"]) == 1
-    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 186
+    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 187
     assert all(item["productModule"] and item["pythonTests"] for item in inventory["routes"])
+
+
+def test_clarification_route_is_public_strict_and_does_not_change_event_types() -> None:
+    path = "/api/v1/writing/runs/{task_id}/clarification"
+    for document in (_json(PUBLIC_OPENAPI), _json(PUBLIC_JAVA_OPENAPI)):
+        operation = document["paths"][path]["post"]
+        assert operation["operationId"] == (
+            "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post"
+        )
+        assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ClarifyWritingRunRequest"
+        }
+        assert operation["responses"]["202"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+        }
+        request = document["components"]["schemas"]["ClarifyWritingRunRequest"]
+        assert request["additionalProperties"] is False
+        assert set(request["required"]) == {
+            "clientRequestId", "expectedRevision", "decisionStepId", "userMessage"
+        }
+    assert "ClarificationAnsweredEventPayload" not in _json(JAVA_OPENAPI)["components"]["schemas"]
 
 
 def test_cross_language_fixtures_are_present_and_bounded() -> None:

@@ -6,6 +6,7 @@ from urllib.parse import quote
 from ...json_types import JsonObject, JsonValue
 from ...registry import CommandSpec, FileOutputSpec
 from ...runtime import CliInputError, CliRuntime, ensure_command_json_result
+from .workflow_input import has_complete_text
 
 _OPERATIONS = {
     "answer_question",
@@ -142,6 +143,8 @@ def _task_path(payload: JsonObject) -> str:
 
 
 def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    if "inputMode" in payload:
+        return _start_natural(runtime, payload)
     _reject_unexpected_fields(payload, _START_FIELDS)
     client_request_id = _require_client_request_id(payload)
     novel_id = _require_string(payload, "novelId")
@@ -239,6 +242,8 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
 
 
 def resume_task(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    if "inputMode" in payload:
+        return _clarify_task(runtime, payload)
     _reject_unexpected_fields(payload, _RESUME_FIELDS)
     body: JsonObject = {"clientRequestId": _require_client_request_id(payload)}
     if "writingSessionId" in payload:
@@ -259,6 +264,60 @@ def resume_task(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         json=body,
     )
     return ensure_command_json_result(response)
+
+
+def _complete_message(payload: JsonObject, field: str) -> str:
+    value = _require_string(payload, field)
+    if not has_complete_text(value):
+        raise CliInputError("INVALID_USER_INSTRUCTION", f"{field} 不能为空白")
+    return value
+
+
+def _start_natural(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    if payload.get("inputMode") != "natural":
+        raise CliInputError("INVALID_INPUT_MODE", "自然启动的 inputMode 必须是 natural")
+    _reject_unexpected_fields(payload, {
+        "profile", "inputMode", "clientRequestId", "novelId", "chapterId",
+        "writingSessionId", "userInstruction", "targetWordCount",
+    })
+    body: JsonObject = {
+        "inputMode": "natural", "workflow": "long_serial",
+        "clientRequestId": _require_client_request_id(payload),
+        "novelId": _require_string(payload, "novelId"),
+        "chapterId": _require_string(payload, "chapterId"),
+        "writingSessionId": _require_string(payload, "writingSessionId"),
+        "userInstruction": _complete_message(payload, "userInstruction"),
+    }
+    if "targetWordCount" in payload:
+        count = payload["targetWordCount"]
+        if type(count) is not int or not 1 <= count <= 10_000_000:
+            raise CliInputError(
+                "INVALID_TARGET_WORD_COUNT", "targetWordCount 必须是 1..10000000 整数"
+            )
+        body["targetWordCount"] = count
+    return ensure_command_json_result(runtime.require_api().request(
+        "POST", "/api/v1/writing/runs", json=body,
+    ))
+
+
+def _clarify_task(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    if payload.get("inputMode") != "clarification":
+        raise CliInputError("INVALID_INPUT_MODE", "澄清回答的 inputMode 必须是 clarification")
+    _reject_unexpected_fields(payload, {
+        "profile", "inputMode", "taskId", "clientRequestId", "expectedRevision",
+        "decisionStepId", "userMessage",
+    })
+    revision = payload.get("expectedRevision")
+    if type(revision) is not int or revision <= 0:
+        raise CliInputError("INVALID_REVISION", "expectedRevision 必须是正整数")
+    body: JsonObject = {
+        "clientRequestId": _require_client_request_id(payload), "expectedRevision": revision,
+        "decisionStepId": _require_string(payload, "decisionStepId"),
+        "userMessage": _complete_message(payload, "userMessage"),
+    }
+    return ensure_command_json_result(runtime.require_api().request(
+        "POST", f"/api/v1/writing/runs/{_task_path(payload)}/clarification", json=body,
+    ))
 
 
 def cancel_task(runtime: CliRuntime, payload: JsonObject) -> JsonObject:

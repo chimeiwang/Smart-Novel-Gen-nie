@@ -353,8 +353,11 @@ approve 必须复验同一来源和当前 revision，编辑批准先形成新的
 ## WorkflowRun 与调试
 
 2026-09-04 共享 V2 快照已增加可选 clarification（问题原文、代码、decisionStepId），只能在未取消的
-waiting_user 中出现且与 Artifact 互斥，缺省时不改变旧快照。自然语言入口仍在接线，当前不能把这个契约
-字段当作已可提交澄清回答的产品能力，也不能把所有 waiting_user 都解释成候选草案已就绪。
+waiting_user 中出现且与 Artifact 互斥，缺省时不改变旧快照。当前分支已实现具名 clarification 回答入口、
+同 Run 解析与业务续接，完整本地回归和隔离五场景验收已通过，真实环境尚未验收，不能宣称生产开放。
+澄清回答和 Artifact revise 是不同决定：前者只追加完整回答与下一解析 Step，后者绑定候选 revision；
+不能把所有 waiting_user 都解释成草案已就绪。澄清后生成的规划和正文仍经过既有复审及作者决定；正式采用时
+复验的是业务生成器冻结的完整指令和来源，不能用尚未澄清的初始 Run 指令替换它们。
 
 WorkflowRun 记录工作流运行。
 

@@ -3809,6 +3809,41 @@
         "title": "CinematographyBase",
         "type": "object"
       },
+      "ClarifyWritingRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "clientRequestId": {
+            "maxLength": 128,
+            "minLength": 16,
+            "title": "Clientrequestid",
+            "type": "string"
+          },
+          "decisionStepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Decisionstepid",
+            "type": "string"
+          },
+          "expectedRevision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Expectedrevision",
+            "type": "integer"
+          },
+          "userMessage": {
+            "minLength": 1,
+            "title": "Usermessage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientRequestId",
+          "expectedRevision",
+          "decisionStepId",
+          "userMessage"
+        ],
+        "title": "ClarifyWritingRunRequest",
+        "type": "object"
+      },
       "CommandClarification": {
         "additionalProperties": false,
         "properties": {
@@ -11463,6 +11498,68 @@
           "promptProfile"
         ],
         "title": "ModelProfileRef",
+        "type": "object"
+      },
+      "NaturalStartWritingRunRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "chapterId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Chapterid",
+            "type": "string"
+          },
+          "clientRequestId": {
+            "maxLength": 128,
+            "minLength": 16,
+            "title": "Clientrequestid",
+            "type": "string"
+          },
+          "inputMode": {
+            "const": "natural",
+            "title": "Inputmode",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Novelid",
+            "type": "string"
+          },
+          "targetWordCount": {
+            "default": 4000,
+            "maximum": 10000000.0,
+            "minimum": 1.0,
+            "title": "Targetwordcount",
+            "type": "integer"
+          },
+          "userInstruction": {
+            "minLength": 1,
+            "title": "Userinstruction",
+            "type": "string"
+          },
+          "workflow": {
+            "const": "long_serial",
+            "title": "Workflow",
+            "type": "string"
+          },
+          "writingSessionId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Writingsessionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "inputMode",
+          "workflow",
+          "clientRequestId",
+          "novelId",
+          "chapterId",
+          "writingSessionId",
+          "userInstruction"
+        ],
+        "title": "NaturalStartWritingRunRequest",
         "type": "object"
       },
       "NovelResponse": {
@@ -46480,6 +46577,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/LongSerialStartWritingRunRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/NaturalStartWritingRunRequest"
                   }
                 ],
                 "title": "Body"
@@ -46907,6 +47007,164 @@
           }
         },
         "summary": "Cancel Writing Run",
+        "tags": [
+          "写作会话"
+        ]
+      }
+    },
+    "/api/v1/writing/runs/{task_id}/clarification": {
+      "post": {
+        "operationId": "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "inkforge-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inkforge-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClarifyWritingRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WritingRunV2Response"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Clarify Writing Run",
         "tags": [
           "写作会话"
         ]

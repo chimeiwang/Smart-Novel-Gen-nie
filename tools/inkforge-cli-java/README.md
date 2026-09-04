@@ -126,5 +126,26 @@ tools/inkforge-cli-java/operator/test-launchers.sh "$PWD" "$JAVA_HOME/bin/java"
 Skill 更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的正文编辑专节。
 本轮完整验证后已重新安装本机两份固定 JAR，SHA-256 均为
 `4e6a74f70a7ec5137534e31f0d0c2745966052d98592f4fafd355d32b57e5ec0`；原包和配置有可恢复备份，
-完整来源记录见正文写作 spec。服务器仍未开放正文 V2，普通 Web 聊天也尚未迁入新内核；不能把本机安装
+完整来源记录见正文写作 spec。服务器仍未开放正文 V2；普通 Web 聊天迁移的当前源码状态见下节，不能把本机安装
 或此前生产身份验证成功当作服务器业务已生效。
+
+## 自然入口与 Skill 说明更新
+
+当前分支的 `long.agent.start` 增加 `inputMode=natural`，`long.task.resume` 增加明确的
+`inputMode=clarification`；命令总数仍为 125，完整 JSON 示例及澄清 JSONL 见 `../inkforge-cli/README.md`
+的自然请求专节。自然消息新建 Run，回答绑定当前 `decisionStepId/expectedRevision`；草案返工仍走
+`long.artifact.revise`。V1 显式 resume 保留，Python Core 回滚镜像拒绝新自然/澄清请求。
+
+本轮只改仓内实现，没有更新前文已安装固定 JAR、两份活动 Skill 或服务器。后续需要更新 Skill 文本时：
+
+- 在 `SKILL.md` 和命令参考中写明：底层 CLI 存在新模式，但 Operator 不授权；45 命令和
+  `plan_chapter/write_chapter/review_chapter` 三种显式 Operation 保持不变。
+- `long.agent.start` / `long.task.resume` 中禁止携带任何 `inputMode`；仓内新版 Operator 直接拒绝，不能
+  通过同时附带允许的 Operation 规避，也不能改走裸 CLI。
+- watcher 识别 `waitReason=clarification` 与完整 `prompt/decisionStepId/revision/data`，不得访问不存在的
+  `artifactId`，不得自动用旧 resume 或 Artifact revise 回答；受限 Skill 遇此状态应展示问题并报告范围限制。
+- 将“源码已实现”“固定 JAR 已安装”“对应 Core 已验收”分别记录；只有明确要求升级安装包时，才执行前文
+  备份、构建与 configure 流程。本文不授权自动安装或扩充 Skill 允许范围。
+
+Java CLI 的输入映射、watcher 与双环境 Operator 拒绝模式有定向 JUnit；Web、Python对照及跨进程验收结果
+以 `../../docs/specs/2026-09-04-durable-natural-language-entry.md` 为准，不把单测当真实账号或生产验收。

@@ -12,6 +12,7 @@ import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.ReviewRepository;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.ObjectProvider;
@@ -64,6 +65,7 @@ class ReviewConfiguration {
             ObjectMapper objectMapper,
             FormalArtifactWriter formalWriter,
             ObjectProvider<ExecutionRegistry> workflowExecutionRegistries,
+            ObjectProvider<WorkflowExecutionContextReader> workflowExecutionContexts,
             CoreSettings settings) {
         ExecutionRegistry workflowExecutionRegistry =
                 settings.durableAgentExecutionSchemaReady()
@@ -73,6 +75,11 @@ class ReviewConfiguration {
                 && workflowExecutionRegistry == null) {
             throw new IllegalStateException("耐久 Agent 数据库结构已就绪但执行 Registry 未装配");
         }
+        WorkflowExecutionContextReader executionContexts = settings.durableAgentExecutionSchemaReady()
+                ? workflowExecutionContexts.getIfAvailable() : null;
+        if (settings.durableAgentExecutionSchemaReady() && executionContexts == null) {
+            throw new IllegalStateException("耐久 Agent 数据库结构已就绪但执行上下文 Reader 未装配");
+        }
         return new JooqReviewRepository(
                 database,
                 ids,
@@ -80,6 +87,6 @@ class ReviewConfiguration {
                 objectMapper,
                 formalWriter,
                 workflowExecutionRegistry,
-                settings.durableAgentExecutionSchemaReady());
+                settings.durableAgentExecutionSchemaReady(), executionContexts);
     }
 }

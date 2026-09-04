@@ -42,6 +42,7 @@ import cn.inkforge.core.reviews.domain.ReviewArtifactSummary;
 import cn.inkforge.core.reviews.domain.SelectionMaterialization;
 import cn.inkforge.core.reviews.domain.SelectionSource;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
@@ -141,6 +142,19 @@ final class JooqReviewRepository implements ReviewRepository {
             FormalArtifactWriter formalWriter,
             ExecutionRegistry registry,
             boolean durableAgentSchemaReady) {
+        this(database, ids, clock, json, formalWriter, registry, durableAgentSchemaReady,
+                WorkflowExecutionContextReader.frozenBusinessPlansOnly());
+    }
+
+    JooqReviewRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock clock,
+            ObjectMapper json,
+            FormalArtifactWriter formalWriter,
+            ExecutionRegistry registry,
+            boolean durableAgentSchemaReady,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -154,7 +168,8 @@ final class JooqReviewRepository implements ReviewRepository {
                         ids,
                         clock,
                         json,
-                        formalWriter)
+                        formalWriter,
+                        executionContexts)
                 : null;
         this.decisions = new JooqReviewDecisionRouter(
                 database, json, legacy, durable, durableAgentSchemaReady);

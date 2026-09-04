@@ -169,7 +169,14 @@ final class LongWatchCommands {
             ObjectNode frame = context.dependencies().json().createObjectNode();
             frame.put("type", "waiting_user");
             frame.put("taskId", taskId);
-            frame.put("artifactId", waitingArtifact(snapshot, engineVersion));
+            if (engineVersion == 2 && snapshot.hasNonNull("clarification")) {
+                ObjectNode question = clarification(snapshot);
+                frame.put("waitReason", "clarification");
+                frame.setAll(question);
+                frame.set("revision", snapshot.get("revision").deepCopy());
+            } else {
+                frame.put("artifactId", waitingArtifact(snapshot, engineVersion));
+            }
             frame.set("data", snapshot.deepCopy());
             emitter.emit(frame);
             return 0;
@@ -242,7 +249,32 @@ final class LongWatchCommands {
             throw new CoreResponseContractException(
                     "V2 任务状态响应包含无效的 error");
         }
+        if (snapshot.hasNonNull("clarification")) clarification(snapshot);
         return status.textValue();
+    }
+
+    private static ObjectNode clarification(ObjectNode snapshot) {
+        JsonNode raw = snapshot.get("clarification");
+        JsonNode revision = snapshot.get("revision");
+        JsonNode active = snapshot.get("activeSteps");
+        if (!(raw instanceof ObjectNode question)
+                || question.size() != 3 || !question.has("clarificationCode")
+                || !question.has("decisionStepId") || !question.has("prompt")
+                || !question.path("clarificationCode").isTextual()
+                || question.path("clarificationCode").asText().isEmpty()
+                || !question.path("decisionStepId").isTextual()
+                || question.path("decisionStepId").asText().isEmpty()
+                || !question.path("prompt").isTextual()
+                || !WorkflowInputText.hasCompleteText(question.path("prompt").asText())
+                || question.path("prompt").asText().codePointCount(0, question.path("prompt").asText().length()) > 2000
+                || !snapshot.path("status").asText().equals("waiting_user")
+                || snapshot.hasNonNull("artifact") || snapshot.hasNonNull("currentStep")
+                || snapshot.hasNonNull("cancelRequestedAt") || snapshot.hasNonNull("error")
+                || active == null || !active.isArray() || !active.isEmpty()
+                || revision == null || !revision.isIntegralNumber() || revision.bigIntegerValue().signum() <= 0) {
+            throw new CoreResponseContractException("V2 待澄清快照缺少合法问题或生命周期不一致");
+        }
+        return question;
     }
 
     private static String waitingArtifact(ObjectNode snapshot, int engineVersion) {

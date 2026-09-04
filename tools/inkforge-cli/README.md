@@ -91,6 +91,48 @@ Agent 消息，不能把 SSE 或任务状态拼成回答。问答的 `writingSes
 - 本规格列出的整份大纲正文、大纲节点、设定、参考资料和小说文风应用命令已实现；伏笔和用户级文风资产写入仍未开放。
   任何调用都不能用读接口或批量请求绕过幂等、CAS、Diff 确认和来源绑定门槛。
 
+## 自然请求与澄清回答（当前分支）
+
+Java CLI 与 Python 对照实现共用以下输入，不新增命令名。当前分支已接线并做定向回归，完整验收状态见
+`docs/specs/2026-09-04-durable-natural-language-entry.md`；本轮未安装新 JAR、未更新真实 Skill、未部署服务器。
+以下是通用 CLI 的 stdin JSON，不是受限 Operator Skill 的可用示例。
+
+`long.agent.start` 新建自然请求；每条新消息使用新的稳定 `clientRequestId`，同一请求重试复用原值：
+
+```json
+{"inputMode":"natural","novelId":"novel-1","chapterId":"chapter-1","writingSessionId":"session-1","clientRequestId":"natural-request-0001","userInstruction":"请先规划这一章，再等我确认。","targetWordCount":4000}
+```
+
+自然分支要求非空会话和完整非空白指令，`targetWordCount` 可省略（默认 4000），提供时必须为
+1～10000000 的整数。不能混入 `operation/target/scope/selectionTarget/selectedAgents/workflow`；CLI
+负责补固定 `workflow=long_serial`，Core 只从已启用的章节问答、规划、正文写作中解析，不借此开放新 Operation。
+原显式 Operation 分支及选区输入保持不变。
+
+当 `long.task.watch` 读到 V2 等待澄清时，输出与草案等待明确不同的 JSONL 行：
+
+```json
+{"type":"waiting_user","taskId":"run-1","waitReason":"clarification","clarificationCode":"uncertain","decisionStepId":"decision-1","prompt":"你希望先规划，还是直接生成正文？","revision":3,"data":{"engineVersion":2,"runId":"run-1","taskId":"run-1","chapterId":"chapter-1","workflow":"long_serial","operation":null,"status":"waiting_user","activeSteps":[],"currentStep":null,"lastEventSequence":4,"revision":3,"artifact":null,"error":null,"clarification":{"clarificationCode":"uncertain","decisionStepId":"decision-1","prompt":"你希望先规划，还是直接生成正文？"},"commandId":null,"commandStatus":null}}
+```
+
+`data` 始终是完整权威快照，不是缩略摘要。此行不带 `artifactId`；旧草案 `waiting_user` 行保持原样。
+澄清不能同时有 Artifact、活动 Step、错误或取消请求，畸形快照报 `CORE_RESPONSE_CONTRACT_ERROR`，不降级 V1。
+
+`long.task.resume` 只有明确指定 `inputMode=clarification` 才调用新澄清端点，继续同一 Run：
+
+```json
+{"inputMode":"clarification","taskId":"run-1","clientRequestId":"clarify-request-0001","expectedRevision":3,"decisionStepId":"decision-1","userMessage":"先规划，保留最后的悬念。"}
+```
+
+`expectedRevision/decisionStepId` 必须来自最新快照，冲突后先回读，不猜版本、不自动改请求重试；最多两次回答由
+Core 判断。问题、指令和回答都保留原始空格和换行。省略 `inputMode` 的 `long.task.resume` 仍是明确的旧 V1
+恢复；它不回答 V2 澄清。草案继续修改仍使用 `long.artifact.revise`，不能混入澄清请求。Python Core 回滚镜像
+分别以 409 `WORKFLOW_NATURAL_ENTRY_UNSUPPORTED` / `WORKFLOW_CLARIFICATION_UNSUPPORTED` 拒绝这两个新分支，
+不会伪造 V2 运行状态。
+
+两份 Operator 仍为 45 个命令、三种显式长篇 Operation；上述两个命令一旦出现 `inputMode`，新版仓内
+Operator 以 `OPERATOR_INPUT_MODE_NOT_ALLOWED` / 退出码 2 拒绝，即使同时伪装为允许的 `plan_chapter`。
+不要绕过 wrapper 调用裸 CLI；Skill 更新清单见 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。
+
 ## 长篇章节影视化边界
 
 `long.video.*` 覆盖当前“章节 → 镜头候选 → 人工编辑确认 → 分集 → 视觉设定 → 逐镜提示词 →

@@ -190,6 +190,41 @@ def _invoke(
     return exit_code, frames, stderr.getvalue()
 
 
+def test_watch_clarification_returns_complete_question_without_artifact():
+    from inkforge_cli.commands.long.tasks import _terminal_result
+
+    question = {
+        "clarificationCode": "uncertain", "decisionStepId": "decision-1",
+        "prompt": "  规划还是正文？\r\n  ",
+    }
+    snapshot = _v2_status("waiting_user", operation=None, clarification=question)
+    frame, code = _terminal_result(TASK_ID, snapshot, 2, "waiting_user")
+    assert code == 0
+    assert frame == {
+        "type": "waiting_user", "taskId": TASK_ID, "waitReason": "clarification",
+        **question, "revision": 3, "data": snapshot,
+    }
+
+
+@pytest.mark.parametrize("changed", [
+    {"artifact": {"artifactId": "artifact-1"}}, {"revision": True}, {"revision": 0},
+    {"activeSteps": [{"stepId": "still-running"}]}, {"cancelRequestedAt": "now"},
+    {"clarification": {"prompt": "问题", "decisionStepId": "decision-1"}},
+    {"clarification": {
+        "prompt": " \ufeff", "decisionStepId": "decision-1", "clarificationCode": "q",
+    }},
+])
+def test_watch_rejects_inconsistent_clarification_snapshot(changed):
+    from inkforge_cli.api import CoreResponseContractError
+    from inkforge_cli.commands.long.tasks import _terminal_result
+
+    snapshot = _v2_status("waiting_user", clarification={
+        "clarificationCode": "uncertain", "decisionStepId": "decision-1", "prompt": "请选择",
+    }) | changed
+    with pytest.raises(CoreResponseContractError):
+        _terminal_result(TASK_ID, snapshot, 2, "waiting_user")
+
+
 def test_watch_gets_snapshot_before_sse_and_reconnects_with_latest_event_id() -> None:
     initial = _status("running")
     after_disconnect = _status("running")

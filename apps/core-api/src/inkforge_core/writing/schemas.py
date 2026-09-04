@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal, Self
 
+from inkforge_contracts.execution import count_chapter_text_length
 from inkforge_contracts.long_serial import (
     ChapterTarget,
     LongSerialScope,
@@ -247,10 +248,47 @@ class LongSerialStartWritingRunRequest(WritingSchema):
         return self
 
 
+class NaturalStartWritingRunRequest(WritingSchema):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    inputMode: Literal["natural"]
+    workflow: Literal["long_serial"]
+    clientRequestId: str = Field(min_length=16, max_length=128)
+    novelId: str = Field(min_length=1, max_length=256)
+    chapterId: str = Field(min_length=1, max_length=256)
+    writingSessionId: str = Field(min_length=1, max_length=256)
+    userInstruction: str = Field(min_length=1)
+    targetWordCount: int = Field(default=4000, ge=1, le=10_000_000)
+
+    @field_validator("userInstruction")
+    @classmethod
+    def validate_complete_instruction(cls, value: str) -> str:
+        if count_chapter_text_length(value) == 0:
+            raise ValueError("用户要求不能为空白")
+        return value
+
+
+class ClarifyWritingRunRequest(WritingSchema):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    clientRequestId: str = Field(min_length=16, max_length=128)
+    expectedRevision: int = Field(gt=0)
+    decisionStepId: str = Field(min_length=1, max_length=128)
+    userMessage: str = Field(min_length=1)
+
+    @field_validator("userMessage")
+    @classmethod
+    def validate_complete_answer(cls, value: str) -> str:
+        if count_chapter_text_length(value) == 0:
+            raise ValueError("澄清回答不能为空白")
+        return value
+
+
 type WritingRunStartRequest = (
     StartWritingRunRequest
     | ShortMediumStartWritingRunRequest
     | LongSerialStartWritingRunRequest
+    | NaturalStartWritingRunRequest
 )
 
 

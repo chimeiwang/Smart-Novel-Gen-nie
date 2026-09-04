@@ -130,6 +130,9 @@
 - [ ] create_outline / revise_outline；
 - [ ] manage_foreshadowing；
 - [ ] 自然语言 `resolve_intent` 与具名澄清决定入口，不借用 `/resume`；
+  2026-09-04 已完成章节问答/规划/正文的自然入口及五场景隔离验收，详见
+  `docs/specs/2026-09-04-durable-natural-language-entry.md`；其余 Operation 的接入和生产验证仍未完成，
+  不将本任务的“全部长篇迁移”标为完成。
 - [ ] 每个 Operation 的 Evidence、Schema、Validator、Reviewer、Apply 和预算均来自 Catalog；
 - [ ] 删除新长篇路径对可变 workspace、模型工具循环和业务提交工具的依赖。
 
@@ -146,7 +149,9 @@
 ## Task 7：Web、CLI 与公共契约收敛
 
 - [ ] Web 提交显式 workflow/operation，不再发送 selectedAgents；
-- [ ] 同一 Session 首版只保留一个 foreground Run；非终态期间禁发普通消息，终态后每条普通消息创建新 Run；
+- [x] 同一 Session 首版只保留一个 foreground Run；非终态期间禁发普通消息，终态后每条普通消息创建新 Run；
+  当前三项自然入口的真实隔离跨进程验收已验证连续两条相同原文、不同请求身份各自创建独立 Run，
+  旧启动重放不会指向新 Run；澄清和草案返工是独立显式动作。
 - [ ] 将本地断开观察与服务端显式停止拆成两个动作，禁止发送新消息时隐式 cancel；
 - [x] `/resume` 按引擎分派：V1 只继续 V1；V2 稳定拒绝，后续普通指令只通过 start 创建新 Run；
 - [ ] GET/SSE 使用显式 V1/V2 union；V2 `chapterId` 可空、`commandId/status` 为空并提供规范 `currentStep`；

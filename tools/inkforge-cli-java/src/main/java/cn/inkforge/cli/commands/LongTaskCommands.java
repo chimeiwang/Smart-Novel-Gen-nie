@@ -55,6 +55,7 @@ final class LongTaskCommands {
     }
 
     private static CommandResult start(CommandContext context, ObjectNode payload) {
+        if (payload.has("inputMode")) return startNatural(context, payload);
         rejectUnexpectedStartFields(payload);
         MutationPayloads.requireFields(
                 payload,
@@ -125,6 +126,7 @@ final class LongTaskCommands {
     }
 
     private static CommandResult resume(CommandContext context, ObjectNode payload) {
+        if (payload.has("inputMode")) return clarify(context, payload);
         MutationPayloads.requireFields(
                 payload,
                 Set.of("taskId", "clientRequestId"),
@@ -145,6 +147,59 @@ final class LongTaskCommands {
                         + Payloads.segment(MutationPayloads.requireString(payload, "taskId"))
                         + "/resume",
                 body);
+    }
+
+    private static CommandResult startNatural(CommandContext context, ObjectNode payload) {
+        if (!textEquals(payload, "inputMode", "natural")) {
+            throw new CliInputException("INVALID_INPUT_MODE", "自然启动的 inputMode 必须是 natural");
+        }
+        MutationPayloads.requireFields(payload,
+                Set.of("inputMode", "clientRequestId", "novelId", "chapterId", "writingSessionId", "userInstruction"),
+                Set.of("targetWordCount"));
+        ObjectNode body = context.dependencies().json().createObjectNode();
+        body.put("inputMode", "natural");
+        body.put("workflow", "long_serial");
+        body.put("clientRequestId", MutationPayloads.clientRequestId(payload, 128));
+        for (String field : Set.of("novelId", "chapterId", "writingSessionId")) {
+            body.put(field, MutationPayloads.requireString(payload, field));
+        }
+        body.put("userInstruction", completeMessage(payload, "userInstruction"));
+        if (payload.has("targetWordCount")) {
+            JsonNode count = payload.get("targetWordCount");
+            if (!count.isIntegralNumber() || count.bigIntegerValue().signum() <= 0
+                    || count.bigIntegerValue().compareTo(BigInteger.valueOf(10_000_000)) > 0) {
+                throw new CliInputException("INVALID_TARGET_WORD_COUNT", "targetWordCount 必须是 1..10000000 整数");
+            }
+            body.set("targetWordCount", count.deepCopy());
+        }
+        return post(context, "/api/v1/writing/runs", body);
+    }
+
+    private static CommandResult clarify(CommandContext context, ObjectNode payload) {
+        if (!textEquals(payload, "inputMode", "clarification")) {
+            throw new CliInputException("INVALID_INPUT_MODE", "澄清回答的 inputMode 必须是 clarification");
+        }
+        MutationPayloads.requireFields(payload, Set.of("inputMode", "taskId", "clientRequestId",
+                "expectedRevision", "decisionStepId", "userMessage"));
+        JsonNode revision = payload.get("expectedRevision");
+        if (!revision.isIntegralNumber() || revision.bigIntegerValue().signum() <= 0) {
+            throw new CliInputException("INVALID_REVISION", "expectedRevision 必须是正整数");
+        }
+        ObjectNode body = context.dependencies().json().createObjectNode();
+        body.put("clientRequestId", MutationPayloads.clientRequestId(payload, 128));
+        body.set("expectedRevision", revision.deepCopy());
+        body.put("decisionStepId", MutationPayloads.requireString(payload, "decisionStepId"));
+        body.put("userMessage", completeMessage(payload, "userMessage"));
+        return post(context, "/api/v1/writing/runs/"
+                + Payloads.segment(MutationPayloads.requireString(payload, "taskId")) + "/clarification", body);
+    }
+
+    private static String completeMessage(ObjectNode payload, String field) {
+        String value = MutationPayloads.requireString(payload, field);
+        if (!WorkflowInputText.hasCompleteText(value)) {
+            throw new CliInputException("INVALID_USER_INSTRUCTION", field + " 不能为空白");
+        }
+        return value;
     }
 
     private static CommandResult cancel(CommandContext context, ObjectNode payload) {

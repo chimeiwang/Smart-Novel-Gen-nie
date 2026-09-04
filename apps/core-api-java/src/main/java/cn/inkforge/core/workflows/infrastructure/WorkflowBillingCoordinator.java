@@ -4,7 +4,9 @@ import cn.inkforge.core.billing.domain.BillingPricing;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.domain.WorkflowRunBudget;
@@ -45,12 +47,19 @@ final class WorkflowBillingCoordinator {
     private final CuidV1Generator ids;
     private final ObjectMapper json;
     private final ExecutionRegistry registry;
+    private final WorkflowExecutionContextReader executionContexts;
 
     WorkflowBillingCoordinator(
             CuidV1Generator ids, ObjectMapper json, ExecutionRegistry registry) {
+        this(ids, json, registry, new JooqWorkflowExecutionContextReader(json));
+    }
+
+    WorkflowBillingCoordinator(CuidV1Generator ids, ObjectMapper json, ExecutionRegistry registry,
+            WorkflowExecutionContextReader executionContexts) {
         this.ids = Objects.requireNonNull(ids);
         this.json = Objects.requireNonNull(json);
         this.registry = Objects.requireNonNull(registry);
+        this.executionContexts = Objects.requireNonNull(executionContexts);
     }
 
     void reserve(
@@ -64,7 +73,8 @@ final class WorkflowBillingCoordinator {
         ExecutionRegistry.AuthorizedDeployment deployment = authorizeReservation(resolved);
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "userId", "novelId", status::text AS status, "budgetJson",
+                SELECT id, "userId", "novelId", "chapterId", "targetType", "targetId", workflow, operation,
+                       "operationCatalogVersion", "modelPolicyJson", status::text AS status, "budgetJson",
                        "cancelRequestedAt"
                 FROM public."WorkflowRun"
                 WHERE id = ? AND "engineVersion" = 2
@@ -73,7 +83,8 @@ final class WorkflowBillingCoordinator {
                 runId);
         Record step = transaction.fetchOne(
                 """
-                SELECT id, "runId", status::text AS status, purpose, "modelProfile",
+                SELECT id, "runId", status::text AS status, purpose, lane, "modelProfile", "modelProfileVersion",
+                       "outputSchema", "outputSchemaVersion",
                        "budgetJson", "resolvedModelJson"
                 FROM public."WorkflowStep"
                 WHERE id = ? AND "runId" = ?
@@ -91,6 +102,15 @@ final class WorkflowBillingCoordinator {
         if (run.get("cancelRequestedAt", LocalDateTime.class) != null) {
             throw new WorkflowExecutionRejectedException("RUN_CANCELLED");
         }
+        WorkflowExecutionContext context = executionContexts.load(transaction, new WorkflowExecutionContext.RunIdentity(
+                runId, run.get("workflow", String.class), run.get("operation", String.class), run.get("operationCatalogVersion", String.class),
+                run.get("chapterId", String.class), run.get("targetType", String.class), run.get("targetId", String.class)),
+                readObject(run.get("modelPolicyJson", String.class)));
+        var frozenStep = context.requireStep(step.get("purpose", String.class), step.get("lane", String.class),
+                step.get("modelProfile", String.class), Integer.parseInt(step.get("modelProfileVersion", String.class)),
+                step.get("outputSchema", String.class), Integer.parseInt(step.get("outputSchemaVersion", String.class)),
+                readObject(step.get("budgetJson", String.class)));
+        resolved.requireAuthorizedBy(frozenStep.modelProfile().toDomain());
         Map<String, Object> resolvedMap = WorkflowCallbackValues.resolvedModelMap(resolved);
         String frozenResolved = step.get("resolvedModelJson", String.class);
         if (frozenResolved == null || !readObject(frozenResolved).equals(resolvedMap)) {
@@ -99,7 +119,7 @@ final class WorkflowBillingCoordinator {
 
         Record existing = lockReservation(transaction, stepId);
         Map<String, Object> pricing = pricingSnapshot(resolvedMap, deployment);
-        WorkflowStepBudget stepBudget = stepBudget(step.get("budgetJson", String.class));
+        WorkflowStepBudget stepBudget = frozenStep.stepBudget().budget();
         long reservedMicros = deployment.billable()
                 ? worstCreditCharge(stepBudget, pricing)
                 : 0L;
@@ -109,7 +129,7 @@ final class WorkflowBillingCoordinator {
             return;
         }
 
-        requireRunBudget(transaction, run, stepId);
+        requireRunBudget(transaction, run, stepId, context);
         String userId = run.get("userId", String.class);
         Record user = transaction.fetchOne(
                 """
@@ -326,8 +346,11 @@ final class WorkflowBillingCoordinator {
         markReconciliation(transaction, reservation, usageJson, now);
     }
 
-    private void requireRunBudget(DSLContext transaction, Record run, String currentStepId) {
-        WorkflowRunBudget budget = runBudget(run.get("budgetJson", String.class));
+    private void requireRunBudget(DSLContext transaction, Record run, String currentStepId, WorkflowExecutionContext context) {
+        WorkflowRunBudget budget = context.outerRunBudget().toDomain();
+        if (!budget.equals(runBudget(run.get("budgetJson", String.class)))) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_RUN_BUDGET_INVALID");
+        }
         List<Record> steps = transaction.fetch(
                 """
                 SELECT step.id, step.status::text AS status, step.purpose, step."budgetJson",
@@ -340,24 +363,26 @@ final class WorkflowBillingCoordinator {
                 """,
                 run.get("id", String.class));
         List<WorkflowRunBudgetCharge> charges = new ArrayList<>();
+        List<WorkflowRunBudgetCharge> businessCharges = new ArrayList<>();
         for (Record value : steps) {
             WorkflowStepBudget stepBudget = stepBudget(value.get("budgetJson", String.class));
             boolean correction = "protocol_correction".equals(value.get("purpose", String.class));
+            boolean resolver = "resolve_intent".equals(value.get("purpose", String.class));
             String status = value.get("status", String.class);
             if ("pending".equals(status) || "running".equals(status)) {
-                charges.add(WorkflowRunBudgetCharge.active(stepBudget, correction));
+                addCharge(charges, businessCharges, WorkflowRunBudgetCharge.active(stepBudget, correction), resolver);
                 continue;
             }
             String reservationStatus = value.get("reservation_status", String.class);
             if ("reconciliation_required".equals(reservationStatus)) {
-                charges.add(WorkflowRunBudgetCharge.active(stepBudget, correction));
+                addCharge(charges, businessCharges, WorkflowRunBudgetCharge.active(stepBudget, correction), resolver);
                 continue;
             }
             String usageJson = value.get("usageJson", String.class);
             if (usageJson == null) continue;
             WorkflowStepUsage usage = usage(readObject(usageJson));
             if (usage.providerAttempts() == 0) {
-                charges.add(new WorkflowRunBudgetCharge(
+                addCharge(charges, businessCharges, new WorkflowRunBudgetCharge(
                         0,
                         0,
                         0,
@@ -366,9 +391,9 @@ final class WorkflowBillingCoordinator {
                         0,
                         0,
                         usage.wallTimeMillis(),
-                        correction ? 1 : 0));
+                        correction ? 1 : 0), resolver);
             } else {
-                charges.add(WorkflowRunBudgetCharge.terminal(stepBudget, usage, correction));
+                addCharge(charges, businessCharges, WorkflowRunBudgetCharge.terminal(stepBudget, usage, correction), resolver);
             }
         }
         if (steps.stream().noneMatch(value -> currentStepId.equals(value.get("id", String.class)))) {
@@ -376,9 +401,16 @@ final class WorkflowBillingCoordinator {
         }
         try {
             budget.requireWithin(charges);
+            if (context.businessPlan() != null) context.businessPlan().runBudget().toDomain().requireWithin(businessCharges);
         } catch (WorkflowBudgetExceededException exception) {
             throw new WorkflowExecutionRejectedException("WORKFLOW_RUN_BUDGET_EXCEEDED");
         }
+    }
+
+    private static void addCharge(List<WorkflowRunBudgetCharge> outer, List<WorkflowRunBudgetCharge> business,
+            WorkflowRunBudgetCharge charge, boolean resolver) {
+        outer.add(charge);
+        if (!resolver) business.add(charge);
     }
 
     private void settleExact(

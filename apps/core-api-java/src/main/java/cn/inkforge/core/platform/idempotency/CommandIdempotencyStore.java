@@ -125,6 +125,27 @@ public final class CommandIdempotencyStore {
                             fingerprint)));
         }
 
+        // V2 的作者决定也占用相同用户级命名空间，不能绕过 start/V1/审核的相同 advisory lock。
+        if (durableAgentSchemaReady) {
+            List<Record> decisions = transaction.fetch("""
+                    SELECT step.id, step.purpose, step.input, step."requestHash"
+                    FROM public."WorkflowStep" AS step
+                    JOIN public."WorkflowRun" AS run ON run.id = step."runId"
+                    WHERE run."engineVersion" = 2 AND run."userId" = ?
+                      AND step.purpose IN ('user_decision', 'intent_clarification_answer')
+                      AND (step.input::jsonb ->> 'clientRequestId' = ?
+                        OR step."idempotencyKey" IN (?, ?))
+                    """, userId, clientRequestId, "decision:" + clientRequestId, "clarification:" + clientRequestId);
+            for (Record decision : decisions) {
+                Map<String, Object> body = object(decision.get("input", String.class));
+                String fingerprint = decision.get("requestHash", String.class);
+                if (body == null || !clientRequestId.equals(body.get("clientRequestId"))
+                        || fingerprint == null || !fingerprint.matches("[0-9a-f]{64}")) throw reused(clientRequestId);
+                matches.add(new Resolution(RecordKind.CONTROL_DECISION, decision.get("id", String.class),
+                        new Metadata(clientRequestId, decision.get("purpose", String.class), Map.of(), body, fingerprint)));
+            }
+        }
+
         if (matches.isEmpty()) return null;
         if (matches.size() != 1) throw reused(clientRequestId);
         Resolution match = matches.getFirst();
@@ -207,7 +228,8 @@ public final class CommandIdempotencyStore {
 
     public enum RecordKind {
         WRITING_COMMAND,
-        WORKFLOW_RUN
+        WORKFLOW_RUN,
+        CONTROL_DECISION
     }
 
     public record Metadata(

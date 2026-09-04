@@ -14,6 +14,7 @@
             "shortmedium::domain",
             "workflows::catalog",
             "workflows::execution",
+            "workflows::protocol",
             "workflows::workflow-domain"
         })
 package cn.inkforge.core.writing;

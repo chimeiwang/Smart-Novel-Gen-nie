@@ -2,6 +2,7 @@ package cn.inkforge.core.workflows.infrastructure;
 
 import cn.inkforge.contracts.api.RunSnapshot;
 import cn.inkforge.contracts.api.WorkflowArtifactSnapshot;
+import cn.inkforge.contracts.api.WorkflowClarificationSnapshot;
 import cn.inkforge.contracts.api.WorkflowCurrentStepSnapshot;
 import cn.inkforge.contracts.api.WorkflowErrorSnapshot;
 import cn.inkforge.contracts.api.WorkflowEventEnvelope;
@@ -12,7 +13,8 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowEventObserverTimeouts;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository;
-import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.workflows.protocol.WorkflowEventPayloadCodec;
 import java.time.LocalDateTime;
@@ -24,6 +26,7 @@ import java.util.Objects;
 import java.util.Optional;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 /** PostgreSQL V2 Run snapshot 与 WorkflowEvent 回放实现；Redis 不参与正确性判定。 */
@@ -33,6 +36,8 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
     private final WorkflowEventPayloadCodec payloads;
     private final WorkflowStepSnapshotFactory stepSnapshots;
     private final WorkflowEventObserverTimeouts timeouts;
+    private final WorkflowExecutionContextReader executionContexts;
+    private final ObjectMapper json;
 
     JooqWorkflowEventStreamRepository(
             CoreDatabase database,
@@ -46,10 +51,21 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
             WorkflowEventPayloadCodec payloads,
             ObjectMapper json,
             WorkflowEventObserverTimeouts timeouts) {
+        this(database, payloads, json, timeouts, new JooqWorkflowExecutionContextReader(json));
+    }
+
+    JooqWorkflowEventStreamRepository(
+            CoreDatabase database,
+            WorkflowEventPayloadCodec payloads,
+            ObjectMapper json,
+            WorkflowEventObserverTimeouts timeouts,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.payloads = Objects.requireNonNull(payloads);
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
         this.timeouts = Objects.requireNonNull(timeouts);
+        this.executionContexts = Objects.requireNonNull(executionContexts);
+        this.json = Objects.requireNonNull(json);
     }
 
     @Override
@@ -60,7 +76,7 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
                     "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
             Record run = transaction.fetchOne(
                     """
-                    SELECT id, "userId", workflow, operation,
+                    SELECT id, "userId", "chapterId", "targetType", "targetId", workflow, operation,
                            "operationCatalogVersion", "modelPolicyJson",
                            status::text AS status,
                            "cancelRequestedAt", "lastEventSequence", revision, "errorCode"
@@ -318,15 +334,13 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
                 ORDER BY step.ordinal ASC, step.id ASC
                 """,
                 runId);
-        ExecutionPlanSnapshot executionPlan = activeStepRecords.isEmpty()
-                ? null
-                : stepSnapshots.executionPlan(run.get("modelPolicyJson", String.class));
-        if (executionPlan != null) {
-            executionPlan.requireOperation(
-                    run.get("workflow", String.class),
-                    run.get("operation", String.class),
-                    run.get("operationCatalogVersion", String.class));
-        }
+        Map<String, Object> initialPlan = json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<>() {});
+        WorkflowExecutionContext executionPlan = activeStepRecords.isEmpty() && run.get("operation", String.class) != null
+                        && !"2".equals(initialPlan.get("planVersion")) ? null
+                : executionContexts.load(transaction, new WorkflowExecutionContext.RunIdentity(
+                        runId, run.get("workflow", String.class), run.get("operation", String.class),
+                        run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
+                        run.get("targetType", String.class), run.get("targetId", String.class)), initialPlan);
         List<WorkflowCurrentStepSnapshot> activeSteps = activeStepRecords.stream()
                 .map(value -> stepSnapshot(executionPlan, value))
                 .toList();
@@ -349,6 +363,11 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
         WorkflowArtifactSnapshot artifact = artifactRecord == null
                 ? null
                 : artifact(transaction, runId, status, cancelRequestedAt, artifactRecord);
+        WorkflowClarificationSnapshot clarification = executionPlan == null || executionPlan.initialIntentPlan() == null
+                ? null : executionContexts.pendingClarification(transaction, runId, status);
+        if (clarification != null && artifact != null) {
+            throw new IllegalStateException("WorkflowRun 澄清问题与 Artifact 不能同时等待作者");
+        }
 
         WorkflowErrorSnapshot error = null;
         String errorCode = run.get("errorCode", String.class);
@@ -378,15 +397,16 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
                         revision,
                         WorkflowRunSnapshot.StatusEnum.fromValue(status),
                         run.get("workflow", String.class))
-                .operation(run.get("operation", String.class))
+                .operation(executionPlan == null ? run.get("operation", String.class) : executionPlan.effectiveOperation())
                 .currentStep(step)
                 .cancelRequestedAt(DatabaseTimestamp.api(cancelRequestedAt))
                 .artifact(artifact)
+                .clarification(clarification)
                 .error(error);
     }
 
     private WorkflowCurrentStepSnapshot stepSnapshot(
-            ExecutionPlanSnapshot executionPlan, Record value) {
+            WorkflowExecutionContext executionPlan, Record value) {
         String lane = value.get("lane", String.class);
         if ("control".equals(lane)) {
             return stepSnapshots.controlStep(

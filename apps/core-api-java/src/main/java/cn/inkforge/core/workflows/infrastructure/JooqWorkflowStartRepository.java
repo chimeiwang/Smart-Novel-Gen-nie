@@ -102,7 +102,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
         String bundleId = ids.next();
         String stepId = ids.next();
         List<EvidenceValue> evidence = evidence(bundleId, plan.evidenceItems());
-        Map<String, Object> manifest = manifest(bundleId, evidence);
+        Map<String, Object> manifest = manifest(bundleId, 1, evidence);
         String manifestJson = canonicalJson(manifest);
         String manifestHash = ExecutionCanonicalJson.sha256(manifest);
         long totalBytes = evidence.stream().mapToLong(EvidenceValue::byteCount).sum();
@@ -129,6 +129,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                 transaction,
                 runId,
                 bundleId,
+                1,
                 plan.evidencePolicyVersion(),
                 manifestJson,
                 manifestHash,
@@ -268,13 +269,29 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                 plan.targetType(),
                 plan.targetId(),
                 json.writeValueAsString(runBudget(plan.runBudget())),
-                json.writeValueAsString(plan.executionPlan().stored()));
+                json.writeValueAsString(plan.storedExecutionPlan()));
     }
+
+    EvidenceBundleRef appendEvidence(DSLContext transaction, String runId, int version,
+            String policyVersion, List<WorkflowEvidenceItemPlan> items, LocalDateTime now) {
+        if (version < 1 || items.isEmpty()) throw new IllegalArgumentException("追加 Evidence 的版本和来源不能为空");
+        String bundleId = ids.next();
+        List<EvidenceValue> values = evidence(bundleId, items);
+        Map<String, Object> manifest = manifest(bundleId, version, values);
+        String hash = ExecutionCanonicalJson.sha256(manifest);
+        long bytes = values.stream().mapToLong(EvidenceValue::byteCount).sum();
+        insertEvidence(transaction, runId, bundleId, version, policyVersion,
+                canonicalJson(manifest), hash, bytes, values, now);
+        return new EvidenceBundleRef(bundleId, version, policyVersion, hash, bytes);
+    }
+
+    record EvidenceBundleRef(String id, int version, String policyVersion, String manifestSha256, long totalBytes) {}
 
     private void insertEvidence(
             DSLContext transaction,
             String runId,
             String bundleId,
+            int version,
             String policyVersion,
             String manifestJson,
             String manifestHash,
@@ -286,10 +303,11 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                 INSERT INTO public."WorkflowEvidenceBundle" (
                   id, "runId", version, "policyVersion", "manifestJson",
                   "manifestSha256", "totalBytes", "createdAt"
-                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 bundleId,
                 runId,
+                version,
                 policyVersion,
                 manifestJson,
                 manifestHash,
@@ -471,7 +489,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
     }
 
     private static Map<String, Object> manifest(
-            String bundleId, List<EvidenceValue> evidence) {
+            String bundleId, int version, List<EvidenceValue> evidence) {
         List<Map<String, Object>> items = new ArrayList<>();
         for (EvidenceValue value : evidence) {
             WorkflowEvidenceItemPlan plan = value.plan();
@@ -500,7 +518,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
         }
         return Map.of(
                 "bundleId", bundleId,
-                "bundleVersion", 1,
+                "bundleVersion", version,
                 "itemCount", items.size(),
                 "items", List.copyOf(items));
     }
@@ -600,7 +618,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
     private static Map<String, Object> runAcceptedPayload(WorkflowStartPlan plan) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("workflow", plan.workflow());
-        payload.put("operation", plan.operation());
+        if (plan.operation() != null) payload.put("operation", plan.operation());
         if (plan.targetType() != null) {
             payload.put("targetType", plan.targetType());
             payload.put("targetId", plan.targetId());

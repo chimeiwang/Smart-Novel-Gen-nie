@@ -5,6 +5,8 @@ import cn.inkforge.contracts.api.CallbackReceipt;
 import cn.inkforge.contracts.api.CancelWritingRunRequest;
 import cn.inkforge.contracts.api.CancelWritingRunPublicResponse;
 import cn.inkforge.contracts.api.CheckpointCallback;
+import cn.inkforge.contracts.api.ClarifyWritingRunRequest;
+import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.contracts.api.CreateMessageRequest;
 import cn.inkforge.contracts.api.CreateWritingSessionRequest;
 import cn.inkforge.contracts.api.MessageResponse;
@@ -32,6 +34,7 @@ import cn.inkforge.core.writing.application.WritingCallbackRepository;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingEventStreamService;
 import cn.inkforge.core.writing.application.WritingRunService;
+import cn.inkforge.core.writing.application.WritingRunClarificationService;
 import cn.inkforge.core.writing.application.WritingSessionService;
 import cn.inkforge.core.writing.application.WritingToolGateway;
 import cn.inkforge.core.writing.application.WritingToolRequest;
@@ -41,6 +44,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import org.openapitools.jackson.nullable.JsonNullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -61,6 +65,7 @@ public final class WritingController implements WritingApi {
     private final Optional<WritingEventStreamService> configuredStreams;
     private final Optional<CurrentUserAccess> configuredUsers;
     private final Optional<InternalServiceAuthenticator> configuredAuthenticator;
+    private final Optional<WritingRunClarificationService> configuredClarifications;
 
     public WritingController(
             Optional<WritingSessionService> configuredSessions,
@@ -71,6 +76,17 @@ public final class WritingController implements WritingApi {
             Optional<WritingEventStreamService> configuredStreams,
             Optional<CurrentUserAccess> configuredUsers,
             Optional<InternalServiceAuthenticator> configuredAuthenticator) {
+        this(configuredSessions, configuredRuns, configuredCallbacks, configuredCallbackRepository,
+                configuredTools, configuredStreams, configuredUsers, configuredAuthenticator, Optional.empty());
+    }
+
+    @Autowired
+    public WritingController(Optional<WritingSessionService> configuredSessions,
+            Optional<WritingRunService> configuredRuns, Optional<WritingCallbackService> configuredCallbacks,
+            Optional<WritingCallbackRepository> configuredCallbackRepository, Optional<WritingToolGateway> configuredTools,
+            Optional<WritingEventStreamService> configuredStreams, Optional<CurrentUserAccess> configuredUsers,
+            Optional<InternalServiceAuthenticator> configuredAuthenticator,
+            Optional<WritingRunClarificationService> configuredClarifications) {
         this.configuredSessions = configuredSessions;
         this.configuredRuns = configuredRuns;
         this.configuredCallbacks = configuredCallbacks;
@@ -79,6 +95,16 @@ public final class WritingController implements WritingApi {
         this.configuredStreams = configuredStreams;
         this.configuredUsers = configuredUsers;
         this.configuredAuthenticator = configuredAuthenticator;
+        this.configuredClarifications = configuredClarifications;
+    }
+
+    @Override
+    public ResponseEntity<WritingRunV2Response> clarifyWritingRunApiV1WritingRunsTaskIdClarificationPost(
+            String taskId, ClarifyWritingRunRequest request, String inkforgeToken) {
+        String userId = user(inkforgeToken).id();
+        WritingRunClarificationService service = configuredClarifications.orElseThrow(() -> new ApiException(
+                503, "WORKFLOW_CLARIFICATION_UNAVAILABLE", "耐久澄清暂时不可用"));
+        return ResponseEntity.accepted().body(service.accept(userId, taskId, request));
     }
 
     @Override

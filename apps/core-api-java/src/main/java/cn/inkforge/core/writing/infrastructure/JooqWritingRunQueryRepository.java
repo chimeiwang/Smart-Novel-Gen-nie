@@ -21,6 +21,8 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.writing.application.WritingRunQueryRepository;
 import cn.inkforge.core.writing.domain.WritingRunCursor;
@@ -35,12 +37,14 @@ import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
 
 /** 使用批量关联读取避免 N+1，并在内存中应用依赖统一结果投影的过滤条件。 */
 final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
 
     private static final int SCAN_BATCH_SIZE = 200;
     private static final Set<String> OPERATIONS = Set.of(
+            "answer_question",
             "generate_outline",
             "generate_manuscript",
             "replace_selection",
@@ -59,6 +63,8 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
     private final WritingRunCursor cursors;
     private final WorkflowStepSnapshotFactory stepSnapshots;
     private final boolean durableAgentSchemaReady;
+    private final WorkflowExecutionContextReader executionContexts;
+    private final ObjectMapper json;
 
     JooqWritingRunQueryRepository(
             CoreDatabase database,
@@ -74,11 +80,19 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             WritingRunCursor cursors,
             ObjectMapper json,
             boolean durableAgentSchemaReady) {
+        this(database, projector, cursors, json, durableAgentSchemaReady, null);
+    }
+
+    JooqWritingRunQueryRepository(CoreDatabase database, WritingRunStatusProjector projector,
+            WritingRunCursor cursors, ObjectMapper json, boolean durableAgentSchemaReady,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.projector = Objects.requireNonNull(projector);
         this.cursors = Objects.requireNonNull(cursors);
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
         this.durableAgentSchemaReady = durableAgentSchemaReady;
+        this.executionContexts = executionContexts;
+        this.json = json;
     }
 
     @Override
@@ -111,6 +125,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             }
             V2Related related = v2Related(context, List.of(taskId));
             return v2Response(
+                    context,
                     run,
                     related.activeSteps().getOrDefault(taskId, List.of()),
                     related.failedSteps().get(taskId),
@@ -189,6 +204,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                     V2Run run = runs.get(candidate.id());
                     if (run == null) throw new IllegalStateException("V2 WorkflowRun 候选已消失");
                     WritingRunV2Response response = v2Response(
+                            context,
                             run,
                             related.activeSteps().getOrDefault(run.id(), List.of()),
                             related.failedSteps().get(run.id()),
@@ -375,6 +391,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
         Record value = context.fetchOne(
                 """
                 SELECT id, "userId", "chapterId", workflow, operation,
+                       "targetType", "targetId",
                        "operationCatalogVersion", "modelPolicyJson", status::text AS status,
                        "cancelRequestedAt", "lastEventSequence", revision, "errorCode"
                 FROM public."WorkflowRun"
@@ -391,6 +408,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
         context.fetch(
                         """
                         SELECT id, "userId", "chapterId", workflow, operation,
+                               "targetType", "targetId",
                                "operationCatalogVersion", "modelPolicyJson",
                                status::text AS status, "cancelRequestedAt",
                                "lastEventSequence", revision, "errorCode"
@@ -414,6 +432,8 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 value.get("operation", String.class),
                 value.get("operationCatalogVersion", String.class),
                 value.get("modelPolicyJson", String.class),
+                value.get("targetType", String.class),
+                value.get("targetId", String.class),
                 value.get("status", String.class),
                 value.get("cancelRequestedAt", LocalDateTime.class),
                 value.get("lastEventSequence", Long.class),
@@ -502,6 +522,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
     }
 
     private WritingRunV2Response v2Response(
+            DSLContext transaction,
             V2Run run,
             List<V2Step> activeStepValues,
             V2Step failedStep,
@@ -515,13 +536,12 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 && !"cancelled".equals(run.status())) {
             throw new IllegalStateException("V2 WorkflowRun 取消时间与生命周期不一致");
         }
-        ExecutionPlanSnapshot executionPlan = activeStepValues.isEmpty()
-                ? null
-                : stepSnapshots.executionPlan(run.modelPolicyJson());
-        if (executionPlan != null) {
-            executionPlan.requireOperation(
-                    run.workflow(), run.operation(), run.operationCatalogVersion());
-        }
+        Map<String, Object> initial = json.readValue(run.modelPolicyJson(), new TypeReference<>() {});
+        var identity = new WorkflowExecutionContext.RunIdentity(run.id(), run.workflow(), run.operation(),
+                run.operationCatalogVersion(), run.chapterId(), run.targetType(), run.targetId());
+        WorkflowExecutionContext executionPlan = executionContexts == null
+                ? WorkflowExecutionContext.fromStored(initial, null, null, identity)
+                : executionContexts.load(transaction, identity, initial);
         List<WorkflowCurrentStepSnapshot> activeSteps = activeStepValues.stream()
                 .map(value -> stepSnapshot(executionPlan, value))
                 .toList();
@@ -551,7 +571,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                             "MODEL_OUTCOME_UNKNOWN".equals(errorCode))
                     .failedStepId(failedStep == null ? null : failedStep.id());
         }
-        return new WritingRunV2Response(
+        WritingRunV2Response response = new WritingRunV2Response(
                         activeSteps,
                         run.chapterId(),
                         null,
@@ -563,15 +583,19 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                         WritingRunV2Response.StatusEnum.fromValue(run.status()),
                         run.id(),
                         run.workflow())
-                .operation(run.operation())
+                .operation(executionPlan.effectiveOperation())
                 .currentStep(current)
                 .cancelRequestedAt(DatabaseTimestamp.api(run.cancelRequestedAt()))
                 .artifact(artifactSnapshot)
                 .error(error);
+        if (executionPlan.initialIntentPlan() != null && executionContexts != null) {
+            response.clarification(executionContexts.pendingClarification(transaction, run.id(), run.status()));
+        }
+        return response;
     }
 
     private WorkflowCurrentStepSnapshot stepSnapshot(
-            ExecutionPlanSnapshot executionPlan, V2Step value) {
+            WorkflowExecutionContext executionPlan, V2Step value) {
         if ("control".equals(value.lane())) {
             return stepSnapshots.controlStep(
                     value.id(),
@@ -662,6 +686,8 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             String operation,
             String operationCatalogVersion,
             String modelPolicyJson,
+            String targetType,
+            String targetId,
             String status,
             LocalDateTime cancelRequestedAt,
             long lastEventSequence,

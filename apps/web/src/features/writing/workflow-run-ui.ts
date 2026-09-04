@@ -46,6 +46,7 @@ export type WorkflowRunUiState = {
   lastEventSequence: number;
   revision: number;
   artifact: WorkflowArtifact | null;
+  clarification: components["schemas"]["WorkflowClarificationSnapshot"] | null;
   error: WorkflowError | null;
   activity: string;
 };
@@ -103,6 +104,7 @@ export function createWorkflowRunUiState(run: WorkflowRunV2Response): WorkflowRu
     lastEventSequence: run.lastEventSequence,
     revision: run.revision,
     artifact: run.artifact ?? null,
+    clarification: run.clarification ?? null,
     error: run.error ?? null,
     activity: activityFromSnapshot(run),
   };
@@ -126,6 +128,7 @@ export function applyWorkflowStreamEvent(
       lastEventSequence: event.baseSequence,
       revision: event.snapshot.revision,
       artifact: event.snapshot.artifact ?? null,
+      clarification: event.snapshot.clarification ?? null,
       error: event.snapshot.error ?? null,
       activity: activityFromSnapshot(event.snapshot),
     };
@@ -158,6 +161,8 @@ export function applyWorkflowStreamEvent(
       return clearActiveSteps({
         ...advanced,
         status: "waiting_user",
+        artifact: null,
+        clarification: event.payload,
         activity: workflowEventLabel(event),
       });
     case "evidence_ready":
@@ -244,6 +249,7 @@ export function applyWorkflowStreamEvent(
       return clearActiveSteps({
         ...advanced,
         status: "completed",
+        clarification: null,
         artifact: state.artifact ? { ...state.artifact, actionable: false } : null,
         activity: workflowEventLabel(event),
       });
@@ -251,6 +257,7 @@ export function applyWorkflowStreamEvent(
       return clearActiveSteps({
         ...advanced,
         status: "failed",
+        clarification: null,
         error: {
           errorCode: event.payload.errorCode,
           failedStepId: event.payload.failedStepId ?? null,
@@ -262,6 +269,7 @@ export function applyWorkflowStreamEvent(
       return clearActiveSteps({
         ...advanced,
         status: "cancelled",
+        clarification: null,
         cancelRequestedAt: state.cancelRequestedAt ?? event.occurredAt,
         artifact: state.artifact ? { ...state.artifact, actionable: false } : null,
         activity: workflowEventLabel(event),
@@ -279,6 +287,14 @@ export function workflowRunShouldStopObservation(state: WorkflowRunUiState | nul
 
 export function workflowEventRequiresSessionMessageRefresh(event: WorkflowEvent): boolean {
   return event.eventType === "completed" && event.payload.outcomeType === "chat_answer";
+}
+
+export function workflowEventRequiresSnapshotRefresh(
+  state: WorkflowRunUiState | null, event: WorkflowEvent,
+): boolean {
+  return Boolean(state && state.runId === event.runId && event.sequence > state.lastEventSequence
+    && state.status === "waiting_user" && state.clarification && event.eventType === "step_finished"
+    && !state.activeSteps.some((step) => step.stepId === event.payload.stepId));
 }
 
 export function workflowStepPurposeLabel(purpose: string): string {
@@ -326,7 +342,7 @@ export function workflowProgressPhaseLabel(phase: WorkflowProgress["phase"]): st
 
 export function workflowRunStatusTitle(state: WorkflowRunUiState): string {
   if (state.cancelRequestedAt && state.status === "running") return "正在安全停止";
-  if (state.status === "waiting_user") return "候选已就绪，等待你确认";
+  if (state.status === "waiting_user") return state.clarification ? "需要你补充信息" : "候选已就绪，等待你确认";
   if (state.status === "completed") return "任务已完成";
   if (state.status === "failed") return "任务执行失败";
   if (state.status === "cancelled") return "任务已停止";
@@ -610,9 +626,10 @@ function activityFromSnapshot(snapshot: {
   status: WorkflowRunV2Response["status"];
   activeSteps: readonly WorkflowCurrentStep[];
   cancelRequestedAt?: string | null;
+  clarification?: components["schemas"]["WorkflowClarificationSnapshot"] | null;
 }): string {
   if (snapshot.cancelRequestedAt && snapshot.status === "running") return "正在安全停止";
-  if (snapshot.status === "waiting_user") return "候选等待确认";
+  if (snapshot.status === "waiting_user") return snapshot.clarification ? "需要你补充信息" : "候选等待确认";
   if (snapshot.status === "completed") return "任务已完成";
   if (snapshot.status === "failed") return "任务执行失败";
   if (snapshot.status === "cancelled") return "任务已停止";

@@ -264,6 +264,24 @@ flowchart TD
 
 ## 写作请求 API
 
+### V2 自然请求与澄清（当前分支本地验收通过，真实环境待验收）
+
+- 普通新消息向 `POST /api/v1/writing/runs` 提交 `inputMode=natural`、`workflow=long_serial`、
+  clientRequestId、novelId、chapterId、writingSessionId、完整 userInstruction 和可选 targetWordCount。
+  不携带 selectedAgents、operation 或模型推测的目标；Core 固定当前章，先创建独立 resolve_intent Step。
+- 本阶段只可选择已实现的章节问答、章节规划与整章正文写作；选区仍走显式来源绑定请求。
+  解析完成后在同一个 Run 内冻结业务来源并接续执行，不改写 Run 初始请求或 operation 列。
+- `waiting_user` 必须区分澄清与待审草案。澄清问题通过快照的 clarification 恢复，回答使用
+  `POST /api/v1/writing/runs/{runId}/clarification`，绑定 clientRequestId、expectedRevision、
+  decisionStepId 和完整 userMessage。同一回答幂等重放受理时的快照；最多两次回答后仍不能确定意图则失败。
+- 普通下一条消息不能因存在旧 taskId 而自动恢复旧任务。只有明确回答当前澄清、处理既有草案或显式恢复
+  V1 历史任务才续接原任务。自然分支不可用时明确拒绝，不暗中回落 V1 或猜成问答。
+- V2 不创建 WritingTask/WritingRunCommand，命令兼容字段固定为 null；模型 Step、问题、回答、选择、
+  消息、事件和计费由 Core 持久化。CLI 只访问这些公共 Core 接口，不直接连接 Agent。
+
+以上接线的验证、部署及实际安装状态以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准。
+下面的启动、恢复、持久命令与旧事件说明描述保留的 V1 路径，不能套用于 V2 自然请求。
+
 ### 启动写作 workflow
 
 入口：`POST /api/v1/writing/runs`，成功返回 202，以及任务标识、命令标识和命令状态。

@@ -14,6 +14,7 @@ from .outbox import WritingOutboxRepository
 from .schemas import (
     CancelWritingRunPublicResponse,
     CancelWritingRunRequest,
+    ClarifyWritingRunRequest,
     CreateMessageRequest,
     CreateWritingSessionRequest,
     MessageResponse,
@@ -25,6 +26,7 @@ from .schemas import (
     WritingRunStartRequest,
     WritingRunStartResponse,
     WritingRunStatusPublicResponse,
+    WritingRunV2Response,
     WritingSessionDetail,
     WritingSessionListItem,
     WritingSessionResponse,
@@ -288,6 +290,23 @@ async def resume_writing_run(
     service: TaskService,
 ) -> ResumeWritingRunResponse:
     return await service.resume(user.id, task_id, body)
+
+
+@router.post(
+    "/runs/{task_id}/clarification",
+    response_model=WritingRunV2Response,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def clarify_writing_run(
+    task_id: str,
+    body: ClarifyWritingRunRequest,
+    user: User,
+) -> WritingRunV2Response:
+    del task_id, body, user
+    raise ApiError(
+        status_code=409, code="WORKFLOW_CLARIFICATION_UNSUPPORTED",
+        message="Python 回滚实例不支持耐久澄清回答，请使用已接通的 Java Core",
+    )
 
 
 @router.post(

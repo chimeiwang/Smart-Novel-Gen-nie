@@ -17,8 +17,10 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowDispatchRepository;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.domain.WorkflowModelProfile;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.domain.WorkflowStepLeasePolicy;
@@ -55,6 +57,7 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
     private final int maxCreativeLeases;
     private final int maxBatchMediaLeases;
     private final int maxReviewLeases;
+    private final WorkflowExecutionContextReader executionContexts;
     private final JooqWorkflowCallbackRepository rejectionConvergence;
 
     JooqWorkflowDispatchRepository(
@@ -65,10 +68,24 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
             ExecutionRegistry registry,
             Duration leaseDuration,
             int maxActiveLeases) {
+        this(database, ids, clock, json, registry, leaseDuration, maxActiveLeases,
+                new JooqWorkflowExecutionContextReader(json));
+    }
+
+    JooqWorkflowDispatchRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock clock,
+            ObjectMapper json,
+            ExecutionRegistry registry,
+            Duration leaseDuration,
+            int maxActiveLeases,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
+        this.executionContexts = Objects.requireNonNull(executionContexts);
         Objects.requireNonNull(registry);
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow Step lease 必须为正数");
@@ -306,7 +323,7 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
         }
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "novelId", workflow, operation, "operationCatalogVersion",
+                SELECT id, "novelId", "chapterId", "targetType", "targetId", workflow, operation, "operationCatalogVersion",
                        "modelPolicyJson", status::text AS status, "cancelRequestedAt",
                        "lastEventSequence", revision
                 FROM public."WorkflowRun"
@@ -532,8 +549,11 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
             long fencingToken,
             String dispatchMode) {
         Map<String, Object> storedBudget = readObject(step.get("budgetJson", String.class));
-        ExecutionPlanSnapshot executionPlan = executionPlan(run);
-        ExecutionPlanSnapshot.Step frozenStep = executionPlan.requireStep(
+        WorkflowExecutionContext executionContext = executionContext(transaction, run);
+        if (executionContext.selection() != null && "resolve_intent".equals(step.get("purpose", String.class))) {
+            throw new IllegalStateException("已选择业务操作的自然 Run 不能再次派发解析器");
+        }
+        ExecutionPlanSnapshot.Step frozenStep = executionContext.requireStep(
                 step.get("purpose", String.class),
                 step.get("lane", String.class),
                 step.get("modelProfile", String.class),
@@ -590,7 +610,7 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                 ExecutionStepRequest.LaneEnum.fromValue(step.get("lane", String.class)),
                 modelProfile,
                 run.get("novelId", String.class),
-                run.get("operation", String.class),
+                executionContext.operationForPurpose(step.get("purpose", String.class)),
                 outputSchema,
                 "2.0",
                 step.get("purpose", String.class),
@@ -703,14 +723,12 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                 bundle.get("version", Integer.class));
     }
 
-    private ExecutionPlanSnapshot executionPlan(Record run) {
-        ExecutionPlanSnapshot result = ExecutionPlanSnapshot.fromStored(
+    private WorkflowExecutionContext executionContext(DSLContext transaction, Record run) {
+        return executionContexts.load(transaction, new WorkflowExecutionContext.RunIdentity(
+                run.get("id", String.class), run.get("workflow", String.class), run.get("operation", String.class),
+                run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
+                run.get("targetType", String.class), run.get("targetId", String.class)),
                 readObject(run.get("modelPolicyJson", String.class)));
-        result.requireOperation(
-                run.get("workflow", String.class),
-                run.get("operation", String.class),
-                run.get("operationCatalogVersion", String.class));
-        return result;
     }
 
     private static void requireAcceptedBinding(

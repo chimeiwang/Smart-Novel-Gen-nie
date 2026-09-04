@@ -180,7 +180,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - V2 `resolve_intent` 是独立系统 Step，不是业务 Operation；operation 必须为 null，不绑定 Artifact。
   执行器只消费完整指令、有序澄清回答和唯一 intent_context，使用 disabled reasoning、interactive lane 和
   专用有限预算，输出严格 ProposedCommand，不生成正文或调用工具。资源身份、有效命令和同 Run 后续
-  编排仍由 Core 决定；执行器支持及共享澄清快照不代表普通 Web/CLI 入口已切换。恢复只复验请求冻结的
+  编排仍由 Core 决定；当前分支已接自然请求及澄清的 Core/Web/CLI，但执行器支持和代码接线均不代表真实
+  环境已经切换，完整验收状态见自然入口规格。恢复只复验请求冻结的
   完整保留依赖，不能用当前系统用途引用覆盖历史 Profile；缺 execution journal 的 running recovery
   仍以 MODEL_OUTCOME_UNKNOWN 收敛，不重复调用模型。
 - V2 `long_serial.plan_chapter` 的生成使用 `plot.chapter_plan.v1`，编辑复审使用

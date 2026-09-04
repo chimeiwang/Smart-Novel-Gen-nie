@@ -83,6 +83,7 @@ import {
   resolvePendingReviewAction,
 } from "./run-outcome-state";
 import { monitorRunStream } from "./run-stream-monitor";
+import { buildClarificationRequest, buildNaturalRunRequest, writingInputDisposition } from "./writing-input";
 import {
   createWritingEventCursors,
   type WritingEventCursors,
@@ -94,6 +95,7 @@ import {
   selectForegroundWorkflowRun,
   workflowEventLabel,
   workflowEventRequiresSessionMessageRefresh,
+  workflowEventRequiresSnapshotRefresh,
   workflowModelRoleLabel,
   workflowProgressPhaseLabel,
   workflowResolvedModelLabel,
@@ -806,11 +808,15 @@ export function WritingConversation({
   const [isPending, startTransition] = useTransition();
 
   const [userInput, setUserInput] = useState("");
+  const [revisionArtifact, setRevisionArtifact] = useState<ReviewArtifactData | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [isCancellingWorkflow, setIsCancellingWorkflow] = useState(false);
   const [isAssigningTask, setIsAssigningTask] = useState(false);
   const [workflowRun, setWorkflowRun] = useState<WorkflowRunUiState | null>(null);
   const workflowRunRef = useRef<WorkflowRunUiState | null>(null);
+  const inputDisposition = writingInputDisposition({
+    run: workflowRun, legacyTaskId: taskId, revisionArtifactId: revisionArtifact?.id,
+  });
   const [agentLiveRuns, setAgentLiveRuns] = useState<AgentLiveRuns>({});
   const agentLiveRunsRef = useRef<AgentLiveRuns>({});
 
@@ -887,6 +893,7 @@ export function WritingConversation({
     persistedPhaseKeyRef.current = null;
     replaceSessionWorkspace(createEmptySessionWorkspace<ReviewArtifactData>(sessionId));
     setMessages([]);
+    setRevisionArtifact(null);
     setGeneratedContent("");
     setError(null);
     setReviewDialogArtifact(null);
@@ -949,7 +956,8 @@ export function WritingConversation({
     updateReviewArtifactAction(null);
   }, [clearReviewActionCloseTimer, updateReviewArtifactAction]);
 
-  const focusChatForArtifactRevision = useCallback(() => {
+  const focusChatForArtifactRevision = useCallback((artifact: ReviewArtifactData) => {
+    setRevisionArtifact(artifact);
     closeReviewArtifactModal({ force: true });
     setPhase("recording");
     window.setTimeout(() => inputRef.current?.focus(), 0);
@@ -1831,7 +1839,10 @@ export function WritingConversation({
         addFlowLog({ type: "phase", content: workflowEventLabel(event) });
 
         if (next.status === "pending" || next.status === "running") setPhase("generating");
-        if (event.eventType === "awaiting_user") {
+        if (event.eventType === "clarification_required") {
+          setPhase("recording");
+          setRevisionArtifact(null);
+        } else if (event.eventType === "awaiting_user") {
           setPhase("recording");
           void refreshWorkflowReviewArtifact(
             event.payload.artifactId,
@@ -2256,8 +2267,8 @@ export function WritingConversation({
   }, []);
 
   const startDiscussionInternal = async (messageOverride?: string, titleOverride?: string) => {
-    const userMessage = (messageOverride ?? userInput).trim();
-    if (!userMessage) return;
+    const userMessage = messageOverride ?? userInput;
+    if (countTextLength(userMessage) === 0) return;
     const attachment = selectionBridge?.attachedSelection ?? null;
     if (attachment?.stale) {
       setError("选区来源已变化，请重新选择后再发送");
@@ -2280,7 +2291,7 @@ export function WritingConversation({
       persist: false,
     });
     setIsAssigningTask(true);
-    addFlowLog({ type: "user", content: `用户: ${userMessage.slice(0, 50)}${userMessage.length > 50 ? "..." : ""}` });
+    addFlowLog({ type: "user", content: `用户: ${userMessage}` });
     phasePersistenceReadyRef.current = true;
     setPhase("discussing");
     setIsSending(true);
@@ -2294,15 +2305,14 @@ export function WritingConversation({
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
         body: attachment
           ? { ...buildSelectionRunRequest({ attachment, novelId, chapterId, writingSessionId: sessionIdForRequest, targetWordCount, userInstruction: userMessage }), clientRequestId: createClientRequestId() }
-          : {
+          : buildNaturalRunRequest({
               clientRequestId: createClientRequestId(),
               novelId,
               chapterId,
               targetWordCount,
-              selectedAgents,
-              userMessage,
+              userInstruction: userMessage,
               writingSessionId: sessionIdForRequest,
-            },
+            }),
         signal: controller.signal,
       }));
       if (attachment) selectionBridge?.removeSelection();
@@ -2339,101 +2349,95 @@ export function WritingConversation({
     await guarded;
   };
 
+  const handleResumeLegacyTask = async (messageOverride?: string) => {
+    await runSendAction(async () => {
+      const legacyTaskId = taskIdRef.current;
+      const sessionId = currentSessionIdRef.current;
+      const message = messageOverride ?? userInput;
+      if (workflowRunRef.current || !legacyTaskId || !sessionId || countTextLength(message) === 0) return;
+      const controller = new AbortController();
+      abortCurrentAgent();
+      abortRef.current = controller;
+      setIsSending(true);
+      try {
+        const accepted = requireApiData(await browserApi.POST("/api/v1/writing/runs/{task_id}/resume", {
+          params: { path: { task_id: legacyTaskId } },
+          body: { clientRequestId: createClientRequestId(), writingSessionId: sessionId, userMessage: message },
+          signal: controller.signal,
+        }));
+        setUserInput("");
+        addMessage({ role: "user", content: message, sessionId, persist: false });
+        await processStream(accepted.taskId, { mode: "session", sessionId }, controller.signal);
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "旧任务恢复失败");
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+        setIsSending(false);
+        clearAgentLiveRuns();
+      }
+    });
+  };
+
   const handleSendMessage = async (messageOverride?: string) => {
+    const message = messageOverride ?? userInput;
+    if (countTextLength(message) === 0) return;
+    const disposition = writingInputDisposition({
+      run: workflowRunRef.current, legacyTaskId: taskIdRef.current,
+      revisionArtifactId: revisionArtifact?.id,
+    });
+    if (disposition === "artifact_revision" && revisionArtifact) {
+      // 该处理器已有发送锁；不能在另一个发送锁内再次调用。
+      await handleArtifactDecision(revisionArtifact, "revise", message);
+      return;
+    }
     const guarded = runSendAction(async () => {
-      const message = (messageOverride ?? userInput).trim();
-      if (!message) return;
       const attachment = selectionBridge?.attachedSelection ?? null;
-      if (attachment?.stale) {
+      if (disposition === "new_run" && attachment?.stale) {
         setError("选区来源已变化，请重新选择后再发送");
         return;
       }
-
-      if (workflowRunIsForeground(workflowRunRef.current)) {
-        setError("当前任务仍在运行。请先完成待确认决定，或使用“停止任务”。");
+      if (disposition === "blocked") {
+        setError("当前任务仍在运行或等待草案决定。请先处理当前任务。");
         return;
       }
-
-      if (attachment && taskId && phase !== "idle" && phase !== "completed" && phase !== "error") {
-        setError("当前任务仍在运行，请等待完成或先取消后再发送选区改写");
+      if (disposition === "clarification" && attachment) {
+        setError("澄清回答不接收新的选区，请先移除选区附件。");
         return;
       }
-
-      // 中断当前正在运行的 Agent
       abortCurrentAgent();
-
-      if (!taskId || workflowRunRef.current?.engineVersion === 2) {
+      if (editingMessageId) {
+        // 编辑后重发也产生新 Run，不删除已持久化的历史对话。
+        setEditingMessageId(null);
+      }
+      if (disposition === "new_run") {
         await startDiscussionInternal(message);
         return;
       }
-
-      if (editingMessageId) {
-        const editIndex = messages.findIndex(m => m.id === editingMessageId);
-        if (editIndex !== -1) {
-          setMessages(prev => prev.slice(0, editIndex + 1));
-        }
-        setEditingMessageId(null);
+      const current = workflowRunRef.current;
+      const sessionIdForRequest = currentSessionIdRef.current;
+      if (!current || !sessionIdForRequest) {
+        setError("当前澄清或写作会话不存在，请刷新状态。");
+        return;
       }
-
-      setUserInput("");
-      addMessage({
-        role: "user",
-        content: message,
-        metadata: attachment ? selectionAttachmentMetadata(attachment) : undefined,
-        persist: false,
-      });
       setIsSending(true);
-
       const controller = new AbortController();
       abortRef.current = controller;
-
       try {
-        let acceptedRunId: string;
-        if (attachment) {
-          if (attachment.resourceType === "chapter_content") await flushActiveChapterSave();
-          const accepted = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
-            body: {
-              ...buildSelectionRunRequest({
-                attachment,
-                novelId,
-                chapterId,
-                writingSessionId: currentSessionIdRef.current,
-                targetWordCount,
-                userInstruction: message,
-              }),
-              clientRequestId: createClientRequestId(),
-            },
+        const accepted = requireApiData(await browserApi.POST(
+          "/api/v1/writing/runs/{task_id}/clarification",
+          {
+            params: { path: { task_id: current.runId } },
+            body: buildClarificationRequest(current, message, createClientRequestId()),
             signal: controller.signal,
-          }));
-          acceptedRunId = writingRunId(accepted);
-          if (isWorkflowRunV2(accepted)) {
-            updateWorkflowRun(createWorkflowRunUiState(accepted));
-            setCurrentOperation(null);
-            setCurrentOperationStage(null);
-          } else {
-            updateWorkflowRun(null);
-          }
-          setTaskId(acceptedRunId);
-          selectionBridge?.removeSelection();
-        } else {
-          const accepted = requireApiData(await browserApi.POST(
-            "/api/v1/writing/runs/{task_id}/resume",
-            {
-              params: { path: { task_id: taskId } },
-              body: {
-                clientRequestId: createClientRequestId(),
-                writingSessionId: currentSessionId ?? null,
-                userMessage: message,
-              },
-              signal: controller.signal,
-            },
-          ));
-          acceptedRunId = accepted.taskId;
-        }
-        const sessionIdForRequest = currentSessionIdRef.current;
-        if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
+          },
+        ));
+        updateWorkflowRun(createWorkflowRunUiState(accepted));
+        setTaskId(accepted.runId);
+        setUserInput("");
+        addMessage({ role: "user", content: message, sessionId: sessionIdForRequest, persist: false });
+        setPhase("generating");
         await processStream(
-          acceptedRunId,
+          accepted.runId,
           { mode: "session", sessionId: sessionIdForRequest },
           controller.signal,
         );
@@ -2441,6 +2445,7 @@ export function WritingConversation({
         if ((err as Error).name === "AbortError") return;
         setError(err instanceof Error ? err.message : "发送失败");
       } finally {
+        if (abortRef.current === controller) abortRef.current = null;
         setIsSending(false);
         clearAgentLiveRuns();
       }
@@ -2478,6 +2483,7 @@ export function WritingConversation({
     let lastOutcomeSignature: string | null = null;
     // cursor 只负责断线续传和去重；每轮连接最终仍回读 /runs/{taskId}，校正漏帧与代理缓存。
     const sseState = eventCursorsRef.current.state(streamTaskId);
+    let requiresSnapshotRead = false;
 
     const applyFrame = (frame: string): boolean => {
       const parsedFrame = parseSseFrame(`${frame}\n\n`, sseState);
@@ -2506,6 +2512,10 @@ export function WritingConversation({
           lastOutcomeSignature,
         );
       }
+      if (event.type === "workflow_event"
+        && workflowEventRequiresSnapshotRefresh(workflowRunRef.current, event)) {
+        requiresSnapshotRead = true;
+      }
       handleEvent(event, scope, streamTaskId);
       return true;
     };
@@ -2518,6 +2528,7 @@ export function WritingConversation({
         signal,
       ),
       consume: async (response) => {
+        requiresSnapshotRead = false;
         const reader = response.body?.getReader();
         if (!reader) throw new Error("写作事件流没有响应体");
         const decoder = new TextDecoder();
@@ -2534,7 +2545,7 @@ export function WritingConversation({
           buffer = frames.pop() || "";
           for (const frame of frames) {
             receivedEvent = applyFrame(frame) || receivedEvent;
-            if (workflowRunShouldStopObservation(workflowRunRef.current)) {
+            if (requiresSnapshotRead || workflowRunShouldStopObservation(workflowRunRef.current)) {
               await reader.cancel();
               return receivedEvent;
             }
@@ -3077,7 +3088,7 @@ export function WritingConversation({
                 disabled={isSending || isActing || actionLocked}
                 onClick={() => {
                   if (isCurrentSessionArtifact) {
-                    focusChatForArtifactRevision();
+                    focusChatForArtifactRevision(artifact);
                     return;
                   }
                   void handleArtifactDecision(artifact, "revise", "继续修改待确认变更");
@@ -3227,7 +3238,7 @@ export function WritingConversation({
                 disabled={isSending || isActing || actionLocked}
                 onClick={() => {
                   if (isCurrentSessionArtifact) {
-                    focusChatForArtifactRevision();
+                    focusChatForArtifactRevision(artifact);
                     return;
                   }
                   void handleArtifactDecision(artifact, "revise", "继续修改待确认变更");
@@ -3326,6 +3337,10 @@ export function WritingConversation({
         const streamScope: StreamUiScope = isCurrentSessionArtifact && currentSessionIdRef.current
           ? { mode: "session", sessionId: currentSessionIdRef.current }
           : { mode: "artifact", artifactId: artifact.id };
+        if (revisionArtifact?.id === artifact.id) {
+          setRevisionArtifact(null);
+          setUserInput("");
+        }
         if (accepted.engineVersion === 2) {
           const next = createWorkflowRunUiState(accepted);
           updateWorkflowRun(next);
@@ -3756,6 +3771,19 @@ export function WritingConversation({
 
       {/* 输入区域 */}
       <div className="chat-input">
+        {workflowRun?.status === "waiting_user" && workflowRun.clarification ? (
+          <div className="workflow-input-context" role="status">
+            <strong>需要你补充信息</strong>
+            <ParagraphText text={workflowRun.clarification.prompt} />
+            <span className="workflow-input-hint">回答会继续当前任务，不会创建新任务或修改草案。</span>
+          </div>
+        ) : revisionArtifact ? (
+          <div className="workflow-input-context">
+            <strong>修改当前草案 · 版本 {revisionArtifact.revision}</strong>
+            <span className="workflow-input-hint">输入返工要求，草案经复审后仍需你确认采用。</span>
+            <button className="button ghost sm" type="button" onClick={() => setRevisionArtifact(null)} disabled={isSending}>取消返工输入</button>
+          </div>
+        ) : null}
         {selectionBridge?.attachedSelection ? (
           <div className={`selection-attachment-card ${selectionBridge.attachedSelection.stale ? "stale" : ""}`}>
             <div className="selection-attachment-main">
@@ -3768,10 +3796,10 @@ export function WritingConversation({
             <button className="button ghost sm" type="button" onClick={selectionBridge.reselectSelection}>重新选择</button>
           </div>
         ) : null}
-        {generatedContent && (
+        {generatedContent && activeReviewArtifact?.status === "awaiting_user" && (
           <div className="quick-actions">
-            <button onClick={() => handleSendMessage("采纳")}>采纳</button>
-            <button onClick={() => handleSendMessage("继续修改")}>修改</button>
+            <button onClick={handleAcceptContent} disabled={isSending}>采纳</button>
+            <button onClick={() => focusChatForArtifactRevision(activeReviewArtifact)} disabled={isSending}>修改</button>
           </div>
         )}
         {phase !== "idle" && phase !== "completed" && (
@@ -3783,12 +3811,12 @@ export function WritingConversation({
                 editedContent={getLocalReviewDraftForApply(workflowReviewArtifact)}
                 isSending={isSending}
                 onDecision={handleArtifactDecision}
-                onRevise={focusChatForArtifactRevision}
+                onRevise={() => focusChatForArtifactRevision(workflowReviewArtifact)}
               />
             ) : workflowRunIsForeground(workflowRun) ? null : phase === "reviewing" ? (
               <>
-                <button onClick={() => handleSendMessage("确认保存")}>确认保存</button>
-                <button onClick={() => handleSendMessage("取消")}>取消</button>
+                <button onClick={() => handleResumeLegacyTask("确认保存")}>确认保存</button>
+                <button onClick={() => handleResumeLegacyTask("取消")}>取消</button>
               </>
             ) : (
               <>
@@ -3799,12 +3827,21 @@ export function WritingConversation({
           </div>
         )}
 
+        {!workflowRun && taskId && phase === "recording" && !workflowReviewArtifact && !chapterTargetPrompt ? (
+          <div className="quick-actions">
+            <button onClick={() => handleResumeLegacyTask()} disabled={isSending || countTextLength(userInput) === 0}>
+              继续旧任务
+            </button>
+            <span className="workflow-input-hint">普通发送会新建任务；仅此动作恢复旧版任务。</span>
+          </div>
+        ) : null}
+
         <div className="input-row">
           <textarea
             ref={inputRef}
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
-            placeholder="描述要完成的创作任务，系统会自动分配合适的 Agent"
+            placeholder={inputDisposition === "clarification" ? "补充当前问题所需的信息" : inputDisposition === "artifact_revision" ? "描述这份草案需要如何修改" : "描述要完成的创作任务，系统会自动分配合适的 Agent"}
             rows={1}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -3814,10 +3851,10 @@ export function WritingConversation({
                 if (editingMessageId) cancelEdit();
               }
             }}
-            disabled={isSending || workflowRunIsForeground(workflowRun)}
+            disabled={isSending || inputDisposition === "blocked"}
           />
-          <button className="send-btn" onClick={() => handleSendMessage()} disabled={!userInput.trim() || isSending || workflowRunIsForeground(workflowRun)}>
-            发送
+          <button className="send-btn" onClick={() => handleSendMessage()} disabled={countTextLength(userInput) === 0 || isSending || inputDisposition === "blocked"}>
+            {inputDisposition === "clarification" ? "回答问题" : inputDisposition === "artifact_revision" ? "提交返工" : "发送"}
           </button>
         </div>
 

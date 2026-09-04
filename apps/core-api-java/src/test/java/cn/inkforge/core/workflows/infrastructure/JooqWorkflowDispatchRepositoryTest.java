@@ -1,6 +1,7 @@
 package cn.inkforge.core.workflows.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.contracts.agent.ExecutionStepAccepted;
 import cn.inkforge.contracts.agent.ExecutionStepRequest;
@@ -11,11 +12,17 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
+import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistryFixtures;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
+import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import cn.inkforge.core.workflows.protocol.ExecutionProtocolDateTime;
+import cn.inkforge.core.workflows.protocol.WorkflowEventPayloadCodec;
+import jakarta.validation.Validation;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -38,6 +45,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.Container.ExecResult;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -124,6 +133,159 @@ class JooqWorkflowDispatchRepositoryTest {
                 WHERE status IN ('pending', 'submitted', 'processing')
                 """,
                 NOW);
+    }
+
+    @Test
+    void 自然SSE快照恢复未解析模型和完整待澄清问题() {
+        String prefix = "intent-sse-question";
+        IntentFixture fixture = intentFixture(prefix, null, "valid");
+        try (var validators = Validation.buildDefaultValidatorFactory()) {
+            var events = new JooqWorkflowEventStreamRepository(database,
+                    new WorkflowEventPayloadCodec(json, validators.getValidator()), json);
+            var first = events.readSnapshot(prefix + "-user", fixture.runId()).orElseThrow().frame().getSnapshot();
+            assertThat(first.getOperation()).isNull();
+            assertThat(first.getCurrentStep().getPurpose()).isEqualTo("resolve_intent");
+            completeIntentResolverAndWait(fixture);
+            insertQuestion(fixture, prefix + "-question", 2, "  确认生成草案？😀\n完整问题  ", "a".repeat(64), false);
+            var waiting = events.readSnapshot(prefix + "-user", fixture.runId()).orElseThrow().frame().getSnapshot();
+            assertThat(waiting.getActiveSteps()).isEmpty();
+            assertThat(waiting.getArtifact()).isNull();
+            assertThat(waiting.getClarification().getPrompt()).isEqualTo("  确认生成草案？😀\n完整问题  ");
+            assertThat(waiting.getClarification().getDecisionStepId()).isEqualTo(prefix + "-question");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"answer_question", "plan_chapter", "write_chapter"})
+    void 自然SSE快照投影唯一已选业务操作但不改Run原身份(String operationName) {
+        String prefix = "intent-sse-" + operationName;
+        IntentFixture fixture = intentFixture(prefix, operationName, "valid");
+        try (var validators = Validation.buildDefaultValidatorFactory()) {
+            var events = new JooqWorkflowEventStreamRepository(database,
+                    new WorkflowEventPayloadCodec(json, validators.getValidator()), json);
+            var snapshot = events.readSnapshot(prefix + "-user", fixture.runId()).orElseThrow().frame().getSnapshot();
+            assertThat(snapshot.getOperation()).isEqualTo(operationName);
+            assertThat(snapshot.getCurrentStep().getPurpose()).isEqualTo("generation");
+            assertThat(snapshot.getClarification()).isNull();
+            assertThat(database.dsl().fetchValue("SELECT operation FROM public.\"WorkflowRun\" WHERE id = ?", fixture.runId())).isNull();
+        }
+    }
+
+    @Test
+    void 调用前业务六调用预算不被三次解析挤占且外层保留全部模型() {
+        IntentFixture fixture = budgetFixture("intent-budget-six", 3, 6);
+        reserveIntentGeneration(fixture);
+        assertThat(database.dsl().fetchOne("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"stepId\" = ?",
+                fixture.activeStepId()).get(0, Long.class)).isEqualTo(1L);
+    }
+
+    @Test
+    void 外层仍有额度时第七个业务模型调用也必须被子预算拒绝() {
+        IntentFixture fixture = budgetFixture("intent-budget-seven", 1, 7);
+        assertThatThrownBy(() -> reserveIntentGeneration(fixture))
+                .isInstanceOfSatisfying(WorkflowExecutionRejectedException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo("WORKFLOW_RUN_BUDGET_EXCEEDED"));
+        assertThat(database.dsl().fetchOne("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"stepId\" = ?",
+                fixture.activeStepId()).get(0, Long.class)).isEqualTo(0L);
+    }
+
+    @Test
+    void 解析模型已发生超额用量不能从外层总预算中消失() {
+        IntentFixture fixture = budgetFixture("intent-budget-outer", 1, 1);
+        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE \"runId\" = ? AND purpose = 'resolve_intent'",
+                json.writeValueAsString(Map.of("usageStatus", "partial", "inputTokens", 204001,
+                        "providerAttempts", 1, "protocolCorrections", 0, "wallTimeMillis", 1000)), fixture.runId());
+        assertThatThrownBy(() -> reserveIntentGeneration(fixture))
+                .isInstanceOfSatisfying(WorkflowExecutionRejectedException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo("WORKFLOW_RUN_BUDGET_EXCEEDED"));
+    }
+
+    @Test
+    void 待澄清Reader完整恢复唯一问题并忽略非等待状态() {
+        IntentFixture fixture = intentFixture("intent-reader-question", null, "valid");
+        completeIntentResolverAndWait(fixture);
+        String prompt = "  请确认是讨论还是生成正文？😀\r\n保留问题原文。  ";
+        insertQuestion(fixture, "intent-reader-question-control", 2, prompt, "a".repeat(64), false);
+        JooqWorkflowExecutionContextReader reader = new JooqWorkflowExecutionContextReader(json);
+        assertThat(reader.pendingClarification(database.dsl(), fixture.runId(), "running")).isNull();
+        var snapshot = reader.pendingClarification(database.dsl(), fixture.runId(), "waiting_user");
+        assertThat(snapshot.getDecisionStepId()).isEqualTo("intent-reader-question-control");
+        assertThat(snapshot.getClarificationCode()).isEqualTo("intent_ambiguous");
+        assertThat(snapshot.getPrompt()).isEqualTo(prompt);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"duplicate", "bad_hash", "wrong_source"})
+    void 待澄清Reader拒绝重复问题与损坏来源(String variant) {
+        IntentFixture fixture = intentFixture("intent-reader-question-" + variant, null, "valid");
+        completeIntentResolverAndWait(fixture);
+        insertQuestion(fixture, fixture.runId() + "-question", 2, "请确认你的意图", "wrong_source".equals(variant) ? "b".repeat(64) : "a".repeat(64),
+                "bad_hash".equals(variant));
+        if ("duplicate".equals(variant)) insertQuestion(fixture, fixture.runId() + "-question-2", 3, "第二个问题", "a".repeat(64), false);
+        JooqWorkflowExecutionContextReader reader = new JooqWorkflowExecutionContextReader(json);
+        assertThatThrownBy(() -> reader.pendingClarification(database.dsl(), fixture.runId(), "waiting_user"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 没有问题事实的作者等待不被误报为澄清() {
+        IntentFixture fixture = intentFixture("intent-reader-artifact-only", null, "valid");
+        completeIntentResolverAndWait(fixture);
+        assertThat(new JooqWorkflowExecutionContextReader(json)
+                .pendingClarification(database.dsl(), fixture.runId(), "waiting_user")).isNull();
+    }
+
+    @Test
+    void 自然解析Step派发空操作且租约恢复保留输入和请求身份() {
+        IntentFixture fixture = intentFixture("intent-dispatch-resolver", null, "valid");
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(fixture.runId());
+        assertThat(request.getPurpose()).isEqualTo("resolve_intent");
+        assertThat(request.getOperation()).isNull();
+        assertThat(request.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(request.getBudget().getMaxInputTokens()).isEqualTo(8000);
+        assertThat(request.getEvidenceBundle().getId()).isEqualTo(fixture.intentBundleId());
+        assertRequestHashes(request);
+
+        expireLease(request.getStepId(), "pending");
+        ExecutionStepRequest replay = dispatches.claimNext().orElseThrow();
+        assertThat(replay.getDispatchMode().getValue()).isEqualTo("pending_recovery");
+        assertThat(replay.getInputHash()).isEqualTo(request.getInputHash());
+        assertThat(replay.getRequestHash()).isEqualTo(request.getRequestHash());
+        assertThat(replay.getOperation()).isNull();
+        assertThat(replay.getFencingToken()).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"answer_question", "plan_chapter", "write_chapter"})
+    void 同Run选择后的业务派发取所选子计划且数据库操作保持空(String selectedOperation) {
+        IntentFixture fixture = intentFixture("intent-dispatch-" + selectedOperation, selectedOperation, "valid");
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        ExecutionPlanSnapshot business = registry.freezePlan("long_serial." + selectedOperation, false);
+        assertThat(request.getRunId()).isEqualTo(fixture.runId());
+        assertThat(request.getOperation()).isEqualTo(selectedOperation);
+        assertThat(request.getPurpose()).isEqualTo("generation");
+        assertThat(request.getModelProfile().getProfile()).isEqualTo(business.generator().modelProfile().profile());
+        assertThat(request.getBudget().getMaxInputTokens()).isEqualTo(Math.toIntExact(business.generator().stepBudget().budget().maxInputTokens()));
+        assertThat(request.getEvidenceBundle().getId()).isNotEqualTo(fixture.intentBundleId());
+        assertRequestHashes(request);
+        assertThat(database.dsl().fetchOne("SELECT operation FROM public.\"WorkflowRun\" WHERE id = ?", fixture.runId())
+                .get("operation", String.class)).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "duplicate", "bad_hash", "wrong_target", "wrong_plan", "wrong_resolver", "pending_selection"})
+    void 非唯一或绑定不符的选择不能派发且领取变更回滚(String variant) {
+        IntentFixture fixture = intentFixture("intent-dispatch-invalid-" + variant, "write_chapter", variant);
+        assertThatThrownBy(dispatches::claimNext).isInstanceOf(IllegalStateException.class);
+        Record unchanged = database.dsl().fetchOne(
+                "SELECT \"attemptCount\", \"fencingToken\", \"activeJobId\" FROM public.\"WorkflowStep\" WHERE id = ?",
+                fixture.activeStepId());
+        assertThat(unchanged.get("attemptCount", Integer.class)).isZero();
+        assertThat(unchanged.get("fencingToken", Long.class)).isZero();
+        assertThat(unchanged.get("activeJobId", String.class)).isNull();
+        assertThat(database.dsl().fetchCount(database.dsl().selectFrom("public.\"WorkflowEvent\"")
+                .where("\"runId\" = ?", fixture.runId()))).isZero();
     }
 
     @Test
@@ -687,6 +849,188 @@ class JooqWorkflowDispatchRepositoryTest {
 
         assertThat(Files.size(fixturePath)).isPositive();
         assertThat(request.getOperation()).isEqualTo("answer_question");
+    }
+
+    private static IntentFixture intentFixture(String prefix, String selectedOperation, String variant) {
+        Fixture owner = fixture(prefix);
+        IntentExecutionPlanSnapshot plan = IntentExecutionPlanSnapshot.freeze(registry,
+                List.of("long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter"));
+        String runId = prefix + "-run";
+        String intentBundleId = prefix + "-intent-bundle";
+        String resolverId = prefix + "-resolver";
+        Map<String, Object> original = Map.of("userInstruction", "请帮我处理本章😀", "targetWordCount", 4000);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowRun" (
+                  id, "novelId", "chapterId", "userId", kind, status, input, "sourceType", "sourceId",
+                  "createdAt", "updatedAt", "engineVersion", workflow, operation, "operationCatalogVersion",
+                  "writingSessionId", "idempotencyKey", "requestHash", "targetType", "targetId",
+                  "budgetJson", "modelPolicyJson", "lastEventSequence", revision
+                ) VALUES (?, ?, ?, ?, 'chat', 'pending', ?, 'chapter', ?, ?, ?, 2, 'long_serial', NULL,
+                  ?, ?, ?, ?, 'chapter', ?, ?, ?, 0, 1)
+                """, runId, owner.novelId(), owner.chapterId(), owner.userId(), json.writeValueAsString(original), owner.chapterId(),
+                NOW, NOW, registry.catalogVersion(), owner.sessionId(), prefix + "-request", ExecutionCanonicalJson.sha256(original),
+                owner.chapterId(), json.writeValueAsString(plan.runBudgetStored()), json.writeValueAsString(plan.stored()));
+        Map<String, Object> intentContext = Map.of("workflow", "long_serial", "novelId", owner.novelId(),
+                "chapterId", owner.chapterId(), "chapterTitle", "第一章", "availableOperations", List.of(
+                        Map.of("operation", "answer_question", "description", "章节问答", "targetType", "chapter", "scopeKind", "chapter"),
+                        Map.of("operation", "plan_chapter", "description", "章节规划", "targetType", "chapter", "scopeKind", "chapter"),
+                        Map.of("operation", "write_chapter", "description", "正文草案", "targetType", "chapter", "scopeKind", "chapter")));
+        String intentManifestHash = insertIntentEvidence(runId, intentBundleId, 1, owner.chapterId(),
+                "intent_context", plan.resolver().evidencePolicy(), intentContext);
+        insertIntentModelStep(runId, owner.novelId(), resolverId, 1, plan.resolver(),
+                Map.of("userInstruction", "请帮我处理本章😀", "clarifications", List.of()),
+                intentBundleId, 1, intentManifestHash, null, selectedOperation == null ? "pending" : "completed");
+        if (selectedOperation == null) return new IntentFixture(runId, resolverId, intentBundleId);
+
+        ExecutionPlanSnapshot business = plan.requireOperationPlan("long_serial." + selectedOperation);
+        Map<String, Object> selection = new LinkedHashMap<>();
+        selection.put("schema", "durable.intent-selection.v1");
+        selection.put("runId", runId);
+        selection.put("operationKey", "long_serial." + selectedOperation);
+        selection.put("operationPlanSha256", "wrong_plan".equals(variant) ? "0".repeat(64) : business.sha256());
+        selection.put("resolverStepId", "wrong_resolver".equals(variant) ? "nonexistent-resolver" : resolverId);
+        selection.put("resolverResultHash", "a".repeat(64));
+        selection.put("intentEvidenceBundleId", intentBundleId);
+        selection.put("targetType", "chapter");
+        selection.put("targetId", "wrong_target".equals(variant) ? "other-chapter" : owner.chapterId());
+        selection.put("scopeKind", "chapter");
+        int controls = "missing".equals(variant) ? 0 : "duplicate".equals(variant) ? 2 : 1;
+        for (int index = 0; index < controls; index++) {
+            String id = prefix + "-selection-" + index;
+            String status = "pending_selection".equals(variant) ? "pending" : "completed";
+            database.dsl().execute("""
+                    INSERT INTO public."WorkflowStep" (
+                      id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal, purpose, lane,
+                      "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey", "requestHash", "inputHash",
+                      "submittedAt", "updatedAt", "completedAt"
+                    ) VALUES (?, ?, 'core', 'persistence', CAST(? AS "WorkflowStepStatus"), ?, ?, ?, 'intent_selection',
+                      'control', 0, ?, 0, ?, ?, ?, ?, ?, ?)
+                    """, id, runId, status, json.writeValueAsString(selection), NOW, 2 + index, NOW, runId + "." + id,
+                    ExecutionCanonicalJson.sha256(selection), "bad_hash".equals(variant) ? "0".repeat(64) : ExecutionCanonicalJson.sha256(selection),
+                    NOW, NOW, "completed".equals(status) ? NOW : null);
+        }
+        String bundleId = prefix + "-business-bundle";
+        String manifestHash = insertIntentEvidence(runId, bundleId, 2, owner.chapterId(), "business_context",
+                business.generator().evidencePolicy(), Map.of("fixture", "业务来源由生产Evidence Planner冻结，此处只验派发选择"));
+        String generationId = prefix + "-generation";
+        insertIntentModelStep(runId, owner.novelId(), generationId, 4, business.generator(), original,
+                bundleId, 2, manifestHash, selectedOperation, "pending");
+        return new IntentFixture(runId, generationId, intentBundleId);
+    }
+
+    private static String insertIntentEvidence(String runId, String bundleId, int version, String chapterId,
+            String resourceType, String policy, Map<String, Object> content) {
+        String itemId = bundleId + "-item";
+        Map<String, Object> metadata = Map.of("role", resourceType);
+        int bytes = ExecutionCanonicalJson.bytes(content).length;
+        Map<String, Object> item = Map.of("itemId", itemId, "ordinal", 1, "resourceType", resourceType,
+                "resourceId", chapterId, "exists", true, "contentType", "json", "contentSha256", ExecutionCanonicalJson.sha256(content),
+                "byteCount", bytes, "metadata", metadata, "resourceUpdatedAt", ExecutionProtocolDateTime.format(NOW.atOffset(ZoneOffset.UTC)));
+        Map<String, Object> manifest = Map.of("bundleId", bundleId, "bundleVersion", version, "itemCount", 1, "items", List.of(item));
+        String hash = ExecutionCanonicalJson.sha256(manifest);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowEvidenceBundle" (id, "runId", version, "policyVersion", "manifestJson", "manifestSha256", "totalBytes", "createdAt")
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, bundleId, runId, version, policy, json.writeValueAsString(manifest), hash, bytes, NOW);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowEvidenceItem" (id, "bundleId", ordinal, "resourceType", "resourceId", exists,
+                  "resourceUpdatedAt", "contentType", "contentJson", "contentSha256", "byteCount", "metadataJson")
+                VALUES (?, ?, 1, ?, ?, TRUE, ?, 'json', ?, ?, ?, ?)
+                """, itemId, bundleId, resourceType, chapterId, NOW, json.writeValueAsString(content), ExecutionCanonicalJson.sha256(content), bytes,
+                json.writeValueAsString(metadata));
+        return hash;
+    }
+
+    private static void insertIntentModelStep(String runId, String novelId, String stepId, int ordinal,
+            ExecutionPlanSnapshot.Step step, Map<String, Object> input, String bundleId, int bundleVersion,
+            String manifestHash, String operationName, String status) {
+        String inputHash = ExecutionCanonicalJson.sha256(input);
+        Map<String, Object> material = new LinkedHashMap<>();
+        material.put("runId", runId);
+        material.put("novelId", novelId);
+        material.put("stepId", stepId);
+        material.put("idempotencyKey", runId + "." + stepId);
+        material.put("inputHash", inputHash);
+        material.put("workflow", "long_serial");
+        material.put("operation", operationName);
+        material.put("purpose", step.purpose());
+        material.put("lane", step.lane());
+        material.put("evidenceManifest", Map.of("bundleId", bundleId, "bundleVersion", bundleVersion,
+                "policyVersion", step.evidencePolicy(), "manifestSha256", manifestHash));
+        material.put("modelProfile", step.modelProfile().toMap());
+        material.put("outputSchema", step.outputSchema().toMap());
+        material.put("budget", step.stepBudget().budgetMap());
+        material.put("artifact", null);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal, purpose, lane,
+                  "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey", "requestHash", "inputHash", "evidenceBundleId",
+                  "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt", "completedAt", "resultHash"
+                ) VALUES (?, ?, ?, 'agent', CAST(? AS "WorkflowStepStatus"), ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, stepId, runId, step.modelProfile().profile(), status, json.writeValueAsString(input), NOW, ordinal, step.purpose(), step.lane(),
+                NOW, runId + "." + stepId, ExecutionCanonicalJson.sha256(material), inputHash, bundleId,
+                step.modelProfile().profile(), Integer.toString(step.modelProfile().version()), step.outputSchema().name(), Integer.toString(step.outputSchema().version()),
+                json.writeValueAsString(step.stepBudget().stored()), NOW, NOW, "completed".equals(status) ? NOW : null,
+                "completed".equals(status) ? "a".repeat(64) : null);
+    }
+
+    private record IntentFixture(String runId, String activeStepId, String intentBundleId) {}
+
+    private static IntentFixture budgetFixture(String prefix, int resolverCount, int businessCount) {
+        IntentFixture fixture = intentFixture(prefix, "write_chapter", "valid");
+        var intent = IntentExecutionPlanSnapshot.freeze(registry, List.of("long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter"));
+        var business = intent.requireOperationPlan("long_serial.write_chapter");
+        String novelId = prefix + "-novel";
+        String intentHash = database.dsl().fetchOne("SELECT \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ?", fixture.intentBundleId()).get(0, String.class);
+        String businessBundle = prefix + "-business-bundle";
+        String businessHash = database.dsl().fetchOne("SELECT \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ?", businessBundle).get(0, String.class);
+        for (int index = 1; index < resolverCount; index++) {
+            insertIntentModelStep(fixture.runId(), novelId, prefix + "-extra-resolver-" + index, 10 + index,
+                    intent.resolver(), Map.of("userInstruction", "完整意图", "clarifications", List.of()), fixture.intentBundleId(), 1, intentHash, null, "completed");
+        }
+        for (int index = 1; index < businessCount; index++) {
+            // 保留真实 Writer/双 Reviewer 配比；第六个业务之外只增加一个 Reviewer，验证子预算独立生效。
+            var step = index == 1 ? business.generator() : business.reviewers().get((index - 2) % 2);
+            insertIntentModelStep(fixture.runId(), novelId, prefix + "-extra-business-" + index, 20 + index,
+                    step, Map.of("fixture", "只验证已冻结Step的预算汇总"), businessBundle, 2, businessHash, "write_chapter", "completed");
+        }
+        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE \"runId\" = ? AND status = 'completed' AND \"modelProfile\" IS NOT NULL",
+                json.writeValueAsString(Map.of("usageStatus", "unknown", "providerAttempts", 1, "protocolCorrections", 0, "wallTimeMillis", 1000)), fixture.runId());
+        return fixture;
+    }
+
+    private static void reserveIntentGeneration(IntentFixture fixture) {
+        var profile = registry.freezePlan("long_serial.write_chapter", false).generator().modelProfile();
+        String fingerprint = WorkflowResolvedModel.fingerprint(profile.deploymentProfileKey(), "fake", "fake", "transport.fake.v1",
+                "endpoint.local-fake.v1", "responses_json_schema_v1", "capability.fake.structured-output.v1", profile.reasoningMode(), true);
+        var resolved = new WorkflowResolvedModel(profile.deploymentProfileKey(), fingerprint, "fake", "fake", "transport.fake.v1",
+                "endpoint.local-fake.v1", "responses_json_schema_v1", "capability.fake.structured-output.v1", profile.reasoningMode(), true);
+        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"resolvedModelJson\" = ? WHERE id = ?",
+                json.writeValueAsString(WorkflowCallbackValues.resolvedModelMap(resolved)), fixture.activeStepId());
+        var coordinator = new WorkflowBillingCoordinator(new CuidV1Generator(CLOCK), json, registry);
+        database.transactionResult(tx -> { coordinator.reserve(tx, fixture.runId(), fixture.activeStepId(), resolved, NOW); return null; });
+    }
+
+    private static void completeIntentResolverAndWait(IntentFixture fixture) {
+        database.dsl().execute("""
+                UPDATE public."WorkflowStep" SET status = 'completed', "resultHash" = ?, "completedAt" = ? WHERE id = ?
+                """, "a".repeat(64), NOW, fixture.activeStepId());
+        database.dsl().execute("UPDATE public.\"WorkflowRun\" SET status = 'waiting_user' WHERE id = ?", fixture.runId());
+    }
+
+    private static void insertQuestion(IntentFixture fixture, String questionId, int ordinal, String prompt, String resultHash, boolean invalidHash) {
+        WorkflowIntentQuestion question = new WorkflowIntentQuestion(fixture.runId(), fixture.activeStepId(), resultHash,
+                fixture.intentBundleId(), "intent_ambiguous", prompt);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal, purpose, lane,
+                  "attemptCount", "fencingToken", "idempotencyKey", "requestHash", "inputHash", "evidenceBundleId",
+                  "submittedAt", "updatedAt", "completedAt"
+                ) VALUES (?, ?, 'core', 'user_confirmation', 'completed', ?, ?, ?, 'intent_clarification', 'control',
+                  0, 0, ?, ?, ?, ?, ?, ?, ?)
+                """, questionId, fixture.runId(), json.writeValueAsString(question.stored()), NOW, ordinal,
+                fixture.runId() + "." + questionId, question.inputHash(), invalidHash ? "0".repeat(64) : question.inputHash(),
+                fixture.intentBundleId(), NOW, NOW, NOW);
     }
 
     private static WorkflowStartPlan plan(Fixture fixture) {

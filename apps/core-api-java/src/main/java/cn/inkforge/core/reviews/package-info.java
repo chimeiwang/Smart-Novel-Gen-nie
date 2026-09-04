@@ -12,6 +12,7 @@
             "references::references",
             "references::reference-domain",
             "workflows::catalog",
+            "workflows::execution",
             "workflows::protocol",
             "workflows::workflow-domain"
         })

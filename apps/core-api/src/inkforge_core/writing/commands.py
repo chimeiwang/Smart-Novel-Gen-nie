@@ -59,6 +59,7 @@ from .recoverability import resolve_recoverable_checkpoint
 from .recovery import validate_resume_session_binding
 from .schemas import (
     LongSerialStartWritingRunRequest,
+    NaturalStartWritingRunRequest,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     ShortMediumStartWritingRunRequest,
@@ -115,6 +116,11 @@ class WritingRunCommandRepository:
     async def create_start_with_task(
         self, user_id: str, request: WritingRunStartRequest
     ) -> WritingRunResponse:
+        if isinstance(request, NaturalStartWritingRunRequest):
+            raise ApiError(
+                status_code=409, code="WORKFLOW_NATURAL_ENTRY_UNSUPPORTED",
+                message="Python 回滚实例不能创建耐久自然运行",
+            )
         if isinstance(request, LongSerialStartWritingRunRequest):
             return await self._create_long_serial_start(user_id, request)
         if isinstance(request, StartWritingRunRequest):

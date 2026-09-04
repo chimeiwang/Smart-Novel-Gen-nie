@@ -16,8 +16,14 @@ import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowCallbackRepository;
 import cn.inkforge.core.workflows.application.WorkflowCallbackResources;
 import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
+import cn.inkforge.core.workflows.catalog.WorkflowIntentSelection;
+import cn.inkforge.core.workflows.domain.DurableIntentDecision;
+import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
@@ -55,6 +61,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() {};
     private static final String GENERATION = "generation";
     private static final String REVIEW = "review";
+    private static final String RESOLVE_INTENT = "resolve_intent";
 
     private final CoreDatabase database;
     private final CuidV1Generator ids;
@@ -62,6 +69,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final ObjectMapper json;
     private final Duration leaseDuration;
     private final WorkflowBillingCoordinator billing;
+    private final WorkflowExecutionContextReader contexts;
+    private final java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -70,6 +79,14 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             ObjectMapper json,
             ExecutionRegistry registry,
             Duration leaseDuration) {
+        this(database, ids, clock, json, registry, leaseDuration,
+                new JooqWorkflowExecutionContextReader(json), () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -81,7 +98,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw new IllegalArgumentException("Workflow callback lease 必须为正数");
         }
         this.leaseDuration = leaseDuration;
-        this.billing = new WorkflowBillingCoordinator(ids, json, requiredRegistry);
+        this.billing = new WorkflowBillingCoordinator(ids, json, requiredRegistry, contexts);
+        this.contexts = Objects.requireNonNull(contexts);
+        this.businessPreparation = Objects.requireNonNull(businessPreparation);
     }
 
     @Override
@@ -176,7 +195,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 transaction, locked, "failed", errorCode,
                 locked.run().get("lastEventSequence", Long.class), now);
         String purpose = locked.step().get("purpose", String.class);
-        if (GENERATION.equals(purpose)) {
+        if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)) {
             failRun(transaction, locked, errorCode, false, sequence, now);
         } else if (REVIEW.equals(purpose)) {
             // Reviewer 不可用只产生 failed Evaluation；已有 candidate 仍由其余 Reviewer 按
@@ -286,8 +305,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         if (locked.run().get("cancelRequestedAt", LocalDateTime.class) != null) {
             return receipt(body, ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
         }
-        ExecutionPlanSnapshot.Step frozenStep = frozenStep(
-                locked, executionPlan(locked.run()));
+        ExecutionPlanSnapshot.Step frozenStep = frozenStep(locked);
         Map<String, Object> modelProfile = frozenStep.modelProfile().toMap();
         Map<String, Object> resolvedModel = WorkflowCallbackValues.resolvedModelMap(resolved);
         long sequence = locked.run().get("lastEventSequence", Long.class);
@@ -391,6 +409,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             completeGeneration(transaction, locked, body, usage, now);
         } else if (REVIEW.equals(purpose)) {
             completeReview(transaction, locked, body, usage, now);
+        } else if (RESOLVE_INTENT.equals(purpose)) {
+            completeIntent(transaction, locked, body, usage, now);
         } else {
             throw invalid("执行回调引用了未授权的 Step purpose");
         }
@@ -459,7 +479,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 body.getErrorCode(),
                 locked.run().get("lastEventSequence", Long.class),
                 now);
-        if (GENERATION.equals(purpose)) {
+        if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)) {
             failRun(
                     transaction,
                     locked,
@@ -474,6 +494,161 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid("执行失败引用了未授权的 Step purpose");
         }
         return receipt(body, ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+    }
+
+    private void completeIntent(DSLContext tx, Locked locked, ExecutionStepResult body,
+            WorkflowStepUsage usage, LocalDateTime now) {
+        if (body.getResultKind() != ExecutionStepResult.ResultKindEnum.PROPOSED_COMMAND
+                || body.getProposedCommand() == null || locked.step().get("artifactId", String.class) != null) {
+            throw invalid("意图解析只接受无 Artifact 的 proposed_command");
+        }
+        WorkflowExecutionContext context = executionContext(locked.run());
+        if (context.initialIntentPlan() == null || context.selection() != null) {
+            throw invalid("意图回调必须属于尚未选择业务操作的自然 Run");
+        }
+        Map<String, Object> input = readObject(locked.step().get("input", String.class));
+        requireHash(locked.step().get("inputHash", String.class), input, "resolver input");
+        if (!input.keySet().equals(java.util.Set.of("userInstruction", "clarifications"))
+                || !(input.get("clarifications") instanceof List<?> answers)) {
+            throw invalid("意图解析缺少完整初始指令或有序回答");
+        }
+        Map<String, Object> proposed = WorkflowCallbackValues.proposedCommandMap(body.getProposedCommand());
+        DurableIntentDecision decision;
+        try {
+            WorkflowOutputValidator.validate(frozenStep(locked).outputSchema().jsonSchema(), proposed);
+            decision = DurableIntentDecision.resolve(proposed, context.initialIdentity().workflow(),
+                    context.initialIntentPlan().operationPlans().stream().map(plan -> plan.operation().key())
+                            .collect(java.util.stream.Collectors.toUnmodifiableSet()),
+                    answers.size(), context.initialIntentPlan().maxClarifications());
+        } catch (IllegalArgumentException exception) {
+            throw invalid("意图结果不符合冻结计划或严格输出契约");
+        }
+        String runId = locked.run().get("id", String.class);
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(proposed), null, null, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null,
+                locked.run().get("lastEventSequence", Long.class), now);
+        if (decision.errorCode() != null) {
+            failRun(tx, locked, decision.errorCode(), false, sequence, now);
+            return;
+        }
+        String resolverBundle = locked.step().get("evidenceBundleId", String.class);
+        if (decision.clarification() != null) {
+            var question = new WorkflowIntentQuestion(runId, body.getStepId(), body.getResultHash(), resolverBundle,
+                    decision.clarification().code(), decision.clarification().prompt());
+            String questionId = appendIntentControl(tx, runId, "intent_clarification", "user_confirmation",
+                    question.stored(), resolverBundle, now);
+            persistIntentQuestion(tx, locked, questionId, question, now);
+            sequence = appendEvent(tx, runId, sequence, "clarification_required",
+                    Map.of("clarificationCode", question.clarificationCode(), "prompt", question.prompt(),
+                            "decisionStepId", questionId), "intent:question:" + questionId, now);
+            updateRun(tx, runId, "waiting_user", sequence, null, null, now);
+            return;
+        }
+        ExecutionPlanSnapshot plan = context.initialIntentPlan().requireOperationPlan(decision.operationKey());
+        WorkflowIntentBusinessPreparation preparation = businessPreparation.get();
+        if (preparation == null) throw new IllegalStateException("自然入口的业务准备端口未装配");
+        String instruction = string(input, "userInstruction");
+        if (!answers.isEmpty()) {
+            List<Map<String, Object>> completeAnswers = answers.stream().map(answer -> {
+                Map<String, Object> value = object(answer, "澄清回答");
+                return Map.<String, Object>of("prompt", string(value, "prompt"), "userMessage", string(value, "userMessage"));
+            }).toList();
+            instruction = canonicalJson(Map.of("initialInstruction", instruction, "clarifications", completeAnswers));
+        }
+        Map<String, Object> originalInput = readObject(locked.run().get("input", String.class));
+        WorkflowIntentBusinessPreparation.Prepared prepared;
+        try {
+            prepared = preparation.prepare(locked.run().get("userId", String.class),
+                    locked.run().get("novelId", String.class), locked.run().get("chapterId", String.class),
+                    locked.run().get("writingSessionId", String.class), instruction,
+                    integer(originalInput, "targetWordCount"), plan);
+        } catch (ApiException exception) {
+            // 解析已经实际完成；来源/业务校验拒绝必须成为可见 Run 终态，不能反复拒绝同一份模型结果。
+            // 临时错误、SQL 和未知程序异常仍交给原回调重试，不隐藏失败或伪造业务决定。
+            if (exception.statusCode() >= 500 || exception.statusCode() == 408 || exception.statusCode() == 429) {
+                throw exception;
+            }
+            failRun(tx, locked, exception.code(), false, sequence, now);
+            return;
+        }
+        if (!plan.generator().equals(prepared.initialStep())) {
+            throw invalid("自然业务准备不得替换冻结的生成器");
+        }
+        int version = tx.fetchOne("SELECT max(version) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", runId)
+                .get(0, Integer.class) + 1;
+        var evidence = new JooqWorkflowStartRepository(database, ids, clock, json).appendEvidence(tx, runId, version,
+                plan.generator().evidencePolicy(), prepared.evidenceItems(), now);
+        var selection = new WorkflowIntentSelection(runId, plan.operation().key(), plan.sha256(), body.getStepId(),
+                body.getResultHash(), resolverBundle, "chapter", locked.run().get("chapterId", String.class), "chapter");
+        appendIntentControl(tx, runId, "intent_selection", "persistence", selection.stored(), resolverBundle, now);
+        appendIntentBusinessStep(tx, locked, plan.generator(), prepared.input(), evidence.id(), now);
+        tx.execute("UPDATE public.\"WorkflowRun\" SET \"currentEvidenceBundleId\" = ? WHERE id = ?", evidence.id(), runId);
+        sequence = appendEvent(tx, runId, sequence, "intent_resolved", Map.of("workflow", plan.operation().workflow(),
+                "operation", plan.operation().operation(), "targetType", "chapter", "targetId", selection.targetId(),
+                "confidence", decision.confidence()), "intent:resolved", now);
+        sequence = appendEvent(tx, runId, sequence, "evidence_ready", Map.of("bundleId", evidence.id(),
+                "bundleVersion", evidence.version(), "manifestSha256", evidence.manifestSha256(), "totalBytes", evidence.totalBytes()),
+                "evidence:" + evidence.version(), now);
+        updateRun(tx, runId, "running", sequence, null, null, now);
+    }
+
+    private String appendIntentControl(DSLContext tx, String runId, String purpose, String type,
+            Map<String, Object> input, String bundleId, LocalDateTime now) {
+        String id = ids.next();
+        String hash = ExecutionCanonicalJson.sha256(input);
+        int ordinal = tx.fetchOne("SELECT max(ordinal) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId)
+                .get(0, Integer.class) + 1;
+        tx.execute("""
+                INSERT INTO public."WorkflowStep" (id, "runId", "stepType", status, input, "createdAt", ordinal,
+                  purpose, lane, "attemptCount", "fencingToken", "idempotencyKey", "requestHash", "inputHash",
+                  "evidenceBundleId", "submittedAt", "updatedAt", "completedAt")
+                VALUES (?, ?, CAST(? AS "WorkflowStepType"), CAST('completed' AS "WorkflowStepStatus"), ?, ?, ?,
+                  ?, 'control', 0, 1, ?, ?, ?, ?, ?, ?, ?)
+                """, id, runId, type, canonicalJson(input), now, ordinal, purpose, runId + "." + id, hash, hash,
+                bundleId, now, now, now);
+        return id;
+    }
+
+    private void appendIntentBusinessStep(DSLContext tx, Locked locked, ExecutionPlanSnapshot.Step generator,
+            Map<String, Object> input, String bundleId, LocalDateTime now) {
+        String runId = locked.run().get("id", String.class);
+        String id = ids.next();
+        String idempotencyKey = runId + "." + id;
+        String inputHash = ExecutionCanonicalJson.sha256(input);
+        Record bundle = tx.fetchOne("SELECT id, version, \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?", bundleId, runId);
+        Map<String, Object> request = new LinkedHashMap<>(stepRequestMaterial(locked.run(), id, idempotencyKey,
+                inputHash, bundle, generator.evidencePolicy(), generator.lane(), generator.modelProfile().toMap(),
+                generator.outputSchema().toMap(), generator.stepBudget().budgetMap(), null));
+        request.put("purpose", GENERATION);
+        int ordinal = tx.fetchOne("SELECT max(ordinal) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId)
+                .get(0, Integer.class) + 1;
+        tx.execute("""
+                INSERT INTO public."WorkflowStep" (id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal,
+                  purpose, lane, "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey", "requestHash", "inputHash",
+                  "evidenceBundleId", "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt")
+                VALUES (?, ?, ?, CAST('agent' AS "WorkflowStepType"), CAST('pending' AS "WorkflowStepStatus"), ?, ?, ?,
+                  'generation', ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, runId, generator.modelProfile().profile(), canonicalJson(input), now, ordinal,
+                generator.lane(), now, idempotencyKey, ExecutionCanonicalJson.sha256(request), inputHash, bundleId,
+                generator.modelProfile().profile(), Integer.toString(generator.modelProfile().version()),
+                generator.outputSchema().name(), Integer.toString(generator.outputSchema().version()),
+                json.writeValueAsString(generator.stepBudget().stored()), now, now);
+    }
+
+    private void persistIntentQuestion(DSLContext tx, Locked locked, String questionId, WorkflowIntentQuestion question, LocalDateTime now) {
+        String sessionId = locked.run().get("writingSessionId", String.class);
+        Record session = tx.fetchOne("SELECT \"updatedAt\" FROM public.\"WritingSession\" WHERE id = ? AND \"novelId\" = ? AND \"chapterId\" = ? FOR UPDATE",
+                sessionId, locked.run().get("novelId", String.class), locked.run().get("chapterId", String.class));
+        if (session == null) throw invalid("意图问题的写作会话不存在或归属不一致");
+        Map<String, Object> source = Map.of("engineVersion", 2, "runId", question.runId(), "stepId", questionId,
+                "decisionStepId", questionId, "outcomeType", "clarification", "resultHash", question.resolverResultHash());
+        tx.execute("""
+                INSERT INTO public."WritingMessage" (id, "sessionId", role, "agentId", content, metadata, "createdAt")
+                VALUES (?, ?, 'agent', '编辑', ?, ?, ?)
+                """, ids.next(), sessionId, question.prompt(), WorkflowMessageMetadata.serialize(question.runId(),
+                        "waiting_user", question.prompt(), "编辑", source, json), now);
+        tx.execute("UPDATE public.\"WritingSession\" SET \"updatedAt\" = ? WHERE id = ?",
+                DatabaseTimestamp.next(clock, session.get("updatedAt", LocalDateTime.class)), sessionId);
     }
 
     private void completeGeneration(
@@ -680,7 +855,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("engineVersion", 2);
         source.put("runId", locked.run().get("id", String.class));
-        source.put("operation", locked.run().get("operation", String.class));
+        source.put("operation", executionContext(locked.run()).effectiveOperation());
         source.put("stepId", locked.step().get("id", String.class));
         source.put("modelProfile", frozenStep.modelProfile().profile());
         source.put("resultHash", resultHash);
@@ -1096,7 +1271,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 locked.run().get("input", String.class));
         Map<String, Object> task = new LinkedHashMap<>();
         task.put("workflow", locked.run().get("workflow", String.class));
-        task.put("operation", locked.run().get("operation", String.class));
+        task.put("operation", executionPlan.operation().operation());
         for (String key : List.of(
                 "target",
                 "scope",
@@ -1107,6 +1282,10 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 "selectionEnd",
                 "selectedTextSha256")) {
             if (originalRunInput.containsKey(key)) task.put(key, originalRunInput.get(key));
+        }
+        if (executionContext(locked.run()).initialIntentPlan() != null) {
+            task.put("target", Map.of("type", "chapter", "id", locked.run().get("chapterId", String.class)));
+            task.put("scope", Map.of("kind", "chapter", "chapterId", locked.run().get("chapterId", String.class)));
         }
         Object userInstruction = task.get("userInstruction");
         if (userInstruction != null && !(userInstruction instanceof String)) {
@@ -1398,7 +1577,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         }
         String runId = locked.run().get("id", String.class);
         long generations = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose IN ('generation', 'candidate_patch')", runId).get(0, Long.class);
-        long modelSteps = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"stepType\" = CAST('agent' AS \"WorkflowStepType\")", runId).get(0, Long.class);
+        long modelSteps = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"stepType\" = CAST('agent' AS \"WorkflowStepType\") AND purpose <> 'resolve_intent'", runId).get(0, Long.class);
         if (generations - 1 >= Math.min(1, plan.reviewPolicy().maxAutomaticRevisions())
                 || modelSteps + 1 + plan.reviewers().size() > plan.runBudget().maxModelCalls()) return false;
         String artifactId = locked.step().get("artifactId", String.class);
@@ -1494,7 +1673,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         }
         if (proposals.size() != findingsCount) return null;
         long modifications = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose IN ('generation','candidate_patch')", runId).get(0, Long.class);
-        long modelSteps = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"stepType\" = CAST('agent' AS \"WorkflowStepType\")", runId).get(0, Long.class);
+        long modelSteps = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"stepType\" = CAST('agent' AS \"WorkflowStepType\") AND purpose <> 'resolve_intent'", runId).get(0, Long.class);
         if (modifications - 1 >= Math.min(1, plan.reviewPolicy().maxAutomaticRevisions())
                 || modelSteps + plan.reviewers().size() > plan.runBudget().maxModelCalls()) return null;
         Record revision = tx.fetchOne("""
@@ -1735,7 +1914,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private Locked lock(DSLContext transaction, String runId, String stepId) {
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "novelId", "chapterId", "writingSessionId", input, workflow, operation,
+                SELECT id, "userId", "novelId", "chapterId", "writingSessionId", input, workflow, operation,
+                       "targetType", "targetId",
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "cancelRequestId", "cancelRequestedAt",
                        "lastEventSequence", revision
@@ -1803,8 +1983,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             String requestHash,
             ResolvedModelRef resolvedModel) {
         WorkflowResolvedModel resolved = WorkflowCallbackValues.resolvedModel(resolvedModel);
-        ExecutionPlanSnapshot.Step frozenStep = frozenStep(
-                locked, executionPlan(locked.run()));
+        ExecutionPlanSnapshot.Step frozenStep = frozenStep(locked);
         resolved.requireAuthorizedBy(frozenStep.modelProfile().toDomain());
         Map<String, Object> serialized = WorkflowCallbackValues.resolvedModelMap(resolved);
         String frozenJson = locked.step().get("resolvedModelJson", String.class);
@@ -1940,13 +2119,23 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     }
 
     private ExecutionPlanSnapshot executionPlan(Record run) {
-        ExecutionPlanSnapshot result = ExecutionPlanSnapshot.fromStored(
+        return executionContext(run).requireBusinessPlan();
+    }
+
+    private WorkflowExecutionContext executionContext(Record run) {
+        return contexts.load(database.dsl(), new WorkflowExecutionContext.RunIdentity(
+                run.get("id", String.class), run.get("workflow", String.class), run.get("operation", String.class),
+                run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
+                run.get("targetType", String.class), run.get("targetId", String.class)),
                 readObject(run.get("modelPolicyJson", String.class)));
-        result.requireOperation(
-                run.get("workflow", String.class),
-                run.get("operation", String.class),
-                run.get("operationCatalogVersion", String.class));
-        return result;
+    }
+
+    private ExecutionPlanSnapshot.Step frozenStep(Locked locked) {
+        return executionContext(locked.run()).requireStep(
+                locked.step().get("purpose", String.class), locked.step().get("lane", String.class),
+                locked.step().get("modelProfile", String.class), Integer.parseInt(locked.step().get("modelProfileVersion", String.class)),
+                locked.step().get("outputSchema", String.class), Integer.parseInt(locked.step().get("outputSchemaVersion", String.class)),
+                readObject(locked.step().get("budgetJson", String.class)));
     }
 
     private ExecutionPlanSnapshot.Step frozenStep(
@@ -2040,7 +2229,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 runId);
     }
 
-    private static Map<String, Object> stepRequestMaterial(
+    private Map<String, Object> stepRequestMaterial(
             Record run,
             String stepId,
             String idempotencyKey,
@@ -2059,7 +2248,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         result.put("idempotencyKey", idempotencyKey);
         result.put("inputHash", inputHash);
         result.put("workflow", run.get("workflow", String.class));
-        result.put("operation", run.get("operation", String.class));
+        result.put("operation", executionContext(run).effectiveOperation());
         result.put("purpose", REVIEW);
         result.put("lane", lane);
         result.put(
@@ -2072,7 +2261,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         result.put("modelProfile", modelProfile);
         result.put("outputSchema", outputSchema);
         result.put("budget", budget);
-        result.put("artifact", Map.of(
+        result.put("artifact", artifact == null ? null : Map.of(
                 "artifactId", artifact.id(), "artifactRevision", artifact.revision()));
         return Collections.unmodifiableMap(result);
     }

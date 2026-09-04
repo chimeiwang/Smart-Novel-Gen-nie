@@ -1,6 +1,8 @@
 package cn.inkforge.core.writing.application;
 
 import cn.inkforge.contracts.api.LongSerialStartWritingRunRequest;
+import cn.inkforge.contracts.api.NaturalStartWritingRunRequest;
+import cn.inkforge.core.platform.text.TextLength;
 import cn.inkforge.contracts.api.ShortMediumStartWritingRunRequest;
 import cn.inkforge.contracts.api.StartWritingRunRequest;
 import cn.inkforge.core.platform.http.ApiException;
@@ -66,6 +68,8 @@ public final class WritingRunStartRequestParser {
             "selectionAttachmentMetadata",
             "targetWordCount",
             "userInstruction");
+    private static final Set<String> NATURAL_FIELDS = Set.of("inputMode", "workflow", "clientRequestId",
+            "novelId", "chapterId", "writingSessionId", "userInstruction", "targetWordCount");
     private static final Set<String> SHORT_OPERATIONS = Set.of(
             "generate_outline", "generate_manuscript", "replace_selection", "full_check");
     private static final Set<String> LONG_OPERATIONS = Set.of(
@@ -98,6 +102,21 @@ public final class WritingRunStartRequestParser {
         JsonNode value = Objects.requireNonNull(body, "写作启动请求体不能为空").value();
         if (!value.isObject()) {
             throw validation("请求体必须是 JSON 对象");
+        }
+        if (value.has("inputMode")) {
+            exactFields(value, NATURAL_FIELDS);
+            requiredConst(value, "inputMode", "natural");
+            requiredConst(value, "workflow", "long_serial");
+            requiredText(value, "clientRequestId", 16, 128);
+            for (String field : List.of("novelId", "chapterId", "writingSessionId")) requiredText(value, field, 1, 256);
+            if (TextLength.count(requiredText(value, "userInstruction", 1, Integer.MAX_VALUE)) == 0) {
+                throw validation("自然请求的 userInstruction 不能为空白");
+            }
+            if (value.has("targetWordCount")) requiredInteger(value, "targetWordCount", 1, 10_000_000);
+            NaturalStartWritingRunRequest request = read(value, NaturalStartWritingRunRequest.class);
+            if (request.getTargetWordCount() == null) request.setTargetWordCount(4000);
+            validateBean(request);
+            return new ParsedWritingRunStartRequest.Natural(request);
         }
         JsonNode workflow = value.get("workflow");
         if (workflow == null) {

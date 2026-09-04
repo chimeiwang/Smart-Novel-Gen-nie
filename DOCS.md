@@ -25,6 +25,8 @@
 - Java Core 单体已于 2026-08-26 完成生产切换并处于观察期；生产不得双 Core 或双写，Python Core 只按
   已冻结流程用于整镜像回滚。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
+- 自然入口、同 Run 澄清及 Web/CLI 适配以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准；
+  本轮只更新仓内源码与契约，不自动更新固定安装包或扩大 Operator 允许范围，不能据此声称生产生效。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口；普通 Redis 承担可重建队列/认证事实，独立 AOF
   execution Redis 只承担当次模型调用边界和未送达终态 journal。
 - 生产继续使用个人项目既有的 `.github/workflows/build.yml` 和 `scripts/deploy-production.sh`：CI 通过后由

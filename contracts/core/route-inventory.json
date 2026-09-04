@@ -3295,7 +3295,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 232,
+      "sourceLine": 234,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3321,7 +3321,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 219,
+      "sourceLine": 221,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3343,7 +3343,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 270,
+      "sourceLine": 272,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3369,7 +3369,33 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 293,
+      "sourceLine": 312,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "clarify_writing_run",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post",
+      "path": "/api/v1/writing/runs/{task_id}/clarification",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 295,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3393,7 +3419,7 @@
         "redis_stream_subscription"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 307,
+      "sourceLine": 326,
       "statusCode": null,
       "transaction": "stream"
     },
@@ -3419,7 +3445,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 279,
+      "sourceLine": 281,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3441,7 +3467,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 161,
+      "sourceLine": 163,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3467,7 +3493,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 171,
+      "sourceLine": 173,
       "statusCode": 201,
       "transaction": "write"
     },
@@ -3493,7 +3519,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 199,
+      "sourceLine": 201,
       "statusCode": 204,
       "transaction": "write"
     },
@@ -3515,7 +3541,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 182,
+      "sourceLine": 184,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3541,7 +3567,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 189,
+      "sourceLine": 191,
       "statusCode": null,
       "transaction": "write"
     },
@@ -3567,7 +3593,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 205,
+      "sourceLine": 207,
       "statusCode": 201,
       "transaction": "write"
     },

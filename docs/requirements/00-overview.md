@@ -26,7 +26,7 @@
 | 项目 | 当前数量 | 口径 |
 | --- | ---: | --- |
 | Web 路由页面 | 9 | Next.js `page.tsx`；另有 1 个根布局 |
-| Core 公共 API | 118 个路径、151 个操作 | 运行时 OpenAPI；含默认关闭的 2 个手机号认证操作和有界审核摘要查询 |
+| Core 公共 API | 119 个路径、152 个操作 | 运行时 OpenAPI；含受配置门禁的 2 个手机号认证操作、有界审核摘要查询与耐久澄清回答 |
 | Core 内部操作 | 33 | 不进入公共 OpenAPI 的 `/internal/v1/**`；新增 3 个耐久 Workflow 回调 |
 | CLI 命令 | 125 | CLI 注册表中的具体命令 |
 | 长篇核心 Agent | 5 | 设定、剧情、写作、校验、编辑 |
@@ -698,7 +698,7 @@ CLI 的产品规则：
 - CLI 不绕过归属、Diff 确认、ReviewArtifact、CAS、素材权利或视频开关；
 - 停止 watcher 只停止本地观察，不取消服务端任务。
 
-CLI 当前不是 151 个公共 API 的逐接口镜像，明确缺口包括：
+CLI 当前不是 152 个公共 API 的逐接口镜像，明确缺口包括：
 
 - 不提供注册命令；
 - 不提供积分余额、用量和任务 token 查询命令；
@@ -731,18 +731,25 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 完整 125 命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
 `tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。
 
+自然入口在当前分支复用 `long.agent.start` 的 `inputMode=natural` 和 `long.task.resume` 的
+`inputMode=clarification`，不新增命令。Web 普通新消息新建 Run，澄清只回答同一 Run 的当前问题，
+草案返工仍走带候选 revision 的决定接口；旧 V1 恢复保留为明确动作。澄清 watcher 输出完整问题和
+`decisionStepId/revision`，不虚构 Artifact。两份受限 Operator 继续拒绝这两种输入模式，45 命令及三种显式
+Operation 不变；本轮未更新已安装固定 JAR 或 Skill，也未部署服务器。源码、完整跨进程验收与生产开放
+必须分别判断，实施状态以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准。
+
 ## 11. 接口与数据追溯
 
 ### 11.1 公共 API 功能组
 
-当前 151 个公共操作按 OpenAPI tag 分布如下。数量用于检查迁移遗漏，不等于每个操作都是独立的用户功能。
+当前 152 个公共操作按 OpenAPI tag 分布如下。数量用于检查迁移遗漏，不等于每个操作都是独立的用户功能。
 
 | 功能组 | 操作数 | 产品归属 |
 | --- | ---: | --- |
 | `auth` | 6 | 注册、登录、登出、当前用户、手机号发码与核验 |
 | `health` | 2 | 存活和就绪 |
 | 中短篇版本 | 7 | 预览、提交、列表、Diff、详情、采用、恢复 |
-| 写作会话 | 12 | 会话、消息、任务、SSE、恢复和取消 |
+| 写作会话 | 13 | 会话、消息、任务、SSE、澄清回答、恢复和取消 |
 | 参考资料 | 6 | CRUD、重建索引和向量查询 |
 | 大纲 | 10 | 文本大纲、剧情进度、大纲节点和伏笔 |
 | 小说 | 10 | 列表、创建、详情、简介、工作区聚合和文风应用 |
@@ -757,7 +764,7 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 | 计费 | 3 | 余额、流水、用量和任务归集 |
 | 质量检查 | 3 | 查询、更新和运行 |
 | 逐镜视频生成 | 6 | 渲染任务、重试、Take 下载和确认 |
-| **合计** | **151** | 118 个路径 |
+| **合计** | **152** | 119 个路径 |
 
 ### 11.2 Core 内部操作
 

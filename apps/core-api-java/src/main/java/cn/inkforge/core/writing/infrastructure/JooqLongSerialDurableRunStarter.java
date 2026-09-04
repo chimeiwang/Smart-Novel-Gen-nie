@@ -1,23 +1,34 @@
 package cn.inkforge.core.writing.infrastructure;
 
 import cn.inkforge.contracts.api.LongSerialStartWritingRunRequest;
+import cn.inkforge.contracts.api.NaturalStartWritingRunRequest;
 import cn.inkforge.contracts.api.WorkflowCurrentStepSnapshot;
 import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
+import cn.inkforge.core.platform.idempotency.CommandIdempotency;
+import cn.inkforge.core.platform.text.TextLength;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
+import cn.inkforge.core.writing.domain.WritingRunCursor;
+import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
+import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowRunStartResult;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
+import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
+import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation.Prepared;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -31,9 +42,13 @@ import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
 
 /** 按 Catalog key 分派长篇确定性 Evidence Planner 的 V2 Run 入口。 */
 final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStarter {
+
+    private static final Set<String> NATURAL_OPERATIONS = Set.of(
+            "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter");
 
     private final CoreDatabase database;
     private final LongSerialRunAssembler assembler;
@@ -46,6 +61,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
     private final Map<String, EvidencePlanner> planners;
     private final ChapterPlanEvidenceReader chapterPlanningSources;
     private final ChapterWritingEvidenceReader chapterWritingSources;
+    private final WorkflowExecutionContextReader executionContexts;
 
     JooqLongSerialDurableRunStarter(
             CoreDatabase database,
@@ -57,6 +73,13 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
             ObjectMapper json,
             ChapterPlanEvidenceReader chapterPlanningSources,
             ChapterWritingEvidenceReader chapterWritingSources) {
+        this(database, assembler, workflows, registry, ids, clock, json, chapterPlanningSources, chapterWritingSources, null);
+    }
+
+    JooqLongSerialDurableRunStarter(CoreDatabase database, LongSerialRunAssembler assembler,
+            DurableWorkflowService workflows, ExecutionRegistry registry, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ChapterPlanEvidenceReader chapterPlanningSources,
+            ChapterWritingEvidenceReader chapterWritingSources, WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.assembler = Objects.requireNonNull(assembler);
         this.workflows = Objects.requireNonNull(workflows);
@@ -66,6 +89,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         this.json = Objects.requireNonNull(json);
         this.chapterPlanningSources = Objects.requireNonNull(chapterPlanningSources);
         this.chapterWritingSources = Objects.requireNonNull(chapterWritingSources);
+        this.executionContexts = executionContexts;
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
         this.planners = Map.of(
                 "long_serial.answer_question", this::planAnswerQuestion,
@@ -78,6 +102,90 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
     public Set<String> supportedOperationKeys() {
         return planners.keySet();
     }
+
+    public Prepared prepare(String userId, String novelId, String chapterId, String writingSessionId,
+            String userInstruction, int targetWordCount, ExecutionPlanSnapshot operationPlan) {
+        if (!NATURAL_OPERATIONS.contains(operationPlan.operation().key()) || writingSessionId == null
+                || userInstruction == null || TextLength.count(userInstruction) == 0
+                || targetWordCount < 1 || targetWordCount > 10_000_000) {
+            throw new ApiException(422, "VALIDATION_ERROR", "自然入口的业务准备身份不完整");
+        }
+        return database.transactionResult(transaction -> {
+            requireLongSerialOwner(transaction, userId, novelId, chapterId, writingSessionId);
+            // 仅复用确定性 Evidence Planner；绝不调用 startFresh，也不重新解析当前 Registry。
+            var request = new LongSerialStartWritingRunRequest()
+                    .novelId(novelId).chapterId(chapterId).writingSessionId(writingSessionId)
+                    .operation(LongSerialStartWritingRunRequest.OperationEnum.fromValue(operationPlan.operation().operation()))
+                    .userInstruction(userInstruction).targetWordCount(targetWordCount);
+            PreparedStart prepared = planners.get(operationPlan.operation().key()).prepare(transaction, userId, request, null);
+            return new Prepared(prepared.input(), prepared.evidenceItems(), operationPlan.generator());
+        });
+    }
+
+    @Override
+    public WritingRunV2Response replayNatural(String userId, NaturalStartWritingRunRequest request) {
+        NaturalInput normalized = normalizeNatural(request);
+        return database.transactionResult(transaction -> {
+            WritingRunV2Response replay = replay(transaction, userId, request.getClientRequestId(), normalized.fingerprint());
+            if (replay == null) throw new IllegalStateException("既有自然 Run 不可见，禁止重新创建");
+            return replay;
+        });
+    }
+
+    @Override
+    public WritingRunV2Response startNatural(String userId, NaturalStartWritingRunRequest request) {
+        NaturalInput normalized = normalizeNatural(request);
+        if (executionContexts == null) throw new IllegalStateException("自然入口的有效执行上下文未装配");
+        return database.transactionResult(transaction -> {
+            WritingRunV2Response replay = replay(transaction, userId, request.getClientRequestId(), normalized.fingerprint());
+            if (replay != null) return replay;
+            requireLongSerialOwner(transaction, userId, request.getNovelId(), request.getChapterId(), request.getWritingSessionId());
+            List<String> operationKeys = registry.enabledOperationKeys("long_serial", false).stream()
+                    .filter(NATURAL_OPERATIONS::contains).sorted().toList();
+            if (operationKeys.isEmpty()) throw new ApiException(409, "DURABLE_NATURAL_ENTRY_NOT_ENABLED", "没有已授权的自然入口操作");
+            IntentExecutionPlanSnapshot plan = IntentExecutionPlanSnapshot.freeze(registry, operationKeys);
+            var system = registry.resolveSystemPurpose("resolve_intent");
+            Record chapter = transaction.fetchOne("SELECT title, \"updatedAt\" FROM public.\"Chapter\" WHERE id = ? AND \"novelId\" = ?",
+                    request.getChapterId(), request.getNovelId());
+            List<Map<String, Object>> available = operationKeys.stream().map(key -> {
+                String operation = plan.requireOperationPlan(key).operation().operation();
+                String description = switch (operation) {
+                    case "answer_question" -> "回答当前章节的问题";
+                    case "plan_chapter" -> "生成当前章节的剧情规划";
+                    case "write_chapter" -> "生成当前章节的完整正文草案";
+                    default -> throw new IllegalStateException("自然入口包含未支持操作");
+                };
+                return Map.<String, Object>of("operation", operation, "description", description,
+                        "targetType", "chapter", "scopeKind", "chapter");
+            }).toList();
+            Map<String, Object> intentContext = Map.of("workflow", "long_serial", "novelId", request.getNovelId(),
+                    "chapterId", request.getChapterId(), "chapterTitle", chapter.get("title", String.class), "availableOperations", available);
+            var initial = new WorkflowInitialStepPlan("resolve_intent", system.purpose().lane(),
+                    Map.of("userInstruction", request.getUserInstruction(), "clarifications", List.of()),
+                    system.modelProfile(), system.stepBudget(), system.outputSchema());
+            WorkflowRunStartResult result = workflows.startFresh(new WorkflowStartPlan(userId, request.getClientRequestId(),
+                    normalized.fingerprint(), "long_serial", null, registry.catalogVersion(), "chat", request.getNovelId(),
+                    request.getChapterId(), request.getWritingSessionId(), "chapter", request.getChapterId(), normalized.body(),
+                    system.purpose().evidencePolicy(), List.of(new WorkflowEvidenceItemPlan("intent_context", request.getChapterId(),
+                            true, null, DatabaseTimestamp.api(chapter.get("updatedAt", LocalDateTime.class)), null,
+                            intentContext, null, null, Map.of("role", "intent_context"))), plan.runBudget(), null, initial, plan));
+            persistUserMessage(transaction, result, request.getUserInstruction(), null);
+            WritingRunV2Response response = replay(transaction, userId, request.getClientRequestId(), normalized.fingerprint());
+            if (response == null) throw new IllegalStateException("自然 Run 创建后不可见");
+            return response;
+        });
+    }
+
+    private NaturalInput normalizeNatural(NaturalStartWritingRunRequest request) {
+        Map<String, Object> body = Map.of("inputMode", "natural", "workflow", "long_serial",
+                "novelId", request.getNovelId(), "chapterId", request.getChapterId(),
+                "writingSessionId", request.getWritingSessionId(), "userInstruction", request.getUserInstruction(),
+                "targetWordCount", request.getTargetWordCount() == null ? 4000 : request.getTargetWordCount());
+        return new NaturalInput(body, CommandIdempotency.requestFingerprint("start",
+                Map.of("novelId", request.getNovelId(), "chapterId", request.getChapterId()), body, json));
+    }
+
+    private record NaturalInput(Map<String, Object> body, String fingerprint) {}
 
     @Override
     public WritingRunV2Response replayExisting(
@@ -367,7 +475,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 """
                 SELECT id, "chapterId", workflow, operation, status::text AS status,
                        "operationCatalogVersion", "requestHash", "modelPolicyJson",
-                       "lastEventSequence", revision
+                       "lastEventSequence", revision, "targetType", "targetId", "cancelRequestedAt", "errorCode"
                 FROM public."WorkflowRun"
                 WHERE "engineVersion" = 2 AND "userId" = ? AND "idempotencyKey" = ?
                 FOR UPDATE
@@ -380,6 +488,14 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     409,
                     "IDEMPOTENCY_KEY_REUSED",
                     "同一 clientRequestId 已用于不同 Agent 请求");
+        }
+        if (IntentExecutionPlanSnapshot.PLAN_VERSION.equals(json.readTree(run.get("modelPolicyJson", String.class))
+                .path("planVersion").asText())) {
+            if (executionContexts == null) throw new IllegalStateException("自然 Run 的重放上下文未装配");
+            // 自然 Run 会从问题推进到业务 Artifact；重放与 GET 必须共用完整权威投影。
+            return (WritingRunV2Response) new JooqWritingRunQueryRepository(database,
+                    new WritingRunStatusProjector(json, new WritingRunOutcomeProjector(), clock),
+                    new WritingRunCursor(json), json, true, executionContexts).getPublic(userId, run.get("id", String.class));
         }
         List<Record> activeStepRecords = transaction.fetch(
                 """
@@ -410,13 +526,18 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 ORDER BY step.ordinal ASC, step.id ASC
                 """,
                 run.get("id", String.class));
-        return response(run, activeStepRecords);
+        return response(transaction, run, activeStepRecords);
     }
 
     private static void requireLongSerialOwner(
             DSLContext transaction,
             String userId,
             LongSerialStartWritingRunRequest request) {
+        requireLongSerialOwner(transaction, userId, request.getNovelId(), request.getChapterId(), nullable(request.getWritingSessionId()));
+    }
+
+    private static void requireLongSerialOwner(DSLContext transaction, String userId,
+            String novelId, String chapterId, String writingSessionId) {
         // 公共 Router 已按 Novel -> Chapter 取得首轮锁；这里即使被单独调用也保持同序，
         // 再锁附属 WritingBible 与可选 Session，不能从 Chapter 回头等待 Novel。
         Record novel = transaction.fetchOne(
@@ -425,7 +546,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 WHERE id = ? AND "userId" = ?
                 FOR UPDATE
                 """,
-                request.getNovelId(),
+                novelId,
                 userId);
         if (novel == null) {
             throw new ApiException(404, "NOVEL_NOT_FOUND", "小说不存在");
@@ -435,8 +556,8 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 SELECT id FROM public."Chapter"
                 WHERE id = ? AND "novelId" = ? FOR UPDATE
                 """,
-                request.getChapterId(),
-                request.getNovelId());
+                chapterId,
+                novelId);
         if (chapter == null) {
             throw new ApiException(404, "CHAPTER_NOT_FOUND", "章节不存在");
         }
@@ -447,14 +568,14 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 WHERE "novelId" = ?
                 FOR UPDATE
                 """,
-                request.getNovelId());
+                novelId);
         if (bible == null) {
             throw new ApiException(404, "NOVEL_NOT_FOUND", "小说不存在");
         }
         if (!"long_serial".equals(bible.get("profile", String.class))) {
             throw new ApiException(409, "LONG_WORKFLOW_MISMATCH", "目标小说不是长篇作品");
         }
-        String sessionId = nullable(request.getWritingSessionId());
+        String sessionId = writingSessionId;
         if (sessionId != null) {
             Record session = transaction.fetchOne(
                     """
@@ -463,8 +584,8 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     FOR UPDATE
                     """,
                     sessionId,
-                    request.getNovelId(),
-                    request.getChapterId());
+                    novelId,
+                    chapterId);
             if (session == null) {
                 throw new ApiException(
                         409,
@@ -507,13 +628,14 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 .currentStep(step);
     }
 
-    private WritingRunV2Response response(Record run, List<Record> activeStepRecords) {
-        ExecutionPlanSnapshot executionPlan =
-                stepSnapshots.executionPlan(run.get("modelPolicyJson", String.class));
-        executionPlan.requireOperation(
-                run.get("workflow", String.class),
-                run.get("operation", String.class),
-                run.get("operationCatalogVersion", String.class));
+    private WritingRunV2Response response(DSLContext transaction, Record run, List<Record> activeStepRecords) {
+        Map<String, Object> initial = json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<>() {});
+        var identity = new WorkflowExecutionContext.RunIdentity(run.get("id", String.class), run.get("workflow", String.class),
+                run.get("operation", String.class), run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
+                run.get("targetType", String.class), run.get("targetId", String.class));
+        WorkflowExecutionContext executionPlan = executionContexts == null
+                ? WorkflowExecutionContext.fromStored(initial, null, null, identity)
+                : executionContexts.load(transaction, identity, initial);
         List<WorkflowCurrentStepSnapshot> activeSteps = activeStepRecords.stream()
                 .map(step -> stepSnapshot(executionPlan, step))
                 .toList();
@@ -524,7 +646,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         WorkflowCurrentStepSnapshot current = activeSteps.isEmpty()
                 ? null
                 : activeSteps.getFirst();
-        return new WritingRunV2Response(
+        WritingRunV2Response response = new WritingRunV2Response(
                         activeSteps,
                         run.get("chapterId", String.class),
                         null,
@@ -536,12 +658,17 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                         WritingRunV2Response.StatusEnum.fromValue(status),
                         run.get("id", String.class),
                         run.get("workflow", String.class))
-                .operation(run.get("operation", String.class))
-                .currentStep(current);
+                .operation(executionPlan.effectiveOperation())
+                .currentStep(current)
+                .cancelRequestedAt(DatabaseTimestamp.api(run.get("cancelRequestedAt", LocalDateTime.class)));
+        if (executionPlan.initialIntentPlan() != null && executionContexts != null) {
+            response.clarification(executionContexts.pendingClarification(transaction, run.get("id", String.class), status));
+        }
+        return response;
     }
 
     private WorkflowCurrentStepSnapshot stepSnapshot(
-            ExecutionPlanSnapshot executionPlan, Record step) {
+            WorkflowExecutionContext executionPlan, Record step) {
         String lane = step.get("lane", String.class);
         if ("control".equals(lane)) {
             return stepSnapshots.controlStep(

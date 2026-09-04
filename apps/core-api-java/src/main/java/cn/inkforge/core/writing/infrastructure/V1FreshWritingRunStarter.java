@@ -2,6 +2,7 @@ package cn.inkforge.core.writing.infrastructure;
 
 import cn.inkforge.contracts.api.WritingRunStartResponse;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
 import cn.inkforge.core.writing.application.WritingCommandRepository;
@@ -30,6 +31,9 @@ final class V1FreshWritingRunStarter implements WritingRunStarter {
     @Override
     public WritingRunStartResponse start(
             String userId, ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural) {
+            throw new ApiException(409, "DURABLE_NATURAL_ENTRY_NOT_ENABLED", "自然请求需要已授权的耐久执行入口");
+        }
         String clientRequestId = RoutingWritingRunStarter.clientRequestId(request);
         CommandIdempotencyStore.Resolution existing = database.transactionResult(
                 transaction -> idempotency.resolve(

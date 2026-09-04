@@ -32,6 +32,30 @@ class WatchCommandsTest {
     private final JsonMapper json = JsonMapper.builder().build();
 
     @Test
+    void 待澄清观察返回完整问题而不是要求Artifact() {
+        WatchApi api = new WatchApi(json);
+        ObjectNode snapshot = (ObjectNode) v2Status("waiting_user", null, 8);
+        snapshot.put("revision", 3);
+        snapshot.set("clarification", json.readTree("""
+                {"clarificationCode":"uncertain","decisionStepId":"decision-1","prompt":"  规划还是正文？\\r\\n  "}
+                """));
+        api.response(snapshot);
+        Invocation result = invoke("long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+        assertThat(result.exit()).isZero();
+        JsonNode frame = result.frames().getLast();
+        assertThat(frame.path("waitReason").asText()).isEqualTo("clarification");
+        assertThat(frame.path("decisionStepId").asText()).isEqualTo("decision-1");
+        assertThat(frame.path("prompt").asText()).isEqualTo("  规划还是正文？\r\n  ");
+        assertThat(frame.path("revision").asInt()).isEqualTo(3);
+        assertThat(frame.has("artifactId")).isFalse();
+        WatchApi invalidApi = new WatchApi(json);
+        snapshot.set("artifact", json.readTree("{\"artifactId\":\"artifact-1\"}"));
+        invalidApi.response(snapshot);
+        assertThat(invoke("long.task.watch", "{\"taskId\":\"t/1\"}", invalidApi, new FakeClock()).exit())
+                .isEqualTo(5);
+    }
+
+    @Test
     void 短篇Agent观察在SSE断线后携带游标重连并读取终态() {
         WatchApi api = new WatchApi(json);
         api.stream(

@@ -24,6 +24,7 @@
 | `specs/2026-09-01-durable-agent-v2-operator-skill-update.md` | CLI 变化、V1/V2 结果恢复与 Operator Skill 更新清单 |
 | `specs/2026-09-04-personal-durable-agent-release-scope.md` | 个人项目信任模型、最小发布流程与退役企业控制面清单 |
 | `specs/2026-09-04-java-cli-operator-cutover.md` | macOS 两份 Operator Skill 的 Java CLI 实际入口、配置升级与验证 |
+| `specs/2026-09-04-durable-natural-language-entry.md` | 普通新消息、同 Run 澄清、草案返工的持久化与 Web/CLI 分流 |
 | `../tools/inkforge-cli-java/README.md` | Java CLI 构建、Skill 安装入口与 Python 对照范围 |
 | `DURABLE_AGENT_V2_ROLLOUT.md` | Durable Agent V2 人工迁移、contract 复验、allowlist canary 与回滚手册 |
 | `JAVA_CORE_CUTOVER.md` | Java Core 单服务生产切换、验证和历史 Python 回退手册 |
