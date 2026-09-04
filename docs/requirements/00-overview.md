@@ -722,6 +722,12 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 生产 Operator 当前只支持无认证 HTTP 代理；TLS、SOCKS 或带认证代理明确拒绝，不会自动改为直连，
 具体环境变量规则见 Java CLI 文档。本地回环始终直连。
 
+当前工作分支的正文写作 V2 接入沿用 `long.agent.start` 与草案决定命令，不新增 CLI 命令。
+`long.artifact.approve` 只对 `write_chapter` 的现有章节正文候选开放 `editedContent` / `editedContentFile`；
+规划不得提交编辑字段，选区只接受 `editedReplacement`。源码变更、已安装固定 JAR 和服务器开放状态分别验收，
+本轮进度及 Skill 更新示例见 `docs/specs/2026-09-04-durable-chapter-writing.md` 和
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。
+
 完整 125 命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
 `tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。
 

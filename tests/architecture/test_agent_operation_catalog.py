@@ -237,6 +237,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
     assert enabled_keys == {
         "long_serial.answer_question",
         "long_serial.plan_chapter",
+        "long_serial.write_chapter",
         "long_serial.rewrite_chapter_selection",
     }
     answer = next(
@@ -488,6 +489,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
     assert [operation["key"] for operation in enabled] == [
         "long_serial.answer_question",
         "long_serial.plan_chapter",
+        "long_serial.write_chapter",
         "long_serial.rewrite_chapter_selection",
     ]
     for operation in enabled:
@@ -564,6 +566,13 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert scene["required"] == ["goal"]
             assert "order" not in scene["properties"]
             assert "beatCount" not in output_schema["jsonSchema"]["properties"]
+        elif operation["key"] == "long_serial.write_chapter":
+            assert output_schema["jsonSchema"]["required"] == ["summary", "content"]
+            assert set(output_schema["jsonSchema"]["properties"]) == {"summary", "content"}
+            assert output_schema["jsonSchema"]["properties"]["summary"]["maxLength"] == 1000
+            assert "maxLength" not in output_schema["jsonSchema"]["properties"]["content"]
+            assert "candidatePatch" not in finding_schema["required"]
+            assert finding_schema["properties"]["candidatePatch"]["additionalProperties"] is False
         else:
             expected_output_field = (
                 "answer"
@@ -707,7 +716,10 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
 
     for key in CHAPTER_DRAFT_OPERATION_KEYS:
         budget = operations[key]["runBudgetProfile"]
-        assert budget["maxPromptCacheMissTokens"] <= 60000
+        if key == "long_serial.write_chapter":
+            assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 180000
+        else:
+            assert budget["maxPromptCacheMissTokens"] <= 60000
         assert budget["maxReasoningTokens"] <= 16000
         assert budget["maxVisibleOutputTokens"] <= 24000
 

@@ -49,7 +49,7 @@ ReviewArtifact 应用，也不得反向覆盖正式镜头或提示词。
 
 ## 长篇选区 ReviewArtifact 应用
 
-选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（V1 CLI 仍可使用既有 `editedReplacementFile`）；V2 选区的公共请求只允许 `editedReplacement`，不得提交 `editedContent`、`selectedUpdateRefs` 或改写 source/prefix/suffix。全文章节/大纲草案继续使用 V1 `editedContent`。V2 选区物化只接受 `long_serial/rewrite_chapter_selection/chapter_draft`，不得把其他 kind 当作 replacement；章节规划使用下文独立的结构化 Beat Plan 应用链。
+选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（CLI 可使用既有 `editedReplacementFile`）；V2 选区的公共请求只允许 `editedReplacement`，不得提交 `editedContent`、`selectedUpdateRefs` 或改写 source/prefix/suffix。V1 全文章节/大纲继续使用 `editedContent`；本分支新增的 V2 `write_chapter` 也使用完整 `editedContent`，不能因此向选区或规划开放该字段。V2 选区物化只接受 `long_serial/rewrite_chapter_selection/chapter_draft`，不得把其他 kind 当作 replacement；章节规划使用下文独立的结构化 Beat Plan 应用链。
 
 操作者在 approve 前必须先 GET Artifact，读取完整 diff（包括选区前后正文、replacement 和来源绑定），对该 diff 做一次独立确认，再使用稳定 `clientRequestId`、当前 `expectedRevision` 提交决定；V2 中该 wire 字段规范解释为 `expectedArtifactRevision`。Core 仍执行 sourceBinding preflight、幂等 fingerprint 与 revision/source CAS 校验。V1 返回受理后再次 GET Artifact/任务状态核对最终结果；V2 决定响应直接返回 PostgreSQL 权威 `WritingRunV2Response`，断流或结果不确定时仍按 `runId` 回读，不得从 HTTP 状态或前端乐观状态伪造完成。
 
@@ -342,6 +342,13 @@ SceneBeat 字段：
 该类型不接受全文或选区编辑字段，修改须通过带非空 `userMessage` 的 revise；discard 保留 V2 审计记录。
 最多一次自动完整返工后仍有问题，或 Reviewer 不可用时，保留候选交给作者，不把基础设施故障解释为内容不通过。
 输入、返回与实际阶段验证见 `docs/specs/2026-09-04-durable-chapter-planning.md`。
+
+V2 正文写作的完整候选每个 revision 只规范保存一份正文；详情从冻结 Evidence 和候选重建完整差异。
+approve 必须复验同一来源和当前 revision，编辑批准先形成新的用户编辑 revision，再在同一事务应用全文。
+其 `editedContent` 与选区的 `editedReplacement` 互斥，revise/discard 均不得携带编辑字段；规划不开放两类编辑。
+采用正文会使章节回到 drafting、清空完成时间并失效旧一致性终检及活动质量运行，但不改其他创作数据层。
+双角色复审、零模型局部 patch、一次自动完整返工和逐 Step 计费遵循
+`docs/specs/2026-09-04-durable-chapter-writing.md`；本分支实现不表示生产已启用。
 
 ## WorkflowRun 与调试
 

@@ -481,6 +481,98 @@ class ChatAnswerOutput(_StrictModel):
         return self
 
 
+_CHAPTER_TEXT_PATTERN = (
+    r"[^\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a"
+    r"\u2028\u2029\u202f\u205f\u3000\ufeff]"
+)
+_IGNORED_CHAPTER_CHARACTERS = frozenset(
+    chr(codepoint)
+    for codepoint in (
+        *range(0x0009, 0x000E),
+        0x0020,
+        0x0085,
+        0x00A0,
+        0x1680,
+        *range(0x2000, 0x200B),
+        0x2028,
+        0x2029,
+        0x202F,
+        0x205F,
+        0x3000,
+        0xFEFF,
+    )
+)
+
+
+def count_chapter_text_length(content: str) -> int:
+    """严格对齐 Web countTextLength/Core TextLength，不使用更宽泛的 Python 空白集。"""
+
+    return sum(character not in _IGNORED_CHAPTER_CHARACTERS for character in content)
+
+
+class ChapterDraftOutput(_StrictModel):
+    """完整正文与说明是唯一模型语义输出，不截断、不复用旧标记协议。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    summary: str = Field(min_length=1, max_length=1000, pattern=_CHAPTER_TEXT_PATTERN)
+    content: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class ChapterDraftResult(ChapterDraftOutput):
+    contentSha256: Sha256
+    wordCount: StrictPositiveInt
+
+    @model_validator(mode="after")
+    def validate_derived_fields(self) -> Self:
+        if self.contentSha256 != hashlib.sha256(self.content.encode("utf-8")).hexdigest():
+            raise ValueError("正文 contentSha256 与完整 UTF-8 正文不一致")
+        if self.wordCount != count_chapter_text_length(self.content):
+            raise ValueError("正文字数与规范 Unicode 码点计数不一致")
+        return self
+
+
+class ChapterDraftPreviousArtifact(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    artifactId: ExecutionId
+    artifactRevision: StrictPositiveInt
+    payload: ChapterDraftResult
+
+
+class ChapterDraftInput(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    userInstruction: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+    targetWordCount: int = Field(ge=1, le=10_000_000)
+    originalUserInstruction: str | None = Field(
+        default=None, min_length=1, pattern=_CHAPTER_TEXT_PATTERN
+    )
+    previousArtifact: ChapterDraftPreviousArtifact | None = None
+
+    @model_validator(mode="after")
+    def validate_revision_pair(self) -> Self:
+        revision_fields = self.model_fields_set & {"originalUserInstruction", "previousArtifact"}
+        if revision_fields and (
+            len(revision_fields) != 2
+            or self.originalUserInstruction is None
+            or self.previousArtifact is None
+        ):
+            raise ValueError("正文返工必须同时绑定原指令和精确上一候选，不能为空")
+        return self
+
+
+def materialize_chapter_draft_output(value: object) -> dict[str, JsonValue]:
+    """仅派生完整正文哈希和字数；summary/content 字节语义保持原样。"""
+
+    draft = ChapterDraftOutput.model_validate(value)
+    output = draft.model_dump(mode="json") | {
+        "contentSha256": hashlib.sha256(draft.content.encode("utf-8")).hexdigest(),
+        "wordCount": count_chapter_text_length(draft.content),
+    }
+    return ChapterDraftResult.model_validate(output).model_dump(mode="json")
+
+
 class ChapterPlanSceneOutput(_StrictModel):
     """模型只填写节拍语义；顺序由 Core/执行器按数组位置派生。"""
 
@@ -925,6 +1017,16 @@ class EvaluationEvidenceReference(_StrictModel):
     range: EvidenceRange | None = None
 
 
+class CandidateTextPatch(_StrictModel):
+    """仅描述原候选的精确替换，资源身份和最终执行决定由 Core 持有。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["text_replace"]
+    find: str = Field(min_length=1)
+    replace: str
+
+
 class EvaluationFinding(_StrictModel):
     dimension: ProtocolCode
     severity: Literal["info", "warning", "error"]
@@ -933,6 +1035,9 @@ class EvaluationFinding(_StrictModel):
     evidence: list[EvaluationEvidenceReference] = Field(min_length=1, max_length=50)
     suggestion: NonBlankText
     confidence: Confidence
+    candidatePatch: CandidateTextPatch | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class EvidenceEvaluation(_StrictModel):

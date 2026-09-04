@@ -156,15 +156,49 @@ def _is_selection_artifact(artifact: JsonObject) -> bool:
     }
 
 
+def _is_writing_artifact(artifact: JsonObject) -> bool:
+    data = artifact.get("payload")
+    target = data.get("target") if isinstance(data, dict) else None
+    return (
+        artifact.get("kind") == "chapter_draft"
+        and isinstance(data, dict)
+        and data.get("operation") == "write_chapter"
+        and isinstance(target, dict)
+        and target.get("mode") == "existing_chapter"
+    )
+
+
 def _require_verified_source(
     runtime: CliRuntime,
     *,
     artifact_id: str,
     artifact_path: str,
+    expected_revision: int | None = None,
 ) -> JsonObject:
-    response = runtime.require_api().request("GET", artifact_path)
+    response = (
+        runtime.require_api().request("GET", artifact_path)
+        if expected_revision is None
+        else runtime.require_api().request(
+            "GET", artifact_path, params={"revision": expected_revision},
+        )
+    )
     if not isinstance(response, dict):
         raise CoreResponseContractError("Artifact 响应不是 JSON 对象")
+    if expected_revision is not None:
+        if response.get("id") != artifact_id:
+            raise CoreResponseContractError("Artifact 响应与请求 artifactId 不一致")
+        revision = response.get("revision")
+        if type(revision) is not int or revision != expected_revision:
+            raise CoreResponseContractError("Artifact 响应与请求 revision 不一致")
+        version = response.get("engineVersion")
+        if type(version) is not int or version not in {1, 2}:
+            raise CoreResponseContractError("Artifact 响应缺少有效 engineVersion")
+        if version != 2:
+            raise CoreApiError(
+                409, code="ARTIFACT_ENGINE_VERSION_MISMATCH",
+                message="审核决定引擎版本与草案持久身份不一致",
+                details={"requestedEngineVersion": 2, "artifactEngineVersion": version},
+            )
     status = response.get("sourceBindingStatus")
     if status == "verified":
         return response
@@ -202,6 +236,31 @@ def _decision_body(
                 "DISCARD_EDIT_FIELDS_FORBIDDEN",
                 f"discard 不接受字段：{forbidden[0]}",
             )
+    elif body["engineVersion"] == 2:
+        forbidden = {name for name in _EDIT_FIELDS if payload.get(name) is not None}
+        if decision == "approve" and artifact is not None:
+            if _is_selection_artifact(artifact):
+                forbidden.difference_update({"editedReplacement", "editedReplacementFile"})
+            elif _is_writing_artifact(artifact):
+                forbidden.difference_update({"editedContent", "editedContentFile"})
+        if forbidden:
+            raise CliInputError(
+                "V2_EDIT_FIELDS_FORBIDDEN",
+                f"V2 {decision} 不接受字段：{sorted(forbidden)[0]}",
+            )
+        if decision == "approve":
+            edited_content = _edited_content(payload)
+            edited_replacement = _edited_replacement(payload)
+            if edited_content is not None:
+                # Python 的 isspace 额外包含 U+001C～001F，正文契约不将它们忽略。
+                if not any(
+                    char in "\u001c\u001d\u001e\u001f" or not char.isspace()
+                    for char in edited_content.replace("\ufeff", "")
+                ):
+                    raise CliInputError("INVALID_EDITED_CONTENT", "V2 editedContent 不能为空白")
+                body["editedContent"] = edited_content
+            if edited_replacement is not None:
+                body["editedReplacement"] = edited_replacement
     else:
         edited_content = _edited_content(payload)
         edited_replacement = _edited_replacement(payload)
@@ -307,6 +366,10 @@ def _decide(
             runtime,
             artifact_id=artifact_id,
             artifact_path=artifact_path,
+            expected_revision=(
+                _require_expected_revision(payload)
+                if _require_engine_version(payload) == 2 else None
+            ),
         )
     body = _decision_body(payload, decision=decision, artifact=artifact)
     response = runtime.require_api().request(

@@ -10,19 +10,22 @@ from pathlib import Path
 from typing import Any
 
 from inkforge_contracts.execution import (
+    CandidateTextPatch,
+    ChapterDraftOutput,
     ChapterPlanOutput,
     canonical_execution_sha256,
 )
+from pydantic import BaseModel
 
 
 def _bytes(value: object) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def chapter_plan_schema() -> dict[str, Any]:
+def model_output_schema(model: type[BaseModel]) -> dict[str, Any]:
     """内联模型引用并去掉展示注解，保持 Core 已实现的严格 Schema 子集。"""
 
-    source = ChapterPlanOutput.model_json_schema(mode="validation")
+    source = model.model_json_schema(mode="validation")
     definitions = source.pop("$defs", {})
 
     def simplify(node: dict[str, Any]) -> dict[str, Any]:
@@ -50,6 +53,10 @@ def chapter_plan_schema() -> dict[str, Any]:
     return {"$schema": "https://json-schema.org/draft/2020-12/schema"} | simplify(source)
 
 
+def chapter_plan_schema() -> dict[str, Any]:
+    return model_output_schema(ChapterPlanOutput)
+
+
 def refresh(root: Path, *, check: bool) -> list[str]:
     changes: dict[Path, bytes] = {}
     prompt_path = root / "prompt-profile-registry.v1.json"
@@ -60,10 +67,25 @@ def refresh(root: Path, *, check: bool) -> list[str]:
 
     output_path = root / "output-schema-registry.v1.json"
     outputs = json.loads(output_path.read_bytes())
+    original_review_schema = next(
+        schema["jsonSchema"]
+        for schema in outputs["schemas"]
+        if schema["key"] == "output.chapter_review_report.v1"
+    )
     for output in outputs["schemas"]:
         if output["key"] == "output.beat_plan.v1":
             output["supported"] = True
             output["jsonSchema"] = chapter_plan_schema()
+        elif output["key"] == "output.chapter_draft.v1":
+            output["supported"] = True
+            output["jsonSchema"] = model_output_schema(ChapterDraftOutput)
+        elif output["key"] == "output.chapter_draft_review_report.v1":
+            schema = json.loads(json.dumps(original_review_schema))
+            patch = model_output_schema(CandidateTextPatch)
+            patch.pop("$schema")
+            schema["properties"]["findings"]["items"]["properties"]["candidatePatch"] = patch
+            output["supported"] = True
+            output["jsonSchema"] = schema
         output["sha256"] = canonical_execution_sha256(output["jsonSchema"])
     changes[output_path] = _bytes(outputs)
 

@@ -293,7 +293,7 @@ class LongWorkflowMutationsTest {
     }
 
     @Test
-    void ArtifactV2编辑字段限于选区批准且V1返工保持可选说明() {
+    void ArtifactV2选区批准限制替换字段且V1返工保持可选说明() {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);
 
@@ -360,6 +360,66 @@ class LongWorkflowMutationsTest {
         assertThat(api.calls.getLast().body().toString()).isEqualTo(
                 "{\"engineVersion\":1,\"clientRequestId\":\"artifact-v1-revise-01\",\"expectedRevision\":4,"
                         + "\"decision\":\"revise\"}");
+    }
+
+    @Test
+    void V2正文批准完整保留内联和文件编辑且精确读取版本(@TempDir Path directory) throws Exception {
+        String content = "  甲".repeat(30_000) + "\r\n末尾e\u0301😀\r\n";
+        Path source = directory.resolve("完整正文.txt");
+        Files.writeString(source, content, StandardCharsets.UTF_8);
+        for (String field : List.of("editedContent", "editedContentFile")) {
+            RecordingApi api = new RecordingApi(json);
+            api.nextGet = writingArtifact();
+            ObjectNode input = (ObjectNode) json.readTree("""
+                    {"artifactId":"draft-1","engineVersion":2,"expectedRevision":7,
+                     "clientRequestId":"draft-full-approve-0001"}
+                    """);
+            input.put(field, field.endsWith("File") ? source.toString() : content);
+            Result result = run(application(api), "long.artifact.approve", input.toString());
+            assertThat(result.exit()).as(result.stdout()).isZero();
+            assertThat(api.calls).hasSize(2);
+            assertThat(api.calls.getFirst().query()).isEqualTo(Map.of("revision", List.of("7")));
+            assertThat(api.calls.getLast().body().path("editedContent").textValue()).isEqualTo(content);
+            assertThat(api.calls.getLast().body().has("editedContentFile")).isFalse();
+            assertThat(api.calls.getLast().body().has("editedReplacement")).isFalse();
+        }
+    }
+
+    @Test
+    void V2正文规划和选区分别限制编辑类型且空白正文不能批准() {
+        for (String extra : List.of(
+                "\"editedReplacement\":\"选区\"",
+                "\"selectedUpdateRefs\":[]",
+                "\"editedContent\":\" \\n\\t\"")) {
+            RecordingApi api = new RecordingApi(json);
+            api.nextGet = writingArtifact();
+            Result result = run(application(api), "long.artifact.approve",
+                    "{\"artifactId\":\"draft-1\",\"engineVersion\":2,\"expectedRevision\":7,"
+                            + "\"clientRequestId\":\"draft-invalid-0001\"," + extra + "}");
+            assertThat(result.exit()).as(result.stdout()).isEqualTo(2);
+            assertThat(api.calls).hasSize(1);
+        }
+        for (String field : List.of("editedContent", "editedReplacement")) {
+            RecordingApi api = new RecordingApi(json);
+            api.nextGet = json.readTree("""
+                    {"engineVersion":2,"id":"plan-1","revision":1,"sourceBindingStatus":"verified",
+                     "kind":"beat_plan","payload":{"operation":"plan_chapter"}}
+                    """);
+            Result result = run(application(api), "long.artifact.approve",
+                    "{\"artifactId\":\"plan-1\",\"engineVersion\":2,\"expectedRevision\":1,"
+                            + "\"clientRequestId\":\"plan-no-edit-0001\",\"" + field + "\":\"禁止编辑\"}");
+            assertThat(result.exit()).as(result.stdout()).isEqualTo(2);
+            assertThat(result.stdout()).contains("V2_EDIT_FIELDS_FORBIDDEN");
+            assertThat(api.calls).hasSize(1);
+        }
+    }
+
+    private JsonNode writingArtifact() {
+        return json.readTree("""
+                {"engineVersion":2,"id":"draft-1","revision":7,"sourceBindingStatus":"verified",
+                 "kind":"chapter_draft","payload":{"kind":"chapter_draft","operation":"write_chapter",
+                 "target":{"mode":"existing_chapter","chapterId":"c1"},"content":"初始草案"}}
+                """);
     }
 
     @Test

@@ -13,6 +13,9 @@ from typing import Literal, Protocol
 
 import jsonschema_rs
 from inkforge_contracts.execution import (
+    ChapterDraftInput,
+    ChapterDraftOutput,
+    ChapterDraftResult,
     ChapterPlanInput,
     ChapterPlanOutput,
     ChapterPlanResult,
@@ -27,6 +30,7 @@ from inkforge_contracts.execution import (
     calculate_resolved_model_fingerprint,
     canonical_execution_json_bytes,
     canonical_execution_sha256,
+    materialize_chapter_draft_output,
     materialize_chapter_plan_output,
 )
 from pydantic import JsonValue, ValidationError
@@ -67,6 +71,7 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
     {
         ("long_serial", "answer_question"),
         ("long_serial", "plan_chapter"),
+        ("long_serial", "write_chapter"),
         ("long_serial", "rewrite_chapter_selection"),
     }
 )
@@ -1027,6 +1032,9 @@ def _structured_output_name(value: str) -> str:
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if (request.workflow, request.operation) == ("long_serial", "write_chapter"):
+        _validate_chapter_draft_input(request)
+        return
     if (request.workflow, request.operation) == ("long_serial", "plan_chapter"):
         _validate_chapter_plan_input(request)
         return
@@ -1130,6 +1138,72 @@ def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
             raise ValueError("规划返工与精确上一候选身份不一致")
     except (TypeError, ValueError, ValidationError) as exc:
         raise ExecutionCapabilityError("章节规划输入或候选不符合冻结契约") from exc
+
+
+def _validate_chapter_draft_input(request: ExecutionStepRequest) -> None:
+    if request.novelId is None:
+        raise ExecutionCapabilityError("正文写作必须绑定 novelId")
+    contexts = [
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType == "chapter_writing_context"
+    ]
+    if len(contexts) != 1:
+        raise ExecutionCapabilityError("正文写作 Evidence 必须包含唯一完整上下文")
+    item = contexts[0]
+    context = item.contentJson
+    chapter = context.get("currentChapter") if isinstance(context, dict) else None
+    if (
+        not item.exists
+        or item.contentType != "json"
+        or item.range is not None
+        or not isinstance(context, dict)
+        or type(context.get("schemaVersion")) is not int
+        or context.get("schemaVersion") != 1
+        or context.get("novelId") != request.novelId
+        or not isinstance(chapter, dict)
+        or chapter.get("id") != item.resourceId
+    ):
+        raise ExecutionCapabilityError("正文写作 Evidence 的完整上下文或目标身份不一致")
+    try:
+        if request.purpose == "review":
+            if set(request.input) != {"task", "candidate"}:
+                raise ValueError("正文复审只接受 task 与完整候选")
+            task = request.input["task"]
+            if (
+                not isinstance(task, dict)
+                or task.get("workflow") != "long_serial"
+                or task.get("operation") != "write_chapter"
+                or task.get("rubricVersion") != "rubric.chapter_draft.review.v1"
+            ):
+                raise ValueError("正文复审任务身份不一致")
+            ChapterDraftInput.model_validate(
+                {
+                    "userInstruction": task.get("userInstruction"),
+                    "targetWordCount": task.get("targetWordCount"),
+                }
+            )
+            if "originalUserInstruction" in task:
+                ChapterDraftInput.model_validate(
+                    {
+                        "userInstruction": task["originalUserInstruction"],
+                        "targetWordCount": task.get("targetWordCount"),
+                    }
+                )
+            ChapterDraftResult.model_validate(request.input["candidate"])
+            return
+        draft = ChapterDraftInput.model_validate(request.input)
+        previous = draft.previousArtifact
+        if previous is None:
+            if request.artifactId is not None or request.artifactRevision is not None:
+                raise ValueError("初始写作不能绑定上一候选")
+        elif (
+            previous.artifactId != request.artifactId
+            or previous.artifactRevision != request.artifactRevision
+        ):
+            raise ValueError("正文返工与精确上一候选身份不一致")
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ExecutionCapabilityError("正文输入或完整候选不符合冻结契约") from exc
 
 
 def _retry_delay_seconds(base_seconds: float, attempt: int, request_hash: str) -> float:
@@ -1282,6 +1356,11 @@ def _validate_provider_result(
             ChapterPlanOutput.model_validate(result.structuredOutput)
         except ValidationError:
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "generation" and request.operation == "write_chapter":
+        try:
+            ChapterDraftOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
 
@@ -1324,6 +1403,8 @@ def _derive_generation_output(
         output = answer.model_dump(mode="json")
     elif request.workflow == "long_serial" and request.operation == "plan_chapter":
         output = materialize_chapter_plan_output(output)
+    elif request.workflow == "long_serial" and request.operation == "write_chapter":
+        output = materialize_chapter_draft_output(output)
     return output
 
 

@@ -80,6 +80,11 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
         return {"replacement": replacement}
     if "answer" in properties:
         return {"answer": "模拟模型已依据冻结章节证据回答问题。"}
+    if {"summary", "content"} <= set(properties):
+        return {
+            "summary": "人物核对已有线索并作出行动选择。",
+            "content": "林舟把旧行动线索放在桌上，逐一核对。\n\n窗外雨声渐紧，他终于作出选择。",
+        }
     if {"title", "summary", "chapterGoal", "sceneBeats"} <= set(properties):
         return {
             "title": "隔离章节规划",

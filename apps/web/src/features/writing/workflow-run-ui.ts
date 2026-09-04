@@ -55,6 +55,9 @@ const MODEL_PROFILE_LABELS: Readonly<Record<string, string>> = {
   "plot.chapter_plan.v1": "章节规划",
   "reviewer.chapter_plan_editorial.v1": "章节规划复审",
   "writer.chapter_selection.v1": "章节选区改写",
+  "writer.chapter_draft.v1": "章节正文生成",
+  "reviewer.chapter_draft_consistency.v1": "正文一致性校验",
+  "reviewer.chapter_draft_editorial.v1": "正文编辑复审",
   "reviewer.consistency.v1": "一致性校验",
   "reviewer.editorial.v1": "编辑复审",
 };
@@ -286,6 +289,7 @@ export function workflowStepPurposeLabel(purpose: string): string {
     summarize_evidence: "整理创作依据",
     protocol_correction: "校正结果格式",
     user_confirmation: "处理你的决定",
+    candidate_patch: "局部修改候选",
   };
   return labels[purpose] ?? "处理任务";
 }

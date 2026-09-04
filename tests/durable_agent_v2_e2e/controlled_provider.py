@@ -12,7 +12,12 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
 )
 from inkforge_agents.providers.fake import FakeModelProvider
-from inkforge_contracts import EvaluationFinding
+from inkforge_contracts import ChapterDraftResult, EvaluationFinding
+
+_WRITING_REVIEW_ROLES = {
+    "reviewer.chapter_draft_consistency.v1": "consistency",
+    "reviewer.chapter_draft_editorial.v1": "editorial",
+}
 
 
 class ControlledFakeModelProvider:
@@ -78,6 +83,32 @@ class ControlledFakeModelProvider:
                 result = _chapter_plan_revision(request, result)
             elif verdict != "pass":
                 raise ValueError("E2E 章节规划复审控制结论无效")
+        elif request.policy.policyId in _WRITING_REVIEW_ROLES:
+            role = _WRITING_REVIEW_ROLES[request.policy.policyId]
+            decision = await self._http.post(
+                "/control/provider/chapter-writing-review-decision",
+                json={
+                    "idempotencyKey": idempotency_key,
+                    "requestSha256": request_sha256,
+                    "role": role,
+                },
+            )
+            decision.raise_for_status()
+            body = decision.json()
+            mode, revision, verdict = (
+                body.get("mode"),
+                body.get("artifactRevision"),
+                body.get("contentVerdict"),
+            )
+            if (
+                mode not in {"pass", "revise_once", "patch_once", "patch_conflict"}
+                or type(revision) is not int
+                or revision < 1
+                or verdict != ("issues_found" if revision == 1 and mode != "pass" else "pass")
+            ):
+                raise ValueError("E2E 正文复审控制结论或候选修订无效")
+            if verdict == "issues_found":
+                result = _chapter_writing_revision(request, result, mode=mode, role=role)
         completed = await self._http.post(
             "/control/provider/completed",
             json={
@@ -90,6 +121,77 @@ class ControlledFakeModelProvider:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+def _chapter_writing_revision(
+    request: ModelTurnRequest,
+    result: ModelTurnResult,
+    *,
+    mode: str,
+    role: str,
+) -> ModelTurnResult:
+    """候选仅留当前测试 Agent 内存；控制器只取得角色和不可变调用身份。"""
+    envelopes = [
+        json.loads(message.content) for message in request.messages if message.role == "user"
+    ]
+    if len(envelopes) != 1 or not isinstance(envelopes[0], dict):
+        raise ValueError("E2E 正文复审缺少唯一执行信封")
+    envelope = envelopes[0]
+    if (envelope.get("workflow"), envelope.get("operation"), envelope.get("purpose")) != (
+        "long_serial",
+        "write_chapter",
+        "review",
+    ):
+        raise ValueError("E2E 正文复审执行身份不匹配")
+    try:
+        candidate = ChapterDraftResult.model_validate(envelope["input"]["candidate"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("E2E 正文复审候选不符合完整结果契约") from None
+    bundle = envelope.get("evidenceBundle")
+    items = bundle.get("items") if isinstance(bundle, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("E2E 正文复审缺少冻结 Evidence")
+    item = next(
+        (value for value in items if isinstance(value, dict) and value.get("exists") is True), None
+    )
+    if item is None:
+        raise ValueError("E2E 正文复审没有可引用证据")
+    finding = {
+        "dimension": "chapter_draft.local",
+        "severity": "warning",
+        "claim": "隔离验收要求明确人物核对行动线索的措辞。",
+        "evidence": [
+            {"evidenceItemId": item.get("id"), "contentSha256": item.get("contentSha256")}
+        ],
+        "suggestion": "依据同一冻结事实修改候选措辞，保留完整正文。",
+        "confidence": 1.0,
+    }
+    if mode in {"patch_once", "patch_conflict"}:
+        find = "旧行动线索"
+        if candidate.content.count(find) != 1:
+            raise ValueError("E2E 正文 patch 需要候选内唯一已知原文")
+        start = candidate.content.index(find)
+        replacement = (
+            "另一行动线索" if mode == "patch_conflict" and role == "editorial" else "新行动线索"
+        )
+        finding["candidatePatch"] = {"kind": "text_replace", "find": find, "replace": replacement}
+        finding["candidateRange"] = {"startCodePoint": start, "endCodePoint": start + len(find)}
+    output = {
+        "contentVerdict": "issues_found",
+        "findings": [EvaluationFinding.model_validate(finding).model_dump(mode="json")],
+    }
+    completion_tokens = len(json.dumps(output, ensure_ascii=False))
+    return result.model_copy(
+        update={
+            "structuredOutput": output,
+            "usage": result.usage.model_copy(
+                update={
+                    "completionTokens": completion_tokens,
+                    "totalTokens": result.usage.promptTokens + completion_tokens,
+                }
+            ),
+        }
+    )
 
 
 def _chapter_plan_revision(request: ModelTurnRequest, result: ModelTurnResult) -> ModelTurnResult:

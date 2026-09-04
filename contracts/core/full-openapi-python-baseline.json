@@ -1895,6 +1895,33 @@
         "title": "CancelWritingRunResponse",
         "type": "object"
       },
+      "CandidateTextPatch": {
+        "additionalProperties": false,
+        "description": "仅描述原候选的精确替换，资源身份和最终执行决定由 Core 持有。",
+        "properties": {
+          "find": {
+            "minLength": 1,
+            "title": "Find",
+            "type": "string"
+          },
+          "kind": {
+            "const": "text_replace",
+            "title": "Kind",
+            "type": "string"
+          },
+          "replace": {
+            "title": "Replace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "find",
+          "replace"
+        ],
+        "title": "CandidateTextPatch",
+        "type": "object"
+      },
       "ChapterAdaptationListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -8670,6 +8697,16 @@
       "EvaluationFinding": {
         "additionalProperties": false,
         "properties": {
+          "candidatePatch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateTextPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "candidateRange": {
             "anyOf": [
               {

@@ -58,6 +58,7 @@ import {
   resolveVisibleReviewArtifact,
 } from "./review-artifact-state";
 import { mergeActionableReviewArtifacts } from "./review-artifact-collection";
+import { isChapterWritingReviewArtifact } from "./review-artifact-edit";
 import {
   resolveLoadedSessionRecoveryState,
 } from "./session-task-state";
@@ -314,6 +315,7 @@ type ReviewArtifactData = {
   payload?: {
     kind?: string;
     operation?: string;
+    target?: { mode?: string; chapterId?: string };
     replacement?: string;
     selection?: {
       resourceType?: string;
@@ -566,6 +568,12 @@ function isSelectionReviewArtifact(artifact: ReviewArtifactData): boolean {
   return artifact.payload?.operation === "rewrite_chapter_selection"
     || artifact.payload?.operation === "rewrite_outline_selection"
     || Boolean(artifact.payload?.selection);
+}
+
+function canEditReviewArtifactText(artifact: ReviewArtifactData): boolean {
+  return Boolean(getReviewArtifactContent(artifact)) && (artifact.engineVersion === 1
+    || isSelectionReviewArtifact(artifact)
+    || isChapterWritingReviewArtifact(artifact.kind, artifact.payload));
 }
 
 function getUpdateActionLabel(action: string) {
@@ -966,7 +974,7 @@ export function WritingConversation({
   }, [clearReviewActionCloseTimer]);
 
   const getLocalReviewDraftForApply = useCallback((artifact: ReviewArtifactData): string | undefined => {
-    if (!getReviewArtifactContent(artifact)) return undefined;
+    if (!canEditReviewArtifactText(artifact)) return undefined;
     const draftSourceKey = `${artifact.id}:${artifact.revision}`;
     if (reviewDraftSourceKey !== draftSourceKey) return undefined;
     return reviewDraftText;
@@ -3112,7 +3120,8 @@ export function WritingConversation({
       artifact.payload.updates.outlineAdjustments?.length
     ));
     const isActing = Boolean(artifact.optimisticStatus) || artifact.status === "applying" || artifact.status === "discarding";
-    const canEditText = Boolean(getReviewArtifactContent(artifact));
+    const artifactContent = getReviewArtifactContent(artifact);
+    const canEditText = canEditReviewArtifactText(artifact);
     const awaitingUser = artifact.status === "awaiting_user";
     const selectedUpdateRefsForApply = getSelectedUpdateRefsForApply(artifact);
     const hasEmptyStructuredSelection = selectedUpdateRefsForApply !== undefined && selectedUpdateRefsForApply.length === 0;
@@ -3160,13 +3169,13 @@ export function WritingConversation({
           ) : null}
 
           <section className="review-dialog-section">
-            <div className="review-dialog-section-title">{canEditText ? (isSelectionReviewArtifact(artifact) ? "可编辑选区替换" : "可编辑正文") : "结构化变更"}</div>
-            {canEditText ? (
+            <div className="review-dialog-section-title">{canEditText ? (isSelectionReviewArtifact(artifact) ? "可编辑选区替换" : "可编辑正文") : artifactContent ? "草案预览" : "结构化变更"}</div>
+            {artifactContent ? (
               <label className="review-editor">
                 <textarea
-                  value={reviewDraftText}
+                  value={canEditText ? reviewDraftText : artifactContent}
                   onChange={(event) => setReviewDraftText(event.target.value)}
-                  readOnly={!awaitingUser || actionLocked}
+                  readOnly={!canEditText || !awaitingUser || actionLocked}
                   spellCheck={false}
                 />
               </label>
@@ -3302,7 +3311,8 @@ export function WritingConversation({
               clientRequestId: createClientRequestId(),
               expectedRevision: artifact.revision,
               decision,
-              editedContent: !isV2Artifact && decision === "approve" && !selectionArtifact
+              editedContent: (!isV2Artifact || isChapterWritingReviewArtifact(artifact.kind, artifact.payload))
+                && decision === "approve" && !selectionArtifact
                 ? editedContent ?? null
                 : null,
               editedReplacement: decision === "approve" && selectionArtifact ? editedContent ?? null : null,

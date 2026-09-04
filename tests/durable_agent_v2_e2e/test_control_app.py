@@ -353,6 +353,7 @@ async def test_controlled_plan_reviewer_uses_frozen_evidence_without_logging_con
     assert findings[0]["dimension"] == "chapter_plan.local"
     assert findings[0]["confidence"] >= 0.8
     assert findings[0]["candidateRange"] is None
+    assert "candidatePatch" not in findings[0]
     assert findings[0]["evidence"] == [
         {"evidenceItemId": "evidence-1", "contentSha256": "a" * 64, "range": None}
     ]
@@ -388,4 +389,225 @@ async def test_other_review_profile_does_not_consume_chapter_plan_override(
         "/control/provider/reached",
         "/control/provider/completed",
     ]
+    await provider.aclose()
+
+
+class _WritingSubmitClient(_FakeAsyncClient):
+    async def post(self, path: str, *, content: bytes, headers: dict[str, str]) -> httpx.Response:
+        assert path == "/internal/v1/executions"
+        return httpx.Response(
+            202, json={"status": "accepted"}, request=httpx.Request("POST", self.base_url + path)
+        )
+
+
+@pytest.mark.parametrize("mode", ["pass", "revise_once", "patch_once", "patch_conflict"])
+def test_writing_review_control_binds_two_roles_and_exact_revision_durably(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    _environment(monkeypatch)
+    monkeypatch.setenv("E2E_CONTROL_DATABASE", str(tmp_path / "control.sqlite3"))
+    monkeypatch.setattr(control_app.httpx, "AsyncClient", _WritingSubmitClient)
+    headers = {"X-InkForge-E2E-Token": "t" * 40}
+    endpoint = "/control/provider/chapter-writing-review-decision"
+    identities = []
+    with TestClient(control_app.create_app()) as client:
+        assert (
+            client.put("/control/chapter-writing-review-mode", json={"mode": mode}).status_code
+            == 403
+        )
+        assert (
+            client.put(
+                "/control/chapter-writing-review-mode", json={"mode": mode}, headers=headers
+            ).status_code
+            == 200
+        )
+        for revision in (1, 2):
+            for role in ("consistency", "editorial"):
+                key = f"run-1.review-{role}-{revision}"
+                identity = {
+                    "idempotencyKey": key,
+                    "requestSha256": str(revision) * 64,
+                    "role": role,
+                }
+                identities.append(identity)
+                assert client.post(endpoint, json=identity, headers=headers).status_code == 409
+                body = {
+                    "workflow": "long_serial",
+                    "operation": "write_chapter",
+                    "purpose": "review",
+                    "idempotencyKey": key,
+                    "artifactRevision": revision,
+                    "modelProfile": {"profile": f"reviewer.chapter_draft_{role}.v1"},
+                    "input": {"candidate": {"content": "不可泄漏的正文"}},
+                }
+                assert client.post("/internal/v1/executions", json=body).status_code == 202
+                provider = {name: identity[name] for name in ("idempotencyKey", "requestSha256")}
+                assert (
+                    client.post(
+                        "/control/provider/reached", json=provider, headers=headers
+                    ).status_code
+                    == 200
+                )
+                response = client.post(endpoint, json=identity, headers=headers)
+                assert response.status_code == 200
+                assert response.json() == {
+                    "contentVerdict": "issues_found"
+                    if revision == 1 and mode != "pass"
+                    else "pass",
+                    "mode": mode,
+                    "artifactRevision": revision,
+                }
+                assert (
+                    client.post(
+                        endpoint, json=identity | {"role": "other"}, headers=headers
+                    ).status_code
+                    == 422
+                )
+                wrong_role = "editorial" if role == "consistency" else "consistency"
+                assert (
+                    client.post(
+                        endpoint, json=identity | {"role": wrong_role}, headers=headers
+                    ).status_code
+                    == 409
+                )
+                assert (
+                    client.post(
+                        endpoint, json=identity | {"requestSha256": "f" * 64}, headers=headers
+                    ).status_code
+                    == 409
+                )
+                assert (
+                    client.post(
+                        endpoint, json=identity | {"content": "不应发送正文"}, headers=headers
+                    ).status_code
+                    == 422
+                )
+                assert (
+                    client.post(
+                        "/internal/v1/executions", json=body | {"artifactRevision": revision + 1}
+                    ).status_code
+                    == 409
+                )
+        state = client.get("/control/state", headers=headers).json()
+        assert len(state["chapterWritingReviews"]) == 4
+        assert "不可泄漏" not in json.dumps(state, ensure_ascii=False)
+    with TestClient(control_app.create_app()) as client:
+        assert (
+            client.put(
+                "/control/chapter-writing-review-mode", json={"mode": "pass"}, headers=headers
+            ).status_code
+            == 200
+        )
+        replay = client.post(endpoint, json=identities[0], headers=headers)
+        assert replay.json()["mode"] == mode
+        assert client.post("/control/reset", headers=headers).status_code == 200
+        assert client.get("/control/state", headers=headers).json()["chapterWritingReviews"] == []
+
+
+class _WritingDecisionClient(_ReviewDecisionClient):
+    mode = "patch_once"
+    revision = 1
+
+    async def post(self, path: str, *, json: dict[str, object]) -> httpx.Response:
+        if path.endswith("chapter-writing-review-decision"):
+            self.calls.append((path, json))
+            return httpx.Response(
+                200,
+                json={
+                    "mode": self.mode,
+                    "artifactRevision": self.revision,
+                    "contentVerdict": "issues_found"
+                    if self.revision == 1 and self.mode != "pass"
+                    else "pass",
+                },
+                request=httpx.Request("POST", "http://control" + path),
+            )
+        return await super().post(path, json=json)
+
+
+def _writing_review_request(role: str) -> ModelTurnRequest:
+    from inkforge_agents.execution.registry import load_execution_registry
+    from inkforge_contracts import materialize_chapter_draft_output
+
+    request = _review_request(f"reviewer.chapter_draft_{role}.v1")
+    envelope = json.loads(request.messages[0].content)
+    envelope["operation"] = "write_chapter"
+    envelope["input"] = {
+        "candidate": materialize_chapter_draft_output(
+            {
+                "summary": "完整正文",
+                "content": "林舟把旧行动线索放在桌上，逐一核对。\n\n窗外雨声渐紧，他终于作出选择。",
+            }
+        )
+    }
+    schema = (
+        load_execution_registry(environment="test")
+        .output_schemas["output.chapter_draft_review_report.v1"]
+        .json_schema_value()
+    )
+    return request.model_copy(
+        update={
+            "messages": [
+                ModelMessage(role="user", content=json.dumps(envelope, ensure_ascii=False))
+            ],
+            "structuredOutput": request.structuredOutput.model_copy(update={"jsonSchema": schema}),
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["consistency", "editorial"])
+@pytest.mark.parametrize("revision", [1, 2])
+@pytest.mark.parametrize("mode", ["pass", "revise_once", "patch_once", "patch_conflict"])
+async def test_controlled_writing_review_modes_are_revision_bound_and_never_send_content(
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+    revision: int,
+    mode: str,
+) -> None:
+    _WritingDecisionClient.mode = mode
+    _WritingDecisionClient.revision = revision
+    _WritingDecisionClient.calls = []
+    monkeypatch.setattr(controlled_provider.httpx, "AsyncClient", _WritingDecisionClient)
+    provider = controlled_provider.ControlledFakeModelProvider(
+        control_url="http://control:8090", control_token="t" * 40
+    )
+    request = _writing_review_request(role)
+    result = await provider.complete_turn(request)
+    jsonschema_rs.validator_for(request.structuredOutput.jsonSchema).validate(
+        result.structuredOutput
+    )
+    needs_revision = revision == 1 and mode != "pass"
+    assert result.structuredOutput["contentVerdict"] == (
+        "issues_found" if needs_revision else "pass"
+    )
+    findings = result.structuredOutput["findings"]
+    if needs_revision:
+        assert len(findings) == 1
+        assert findings[0]["dimension"] == "chapter_draft.local"
+        if mode in {"patch_once", "patch_conflict"}:
+            patch = findings[0]["candidatePatch"]
+            assert patch["find"] == "旧行动线索"
+            assert patch["replace"] == (
+                "另一行动线索" if mode == "patch_conflict" and role == "editorial" else "新行动线索"
+            )
+        else:
+            assert "candidatePatch" not in findings[0]
+    else:
+        assert findings == []
+    assert result.usage.completionTokens == len(
+        json.dumps(result.structuredOutput, ensure_ascii=False)
+    )
+    assert result.usage.totalTokens == result.usage.promptTokens + result.usage.completionTokens
+    calls = _WritingDecisionClient.calls
+    assert [path for path, _ in calls] == [
+        "/control/provider/reached",
+        "/control/provider/chapter-writing-review-decision",
+        "/control/provider/completed",
+    ]
+    assert calls[1][1]["role"] == role
+    assert set(calls[1][1]) == {"idempotencyKey", "requestSha256", "role"}
+    assert "林舟" not in json.dumps(calls, ensure_ascii=False)
     await provider.aclose()

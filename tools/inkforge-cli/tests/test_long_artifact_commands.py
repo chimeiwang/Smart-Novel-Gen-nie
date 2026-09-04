@@ -8,7 +8,7 @@ import pytest
 from inkforge_cli.api import CoreApiError
 from inkforge_cli.commands.long import artifacts
 from inkforge_cli.json_types import JsonObject
-from inkforge_cli.runtime import CliInputError, CliRuntime
+from inkforge_cli.runtime import CliInputError, CliRuntime, CoreResponseContractError
 
 
 @dataclass
@@ -38,6 +38,84 @@ def runtime(api: RecordingApi) -> CliRuntime:
 
 def payload(**values: object) -> JsonObject:
     return cast(JsonObject, values)
+
+
+def writing_artifact() -> JsonObject:
+    return {
+        "id": "draft-1",
+        "engineVersion": 2,
+        "revision": 7,
+        "sourceBindingStatus": "verified",
+        "kind": "chapter_draft",
+        "payload": {
+            "kind": "chapter_draft",
+            "operation": "write_chapter",
+            "target": {"mode": "existing_chapter", "chapterId": "c1"},
+            "content": "初始完整草案",
+        },
+    }
+
+
+@pytest.mark.parametrize("field_name", ["editedContent", "editedContentFile"])
+def test_v2_full_edit_preserves_content_and_reads_exact_revision(
+    tmp_path: Path, field_name: str,
+) -> None:
+    content = "  甲" * 30_000 + "\r\n尾部e\u0301😀\r\n"
+    source = tmp_path / "完整正文.txt"
+    source.write_bytes(content.encode("utf-8"))
+    api = RecordingApi(responses=[writing_artifact(), {"decision": "approve"}])
+    artifacts.approve(runtime(api), payload(
+        artifactId="draft-1", engineVersion=2, expectedRevision=7,
+        clientRequestId="draft-full-approve-0001",
+        **{field_name: str(source) if field_name.endswith("File") else content},
+    ))
+    assert api.calls[0] == (
+        "GET", "/api/v1/review-artifacts/draft-1", {"params": {"revision": 7}},
+    )
+    assert api.calls[-1][2]["json"]["editedContent"] == content
+    assert "editedContentFile" not in api.calls[-1][2]["json"]
+
+
+@pytest.mark.parametrize("extra", [
+    {"editedContent": " \n\t"},
+    {"editedReplacement": "选区"},
+    {"selectedUpdateRefs": []},
+])
+def test_v2_full_edit_rejects_blank_or_other_artifact_fields(extra: dict[str, object]) -> None:
+    api = RecordingApi(responses=[writing_artifact()])
+    with pytest.raises(CliInputError):
+        artifacts.approve(runtime(api), payload(
+            artifactId="draft-1", engineVersion=2, expectedRevision=7,
+            clientRequestId="draft-invalid-0001", **extra,
+        ))
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
+@pytest.mark.parametrize("field_name", ["editedContent", "editedReplacement"])
+def test_v2_plan_rejects_both_edit_types(field_name: str) -> None:
+    artifact = writing_artifact()
+    artifact.update(kind="beat_plan", payload={"operation": "plan_chapter"})
+    api = RecordingApi(responses=[artifact])
+    with pytest.raises(CliInputError) as caught:
+        artifacts.approve(runtime(api), payload(
+            artifactId="draft-1", engineVersion=2, expectedRevision=7,
+            clientRequestId="plan-no-edit-0001", **{field_name: "编辑内容"},
+        ))
+    assert caught.value.code == "V2_EDIT_FIELDS_FORBIDDEN"
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
+@pytest.mark.parametrize("changed", [{"id": "other"}, {"revision": 8}, {"revision": True}])
+def test_v2_decision_rejects_wrong_exact_artifact(changed: dict[str, object]) -> None:
+    artifact = writing_artifact()
+    artifact.update(cast(JsonObject, changed))
+    api = RecordingApi(responses=[artifact])
+    with pytest.raises(CoreResponseContractError):
+        artifacts.approve(runtime(api), payload(
+            artifactId="draft-1", engineVersion=2, expectedRevision=7,
+            clientRequestId="draft-identity-0001", editedContent="完整正文",
+        ))
+    assert [call[0] for call in api.calls] == ["GET"]
 
 
 @pytest.mark.parametrize(
@@ -244,7 +322,10 @@ def test_all_decisions_send_explicit_valid_engine_version(
 ) -> None:
     responses: list[Any] = []
     if decision != "discard":
-        responses.append({"sourceBindingStatus": "verified"})
+        responses.append({
+            "id": "artifact-1", "revision": 1,
+            "engineVersion": engine_version, "sourceBindingStatus": "verified",
+        })
     responses.append({"artifactId": "artifact-1", "decision": decision})
     api = RecordingApi(responses=responses)
 

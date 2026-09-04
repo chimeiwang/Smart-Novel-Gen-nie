@@ -112,6 +112,120 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 正文双复审一致局部Patch仅创建一个零模型Step并再次复审() {
+        Flow flow = runningChapterFlow("chapter-patch");
+        ExecutionStepResult generated = chapterResult(flow.request(), "甲😀乙丙丁");
+        callbacks.result(generated);
+        assertThat(callbacks.result(generated).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        List<ExecutionStepRequest> reviewers = List.of(startNextPlanStep(flow), startNextPlanStep(flow));
+        assertThat(reviewers).extracting(request -> request.getModelProfile().getProfile())
+                .containsExactlyInAnyOrder("reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1");
+        for (var reviewer : reviewers) {
+            assertThat(reviewer.getInput().get("candidate")).isEqualTo(WorkflowCallbackValues.optional(generated.getOutput()));
+            ExecutionStepResult result = chapterReviewResult(reviewer, "patch", "😀乙", "完整新段");
+            callbacks.result(result);
+            assertThat(callbacks.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        }
+        Record control = database.dsl().fetchOne("SELECT \"stepType\"::text, lane, \"modelProfile\", \"usageJson\", \"artifactRevision\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'candidate_patch'", flow.runId());
+        assertThat(control.get("stepType", String.class)).isEqualTo("persistence");
+        assertThat(control.get("lane", String.class)).isEqualTo("control");
+        assertThat(control.get("modelProfile")).isNull();
+        assertThat(control.get("usageJson")).isNull();
+        assertThat(control.get("artifactRevision", Integer.class)).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", flow.runId())).isEqualTo(1);
+        for (var reviewer : List.of(startNextPlanStep(flow), startNextPlanStep(flow))) {
+            assertThat(reviewer.getArtifactRevision()).isEqualTo(2);
+            assertThat((Map<String, Object>) reviewer.getInput().get("candidate")).containsEntry("content", "甲完整新段丙丁");
+            callbacks.result(chapterReviewResult(reviewer, "patch", "丙", "第二次不得自动应用"));
+        }
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'candidate_patch'", flow.runId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(5);
+        assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", flow.runId()).get(0, String.class)).isEqualTo("waiting_user");
+        assertThat(database.dsl().fetchOne("SELECT content FROM public.\"Chapter\" WHERE \"novelId\" = ?", flow.request().getNovelId()).get(0, String.class)).isEqualTo("甲😀乙");
+    }
+
+    @Test
+    void 正文无Patch的局部一致意见仅完整返工一次并保留输入AB() {
+        Flow flow = runningChapterFlow("chapter-rewrite");
+        callbacks.result(chapterResult(flow.request(), "首轮完整正文😀"));
+        for (var reviewer : List.of(startNextPlanStep(flow), startNextPlanStep(flow))) callbacks.result(chapterReviewResult(reviewer, "rewrite", "", ""));
+        var revision = startNextPlanStep(flow);
+        assertThat(revision.getPurpose()).isEqualTo("generation");
+        assertThat(revision.getInput()).containsOnlyKeys("userInstruction", "targetWordCount", "originalUserInstruction", "previousArtifact");
+        assertThat(revision.getInput()).containsEntry("originalUserInstruction", "完成当前章节正文");
+        callbacks.result(chapterResult(revision, "完整返工正文😀"));
+        for (var reviewer : List.of(startNextPlanStep(flow), startNextPlanStep(flow))) {
+            assertThat((Map<String, Object>) reviewer.getInput().get("task")).containsEntry("userInstruction", revision.getInput().get("userInstruction"))
+                    .containsEntry("originalUserInstruction", "完成当前章节正文");
+            callbacks.result(chapterReviewResult(reviewer, "rewrite", "", ""));
+        }
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", flow.runId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(6);
+    }
+
+    @Test
+    void 正文Patch混合分歧重叠多命中和结构问题都保留原候选() {
+        for (String mode : List.of("mixed", "disagree", "conflict", "missing", "ambiguous", "structural", "uncertain", "unavailable")) {
+            Flow flow = runningChapterFlow("chapter-reject-" + mode);
+            callbacks.result(chapterResult(flow.request(), "甲乙甲"));
+            var reviewers = List.of(startNextPlanStep(flow), startNextPlanStep(flow));
+            for (int index = 0; index < reviewers.size(); index++) {
+                var reviewer = reviewers.get(index);
+                if ("unavailable".equals(mode) && index == 1) callbacks.failure(reviewFailure(reviewer));
+                else if ("disagree".equals(mode) && index == 1) callbacks.result(reviewResult(reviewer));
+                else callbacks.result(chapterReviewResult(reviewer,
+                        "mixed".equals(mode) && index == 1 ? "rewrite" : mode,
+                        "ambiguous".equals(mode) ? "甲" : "missing".equals(mode) ? "不存在" : "乙",
+                        "conflict".equals(mode) && index == 1 ? "不同结果" : "统一结果"));
+            }
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'candidate_patch'", flow.runId())).isZero();
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", flow.runId())).isEqualTo(1);
+            assertThat(database.dsl().fetchOne("SELECT revision FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId()).get(0, Integer.class)).isEqualTo(1);
+        }
+    }
+
+    private static Flow runningChapterFlow(String prefix) {
+        Fixture fixture = fixture(prefix);
+        var op = registry.resolve("long_serial.write_chapter", false);
+        Map<String, Object> input = Map.of("userInstruction", "完成当前章节正文", "targetWordCount", 2500);
+        Map<String, Object> normalized = new LinkedHashMap<>(input);
+        normalized.putAll(Map.of("workflow", "long_serial", "operation", "write_chapter", "novelId", fixture.novelId(), "chapterId", fixture.chapterId()));
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request", sha256(prefix), "long_serial", "write_chapter", "1", "chapter_generation",
+                fixture.novelId(), fixture.chapterId(), fixture.sessionId(), "chapter", fixture.chapterId(), normalized, op.operation().evidencePolicy(),
+                List.of(new WorkflowEvidenceItemPlan("chapter_writing_context", fixture.chapterId(), true, null, API_NOW, null,
+                        Map.of("schemaVersion", 1, "novelId", fixture.novelId(), "currentChapter", Map.of("id", fixture.chapterId(), "content", "甲😀乙")), null, null, Map.of("role", "chapter_writing_context"))),
+                op.operation().runBudget(), ExecutionPlanSnapshot.freeze(registry.catalogVersion(), registry.manifestFingerprint(), op),
+                new WorkflowInitialStepPlan("generation", op.operation().lane(), input, op.generatorProfile(), op.generatorStepBudget(), op.outputSchema())));
+        var request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        accept(request);
+        callbacks.progress(progress(request, unknownUsage()));
+        return new Flow(started.runId(), fixture.userId(), fixture.sessionId(), request);
+    }
+
+    private static ExecutionStepResult chapterResult(ExecutionStepRequest request, String content) {
+        var result = outputResult(request, "占位");
+        result.setOutput(org.openapitools.jackson.nullable.JsonNullable.of(
+                cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact.deriveOutput("完整正文摘要", content)));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private static ExecutionStepResult chapterReviewResult(ExecutionStepRequest request, String mode, String find, String replace) {
+        var result = reviewResult(request);
+        var item = request.getEvidenceBundle().getItems().getFirst();
+        Map<String, Object> finding = new LinkedHashMap<>(Map.of("dimension", "structural".equals(mode) ? "chapter_draft.structural" : "chapter_draft.local",
+                "severity", "warning", "confidence", "uncertain".equals(mode) ? 0.5 : 0.95,
+                "claim", "需要改善这处细节", "suggestion", "这是说明，不得解析为替换文本",
+                "evidence", List.of(Map.of("evidenceItemId", item.getId(), "contentSha256", item.getContentSha256()))));
+        if (!"rewrite".equals(mode)) finding.put("candidatePatch", Map.of("kind", "text_replace", "find", find, "replace", replace));
+        result.getEvaluation().setContentVerdict(EvidenceEvaluation.ContentVerdictEnum.ISSUES_FOUND);
+        result.getEvaluation().setFindings(List.of(json.convertValue(finding, cn.inkforge.contracts.api.EvaluationFinding.class)));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    @Test
     void 章节计划局部问题仅自动返工一次且同Evidence与不可变Revision贯穿完整链() {
         Flow flow = runningPlanFlow("plan-auto");
         ExecutionStepResult first = planResult(flow.request(), "首轮😀计划");

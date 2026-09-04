@@ -220,7 +220,7 @@ final class LongArtifactCommands {
         body.put("expectedRevision", expectedRevision(payload));
         body.put("decision", decision);
         if (engineVersion == 2) {
-            addV2DecisionFields(body, payload, decision);
+            addV2DecisionFields(body, payload, decision, artifact);
         } else {
             addV1DecisionFields(body, payload, decision, artifact);
         }
@@ -277,11 +277,16 @@ final class LongArtifactCommands {
     }
 
     private static void addV2DecisionFields(
-            ObjectNode body, ObjectNode payload, String decision) {
+            ObjectNode body, ObjectNode payload, String decision, ObjectNode artifact) {
         TreeSet<String> forbidden = presentNonNullFields(payload, EDIT_FIELDS);
         if (decision.equals("approve")) {
-            forbidden.remove("editedReplacement");
-            forbidden.remove("editedReplacementFile");
+            if (selectionArtifact(artifact)) {
+                forbidden.remove("editedReplacement");
+                forbidden.remove("editedReplacementFile");
+            } else if (writingArtifact(artifact)) {
+                forbidden.remove("editedContent");
+                forbidden.remove("editedContentFile");
+            }
         }
         if (!forbidden.isEmpty()) {
             throw new CliInputException(
@@ -289,6 +294,15 @@ final class LongArtifactCommands {
                     "V2 " + decision + " 不接受字段：" + forbidden.getFirst());
         }
         if (!decision.equals("approve")) return;
+        String content = editedContent(payload);
+        if (content != null) {
+            if (content.codePoints().allMatch(code -> (Character.isWhitespace(code)
+                    && (code < 0x1c || code > 0x1f))
+                    || Character.isSpaceChar(code) || code == 0x85 || code == 0xfeff)) {
+                throw new CliInputException("INVALID_EDITED_CONTENT", "V2 editedContent 不能为空白");
+            }
+            body.put("editedContent", content);
+        }
         String replacement = editedReplacement(payload);
         if (replacement != null) body.put("editedReplacement", replacement);
     }
@@ -374,6 +388,14 @@ final class LongArtifactCommands {
         JsonNode target = payload != null && payload.isObject() ? payload.get("target") : null;
         JsonNode mode = target != null && target.isObject() ? target.get("mode") : null;
         return mode != null && mode.isTextual() && SELECTION_MODES.contains(mode.textValue());
+    }
+
+    private static boolean writingArtifact(ObjectNode artifact) {
+        return artifact != null
+                && "chapter_draft".equals(artifact.path("kind").asText())
+                && "write_chapter".equals(artifact.path("payload").path("operation").asText())
+                && "existing_chapter".equals(
+                        artifact.path("payload").path("target").path("mode").asText());
     }
 
     private static void validateUserMessage(ObjectNode payload) {

@@ -186,7 +186,7 @@ def test_artifact_decision_omitted_engine_version_preserves_v1_shape() -> None:
     assert request.selectedUpdateRefs is not None
 
 
-def test_artifact_decision_v2_accepts_selection_approve_and_explicit_revise() -> None:
+def test_artifact_decision_v2_accepts_selection_or_full_content_and_explicit_revise() -> None:
     approve = ReviewArtifactDecisionRequest.model_validate(
         {
             "engineVersion": 2,
@@ -205,19 +205,37 @@ def test_artifact_decision_v2_accepts_selection_approve_and_explicit_revise() ->
             "userMessage": "保留含义，压缩动作描写",
         }
     )
+    content = "  完整正文\n末尾保持。\n"
+    full_approve = ReviewArtifactDecisionRequest.model_validate(
+        {
+            "engineVersion": 2,
+            "clientRequestId": "client-request-v2-full-approve",
+            "expectedRevision": 8,
+            "decision": "approve",
+            "editedContent": content,
+        }
+    )
 
     assert approve.engineVersion == revise.engineVersion == 2
     assert approve.editedReplacement == "只替换冻结选区"
     assert revise.userMessage == "保留含义，压缩动作描写"
+    assert full_approve.editedContent == content
+    assert full_approve.editedReplacement is None
 
 
 @pytest.mark.parametrize(
     ("decision", "extra"),
     [
-        ("approve", {"editedContent": "禁止用全文伪装选区"}),
+        ("approve", {"editedContent": "正文", "editedReplacement": "选区"}),
+        ("approve", {"editedContent": " \n\t"}),
+        ("approve", {"editedContent": "\ufeff"}),
+        ("approve", {"editedContent": " \ufeff\n\ufeff\t"}),
         ("approve", {"selectedUpdateRefs": [{"section": "characters"}]}),
         ("approve", {"editedReplacement": "   "}),
         ("discard", {"editedReplacement": "不能在丢弃时编辑"}),
+        ("discard", {"editedContent": "不能在丢弃时编辑全文"}),
+        ("revise", {"userMessage": "修改要求", "editedContent": "正文"}),
+        ("revise", {"userMessage": "修改要求", "editedReplacement": "选区"}),
         ("revise", {}),
         ("revise", {"userMessage": "   "}),
     ],
@@ -235,3 +253,12 @@ def test_artifact_decision_v2_rejects_ambiguous_or_incomplete_shape(
                 **extra,
             }
         )
+
+
+@pytest.mark.parametrize("content", ["\u001c", "\u001d", "\u001e", "\u001f"])
+def test_v2_full_edit_uses_shared_chapter_whitespace_set(content: str) -> None:
+    request = ReviewArtifactDecisionRequest.model_validate({
+        "engineVersion": 2, "clientRequestId": "v2-content-unicode-0001",
+        "expectedRevision": 1, "decision": "approve", "editedContent": content,
+    })
+    assert request.editedContent == content

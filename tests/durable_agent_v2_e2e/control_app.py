@@ -43,6 +43,16 @@ class ChapterPlanReviewModeRequest(BaseModel):
     mode: Literal["pass", "revise_once"]
 
 
+class ChapterWritingReviewModeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["pass", "revise_once", "patch_once", "patch_conflict"]
+
+
+class ChapterWritingReviewIdentity(ProviderIdentity):
+    role: Literal["consistency", "editorial"]
+
+
 class CallbackModeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -154,6 +164,19 @@ class _Store:
                   content_verdict TEXT NOT NULL CHECK (content_verdict IN ('pass', 'issues_found')),
                   decided_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS chapter_writing_review_mode (
+                  id INTEGER PRIMARY KEY CHECK (id = 1), mode TEXT NOT NULL
+                );
+                INSERT OR IGNORE INTO chapter_writing_review_mode VALUES (1, 'pass');
+                CREATE TABLE IF NOT EXISTS chapter_writing_review_submission (
+                  idempotency_key TEXT PRIMARY KEY, role TEXT NOT NULL,
+                  artifact_revision INTEGER NOT NULL, mode TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS chapter_writing_review (
+                  idempotency_key TEXT PRIMARY KEY, request_sha256 TEXT NOT NULL,
+                  role TEXT NOT NULL, artifact_revision INTEGER NOT NULL, mode TEXT NOT NULL,
+                  content_verdict TEXT NOT NULL, decided_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -232,6 +255,108 @@ class _Store:
                     "UPDATE chapter_plan_review_mode SET revise_remaining = 0 WHERE id = 1"
                 )
             return decision
+
+    def chapter_writing_review_mode(self, mode: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE chapter_writing_review_mode SET mode = ? WHERE id = 1", (mode,)
+            )
+
+    def chapter_writing_submission(self, payload: object) -> None:
+        """只从透明请求提取角色/revision/幂等身份，不持久化 input 或候选。"""
+        if not isinstance(payload, dict) or (
+            payload.get("workflow"),
+            payload.get("operation"),
+            payload.get("purpose"),
+        ) != ("long_serial", "write_chapter", "review"):
+            return
+        profile = payload.get("modelProfile")
+        profile_key = profile.get("profile") if isinstance(profile, dict) else None
+        roles = {
+            "reviewer.chapter_draft_consistency.v1": "consistency",
+            "reviewer.chapter_draft_editorial.v1": "editorial",
+        }
+        role = roles.get(profile_key) if isinstance(profile_key, str) else None
+        key = payload.get("idempotencyKey")
+        revision = payload.get("artifactRevision")
+        if (
+            role is None
+            or not isinstance(key, str)
+            or not key
+            or len(key) > 128
+            or (type(revision) is not int or revision < 1)
+        ):
+            raise ValueError("正文复审透明提交缺少严格角色或候选身份")
+        with self._lock, self._connection:
+            previous = self._connection.execute(
+                "SELECT role, artifact_revision FROM chapter_writing_review_submission "
+                "WHERE idempotency_key = ?",
+                (key,),
+            ).fetchone()
+            if previous is not None:
+                if previous["role"] != role or previous["artifact_revision"] != revision:
+                    raise ValueError("正文复审提交改变了同一幂等键的角色或候选")
+                return
+            mode = self._connection.execute(
+                "SELECT mode FROM chapter_writing_review_mode WHERE id = 1"
+            ).fetchone()["mode"]
+            self._connection.execute(
+                "INSERT INTO chapter_writing_review_submission VALUES (?, ?, ?, ?)",
+                (key, role, revision, mode),
+            )
+
+    def chapter_writing_review_decision(
+        self, identity: ChapterWritingReviewIdentity
+    ) -> dict[str, object]:
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            provider = self._connection.execute(
+                "SELECT request_sha256 FROM provider_call WHERE idempotency_key = ?",
+                (identity.idempotencyKey,),
+            ).fetchone()
+            submission = self._connection.execute(
+                "SELECT role, artifact_revision, mode FROM chapter_writing_review_submission "
+                "WHERE idempotency_key = ?",
+                (identity.idempotencyKey,),
+            ).fetchone()
+            if (
+                provider is None
+                or provider["request_sha256"] != identity.requestSha256
+                or submission is None
+                or submission["role"] != identity.role
+            ):
+                raise ValueError("正文复审缺少匹配的透明提交与供应商身份")
+            previous = self._connection.execute(
+                "SELECT * FROM chapter_writing_review WHERE idempotency_key = ?",
+                (identity.idempotencyKey,),
+            ).fetchone()
+            if previous is not None:
+                if (
+                    previous["request_sha256"] != identity.requestSha256
+                    or previous["role"] != identity.role
+                ):
+                    raise ValueError("正文复审幂等身份冲突")
+                return {
+                    "contentVerdict": previous["content_verdict"],
+                    "mode": previous["mode"],
+                    "artifactRevision": previous["artifact_revision"],
+                }
+            revision = submission["artifact_revision"]
+            mode = submission["mode"]
+            verdict = "issues_found" if revision == 1 and mode != "pass" else "pass"
+            self._connection.execute(
+                "INSERT INTO chapter_writing_review VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    identity.idempotencyKey,
+                    identity.requestSha256,
+                    identity.role,
+                    revision,
+                    mode,
+                    verdict,
+                    _now(),
+                ),
+            )
+            return {"contentVerdict": verdict, "mode": mode, "artifactRevision": revision}
 
     def callback(
         self,
@@ -339,12 +464,19 @@ class _Store:
             review_mode = self._connection.execute(
                 "SELECT revise_remaining FROM chapter_plan_review_mode WHERE id = 1"
             ).fetchone()
+            writing_reviews = [
+                dict(row)
+                for row in self._connection.execute(
+                    "SELECT * FROM chapter_writing_review ORDER BY decided_at, idempotency_key"
+                ).fetchall()
+            ]
         return {
             "providerCalls": providers,
             "callbackAttempts": callbacks,
             "executionSubmitAttempts": submissions,
             "chapterPlanReviews": reviews,
             "chapterPlanReviewMode": {"reviseRemaining": review_mode["revise_remaining"]},
+            "chapterWritingReviews": writing_reviews,
         }
 
     def reset(self) -> None:
@@ -353,6 +485,11 @@ class _Store:
             self._connection.execute("DELETE FROM provider_call")
             self._connection.execute("DELETE FROM execution_submit_attempt")
             self._connection.execute("DELETE FROM chapter_plan_review")
+            self._connection.execute("DELETE FROM chapter_writing_review")
+            self._connection.execute("DELETE FROM chapter_writing_review_submission")
+            self._connection.execute(
+                "UPDATE chapter_writing_review_mode SET mode = 'pass' WHERE id = 1"
+            )
             self._connection.execute(
                 "UPDATE chapter_plan_review_mode SET revise_remaining = 0 WHERE id = 1"
             )
@@ -523,6 +660,26 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return {"contentVerdict": decision}
 
+    @app.put("/control/chapter-writing-review-mode")
+    async def set_chapter_writing_review_mode(
+        body: ChapterWritingReviewModeRequest,
+        control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
+    ) -> dict[str, str]:
+        authorize(control_token)
+        store.chapter_writing_review_mode(body.mode)
+        return {"mode": body.mode}
+
+    @app.post("/control/provider/chapter-writing-review-decision")
+    async def chapter_writing_review_decision(
+        body: ChapterWritingReviewIdentity,
+        control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
+    ) -> dict[str, object]:
+        authorize(control_token)
+        try:
+            return store.chapter_writing_review_decision(body)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
     @app.put("/control/callback-mode")
     async def set_callback_mode(
         body: CallbackModeRequest,
@@ -629,6 +786,10 @@ def create_app() -> FastAPI:
                 status_code=503,
                 content={"detail": "E2E execution submit 已在转发前中止"},
             )
+        try:
+            store.chapter_writing_submission(payload)
+        except ValueError as exc:
+            return JSONResponse(status_code=409, content={"detail": str(exc)})
         try:
             upstream_response = await agent_http.post(
                 request.url.path,

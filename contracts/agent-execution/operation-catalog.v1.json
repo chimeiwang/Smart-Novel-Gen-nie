@@ -242,21 +242,43 @@
       "key": "long_serial.write_chapter",
       "workflow": "long_serial",
       "operation": "write_chapter",
-      "labels": {"zh-CN": "生成正文草案"},
-      "targetKinds": ["chapter"],
-      "scopeKinds": ["chapter"],
+      "labels": {
+        "zh-CN": "生成正文草案"
+      },
+      "targetKinds": [
+        "chapter"
+      ],
+      "scopeKinds": [
+        "chapter"
+      ],
       "mutating": true,
       "developmentOnly": false,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.long_serial.chapter_draft.v1",
       "generatorProfile": "writer.chapter_draft.v1",
       "outputSchema": "output.chapter_draft.v1",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.complete_output.v1", "validator.chapter_source_binding.v1", "validator.chapter_length.v1"],
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.complete_output.v1",
+        "validator.chapter_source_binding.v1",
+        "validator.chapter_length.v1"
+      ],
       "reviewPolicy": {
-        "profile": "review.parallel_chapter.v1",
+        "profile": "review.chapter_draft.v1",
         "mode": "parallel",
-        "reviewerProfiles": ["reviewer.consistency.v1", "reviewer.editorial.v1"],
-        "mergePolicy": "review.merge_all_pass_else_author.v1",
+        "reviewerProfiles": [
+          "reviewer.chapter_draft_consistency.v1",
+          "reviewer.chapter_draft_editorial.v1"
+        ],
+        "reviewerStepBudgetProfiles": {
+          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
+          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+        },
+        "reviewerOutputSchema": "output.chapter_draft_review_report.v1",
+        "rubricVersion": "rubric.chapter_draft.review.v1",
+        "evidencePolicy": "evidence.review.same_bundle_artifact_revision.v1",
+        "lane": "interactive",
+        "mergePolicy": "review.chapter_draft.patch_or_author.v1",
         "maxAutomaticRevisions": 1,
         "onUnavailable": "awaiting_user"
       },
@@ -265,7 +287,7 @@
         "profile": "budget.long_serial.chapter_draft.v1",
         "maxModelCalls": 6,
         "maxInputTokens": 180000,
-        "maxPromptCacheMissTokens": 60000,
+        "maxPromptCacheMissTokens": 180000,
         "maxCompletionTokens": 40000,
         "maxReasoningTokens": 16000,
         "maxVisibleOutputTokens": 24000,
@@ -274,7 +296,8 @@
         "maxProtocolCorrectionSteps": 1,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "creative"
+      "lane": "creative",
+      "generatorStepBudgetProfile": "step_budget.long_serial.write_chapter.generator.v1"
     },
     {
       "key": "long_serial.rewrite_scene",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal, Self
 
+from inkforge_contracts import count_chapter_text_length
 from inkforge_contracts.long_serial import SourceBinding
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, model_validator
 
@@ -115,16 +116,12 @@ class ArtifactSelectionRef(ReviewSchema):
 class ReviewArtifactDecisionRequest(ReviewSchema):
     engineVersion: Literal[1, 2] = Field(
         default=1,
-        description=(
-            "审核决定引擎版本；省略只兼容解释为 V1，V2 必须显式提交 2"
-        ),
+        description=("审核决定引擎版本；省略只兼容解释为 V1，V2 必须显式提交 2"),
     )
     clientRequestId: str = Field(min_length=16, max_length=128)
     expectedRevision: StrictInt = Field(
         ge=1,
-        description=(
-            "V1 为既有草案修订号；V2 为规范 expectedArtifactRevision wire 字段"
-        ),
+        description=("V1 为既有草案修订号；V2 为规范 expectedArtifactRevision wire 字段"),
     )
     decision: Literal["approve", "discard", "revise"]
     editedContent: str | None = None
@@ -136,20 +133,24 @@ class ReviewArtifactDecisionRequest(ReviewSchema):
     def validate_v2_decision_shape(self) -> Self:
         if self.engineVersion != 2:
             return self
-        if self.editedContent is not None or self.selectedUpdateRefs is not None:
-            raise ValueError("V2 章节选区决定只允许提交 editedReplacement")
+        if self.selectedUpdateRefs is not None:
+            raise ValueError("V2 决定不允许提交 selectedUpdateRefs")
         if self.decision == "approve":
-            if (
-                self.editedReplacement is not None
-                and not self.editedReplacement.strip()
+            if self.editedContent is not None and self.editedReplacement is not None:
+                raise ValueError("V2 editedContent 与 editedReplacement 不能同时提供")
+            for name, content in (
+                ("editedContent", self.editedContent),
+                ("editedReplacement", self.editedReplacement),
             ):
-                raise ValueError("V2 editedReplacement 不能为空白")
+                if content is not None and (
+                    count_chapter_text_length(content) == 0
+                    if name == "editedContent" else not content.strip()
+                ):
+                    raise ValueError(f"V2 {name} 不能为空白")
             return self
-        if self.editedReplacement is not None:
-            raise ValueError("只有 V2 approve 可以提交 editedReplacement")
-        if self.decision == "revise" and (
-            self.userMessage is None or not self.userMessage.strip()
-        ):
+        if self.editedContent is not None or self.editedReplacement is not None:
+            raise ValueError("只有 V2 approve 可以提交 editedContent 或 editedReplacement")
+        if self.decision == "revise" and (self.userMessage is None or not self.userMessage.strip()):
             raise ValueError("V2 revise 必须携带非空白 userMessage")
         return self
 

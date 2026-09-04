@@ -21,6 +21,12 @@ import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
+import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
+import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
+import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
+import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
+import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
+import cn.inkforge.core.workflows.domain.WorkflowUsageStatus;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -127,24 +133,27 @@ final class JooqDurableReviewDecisionStore {
         ExecutionPlanSnapshot executionPlan = executionPlan(locked.run());
         requireSupported(locked, executionPlan);
         boolean beatPlan = "beat_plan".equals(locked.kind());
-        if (beatPlan && nullable(request.getEditedReplacement()) != null) {
-            throw new ApiException(422, "VALIDATION_ERROR", "章节计划批准不接受正文替换；请提交返工指令");
+        boolean chapterDraft = "write_chapter".equals(locked.run().get("operation", String.class));
+        if (((beatPlan || chapterDraft) && nullable(request.getEditedReplacement()) != null)
+                || (!chapterDraft && nullable(request.getEditedContent()) != null)) {
+            throw validation("编辑字段与 Core 权威草案类型不匹配");
         }
-        Source source = beatPlan ? null : lockAndVerifySource(transaction, locked);
-        Revision revision = beatPlan ? exactPlanRevision(transaction, locked) : exactRevision(locked, source);
+        Source source = beatPlan || chapterDraft ? null : lockAndVerifySource(transaction, locked);
+        Revision revision = chapterDraft ? exactChapterRevision(transaction, locked) : beatPlan ? exactPlanRevision(transaction, locked) : exactRevision(locked, source);
         LocalDateTime now = DatabaseTimestamp.now(clock);
         String decision = request.getDecision().getValue();
 
         if ("approve".equals(decision)) {
-            Revision applied = beatPlan ? revision : editedRevision(
+            String decisionStepId = ids.next();
+            Revision applied = chapterDraft ? editedChapterRevision(transaction, locked, revision,
+                    nullable(request.getEditedContent()), decisionStepId, identity.fingerprint(), now) : beatPlan ? revision : editedRevision(
                     transaction,
                     locked,
                     revision,
                     source,
                     nullable(request.getEditedReplacement()),
                     now);
-            String decisionStepId = insertDecisionStep(
-                    transaction, locked, applied, request, identity, now);
+            insertDecisionStep(transaction, locked, applied, request, identity, now, decisionStepId);
             long sequence = appendEvent(
                     transaction,
                     locked.runId(),
@@ -316,6 +325,10 @@ final class JooqDurableReviewDecisionStore {
                 && "beat_plan".equals(locked.kind())
                 && "long_serial.plan_chapter".equals(executionPlan.operation().key())
                 && "apply.beat_plan.v1".equals(executionPlan.operation().applyHandler());
+        operation |= "write_chapter".equals(locked.run().get("operation", String.class))
+                && "chapter_draft".equals(locked.kind())
+                && "long_serial.write_chapter".equals(executionPlan.operation().key())
+                && "apply.chapter_draft.v1".equals(executionPlan.operation().applyHandler());
         boolean supported = operation && "long_serial".equals(locked.run().get("workflow", String.class))
                 && locked.artifact().get("taskId", String.class) == null
                 && Objects.equals(
@@ -395,6 +408,47 @@ final class JooqDurableReviewDecisionStore {
                 selectedHash,
                 ReviewArtifactRules.slice(current, 0, start),
                 ReviewArtifactRules.slice(current, end, length));
+    }
+
+    private Revision exactChapterRevision(DSLContext tx, Locked locked) {
+        Map<String, Object> payload = readObject(locked.revision().get("payloadJson", String.class));
+        Map<String, Object> diff = readObject(locked.revision().get("diffJson", String.class));
+        requireHeadMatches(locked, payload, diff);
+        var evidence = DurableChapterWritingReviewEvidence.read(tx, json, locked.runId(), sourceBundleId(locked), locked.chapterId());
+        String instruction = readObject(locked.run().get("input", String.class)).get("userInstruction") instanceof String value ? value : null;
+        var current = new JooqChapterWritingEvidenceReader(json).capture(tx, locked.novelId(), locked.chapterId(), instruction);
+        if (!ExecutionCanonicalJson.sha256(evidence.context()).equals(ExecutionCanonicalJson.sha256(current.context()))) {
+            throw new ApiException(409, "ARTIFACT_SOURCE_VERSION_CONFLICT", "正文草案的冻结来源已变化",
+                    Map.of("resourceType", "chapter_writing_context", "resourceId", locked.chapterId()));
+        }
+        var materialized = DurableChapterDraftArtifact.reconstruct(payload, diff, evidence.bundleId(), evidence.manifestHash(), locked.chapterId(), evidence.content());
+        return new Revision(locked.revision().get("revision", Integer.class), materialized.payload(), materialized.diff(), payload, diff);
+    }
+
+    private Revision editedChapterRevision(DSLContext tx, Locked locked, Revision base, String content,
+            String decisionStepId, String decisionHash, LocalDateTime now) {
+        if (content == null) return base;
+        Map<String, Object> output;
+        try {
+            output = DurableChapterDraftArtifact.deriveOutput(string(base.storedPayload(), "summary"), content);
+        } catch (IllegalArgumentException exception) {
+            throw validation("V2 editedContent 必须是完整非空白正文");
+        }
+        var stored = DurableChapterDraftArtifact.create(sourceBundleId(locked), string(base.storedPayload(), "evidenceManifestSha256"),
+                locked.chapterId(), output, decisionStepId, decisionHash);
+        int revision = Math.addExact(base.number(), 1);
+        tx.execute("""
+                INSERT INTO public."ReviewArtifactRevision" (id, "artifactId", revision, summary, "payloadJson", "diffJson", "createdByAgent", "createdAt")
+                VALUES (?, ?, ?, '用户编辑后批准', ?, ?, '用户', ?)
+                """, ids.next(), locked.artifactId(), revision, canonicalJson(stored.payload()), canonicalJson(stored.diff()), now);
+        int changed = tx.execute("""
+                UPDATE public."ReviewArtifact" SET revision = ?, "payloadJson" = ?, "diffJson" = ?, "updatedByAgent" = '用户', "updatedAt" = ?
+                WHERE id = ? AND revision = ? AND status = CAST('awaiting_user' AS "ReviewArtifactStatus")
+                """, revision, canonicalJson(stored.payload()), canonicalJson(stored.diff()), now, locked.artifactId(), base.number());
+        if (changed != 1) throw revisionConflict(base.number(), revision);
+        var materialized = DurableChapterDraftArtifact.reconstruct(stored.payload(), stored.diff(), sourceBundleId(locked),
+                string(base.storedPayload(), "evidenceManifestSha256"), locked.chapterId(), string(base.diff(), "before"));
+        return new Revision(revision, materialized.payload(), materialized.diff(), stored.payload(), stored.diff());
     }
 
     private Revision exactPlanRevision(DSLContext transaction, Locked locked) {
@@ -590,8 +644,12 @@ final class JooqDurableReviewDecisionStore {
             ReviewArtifactDecisionRequest request,
             ReviewDecisionIdentity identity,
             LocalDateTime now) {
+        return insertDecisionStep(transaction, locked, revision, request, identity, now, ids.next());
+    }
+
+    private String insertDecisionStep(DSLContext transaction, Locked locked, Revision revision,
+            ReviewArtifactDecisionRequest request, ReviewDecisionIdentity identity, LocalDateTime now, String stepId) {
         int ordinal = nextOrdinal(transaction, locked.runId());
-        String stepId = ids.next();
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("schemaVersion", 1);
         input.put("clientRequestId", request.getClientRequestId());
@@ -653,7 +711,7 @@ final class JooqDurableReviewDecisionStore {
         long generationSteps = transaction.fetchOne(
                 """
                 SELECT count(*) FROM public."WorkflowStep"
-                WHERE "runId" = ? AND purpose = 'generation'
+                WHERE "runId" = ? AND purpose IN ('generation', 'candidate_patch')
                 """,
                 locked.runId()).get(0, Long.class);
         int requiredCalls = 1 + executionPlan.reviewers().size();
@@ -665,6 +723,7 @@ final class JooqDurableReviewDecisionStore {
                     "WORKFLOW_REVISION_BUDGET_EXCEEDED",
                     "当前工作流已用完候选返工预算");
         }
+        requireRevisionRoundBudget(transaction, locked, executionPlan);
         Record original = transaction.fetchOne(
                 """
                 SELECT input FROM public."WorkflowStep"
@@ -680,7 +739,10 @@ final class JooqDurableReviewDecisionStore {
                 : null;
         input.put("originalUserInstruction", originalInstruction);
         input.put("userInstruction", nullable(request.getUserMessage()));
-        if ("beat_plan".equals(locked.kind())) {
+        if ("write_chapter".equals(locked.run().get("operation", String.class))) {
+            input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
+                    "artifactRevision", revision.number(), "payload", DurableChapterDraftArtifact.output(revision.storedPayload())));
+        } else if ("beat_plan".equals(locked.kind())) {
             input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
                     "artifactRevision", revision.number(), "payload", DurableBeatPlanArtifact.output(revision.storedPayload())));
         } else {
@@ -753,6 +815,59 @@ final class JooqDurableReviewDecisionStore {
                 json.writeValueAsString(storedBudget),
                 now,
                 now);
+    }
+
+    /** Run 已在决定入口锁定；受理前同时为完整生成与全部 Reviewer 核验冻结额度。 */
+    private void requireRevisionRoundBudget(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan) {
+        List<WorkflowRunBudgetCharge> charges = new ArrayList<>();
+        charges.add(WorkflowRunBudgetCharge.active(plan.generator().stepBudget().budget()));
+        for (var reviewer : plan.reviewers()) {
+            charges.add(WorkflowRunBudgetCharge.active(reviewer.stepBudget().budget()));
+        }
+        for (Record step : tx.fetch("""
+                SELECT step.status::text AS status, step.purpose, step."budgetJson", step."usageJson",
+                       reservation.status AS reservation_status
+                FROM public."WorkflowStep" step
+                LEFT JOIN public."WorkflowBillingReservation" reservation ON reservation."stepId" = step.id
+                WHERE step."runId" = ? AND step."budgetJson" IS NOT NULL
+                ORDER BY step.ordinal, step.id
+                """, locked.runId())) {
+            WorkflowStepBudget budget = json.convertValue(
+                    readObject(step.get("budgetJson", String.class)).get("budget"), WorkflowStepBudget.class);
+            boolean correction = "protocol_correction".equals(step.get("purpose", String.class));
+            if (List.of("pending", "running").contains(step.get("status", String.class))
+                    || "reconciliation_required".equals(step.get("reservation_status", String.class))) {
+                charges.add(WorkflowRunBudgetCharge.active(budget, correction));
+                continue;
+            }
+            String usageJson = step.get("usageJson", String.class);
+            if (usageJson == null) continue;
+            Map<String, Object> value = readObject(usageJson);
+            WorkflowStepUsage usage = new WorkflowStepUsage(
+                    WorkflowUsageStatus.fromWireValue(string(value, "usageStatus")),
+                    nullableLong(value, "inputTokens"), nullableLong(value, "cachedTokens"),
+                    nullableLong(value, "promptCacheMissTokens"), nullableLong(value, "completionTokens"),
+                    nullableLong(value, "reasoningTokens"), nullableLong(value, "visibleOutputTokens"),
+                    nullableLong(value, "costMicros"), integer(value, "providerAttempts"),
+                    integer(value, "protocolCorrections"), nullableLong(value, "wallTimeMillis"));
+            // 与调用前计费核验同口径：零尝试仅计墙钟；未知维度按该 Step 授权上限占用。
+            charges.add(usage.providerAttempts() == 0
+                    ? new WorkflowRunBudgetCharge(0, 0, 0, 0, 0, 0, 0, usage.wallTimeMillis(), correction ? 1 : 0)
+                    : WorkflowRunBudgetCharge.terminal(budget, usage, correction));
+        }
+        try {
+            plan.runBudget().toDomain().requireWithin(charges);
+        } catch (WorkflowBudgetExceededException | ArithmeticException exception) {
+            throw new ApiException(409, "WORKFLOW_REVISION_BUDGET_EXCEEDED",
+                    "当前工作流剩余预算不足以完成整轮生成与复审");
+        }
+    }
+
+    private static Long nullableLong(Map<String, Object> value, String field) {
+        Object number = value.get(field);
+        if (number == null) return null;
+        if (number instanceof Number result) return result.longValue();
+        throw invalidArtifact();
     }
 
     private static Map<String, Object> stepRequestMaterial(
@@ -1002,18 +1117,19 @@ final class JooqDurableReviewDecisionStore {
         if (request.getEngineVersion() != ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2) {
             throw new IllegalArgumentException("V2 决定必须显式声明 engineVersion=2");
         }
-        if (nullable(request.getEditedContent()) != null
-                || nullable(request.getSelectedUpdateRefs()) != null) {
-            throw validation("V2 章节选区决定只允许提交 editedReplacement");
+        if (nullable(request.getSelectedUpdateRefs()) != null) {
+            throw validation("V2 草案决定不允许 selectedUpdateRefs");
         }
         String replacement = nullable(request.getEditedReplacement());
+        String content = nullable(request.getEditedContent());
+        if (replacement != null && content != null) throw validation("全文与选区编辑字段不能同时提交");
         if (request.getDecision() == ReviewArtifactDecisionRequest.DecisionEnum.APPROVE) {
             if (replacement != null && replacement.isBlank()) {
                 throw validation("V2 editedReplacement 不能为空白");
             }
             return;
         }
-        if (replacement != null) throw validation("只有 V2 approve 可以提交 editedReplacement");
+        if (replacement != null || content != null) throw validation("只有 V2 approve 可以提交编辑字段");
         if (request.getDecision() == ReviewArtifactDecisionRequest.DecisionEnum.REVISE) {
             String message = nullable(request.getUserMessage());
             if (message == null || message.isBlank()) {

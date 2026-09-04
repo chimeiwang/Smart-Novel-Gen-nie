@@ -517,6 +517,13 @@ test("章节规划刷新后恢复实际生成与专用编辑复审角色", () =>
   );
 });
 
+test("正文写作显示整章生成双复审及非模型局部修改角色", () => {
+  assert.equal(workflowModelRoleLabel(modelProfile("writer.chapter_draft.v1"), "generation"), "章节正文生成");
+  assert.equal(workflowModelRoleLabel(modelProfile("reviewer.chapter_draft_consistency.v1"), "review"), "正文一致性校验");
+  assert.equal(workflowModelRoleLabel(modelProfile("reviewer.chapter_draft_editorial.v1"), "review"), "正文编辑复审");
+  assert.equal(workflowModelRoleLabel(null, "candidate_patch"), "局部修改候选");
+});
+
 test("只有 chat_answer 完成事件要求回读当前会话权威消息", () => {
   const answerCompleted = workflowEvent(envelope(3, "completed", {
     outcomeType: "chat_answer",

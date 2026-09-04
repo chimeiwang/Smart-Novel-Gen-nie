@@ -211,11 +211,11 @@
     {
       "key": "writer.chapter_draft.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "bounded",
       "purpose": "generation",
-      "promptProfile": "prompt.unavailable.generation.v1",
-      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+      "promptProfile": "prompt.writer.chapter_draft.v1",
+      "deploymentProfileKey": "deployment.writer.chapter_draft.v1"
     },
     {
       "key": "writer.chapter_selection.v1",
@@ -252,6 +252,24 @@
       "purpose": "generation",
       "promptProfile": "prompt.unavailable.generation.v1",
       "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "reviewer.chapter_draft_consistency.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.chapter_draft_consistency.v1",
+      "deploymentProfileKey": "deployment.reviewer.chapter_draft_consistency.v1"
+    },
+    {
+      "key": "reviewer.chapter_draft_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.chapter_draft_editorial.v1",
+      "deploymentProfileKey": "deployment.reviewer.chapter_draft_editorial.v1"
     }
   ]
 }

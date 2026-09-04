@@ -13,6 +13,7 @@ import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.writing.application.EngineIdentityProbe;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
+import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.writing.application.WritingCallbackRepository;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingCommandDispatchRepository;
@@ -148,9 +149,10 @@ class WritingConfiguration {
             CuidV1Generator ids,
             Clock coreClock,
             ObjectMapper objectMapper,
-            ChapterPlanEvidenceReader chapterPlanningSources) {
+            ChapterPlanEvidenceReader chapterPlanningSources,
+            ChapterWritingEvidenceReader chapterWritingSources) {
         return new JooqLongSerialDurableRunStarter(
-                database, assembler, workflows, registry, ids, coreClock, objectMapper, chapterPlanningSources);
+                database, assembler, workflows, registry, ids, coreClock, objectMapper, chapterPlanningSources, chapterWritingSources);
     }
 
     @Bean

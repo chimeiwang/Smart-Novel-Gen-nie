@@ -8,6 +8,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.references.application.ReferenceRepository;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
+import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.ReviewRepository;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
@@ -25,6 +26,12 @@ class ReviewConfiguration {
     @Bean
     ChapterPlanEvidenceReader chapterPlanEvidenceReader(ObjectMapper objectMapper) {
         return new JooqChapterPlanEvidenceReader(objectMapper);
+    }
+
+    @Bean
+    ChapterWritingEvidenceReader chapterWritingEvidenceReader(
+            ObjectMapper objectMapper, ChapterPlanEvidenceReader chapterPlanningSources) {
+        return new JooqChapterWritingEvidenceReader(objectMapper, chapterPlanningSources);
     }
 
     @Bean

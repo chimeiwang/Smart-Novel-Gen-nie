@@ -253,6 +253,16 @@ final class WorkflowCallbackValues {
         result.put("evidence", evidence.stream().map(reference -> referenceMap(reference, includeNull)).toList());
         result.put("suggestion", value.getSuggestion());
         result.put("confidence", value.getConfidence());
+        var patch = value.getCandidatePatch();
+        if (patch != null) {
+            if (!"text_replace".equals(patch.getKind()) || patch.getFind() == null
+                    || patch.getFind().isEmpty() || patch.getReplace() == null) {
+                throw new IllegalArgumentException("candidatePatch 必须是完整的精确文本替换");
+            }
+            // 新字段缺省或 null 都不进入 canonical 材料，旧 Reviewer 回调哈希保持不变。
+            result.put("candidatePatch", Map.of("kind", patch.getKind(),
+                    "find", patch.getFind(), "replace", patch.getReplace()));
+        }
         return Collections.unmodifiableMap(result);
     }
 

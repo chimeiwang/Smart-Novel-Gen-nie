@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 221,
+  "modelCount": 226,
   "models": [
     {
       "model": "AgentEvent",
@@ -43,6 +43,36 @@
       "module": "execution",
       "path": "execution/BillingReconciliationRequest.schema.json",
       "sha256": "ef106527fcbbc85cef5a7ceeb2c93600f0e8edb10fa56ae39bd55498ac7d1e49"
+    },
+    {
+      "model": "CandidateTextPatch",
+      "module": "execution",
+      "path": "execution/CandidateTextPatch.schema.json",
+      "sha256": "689c450f94e746451ac3177910bff2e0a6c479acb201c139ae3006da135af1a2"
+    },
+    {
+      "model": "ChapterDraftInput",
+      "module": "execution",
+      "path": "execution/ChapterDraftInput.schema.json",
+      "sha256": "7fea20917fe60a48b42cd66c6eef1dd2a6dc27f3e61734d946be87f9abc377b0"
+    },
+    {
+      "model": "ChapterDraftOutput",
+      "module": "execution",
+      "path": "execution/ChapterDraftOutput.schema.json",
+      "sha256": "9559fa3bc0c4738744b24b22dafb852a2cb5ad1933f84e2f81f426f7af39e2b5"
+    },
+    {
+      "model": "ChapterDraftPreviousArtifact",
+      "module": "execution",
+      "path": "execution/ChapterDraftPreviousArtifact.schema.json",
+      "sha256": "a8bafd906fa3c1948123776d503713f7cb3152bea8ffadb54d52fa25a3745865"
+    },
+    {
+      "model": "ChapterDraftResult",
+      "module": "execution",
+      "path": "execution/ChapterDraftResult.schema.json",
+      "sha256": "39237686ed8cbfc8401045e4cd6831fe9d28a22492e62bb1f9e19f0c03cd2332"
     },
     {
       "model": "ChapterPlanInput",
@@ -108,7 +138,7 @@
       "model": "EvaluationFinding",
       "module": "execution",
       "path": "execution/EvaluationFinding.schema.json",
-      "sha256": "ddde0c43d51e061690b22522376508404204f8483323aec3d1a5548bececd0f4"
+      "sha256": "3ea04bf236d052c73bc46c281e87f92e93e9f0ff35e8e54b0e0eb2b22ba29882"
     },
     {
       "model": "EvidenceBundle",
@@ -120,7 +150,7 @@
       "model": "EvidenceEvaluation",
       "module": "execution",
       "path": "execution/EvidenceEvaluation.schema.json",
-      "sha256": "2883c7c4c096eb5f3dd756e2ab9ccbf9b01302c371e506999085e288dc116506"
+      "sha256": "ede446cd23bca8ba2bf2d60378928ff2fcf01b2f22c4b16dc4d166b714ea8c10"
     },
     {
       "model": "EvidenceExpansionItem",
@@ -204,7 +234,7 @@
       "model": "ExecutionStepResult",
       "module": "execution",
       "path": "execution/ExecutionStepResult.schema.json",
-      "sha256": "16918a28fcecbcd0b7d83d62d4564d30296b5a68cc1d74f378728a3663853019"
+      "sha256": "02788841105dccfec601cea4c42eeca820259919d6ac08934b405c996d2ed01d"
     },
     {
       "model": "ModelProfileRef",

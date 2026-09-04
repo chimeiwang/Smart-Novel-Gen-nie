@@ -14,6 +14,8 @@ final class WorkflowResultMaterializerRegistry {
             new Binding("apply.chat_answer.v1", Materializer.CHAT_ANSWER),
             "long_serial.plan_chapter",
             new Binding("apply.beat_plan.v1", Materializer.BEAT_PLAN_REVIEW_ARTIFACT),
+            "long_serial.write_chapter",
+            new Binding("apply.chapter_draft.v1", Materializer.CHAPTER_DRAFT_REVIEW_ARTIFACT),
             "long_serial.rewrite_chapter_selection",
             new Binding(
                     "apply.chapter_selection.v1",
@@ -50,6 +52,7 @@ final class WorkflowResultMaterializerRegistry {
     enum Materializer {
         CHAT_ANSWER,
         BEAT_PLAN_REVIEW_ARTIFACT,
+        CHAPTER_DRAFT_REVIEW_ARTIFACT,
         CHAPTER_SELECTION_REVIEW_ARTIFACT
     }
 

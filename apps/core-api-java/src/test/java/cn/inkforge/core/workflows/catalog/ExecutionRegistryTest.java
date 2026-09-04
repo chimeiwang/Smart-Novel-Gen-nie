@@ -27,7 +27,8 @@ class ExecutionRegistryTest {
                 .containsExactly(
                         "long_serial.answer_question",
                         "long_serial.plan_chapter",
-                        "long_serial.rewrite_chapter_selection");
+                        "long_serial.rewrite_chapter_selection",
+                        "long_serial.write_chapter");
         ExecutionRegistry.ResolvedOperation resolved =
                 registry.resolve("long_serial.rewrite_chapter_selection", false);
 
@@ -90,7 +91,7 @@ class ExecutionRegistryTest {
     void 未启用操作和系统用途不能借目录存在绕过门禁() {
         ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
 
-        assertThatThrownBy(() -> registry.resolve("long_serial.write_chapter", false))
+        assertThatThrownBy(() -> registry.resolve("long_serial.rewrite_scene", false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
         assertThatThrownBy(() -> registry.resolve(
@@ -100,6 +101,27 @@ class ExecutionRegistryTest {
         assertThatThrownBy(() -> registry.resolveSystemPurpose("protocol_correction"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
+    }
+
+    @Test
+    void 正文冻结完整输出专用双复审和六调用总预算() {
+        ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        var draft = registry.resolve("long_serial.write_chapter", false);
+        assertThat(draft.generatorProfile().key()).isEqualTo("writer.chapter_draft.v1");
+        assertThat(draft.outputSchema().jsonSchema().get("required"))
+                .isEqualTo(java.util.List.of("summary", "content"));
+        assertThat(draft.reviewers()).extracting(reviewer -> reviewer.profile().key())
+                .containsExactly("reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1");
+        assertThat(draft.operation().reviewPolicy().mergePolicy())
+                .isEqualTo("review.chapter_draft.patch_or_author.v1");
+        assertThat(draft.operation().reviewPolicy().maxAutomaticRevisions()).isEqualTo(1);
+        assertThat(draft.operation().runBudget().maxModelCalls()).isEqualTo(6);
+        assertThat(draft.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(180_000);
+        assertThat(draft.generatorStepBudget().budget().maxCompletionTokens()).isEqualTo(16_000);
+        assertThat(draft.reviewers()).allSatisfy(reviewer -> {
+            assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(30_000);
+            assertThat(reviewer.stepBudget().budget().maxReasoningTokens()).isZero();
+        });
     }
 
     @Test

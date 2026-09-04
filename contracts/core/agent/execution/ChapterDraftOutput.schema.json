@@ -1,0 +1,28 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/ChapterDraftOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "完整正文与说明是唯一模型语义输出，不截断、不复用旧标记协议。",
+  "properties": {
+    "content": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Content",
+      "type": "string"
+    },
+    "summary": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary",
+    "content"
+  ],
+  "title": "ChapterDraftOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChapterDraftOutput"
+}

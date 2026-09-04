@@ -13,6 +13,15 @@ public interface ChapterPlanEvidenceReader {
 
     Snapshot capture(DSLContext transaction, String novelId, String chapterId, String userInstruction);
 
+    /** 额外文本只参与确定性相关性选择，不替换用户指令，也不自动进入规划投影。 */
+    default Snapshot capture(DSLContext transaction, String novelId, String chapterId, String userInstruction,
+            String additionalRelevanceText) {
+        if (!Objects.requireNonNull(additionalRelevanceText).isEmpty()) {
+            throw new UnsupportedOperationException("当前来源读取器不支持额外相关性文本");
+        }
+        return capture(transaction, novelId, chapterId, userInstruction);
+    }
+
     record Snapshot(Map<String, Object> context, OffsetDateTime chapterUpdatedAt) {
         public Snapshot {
             context = freezeMap(context);

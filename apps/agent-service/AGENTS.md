@@ -183,6 +183,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   Provider 只生成 title/summary/chapterGoal/sceneBeats 等语义字段，连续 order、beatCount、contentSha256
   由程序派生并由 Core 复验。Core 持有候选、复审、最多一次自动完整返工和用户决定的编排及计费。
   该 Operation 的本分支接入不表示其余 Catalog 占位项已实现，也不表示生产已经开放。
+- V2 `long_serial.write_chapter` 使用 `writer.chapter_draft.v1` 与专用正文一致性/编辑双 Reviewer。
+  三者只消费同一 `chapter_writing_context`，不回读工作区。Provider 仅生成完整 summary/content；
+  程序派生原始 UTF-8 哈希及统一 Unicode 字数，超预算或不完整结束必须明确失败，不得裁切正文。
+  Reviewer 的结构化 candidatePatch 与 suggestion 解释文字严格区分；Core 独占局部修改、全篇返工、
+  不可变 revision 和正式采用。零模型 candidate_patch 是 Core 的 persistence/control Step，不调用 Agent，
+  不伪造模型用量或积分预留；最多一次自动修改后必须再次双复审，剩余问题交作者。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

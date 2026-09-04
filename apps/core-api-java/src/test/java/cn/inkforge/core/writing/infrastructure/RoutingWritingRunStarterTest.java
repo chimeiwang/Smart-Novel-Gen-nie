@@ -15,6 +15,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.reviews.infrastructure.JooqChapterPlanEvidenceReader;
+import cn.inkforge.core.reviews.infrastructure.JooqChapterWritingEvidenceReader;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
@@ -109,7 +110,8 @@ class RoutingWritingRunStarterTest {
                 ids,
                 CLOCK,
                 json,
-                new JooqChapterPlanEvidenceReader(json));
+                new JooqChapterPlanEvidenceReader(json),
+                new JooqChapterWritingEvidenceReader(json));
     }
 
     @AfterAll
@@ -360,6 +362,55 @@ class RoutingWritingRunStarterTest {
                 .isZero();
         assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?", fixture.sessionId()))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void 正文写作V2冻结完整上下文但生成输入只保留指令字数且幂等不重读() {
+        Fixture fixture = fixture("route-v2-chapter-writing");
+        ParsedWritingRunStartRequest request = longSerialRequest(
+                fixture, "request-route-v2-writing-01", "write_chapter", true);
+        assertThat(durable.supportedOperationKeys()).contains("long_serial.write_chapter");
+        WritingRunV2Response first = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(), request);
+        Record facts = database.dsl().fetchOne("""
+                SELECT run.kind::text AS kind, item."contentJson" AS context,
+                       item."contentText" AS content_text, item."resourceType" AS resource_type,
+                       item."metadataJson" AS metadata, step.input::text AS step_input,
+                       item."rangeJson" AS range_json
+                FROM public."WorkflowRun" run
+                JOIN public."WorkflowEvidenceBundle" bundle ON bundle."runId" = run.id
+                JOIN public."WorkflowEvidenceItem" item ON item."bundleId" = bundle.id
+                JOIN public."WorkflowStep" step ON step."runId" = run.id
+                WHERE run.id = ?
+                """, first.getRunId());
+        assertThat(first.getOperation()).isEqualTo("write_chapter");
+        assertThat(first.getCurrentStep().getModelProfile().getProfile()).isEqualTo("writer.chapter_draft.v1");
+        assertThat(facts.get("kind", String.class)).isEqualTo("chapter_generation");
+        assertThat(facts.get("resource_type", String.class)).isEqualTo("chapter_writing_context");
+        assertThat(facts.get("content_text")).isNull();
+        assertThat(facts.get("range_json")).isNull();
+        var context = json.readTree(facts.get("context", String.class));
+        assertThat(context.at("/currentChapter/id").textValue()).isEqualTo(fixture.chapterId());
+        assertThat(context.at("/currentChapter/content").textValue()).isEqualTo(fixture.content());
+        assertThat(context.path("sourceBindings").findValues("resourceType"))
+                .extracting(tools.jackson.databind.JsonNode::textValue)
+                .contains("chapter_content", "novel_context", "writing_style", "previous_chapter", "next_chapter");
+        assertThat(json.readTree(facts.get("step_input", String.class))).isEqualTo(json.valueToTree(Map.of(
+                "userInstruction", "请执行 write_chapter", "targetWordCount", 1000)));
+        assertThat(json.readTree(facts.get("metadata", String.class)).path("role").textValue()).isEqualTo("chapter_writing_context");
+        assertThat(context.has("workspace")).isFalse();
+        assertThat(context.has("userInstruction")).isFalse();
+        database.dsl().execute("UPDATE public.\"Chapter\" SET content = '后来修改完整正文' WHERE id = ?", fixture.chapterId());
+        WritingRunV2Response replay = (WritingRunV2Response) router("off").start(fixture.userId(), request);
+        assertThat(replay.getRunId()).isEqualTo(first.getRunId());
+        assertThat(database.dsl().fetchOne("""
+                SELECT item."contentJson" FROM public."WorkflowEvidenceItem" item
+                JOIN public."WorkflowEvidenceBundle" bundle ON bundle.id = item."bundleId" WHERE bundle."runId" = ?
+                """, first.getRunId()).get("contentJson", String.class)).isEqualTo(facts.get("context", String.class));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?", fixture.novelId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WritingRunCommand\" WHERE \"taskId\" IN (SELECT id FROM public.\"WritingTask\" WHERE \"novelId\" = ?)", fixture.novelId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE \"novelId\" = ?", fixture.novelId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ?", fixture.chapterId())).isZero();
     }
 
     @Test

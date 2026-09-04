@@ -8,7 +8,8 @@
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
-- 本次不新增 CLI 命令名，只扩展现有 `long.agent.start` 的一个显式 Operation。
+- 问答阶段只扩展现有 `long.agent.start` 的一个显式 Operation；2026-09-04 正文写作阶段另扩展既有
+  `long.artifact.approve` 的 V2 全文编辑语义，见下文专节，两阶段均不新增命令名。
 - macOS 两份 Skill 已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机实际入口切换与离线验收，
   执行链为 `scripts/run.sh → Java Operator → Java CLI`。新版生产入口已于 2026-09-04 用既有 Keychain 会话通过
   指定账号的 `auth.whoami`，真实写作业务与 Windows 实机尚未验收，服务器部署状态不随本机切换变化。
@@ -52,7 +53,7 @@ Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成�
 
 ## 命令面与 Skill 行为变化
 
-CLI 命令名不变；只有 `long.agent.start` 的 Operation 集合增加了 `answer_question`。已有 Operation 的输入和结果
+2026-09-01 问答阶段的 CLI 命令名不变；当时只有 `long.agent.start` 的 Operation 集合增加了 `answer_question`。已有 Operation 的输入和结果
 语义、身份预检、固定 origin/profile、Keychain 与幂等边界保持不变。`long.task.watch` 的命令名和中断语义不变，
 但其输出判别已经从 V1-only `outcome.state` 扩展为按显式 `engineVersion` 分流的 V1/V2 契约；两份 Skill 必须同步
 修改 watcher、终态和恢复说明，不能把“命令名不变”误写成“watcher 行为无需更新”。Skill 也不得把此次变化解释为
@@ -123,6 +124,76 @@ Skill 不得把这些本地输入错误自动改写成另一种 Operation、scop
 上表的 `UNEXPECTED_FIELD` 只描述顶层字段。当前 CLI 对 `target`/`scope` 只做已定义身份字段的一致性检查；其内部
 额外成员会随请求发送并由公共 Core 契约决定是否以 422 拒绝。Skill 必须始终生成本文件示例的精确
 `target`/`scope`，不得利用这一区别发送扩展字段，也不得宣称所有嵌套额外字段都由 CLI 在零业务请求条件下拒绝。
+
+## 2026-09-04 正文 V2 编辑决定更新
+
+本节对应 `docs/specs/2026-09-04-durable-chapter-writing.md`。CLI 仍为 125 个命令，macOS 两份 Skill 仍为
+45 个允许命令，两份 Skill 的 `long.agent.start` 仍只允许 `plan_chapter`、`write_chapter`、`review_chapter` 三种 Operation。
+不开放问答、视频或新的选区启动能力；Agent 没有向 CLI 暴露直连入口，实际链路仍为
+`Skill scripts/run.sh → Java Operator/CLI → Core /api/v1/** → Agent`，只有 Core 决定是否派发 Agent。
+Python CLI 继续作为兼容对照，不回到已安装 Skill 的运行链。
+
+本轮完整验证后，包含正文编辑变更的新 JAR 已显式安装到本机两份 Skill 的固定运行包；服务器仍未部署或开放
+正文写作 V2。两份包 SHA-256 均为 `4e6a74f70a7ec5137534e31f0d0c2745966052d98592f4fafd355d32b57e5ec0`，
+来源 revision 为 `a0b6a98913066f3d66e8d06a4274ab4f21d949a5`、repositoryDirty=true；保留了原账号/端点绑定。
+旧包与原配置备份在 `/Users/boqiangnie/.codex/inkforge-cli-writing-backup.9hh3ty`。本轮只做离线入口验证，
+没有重做生产身份或业务调用；不能把本机包已更新解释为服务器已启用。后续源码或 checkout 仍不会自动替换固定包。
+
+### 决定前读取与类型规则
+
+1. 保留启动响应的 `runId`，使用 `long.task.get` / `long.task.watch` 的 `{"taskId":"<runId>"}` 观察；V2 读取
+   `status/activeSteps/artifact`。`waiting_user` 只表示候选等待作者，未覆盖正式正文。
+2. 从 Run 读取 `artifact.artifactId` 和 `artifact.artifactRevision`，执行
+   `long.artifact.get`：`{"artifactId":"<artifactId>","revision":7}`。这里必须传 `revision`，不能省略或用
+   `expectedRevision` 替代；示例数字须替换为实际返回值。
+3. 独立阅读完整正文、全文 Diff 和来源，确认详情 `id/revision/engineVersion=2` 与请求一致，且
+   `sourceBindingStatus=verified`。正文候选还须为 `kind=chapter_draft`、`payload.operation=write_chapter`、
+   `payload.target.mode=existing_chapter`；不能根据命令名猜测候选类型。
+4. `approve/revise` 内部仍会再次 GET 同一精确 revision 并核对来源，再 POST 决定；这不替代作者阅读与确认。
+   `discard` 保持无详情前读的幂等路径，调用方仍须明确 V2 身份和 revision。
+
+| V2 候选 | 批准时可选编辑字段 | 其他限制 |
+| --- | --- | --- |
+| `write_chapter` 当前章正文 | `editedContent` 或 `editedContentFile`，至多一个 | 必须是完整非空白正文，不接受 replacement |
+| 章节规划 `beat_plan` | 无 | 用 `long.artifact.revise` 提交修改要求，不能把计划当正文编辑 |
+| 已有选区草案 | `editedReplacement` 或 `editedReplacementFile`，至多一个 | 只提交选区替换文本，不接受 editedContent；本行不扩大 Skill 启动权限 |
+
+所有 V2 决定继续禁止 `selectedUpdateRefs`；`revise/discard` 不接受编辑字段。省略全部编辑字段的 approve
+采用原候选；编辑批准会先形成用户编辑 revision，再由 Core 在同一事务采用。文件内容必须完整按 UTF-8 读取，
+保留换行、首尾空格及 Unicode 字符，不 trim、摘要、分块代替全文或截断。文件路径只是 CLI 本地输入，不发给 Core。
+
+正文文件编辑批准示例（ID、revision 与路径必须替换为已确认的实际值）：
+
+```json
+{
+  "artifactId": "artifact-id",
+  "engineVersion": 2,
+  "expectedRevision": 7,
+  "clientRequestId": "chapter-draft-edit-20260904-0001",
+  "editedContentFile": "/absolute/path/已确认完整正文.txt"
+}
+```
+
+用 `long.artifact.approve` 发送上述 JSON；内联方式将文件字段替换成 `editedContent`，不能同时携带两者。
+返工使用 `long.artifact.revise` 和相同四个身份字段，另加非空 `userMessage`，使用本次决定独立、稳定的
+`clientRequestId`；丢弃使用 `long.artifact.discard`，不加编辑字段。网络结果不确定时只重放完全相同的请求与
+requestId；新修改要求或新 revision 不能复用旧请求内容，也不能用换 ID 的方式猜测上一决定是否成功。
+
+决定响应及 Run 回读是 Core 权威状态；`completed` 本身不能区分批准和丢弃。批准后回读 `long.chapter.get`
+确认完整正式正文及状态，不能把 SSE、CLI 文件或候选预览当正式结果。采用正文不会自动完成章节，也不会更新
+章节进展、故事进展、计划、设定或伏笔。来源/revision 冲突时重新读取，不自动覆盖新来源或改用内部接口。
+
+### 后续安装与 Skill 维护清单
+
+- 先完成本分支 Java/Python CLI、Core 与 Agent 相关门禁，构建新 JAR，并执行真实 JAR/shell 的隔离入口验证。
+- 经本机安装更新后，核对固定包 `jarSha256`、来源提交和 `repositoryDirty` 记录；没有这一步，不把源码或
+  `target/inkforge-cli.jar` 当作日常 Skill 已安装版本。安装流程见 Java CLI README 与入口切换 spec。
+- 实际维护 Skill 时同步 `references/cli-contract.md`、`references/long-serial-workflow.md`、
+  `references/recovery.md` 及必要的 `SKILL.md`：写清精确详情、三类编辑字段、完整文件、幂等恢复和最终正文回读；
+  不改变 45 命令/三 Operation 允许范围，不恢复 Python wrapper，不修改凭据规则。
+- 本轮只更新 Application Support 下的固定运行包和配置，没有修改已安装 `~/.codex/skills` 说明或脚本文件，
+  没有执行生产部署。新包安装与
+  目标 Core/Agent 实际部署、V2 路由和业务验收是不同事实，后者完成前不得宣称生产正文 V2 已开放。
 
 ## 观察与结果恢复
 

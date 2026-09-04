@@ -52,7 +52,8 @@ install -m 755 tools/inkforge-cli-java/operator/production/configure.sh \
 - 长篇 watcher 按 `engineVersion` 分流：V1 读取 `outcome`，V2 读取 `status/activeSteps/artifact/error`，
   V2 成功为 `completed`；协议错误停止，中断只停止观察。不能继续把所有任务都按 V1 outcome 解读。
 - V2 Artifact 决定显式传 `engineVersion: 2`、当前 `expectedRevision` 与稳定 `clientRequestId`；
-  approve/revise 先回读同一 revision 并核对来源。V2 的编辑字段按其契约处理，不复制 V1 全文编辑字段。
+  approve/revise 先回读同一 revision 并核对来源。正文写作 V2 的 `editedContent[File]`、选区的
+  `editedReplacement[File]` 和不可直接编辑的规划必须按权威候选类型区分，不能互换字段。
 - 将旧 `scripts/configure.py`、`scripts/run.py`、`scripts/macos_cli.py`、`scripts/operator_support.py` 和旧
   `tests/test_operator.py` 迁出到上面的可恢复备份；不要在活动 Skill 中保留 Python/Java 双入口。新验证使用
   Java JUnit、仓内 shell 验证及 Skill 结构检查。
@@ -118,3 +119,12 @@ tools/inkforge-cli-java/operator/test-launchers.sh "$PWD" "$JAVA_HOME/bin/java"
 章节规划 V2 沿用 `long.agent.start` 的 `plan_chapter` 及既有观察/草案决定命令，完整输入示例、
 `waiting_user`/`completed` 区别、返工和禁止编辑字段见
 `../../docs/specs/2026-09-04-durable-chapter-planning.md`。这条链已通过本分支的隔离 Fake 验收，不代表服务器已启用。
+
+正文写作 V2 的本轮变更允许 `long.artifact.approve` 使用 `editedContent` 或 `editedContentFile` 采用完整
+用户编辑正文；命令仍为 125 个，Skill 仍为 45 个。详情必须先通过 `long.artifact.get` 的 `revision` 精确读取，
+决定继续使用 `expectedRevision`；规划不能直接编辑，选区仍只接受 replacement。完整示例、类型限制和
+Skill 更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的正文编辑专节。
+本轮完整验证后已重新安装本机两份固定 JAR，SHA-256 均为
+`4e6a74f70a7ec5137534e31f0d0c2745966052d98592f4fafd355d32b57e5ec0`；原包和配置有可恢复备份，
+完整来源记录见正文写作 spec。服务器仍未开放正文 V2，普通 Web 聊天也尚未迁入新内核；不能把本机安装
+或此前生产身份验证成功当作服务器业务已生效。

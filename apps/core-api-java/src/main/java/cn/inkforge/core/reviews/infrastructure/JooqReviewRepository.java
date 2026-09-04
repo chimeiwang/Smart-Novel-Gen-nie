@@ -44,6 +44,7 @@ import cn.inkforge.core.reviews.domain.SelectionSource;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
+import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -667,6 +668,9 @@ final class JooqReviewRepository implements ReviewRepository {
             result.setTitle((String) plan.get("title"));
             result.setSummary((String) plan.get("summary"));
         }
+        if (durable != null && "write_chapter".equals(payload.get("operation"))) {
+            result.setSummary((String) payload.get("summary"));
+        }
         result.setPayload(payload);
         result.setDiff(JsonNullable.of(diff));
         result.setCreatedByAgent(artifact.getCreatedbyagent());
@@ -738,6 +742,14 @@ final class JooqReviewRepository implements ReviewRepository {
                     "待审核草案 head 与精确修订事实不一致");
         }
         String bundleId = requiredStoredText(storedPayload, "evidenceBundleId");
+        if (DurableChapterDraftArtifact.isStored(storedPayload)) {
+            var evidence = DurableChapterWritingReviewEvidence.read(context, json, artifact.getWorkflowrunid(), bundleId, artifact.getChapterid());
+            var materialized = DurableChapterDraftArtifact.reconstruct(storedPayload, storedDiff, bundleId,
+                    evidence.manifestHash(), artifact.getChapterid(), evidence.content());
+            Object bindings = evidence.context().get("sourceBindings");
+            if (!(bindings instanceof List<?> list) || list.isEmpty()) throw artifactIntegrityError();
+            return new DurableDetail(materialized.payload(), materialized.diff(), list.stream().map(value -> json.convertValue(value, SourceBinding.class)).toList());
+        }
         if (DurableBeatPlanArtifact.isStored(storedPayload)) {
             DurableChapterPlanReviewEvidence evidence = DurableChapterPlanReviewEvidence.read(
                     context, json, artifact.getWorkflowrunid(), bundleId, artifact.getChapterid());

@@ -44,3 +44,10 @@ test("草案列表只承载摘要且详情按精确 revision 去重缓存", asyn
   assert.match(source, /detailLoaded:\s*false/);
   assert.match(source, /detailLoaded:\s*true/);
 });
+
+test("V2 全文编辑只发送给写章草案且不混入选区字段", async () => {
+  const source = await readFile(new URL("../writing-conversation.tsx", import.meta.url), "utf8");
+  assert.match(source, /editedContent:\s*\(!isV2Artifact\s*\|\|\s*isChapterWritingReviewArtifact\(artifact\.kind,\s*artifact\.payload\)\)/);
+  assert.match(source, /editedReplacement:\s*decision\s*===\s*"approve"\s*&&\s*selectionArtifact/);
+  assert.match(source, /readOnly=\{!canEditText\s*\|\|\s*!awaitingUser\s*\|\|\s*actionLocked\}/);
+});

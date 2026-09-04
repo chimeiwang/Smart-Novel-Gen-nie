@@ -2197,7 +2197,13 @@ def run(
                 }
             )
 
-        if phase == "chapter-planning":
+        if phase == "chapter-writing":
+            from tests.durable_agent_v2_e2e.chapter_writing import scenarios as writing_scenarios
+
+            for scenario in writing_scenarios(acceptance):
+                record_scenario(scenario)
+            record_scenario(acceptance.cancel_before_agent_submit(operation="write_chapter"))
+        elif phase == "chapter-planning":
             from tests.durable_agent_v2_e2e.chapter_planning import scenarios as plan_scenarios
 
             for scenario in plan_scenarios(acceptance):
@@ -2279,12 +2285,14 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument(
         "--phase",
-        choices=("happy", "minimum", "chapter-planning"),
+        choices=("happy", "minimum", "chapter-planning", "chapter-writing"),
         default="minimum",
         help=(
             "happy 只验成功/幂等/SSE；minimum 继续验 callback 丢回执、"
             "Agent/Core 重启、submit 前取消与 AOF；chapter-planning 单独验证规划生成、复审、"
-            "Core 重启、批准/丢弃/显式与自动返工、幂等与 submit 前取消"
+            "Core 重启、批准/丢弃/显式与自动返工、幂等与 submit 前取消；"
+            "chapter-writing 单独验证完整正文、双复审、全文编辑批准、完整返工、"
+            "无模型局部修改及冲突回退、Core 重启、幂等与 submit 前取消"
         ),
     )
     parser.add_argument(

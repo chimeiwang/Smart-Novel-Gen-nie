@@ -31,6 +31,12 @@ public final class JooqChapterPlanEvidenceReader implements ChapterPlanEvidenceR
 
     @Override
     public Snapshot capture(DSLContext tx, String novelId, String chapterId, String userInstruction) {
+        return capture(tx, novelId, chapterId, userInstruction, "");
+    }
+
+    @Override
+    public Snapshot capture(DSLContext tx, String novelId, String chapterId, String userInstruction,
+            String additionalRelevanceText) {
         Map<String, Object> novel = one(tx, """
                 SELECT jsonb_build_object('id', source.id, 'name', source.name)::text AS snapshot
                 FROM public."Novel" AS source WHERE id = ? FOR UPDATE
@@ -95,6 +101,9 @@ public final class JooqChapterPlanEvidenceReader implements ChapterPlanEvidenceR
                 + json.writeValueAsString(goal) + "\n" + json.writeValueAsString(path) + "\n"
                 + json.writeValueAsString(plot) + "\n" + json.writeValueAsString(progress) + "\n"
                 + json.writeValueAsString(previousProgress) + "\n" + json.writeValueAsString(approved);
+        if (!Objects.requireNonNull(additionalRelevanceText).isEmpty()) {
+            selection += "\n" + additionalRelevanceText;
+        }
         Map<String, Object> lore = new LinkedHashMap<>();
         for (String[] kind : List.of(
                 new String[] {"Character", "name", "character", "characters"},

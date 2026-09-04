@@ -2,6 +2,7 @@ import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
+from inkforge_contracts import ChapterDraftOutput
 
 
 @pytest.mark.asyncio
@@ -177,3 +178,24 @@ async def test_fake_provider_returns_semantic_chapter_plan_without_system_fields
     assert result.toolCalls == []
     assert result.finishReason == "stop"
     assert result.usage.totalTokens == result.usage.promptTokens + result.usage.completionTokens
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_returns_full_chapter_without_system_fields() -> None:
+    result = await FakeModelProvider().complete_turn(ModelTurnRequest(
+        messages=[{"role": "user", "content": "依据冻结资料写完整正文"}],
+        tools=[], maxOutputTokens=8000, policy=LEGACY_PROVIDER_DEFAULT,
+        structuredOutput={
+            "route": "chat_json_output_v1", "name": "output_chapter_draft_v1",
+            "jsonSchema": ChapterDraftOutput.model_json_schema(),
+        },
+    ))
+    output = ChapterDraftOutput.model_validate(result.structuredOutput)
+    assert output.content == (
+        "林舟把旧行动线索放在桌上，逐一核对。\n\n窗外雨声渐紧，他终于作出选择。"
+    )
+    assert output.summary
+    assert result.structuredOutput is not None
+    assert set(result.structuredOutput) == {"summary", "content"}
+    assert result.toolCalls == []
+    assert result.finishReason == "stop"
