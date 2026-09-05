@@ -126,8 +126,9 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
   不新增程序场景边界，不覆盖进展、计划或设定。
 - 大纲选区冻结总纲/节点真实行 ID、版本、全文/选区哈希和码点范围，单编辑复审；明确局部问题可完整
   返工一次，剩余问题交作者。正式采用只拼接原选区外文本与 replacement，不改变节点结构或章节。
-- 新自然请求可选择问答、规划、正文、审阅、场景改写五项；旧三项冻结计划按原快照恢复。大纲选区
-  继续显式绑定来源，不能由意图解析器猜测选区。
+- 新自然请求可选择问答、规划、正文、审阅、场景改写五项，使用 v2 意图提示词读取本次冻结的可选列表。
+  已冻结的三项或五项计划保留原 v1 解析器及哈希，不在恢复时换用新提示词。大纲选区继续显式绑定来源，
+  不能由意图解析器猜测选区。
 
 ## 目标
 
@@ -283,7 +284,7 @@ flowchart TD
 - 普通新消息向 `POST /api/v1/writing/runs` 提交 `inputMode=natural`、`workflow=long_serial`、
   clientRequestId、novelId、chapterId、writingSessionId、完整 userInstruction 和可选 targetWordCount。
   不携带 selectedAgents、operation 或模型推测的目标；Core 固定当前章，先创建独立 resolve_intent Step。
-- 本阶段只可选择已实现的章节问答、章节规划与整章正文写作；选区仍走显式来源绑定请求。
+- 当前可选择已实现的章节问答、章节规划、整章正文写作、整章审阅与场景改写；选区仍走显式来源绑定请求。
   解析完成后在同一个 Run 内冻结业务来源并接续执行，不改写 Run 初始请求或 operation 列。
 - `waiting_user` 必须区分澄清与待审草案。澄清问题通过快照的 clarification 恢复，回答使用
   `POST /api/v1/writing/runs/{runId}/clarification`，绑定 clientRequestId、expectedRevision、

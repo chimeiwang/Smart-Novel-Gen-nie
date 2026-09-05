@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from copy import deepcopy
 from dataclasses import replace
+from pathlib import Path
 from types import MappingProxyType
 
 import pytest
@@ -20,6 +22,20 @@ from inkforge_contracts.execution import (
 from .support import execution_request, rehash_request
 from .test_chapter_plan import _context_item, _with_evidence
 from .test_executor import RecordingModel, _executor, _one_attempt
+
+_CONTRACT_ROOT = Path(__file__).resolve().parents[4] / "contracts" / "agent-execution"
+
+
+def _asset_entry_sha256(filename: str, collection: str, key: str) -> str:
+    document = json.loads((_CONTRACT_ROOT / filename).read_text(encoding="utf-8"))
+    entry = next(item for item in document[collection] if item["key"] == key)
+    encoded = json.dumps(
+        entry,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _context():
@@ -46,10 +62,13 @@ def _context():
     }
 
 
-def _request(*, mode="initial", clarifications=None, context=None):
+def _request(*, mode="initial", clarifications=None, context=None, profile_key=None):
     registry = load_execution_registry(environment="test")
     resolved = registry.resolve_system_purpose("resolve_intent", "long_serial")
-    profile, schema, budget = resolved.model_profile, resolved.output_schema, resolved.step_budget
+    profile = (
+        resolved.model_profile if profile_key is None else registry.profiles[profile_key]
+    )
+    schema, budget = resolved.output_schema, resolved.step_budget
     base = execution_request()
     candidate = base.model_copy(
         update={
@@ -122,6 +141,24 @@ def _output(operation="answer_question"):
     }
 
 
+def _with_profile(request, profile):
+    return request.model_copy(
+        update={
+            "modelProfile": ModelProfileRef(
+                profile=profile.key,
+                version=profile.version,
+                reasoningMode=profile.reasoning_mode,
+                deploymentProfileKey=profile.deployment_profile_key,
+                promptProfile=PromptProfileRef(
+                    name=profile.prompt_profile.key,
+                    version=profile.prompt_profile.version,
+                    sha256=profile.prompt_profile.sha256,
+                ),
+            )
+        }
+    )
+
+
 def _result(output, *, finish="stop", input_tokens=1000):
     return ModelTurnResult(
         content="",
@@ -140,12 +177,34 @@ def _result(output, *, finish="stop", input_tokens=1000):
 
 
 def test_intent_system_has_complete_disabled_reasoning_assets_and_exact_budget():
-    resolved = load_execution_registry(environment="test").resolve_system_purpose(
-        "resolve_intent", "long_serial"
-    )
+    registry = load_execution_registry(environment="test")
+    resolved = registry.resolve_system_purpose("resolve_intent", "long_serial")
     assert resolved.definition.workflows == ("long_serial",)
-    assert resolved.model_profile.key == "system.intent_resolver.v1"
+    assert resolved.model_profile.key == "system.intent_resolver.v2"
+    assert resolved.model_profile.version == 2
+    assert resolved.model_profile.prompt_profile.key == "prompt.system.intent_resolver.v2"
+    assert resolved.model_profile.prompt_profile.version == 2
+    assert (
+        resolved.model_profile.deployment_profile_key
+        == "deployment.system.intent_resolver.v2"
+    )
     assert resolved.model_profile.reasoning_mode == "disabled"
+    assert registry.profiles["system.intent_resolver.v1"].version == 1
+    assert (
+        registry.profiles["system.intent_resolver.v1"].prompt_profile.sha256
+        == "4ebf30f06de85e21db42275f10e88a9ce309ee037dfebfd0fc921bfc77796f63"
+    )
+    assert _asset_entry_sha256(
+        "prompt-profile-registry.v1.json", "prompts", "prompt.system.intent_resolver.v1"
+    ) == "011648acbdbcf2daa527d4e91e3ba0997d233277e9777f645a1f4262d244d204"
+    assert _asset_entry_sha256(
+        "profile-registry.v1.json", "profiles", "system.intent_resolver.v1"
+    ) == "883cb9744409af7517388ad0898247da972a69758533ba1698c5c1aea4372a4b"
+    assert _asset_entry_sha256(
+        "deployment-profile-registry.v1.json",
+        "profiles",
+        "deployment.system.intent_resolver.v1",
+    ) == "efa051bc34fb0635907955053e1e291c059be124b0d739b0bc1acc69883531a4"
     assert (
         resolved.step_budget.max_input_tokens
         == resolved.step_budget.max_prompt_cache_miss_tokens
@@ -164,6 +223,99 @@ def test_intent_system_has_complete_disabled_reasoning_assets_and_exact_budget()
     assert resolved.step_budget.max_cost_micros == 50_000
     assert resolved.step_budget.max_wall_clock_seconds == 30
     assert resolved.step_budget.max_provider_retries == 2
+
+
+def test_intent_v2_model_envelope_uses_dynamic_five_operation_descriptions():
+    request = _request()
+    executor = _executor(RecordingModel())
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    model_request = executor.build_model_request(request, resolved)
+
+    assert model_request.messages[0].content == resolved.prompt_profile.system_prompt
+    assert model_request.policy.policyId == "system.intent_resolver.v2"
+    assert "availableOperations" in model_request.messages[0].content
+    assert "description" in model_request.messages[0].content
+    assert "answer_question 表示" not in model_request.messages[0].content
+    envelope = json.loads(model_request.messages[1].content)
+    context = envelope["evidenceBundle"]["items"][0]["contentJson"]
+    assert context["availableOperations"] == _context()["availableOperations"]
+
+
+@pytest.mark.parametrize("mode", ["initial", "pending_recovery", "running_recovery"])
+@pytest.mark.parametrize(
+    "profile_key", ["system.intent_resolver.v1", "system.intent_resolver.v2"]
+)
+def test_intent_accepts_only_complete_v1_or_v2_frozen_profile_tuples(mode, profile_key):
+    resolved = _executor(RecordingModel()).resolve(
+        _request(mode=mode, profile_key=profile_key),
+        load_execution_registry(environment="test"),
+    )
+    assert resolved.profile.key == profile_key
+
+
+@pytest.mark.parametrize("mode", ["initial", "pending_recovery", "running_recovery"])
+def test_intent_rejects_arbitrary_versioned_profile_alias(mode):
+    registry = load_execution_registry(environment="test")
+    legacy = registry.profiles["system.intent_resolver.v1"]
+    alias = replace(legacy, key="system.intent_resolver.v99", version=99)
+    registry_with_alias = replace(
+        registry,
+        profiles=MappingProxyType({**registry.profiles, alias.key: alias}),
+    )
+    request = _request(mode=mode, profile_key="system.intent_resolver.v1")
+    request = request.model_copy(
+        update={
+            "modelProfile": request.modelProfile.model_copy(
+                update={"profile": alias.key, "version": alias.version}
+            )
+        }
+    )
+    with pytest.raises(ExecutionCapabilityError):
+        _executor(RecordingModel()).resolve(request, registry_with_alias)
+
+
+@pytest.mark.parametrize("mode", ["initial", "pending_recovery", "running_recovery"])
+@pytest.mark.parametrize(
+    ("profile_key", "prompt_key", "deployment_key"),
+    [
+        (
+            "system.intent_resolver.v1",
+            "prompt.system.intent_resolver.v2",
+            "deployment.system.intent_resolver.v1",
+        ),
+        (
+            "system.intent_resolver.v1",
+            "prompt.system.intent_resolver.v1",
+            "deployment.system.intent_resolver.v2",
+        ),
+        (
+            "system.intent_resolver.v2",
+            "prompt.system.intent_resolver.v1",
+            "deployment.system.intent_resolver.v2",
+        ),
+        (
+            "system.intent_resolver.v2",
+            "prompt.system.intent_resolver.v2",
+            "deployment.system.intent_resolver.v1",
+        ),
+    ],
+)
+def test_intent_rejects_cross_version_prompt_or_deployment_tuple(
+    mode, profile_key, prompt_key, deployment_key
+):
+    registry = load_execution_registry(environment="test")
+    crossed = replace(
+        registry.profiles[profile_key],
+        prompt_profile=registry.prompt_profiles[prompt_key],
+        deployment_profile_key=deployment_key,
+    )
+    registry_with_crossed_profile = replace(
+        registry,
+        profiles=MappingProxyType({**registry.profiles, profile_key: crossed}),
+    )
+    request = _with_profile(_request(mode=mode, profile_key=profile_key), crossed)
+    with pytest.raises(ExecutionCapabilityError):
+        _executor(RecordingModel()).resolve(request, registry_with_crossed_profile)
 
 
 @pytest.mark.asyncio
@@ -274,6 +426,34 @@ def test_intent_recovery_keeps_retained_contract_but_initial_rejects_retired_pur
     assert executor.resolve(_request(mode="pending_recovery"), disabled).purpose == "resolve_intent"
 
 
+@pytest.mark.parametrize(
+    "definition_update",
+    [
+        {"workflows": ("quality",)},
+        {"lane": "creative"},
+        {"evidence_policy": "evidence.system.summary.v1"},
+        {"parent_operations": ("long_serial.answer_question",)},
+    ],
+)
+def test_intent_v1_initial_still_requires_current_system_purpose_binding(definition_update):
+    registry = load_execution_registry(environment="test")
+    altered = replace(
+        registry,
+        system_purposes=MappingProxyType(
+            {
+                **registry.system_purposes,
+                "resolve_intent": replace(
+                    registry.system_purposes["resolve_intent"], **definition_update
+                ),
+            }
+        ),
+    )
+    with pytest.raises(ExecutionCapabilityError):
+        _executor(RecordingModel()).resolve(
+            _request(profile_key="system.intent_resolver.v1"), altered
+        )
+
+
 @pytest.mark.parametrize("mode", ["pending_recovery", "running_recovery"])
 def test_intent_recovery_ignores_new_purpose_references_but_requires_retained_tuple(mode):
     registry = load_execution_registry(environment="test")
@@ -293,7 +473,8 @@ def test_intent_recovery_ignores_new_purpose_references_but_requires_retained_tu
         ),
     )
     executor = _executor(RecordingModel())
-    assert executor.resolve(_request(mode=mode), updated).purpose == "resolve_intent"
+    legacy_request = _request(mode=mode, profile_key="system.intent_resolver.v1")
+    assert executor.resolve(legacy_request, updated).purpose == "resolve_intent"
     removed = replace(
         updated,
         profiles=MappingProxyType(
@@ -305,7 +486,7 @@ def test_intent_recovery_ignores_new_purpose_references_but_requires_retained_tu
         ),
     )
     with pytest.raises(ExecutionCapabilityError):
-        executor.resolve(_request(mode=mode), removed)
+        executor.resolve(legacy_request, removed)
 
 
 @pytest.mark.parametrize("mode", ["initial", "pending_recovery", "running_recovery"])

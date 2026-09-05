@@ -11,7 +11,7 @@
   },
   "profileRegistry": {
     "path": "profile-registry.v1.json",
-    "sha256": "a700ae8cba77d5fbccd80de3736a5f1bd13f0a226f1faf3dd93b9626d05435fe"
+    "sha256": "c74aa19af424d9f945c0d5bba13ffb63233470e726f0ce9aa577b50efdff4fe5"
   },
   "profileRegistrySchema": {
     "path": "profile-registry.schema.json",
@@ -19,7 +19,7 @@
   },
   "deploymentProfileRegistry": {
     "path": "deployment-profile-registry.v1.json",
-    "sha256": "2b2fbfb34b5a8c04126172bf4691672e04ee0e18c5520f78f2de575e5418dcc0"
+    "sha256": "73d7f89d12c86e365e6d1f9ddd45ea6ddcb4cef77f263ac19b4f94864b9ef028"
   },
   "deploymentProfileRegistrySchema": {
     "path": "deployment-profile-registry.schema.json",
@@ -27,7 +27,7 @@
   },
   "promptProfileRegistry": {
     "path": "prompt-profile-registry.v1.json",
-    "sha256": "c77d988b6191e10cde55f3c439dffc1c199606e716f9dcdeeff94a67abf2755b"
+    "sha256": "8751aea85d536703b6b31674b6ea19297b35a767e641ef53f33b3e3c1f933b2d"
   },
   "promptProfileRegistrySchema": {
     "path": "prompt-profile-registry.schema.json",
@@ -51,7 +51,7 @@
   },
   "systemPurposeRegistry": {
     "path": "system-purpose-registry.v1.json",
-    "sha256": "29b473ef387015014dce9231de152eed1d01e38b8ec2a22633cfddf978ea13e4"
+    "sha256": "a77e499c853de53b462169363dbeab423386ed8f0edc4d648a7c2ac81f1f5ebd"
   },
   "systemPurposeRegistrySchema": {
     "path": "system-purpose-registry.schema.json",

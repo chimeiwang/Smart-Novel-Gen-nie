@@ -120,12 +120,16 @@
 - [x] Web 在 `completed(outcomeType=chat_answer)` 后按事件流绑定的当前会话回读权威 `WritingMessage`、保留终态并
   拒绝迟到会话响应；问答完成不刷新 ReviewArtifact，活动项显示“章节问答”；
 - [ ] `answer_question` 通过跨进程故障注入、真实供应商低额度预发布与生产交集 allowlist canary；
-- [ ] review_chapter；
+- [x] `review_chapter` 仓内接线：独立完整只读报告、可空会话、GET/CLI 全文读取与会话消息；
+  本地验收见 `docs/specs/2026-09-05-durable-review-and-rewrites.md`；
 - [x] `plan_chapter` 仓内接线：严格结构化计划、同 Evidence 生成/编辑复审、一次耐久自动返工、作者决定及
   正式 Beat Plan 应用；独立 Compose 五场景通过，详见 `docs/specs/2026-09-04-durable-chapter-planning.md`；
 - [ ] `plan_chapter` 真实供应商、开发及生产 canary；本地 Fake 通过不代替这些结果；
-- [ ] write_chapter / rewrite_scene；
-- [ ] rewrite_outline_selection；
+- [x] `write_chapter` / `rewrite_scene` 仓内接线：完整候选、同来源双复审、一次自动修改和作者决定；
+  本地验收分别见正文写作与整章审阅/改写规格；
+- [x] `rewrite_outline_selection` 仓内接线：真实总纲/节点来源、选区候选、单复审与精确采用；
+  本地验收见整章审阅/改写规格；
+- [ ] 上述审阅、正文、场景和大纲选区的真实供应商、开发及生产验收；本地通过不表示已安装或已发布；
 - [ ] create_lore / revise_lore；
 - [ ] create_outline / revise_outline；
 - [ ] manage_foreshadowing；

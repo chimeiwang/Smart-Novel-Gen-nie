@@ -86,24 +86,20 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
         answers = input_value.get("clarifications", [])
         if answers:
             text = answers[-1].get("userMessage", "")
-        for operation in (
-            "answer_question",
-            "plan_chapter",
-            "write_chapter",
-            "rewrite_scene",
-            "review_chapter",
-        ):
-            if text == f"【隔离意图:{operation}】":
-                return {
-                    "workflow": "long_serial",
-                    "operation": operation,
-                    "confidence": 0.99,
-                    "targetType": None,
-                    "targetId": None,
-                    "scopeKind": None,
-                    "arguments": {},
-                    "clarification": None,
-                }
+        available = _intent_available_operations(envelope)
+        marker = re.fullmatch(r"【隔离意图:([a-z][a-z0-9_]*)】", text)
+        if marker is not None and marker.group(1) in {item[0] for item in available}:
+            return {
+                "workflow": "long_serial",
+                "operation": marker.group(1),
+                "confidence": 0.99,
+                "targetType": None,
+                "targetId": None,
+                "scopeKind": None,
+                "arguments": {},
+                "clarification": None,
+            }
+        descriptions = "；".join(item[1] for item in available)
         return {
             "workflow": None,
             "operation": None,
@@ -114,7 +110,7 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
             "arguments": {},
             "clarification": {
                 "code": "intent.unclear",
-                "prompt": "请明确希望问答、规划章节、生成或改写正文，还是审阅章节。",
+                "prompt": f"请根据当前可用操作说明明确请求：{descriptions}",
             },
         }
     if "replacement" in properties:
@@ -159,6 +155,35 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
     if {"contentVerdict", "findings"} <= set(properties):
         return {"contentVerdict": "pass", "findings": []}
     raise ValueError("模拟 Provider 不支持该结构化输出 Schema")
+
+
+def _intent_available_operations(envelope: object) -> list[tuple[str, str]]:
+    if not isinstance(envelope, dict):
+        return []
+    evidence = envelope.get("evidenceBundle")
+    if not isinstance(evidence, dict):
+        return []
+    items = evidence.get("items")
+    if not isinstance(items, list):
+        return []
+    result: list[tuple[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("resourceType") != "intent_context":
+            continue
+        content = item.get("contentJson")
+        if not isinstance(content, dict):
+            continue
+        available = content.get("availableOperations")
+        if not isinstance(available, list):
+            continue
+        for operation in available:
+            if not isinstance(operation, dict):
+                continue
+            code = operation.get("operation")
+            description = operation.get("description")
+            if isinstance(code, str) and isinstance(description, str):
+                result.append((code, description))
+    return result
 
 
 def _build_response(request: ModelTurnRequest) -> tuple[str, list[ModelToolCall]]:

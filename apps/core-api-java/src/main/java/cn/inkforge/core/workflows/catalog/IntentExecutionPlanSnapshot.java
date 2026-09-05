@@ -34,8 +34,22 @@ public final class IntentExecutionPlanSnapshot {
     private static final Set<String> PLAN_KEYS = Set.of(
             "workflow", "operationCatalogVersion", "executionManifestFingerprint", "resolver",
             "operationPlans", "maxClarifications", "runBudget");
+    private static final String RESOLVER_OUTPUT_SCHEMA_SHA256 =
+            "d01c3444cfd4da13d9df6fe5dee58dfe5a75c413ad89ac28a766d18f6e8bde25";
     private static final WorkflowStepBudget RESOLVER_BUDGET = new WorkflowStepBudget(
             1, 8_000, 8_000, 1_000, 0, 1_000, 50_000, 30, 2, 0);
+    private static final ResolverTuple RESOLVER_V1 = new ResolverTuple(
+            1,
+            "system.intent_resolver.v1",
+            "deployment.system.intent_resolver.v1",
+            "prompt.system.intent_resolver.v1",
+            "4ebf30f06de85e21db42275f10e88a9ce309ee037dfebfd0fc921bfc77796f63");
+    private static final ResolverTuple RESOLVER_V2 = new ResolverTuple(
+            2,
+            "system.intent_resolver.v2",
+            "deployment.system.intent_resolver.v2",
+            "prompt.system.intent_resolver.v2",
+            "5f1b980a61c8c66f9e43b06824816cfbdff723eada0784b2e2f5d7c6796fb5bd");
 
     private final String operationCatalogVersion;
     private final String executionManifestFingerprint;
@@ -95,9 +109,11 @@ public final class IntentExecutionPlanSnapshot {
         }
         List<ExecutionPlanSnapshot> plans = authorizedOperationKeys.stream()
                 .map(key -> registry.freezePlan(key, false)).toList();
+        ExecutionPlanSnapshot.Step resolver = ExecutionPlanSnapshot.freezeSystemPurpose(resolved);
+        requireCurrentResolver(resolver);
         return new IntentExecutionPlanSnapshot(
                 registry.catalogVersion(), registry.manifestFingerprint(),
-                ExecutionPlanSnapshot.freezeSystemPurpose(resolved), plans, null, null);
+                resolver, plans, null, null);
     }
 
     /** 只验证持久化的冻结事实，不要求当前部署仍保有同一份 Registry。 */
@@ -189,14 +205,25 @@ public final class IntentExecutionPlanSnapshot {
     private static void requireResolver(ExecutionPlanSnapshot.Step step) {
         if (!"resolve_intent".equals(step.purpose()) || !"interactive".equals(step.lane())
                 || !"evidence.system.intent.v1".equals(step.evidencePolicy())
-                || !"system.intent_resolver.v1".equals(step.modelProfile().profile())
                 || !"disabled".equals(step.modelProfile().reasoningMode())
-                || !"deployment.system.intent_resolver.v1".equals(step.modelProfile().deploymentProfileKey())
-                || !"prompt.system.intent_resolver.v1".equals(step.modelProfile().promptProfile().name())
                 || !"output.proposed_command.v1".equals(step.outputSchema().name())
+                || step.outputSchema().version() != 1
+                || !RESOLVER_OUTPUT_SCHEMA_SHA256.equals(step.outputSchema().sha256())
                 || !"step_budget.system.resolve_intent.v1".equals(step.stepBudget().profile())
+                || step.stepBudget().version() != 1
                 || !RESOLVER_BUDGET.equals(step.stepBudget().budget())) {
             throw invalid("自然入口解析器的用途、Profile、Schema、Evidence 或预算不受支持");
+        }
+        if (!RESOLVER_V1.matches(step.modelProfile())
+                && !RESOLVER_V2.matches(step.modelProfile())) {
+            throw invalid("自然入口解析器的 Profile、Prompt 与 Deployment 版本组合不受支持");
+        }
+    }
+
+    private static void requireCurrentResolver(ExecutionPlanSnapshot.Step step) {
+        requireResolver(step);
+        if (!RESOLVER_V2.matches(step.modelProfile())) {
+            throw invalid("新自然入口必须冻结当前 v2 意图解析器依赖");
         }
     }
 
@@ -288,6 +315,23 @@ public final class IntentExecutionPlanSnapshot {
     private static String requireSha256(String value, String label) {
         if (value == null || !value.matches("^[0-9a-f]{64}$")) throw invalid(label + " 必须为小写 SHA-256");
         return value;
+    }
+
+    private record ResolverTuple(
+            int version,
+            String profile,
+            String deploymentProfile,
+            String promptProfile,
+            String promptSha256) {
+
+        private boolean matches(ExecutionPlanSnapshot.ModelProfile value) {
+            return version == value.version()
+                    && profile.equals(value.profile())
+                    && deploymentProfile.equals(value.deploymentProfileKey())
+                    && version == value.promptProfile().version()
+                    && promptProfile.equals(value.promptProfile().name())
+                    && promptSha256.equals(value.promptProfile().sha256());
+        }
     }
 
     private static IllegalStateException invalid(String message) { return new IllegalStateException(message); }

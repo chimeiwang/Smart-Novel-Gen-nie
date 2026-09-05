@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.fake import FakeModelProvider
@@ -237,3 +239,54 @@ async def test_fake_provider_returns_distinct_review_and_outline_outputs() -> No
         {"report": FAKE_CHAPTER_REVIEW_REPORT},
         {"replacement": FAKE_OUTLINE_SELECTION_REPLACEMENT},
     ]
+
+
+@pytest.mark.asyncio
+async def test_fake_intent_marker_is_limited_by_frozen_available_operations() -> None:
+    def request(operations: list[str]) -> ModelTurnRequest:
+        envelope = {
+            "input": {
+                "userInstruction": "【隔离意图:review_chapter】",
+                "clarifications": [],
+            },
+            "evidenceBundle": {
+                "items": [
+                    {
+                        "resourceType": "intent_context",
+                        "metadata": {"role": "intent_context"},
+                        "contentJson": {
+                            "availableOperations": [
+                                {"operation": operation, "description": f"说明:{operation}"}
+                                for operation in operations
+                            ]
+                        },
+                    }
+                ]
+            },
+        }
+        return ModelTurnRequest(
+            messages=[{"role": "user", "content": json.dumps(envelope)}],
+            tools=[],
+            maxOutputTokens=1000,
+            policy=LEGACY_PROVIDER_DEFAULT,
+            structuredOutput={
+                "route": "chat_json_output_v1",
+                "name": "output_proposed_command_v1",
+                "jsonSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workflow": {},
+                        "operation": {},
+                        "confidence": {},
+                        "clarification": {},
+                    },
+                },
+            },
+        )
+
+    unavailable = await FakeModelProvider().complete_turn(request(["answer_question"]))
+    available = await FakeModelProvider().complete_turn(request(["review_chapter"]))
+    assert unavailable.structuredOutput["operation"] is None
+    assert unavailable.structuredOutput["clarification"] is not None
+    assert available.structuredOutput["operation"] == "review_chapter"
+    assert available.structuredOutput["clarification"] is None

@@ -93,6 +93,8 @@ artifact.approve/revise/discard。正文编辑与选区编辑字段不可互换�
 clientRequestId，网络结果不确定时重放原决定或回读同一 Run，不能另起一个改写任务冒充重试。
 
 自然入口新增 review_chapter 与 rewrite_scene；outline 选区仍需显式绑定，不能从文字猜选区。
+后续意图提示词 v2 补充只修正 Core/Agent 的内部操作选择与旧任务恢复，不新增 CLI 参数、命令或结果字段，
+不要求 Skill 传入提示词版本，也不表示固定安装包已升级。
 两份 Operator 仍拒绝任何 inputMode、rewrite_scene 和 rewrite_outline_selection；原三操作中的
 review_chapter 只有目标 Core 命中已验收 V2 路由时才返回上述新格式。更新 Skill 时应记录对应 Core 版本、
 固定 JAR 来源和离线验证结果，不能把本节存在解释为安装或生产已经完成。

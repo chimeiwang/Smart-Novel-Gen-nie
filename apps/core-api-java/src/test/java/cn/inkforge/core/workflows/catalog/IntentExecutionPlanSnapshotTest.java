@@ -15,6 +15,10 @@ import tools.jackson.databind.ObjectMapper;
 
 class IntentExecutionPlanSnapshotTest {
 
+    private static final String RESOLVER_V1_PROMPT_SHA256 =
+            "4ebf30f06de85e21db42275f10e88a9ce309ee037dfebfd0fc921bfc77796f63";
+    private static final String RESOLVER_V2_PROMPT_SHA256 =
+            "5f1b980a61c8c66f9e43b06824816cfbdff723eada0784b2e2f5d7c6796fb5bd";
     private static final List<String> OPERATIONS = List.of(
             "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter");
     private static final List<String> FIVE_OPERATIONS = List.of(
@@ -32,12 +36,21 @@ class IntentExecutionPlanSnapshotTest {
         assertThat(snapshot.executionManifestFingerprint()).isEqualTo(registry.manifestFingerprint());
         assertThat(snapshot.resolver().purpose()).isEqualTo("resolve_intent");
         assertThat(snapshot.resolver().lane()).isEqualTo("interactive");
-        assertThat(snapshot.resolver().modelProfile().profile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(snapshot.resolver().modelProfile().profile()).isEqualTo("system.intent_resolver.v2");
+        assertThat(snapshot.resolver().modelProfile().version()).isEqualTo(2);
         assertThat(snapshot.resolver().modelProfile().reasoningMode()).isEqualTo("disabled");
+        assertThat(snapshot.resolver().modelProfile().deploymentProfileKey())
+                .isEqualTo("deployment.system.intent_resolver.v2");
         assertThat(snapshot.resolver().modelProfile().promptProfile().name())
-                .isEqualTo("prompt.system.intent_resolver.v1");
+                .isEqualTo("prompt.system.intent_resolver.v2");
+        assertThat(snapshot.resolver().modelProfile().promptProfile().version()).isEqualTo(2);
+        assertThat(snapshot.resolver().modelProfile().promptProfile().sha256())
+                .isEqualTo(RESOLVER_V2_PROMPT_SHA256);
         assertThat(snapshot.resolver().outputSchema().name()).isEqualTo("output.proposed_command.v1");
+        assertThat(snapshot.resolver().outputSchema().version()).isEqualTo(1);
         assertThat(snapshot.resolver().evidencePolicy()).isEqualTo("evidence.system.intent.v1");
+        assertThat(snapshot.resolver().stepBudget().profile()).isEqualTo("step_budget.system.resolve_intent.v1");
+        assertThat(snapshot.resolver().stepBudget().version()).isEqualTo(1);
         assertThat(snapshot.maxClarifications()).isEqualTo(2);
         assertThat(snapshot.maxResolverSteps()).isEqualTo(3);
         assertThat(snapshot.operationPlans()).extracting(plan -> plan.operation().key()).containsExactlyElementsOf(OPERATIONS);
@@ -214,20 +227,86 @@ class IntentExecutionPlanSnapshotTest {
         assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(changedBudget)).isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void 历史恢复接受完整v1和v2而新冻结只使用v2() {
+        IntentExecutionPlanSnapshot current = snapshot();
+        assertThat(IntentExecutionPlanSnapshot.fromStored(copy(current.stored())).stored())
+                .isEqualTo(current.stored());
+
+        Map<String, Object> historical = copy(current.stored());
+        replaceResolverTuple(historical, 1, RESOLVER_V1_PROMPT_SHA256);
+        rehash(historical);
+        IntentExecutionPlanSnapshot restored = IntentExecutionPlanSnapshot.fromStored(historical);
+        assertThat(restored.resolver().modelProfile().profile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(restored.resolver().modelProfile().deploymentProfileKey())
+                .isEqualTo("deployment.system.intent_resolver.v1");
+        assertThat(restored.resolver().modelProfile().promptProfile().name())
+                .isEqualTo("prompt.system.intent_resolver.v1");
+        assertThat(restored.resolver().stepBudget().budget()).isEqualTo(current.resolver().stepBudget().budget());
+        assertThat(restored.runBudget()).isEqualTo(current.runBudget());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"modelProfile", "promptProfile", "deploymentProfile"})
+    void 解析器拒绝v1v2交叉混搭(String component) {
+        Map<String, Object> stored = copy(snapshot().stored());
+        Map<String, Object> resolver = object(object(stored.get("plan")).get("resolver"));
+        Map<String, Object> profile = object(resolver.get("modelProfile"));
+        switch (component) {
+            case "modelProfile" -> {
+                profile.put("profile", "system.intent_resolver.v1");
+                profile.put("version", 1);
+            }
+            case "promptProfile" -> replacePromptTuple(profile, 1, RESOLVER_V1_PROMPT_SHA256);
+            case "deploymentProfile" -> profile.put(
+                    "deploymentProfileKey", "deployment.system.intent_resolver.v1");
+            default -> throw new AssertionError(component);
+        }
+        rehash(stored);
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(stored))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"modelProfile", "promptProfile", "outputSchema", "stepBudget"})
-    void 解析器全部版本固定为一且改名升级也不能绕过(String component) {
-        for (boolean changeName : List.of(false, true)) {
+    void 解析器名称与声明版本不一致时拒绝(String component) {
+        Map<String, Object> stored = copy(snapshot().stored());
+        Map<String, Object> resolver = object(object(stored.get("plan")).get("resolver"));
+        Map<String, Object> reference = "promptProfile".equals(component)
+                ? object(object(resolver.get("modelProfile")).get("promptProfile"))
+                : object(resolver.get(component));
+        reference.put("version", ((Number) reference.get("version")).intValue() + 1);
+        rehash(stored);
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(stored))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 解析器拒绝伪造完整v3以及v2Prompt挂载v1哈希() {
+        Map<String, Object> unsupported = copy(snapshot().stored());
+        replaceResolverTuple(unsupported, 3, snapshot().resolver().modelProfile().promptProfile().sha256());
+        rehash(unsupported);
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(unsupported))
+                .isInstanceOf(IllegalStateException.class);
+
+        Map<String, Object> changedPrompt = copy(snapshot().stored());
+        Map<String, Object> resolver = object(object(changedPrompt.get("plan")).get("resolver"));
+        object(object(resolver.get("modelProfile")).get("promptProfile"))
+                .put("sha256", RESOLVER_V1_PROMPT_SHA256);
+        rehash(changedPrompt);
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(changedPrompt))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 解析器Output与StepBudget不能以新名新版本绕过固定依赖() {
+        for (String component : List.of("outputSchema", "stepBudget")) {
             Map<String, Object> stored = copy(snapshot().stored());
             Map<String, Object> resolver = object(object(stored.get("plan")).get("resolver"));
-            Map<String, Object> reference = "promptProfile".equals(component)
-                    ? object(object(resolver.get("modelProfile")).get("promptProfile"))
-                    : object(resolver.get(component));
+            Map<String, Object> reference = object(resolver.get(component));
+            String nameKey = "stepBudget".equals(component) ? "profile" : "name";
+            reference.put(nameKey, ((String) reference.get(nameKey)).replace(".v1", ".v2"));
             reference.put("version", 2);
-            if (changeName) {
-                String nameKey = List.of("modelProfile", "stepBudget").contains(component) ? "profile" : "name";
-                reference.put(nameKey, ((String) reference.get(nameKey)).replace(".v1", ".v2"));
-            }
             rehash(stored);
             assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(stored))
                     .isInstanceOf(IllegalStateException.class);
@@ -237,7 +316,7 @@ class IntentExecutionPlanSnapshotTest {
     @Test
     void 解析器复用现有部署授权且测试Fake不获生产授权() {
         IntentExecutionPlanSnapshot plan = snapshot();
-        WorkflowResolvedModel fake = resolvedModel(
+        WorkflowResolvedModel fake = resolvedModel(plan,
                 "fake", "fake", "transport.fake.v1", "endpoint.local-fake.v1",
                 "responses_json_schema_v1", "capability.fake.structured-output.v1", true);
         fake.requireAuthorizedBy(plan.resolver().modelProfile().toDomain());
@@ -245,12 +324,12 @@ class IntentExecutionPlanSnapshotTest {
 
         ExecutionRegistry production = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.PRODUCTION);
         assertThatThrownBy(() -> production.requireAuthorizedDeployment(fake)).isInstanceOf(IllegalStateException.class);
-        WorkflowResolvedModel official = resolvedModel(
+        WorkflowResolvedModel official = resolvedModel(plan,
                 "openai_compatible", "deepseek-v4-flash", "transport.deepseek-v4.v1", "endpoint.deepseek-official.v1",
                 "chat_json_output_v1", "capability.deepseek-v4.chat-json.v1", false);
         official.requireAuthorizedBy(plan.resolver().modelProfile().toDomain());
         assertThat(production.requireAuthorizedDeployment(official).billable()).isTrue();
-        WorkflowResolvedModel custom = resolvedModel(
+        WorkflowResolvedModel custom = resolvedModel(plan,
                 "openai_compatible", "deepseek-v4-flash", "transport.deepseek-v4.v1", "endpoint.deepseek-custom.v1",
                 "chat_json_output_v1", "capability.deepseek-v4.chat-json.v1", false);
         assertThatThrownBy(() -> production.requireAuthorizedDeployment(custom)).isInstanceOf(IllegalStateException.class);
@@ -290,9 +369,10 @@ class IntentExecutionPlanSnapshotTest {
     }
 
     private static WorkflowResolvedModel resolvedModel(
+            IntentExecutionPlanSnapshot plan,
             String provider, String model, String transport, String endpoint,
             String outputRoute, String capability, boolean supportsIdempotency) {
-        String deploymentProfile = "deployment.system.intent_resolver.v1";
+        String deploymentProfile = plan.resolver().modelProfile().deploymentProfileKey();
         return new WorkflowResolvedModel(
                 deploymentProfile,
                 WorkflowResolvedModel.fingerprint(deploymentProfile, provider, model, transport, endpoint,
@@ -306,6 +386,24 @@ class IntentExecutionPlanSnapshotTest {
 
     private static void rehash(Map<String, Object> stored) {
         stored.put("planSha256", ExecutionCanonicalJson.sha256(object(stored.get("plan"))));
+    }
+
+    private static void replaceResolverTuple(
+            Map<String, Object> stored, int version, String promptSha256) {
+        Map<String, Object> resolver = object(object(stored.get("plan")).get("resolver"));
+        Map<String, Object> profile = object(resolver.get("modelProfile"));
+        profile.put("profile", "system.intent_resolver.v" + version);
+        profile.put("version", version);
+        profile.put("deploymentProfileKey", "deployment.system.intent_resolver.v" + version);
+        replacePromptTuple(profile, version, promptSha256);
+    }
+
+    private static void replacePromptTuple(
+            Map<String, Object> profile, int version, String promptSha256) {
+        Map<String, Object> prompt = object(profile.get("promptProfile"));
+        prompt.put("name", "prompt.system.intent_resolver.v" + version);
+        prompt.put("version", version);
+        prompt.put("sha256", promptSha256);
     }
 
     @SuppressWarnings("unchecked")

@@ -64,6 +64,7 @@ def assert_natural_facts(
         "legacyTaskCount": 0,
         "legacyCommandCount": 0,
         "resolverCount": answers + 1,
+        "badResolverProfileCount": 0,
         "businessStepCount": business_steps,
         "modelStepCount": models,
         "badModelStepCount": 0,
@@ -276,6 +277,9 @@ def _facts(
             "publicOperation": snapshot.get("operation"),
             "modelStepCount": len(models),
             "resolverCount": len(resolvers),
+            "badResolverProfileCount": sum(
+                step["modelProfile"] != "system.intent_resolver.v2" for step in resolvers
+            ),
             "businessStepCount": len(business),
             "badModelStepCount": sum(
                 step["status"] != "completed"

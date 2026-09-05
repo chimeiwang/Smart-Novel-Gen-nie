@@ -12,7 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 class ExecutionPlanSnapshotTest {
 
     private static final String MANIFEST_FINGERPRINT =
-            "2db29fa6d5e31651e0932e710c8da991c8ecdffe12dcafca57ca617f6023edbb";
+            "f7be00d2eb2cde1185e917f916ce0006a469d89f46fbdc236a8ecac5c2ecba05";
     private final ObjectMapper json = new ObjectMapper();
 
     @Test

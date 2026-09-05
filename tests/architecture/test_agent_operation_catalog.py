@@ -119,6 +119,7 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
         "protocol_correction",
     }
 )
+RETAINED_EXECUTION_PROFILE_KEYS = frozenset({"system.intent_resolver.v1"})
 NO_THINKING_OPERATION_KEYS = frozenset(
     {
         "long_serial.answer_question",
@@ -286,6 +287,7 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         cast(str, system_purpose["modelProfile"])
         for system_purpose in system_purposes.values()
     )
+    referenced_profiles.update(RETAINED_EXECUTION_PROFILE_KEYS)
     referenced_output_schemas.update(
         cast(str, system_purpose["outputSchema"])
         for system_purpose in system_purposes.values()

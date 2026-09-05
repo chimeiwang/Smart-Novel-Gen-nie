@@ -91,6 +91,44 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
 _INTENT_OPERATIONS = frozenset(
     {"answer_question", "plan_chapter", "write_chapter", "rewrite_scene", "review_chapter"}
 )
+_INTENT_RESOLVER_PROFILE_TUPLES = {
+    "system.intent_resolver.v1": (
+        1,
+        "prompt.system.intent_resolver.v1",
+        1,
+        "4ebf30f06de85e21db42275f10e88a9ce309ee037dfebfd0fc921bfc77796f63",
+        "deployment.system.intent_resolver.v1",
+        1,
+    ),
+    "system.intent_resolver.v2": (
+        2,
+        "prompt.system.intent_resolver.v2",
+        2,
+        "5f1b980a61c8c66f9e43b06824816cfbdff723eada0784b2e2f5d7c6796fb5bd",
+        "deployment.system.intent_resolver.v2",
+        2,
+    ),
+}
+_CURRENT_INTENT_RESOLVER_PROFILE = "system.intent_resolver.v2"
+_INTENT_OUTPUT_TUPLE = (
+    "output.proposed_command.v1",
+    1,
+    "d01c3444cfd4da13d9df6fe5dee58dfe5a75c413ad89ac28a766d18f6e8bde25",
+)
+_INTENT_BUDGET_TUPLE = (
+    "step_budget.system.resolve_intent.v1",
+    1,
+    1,
+    8000,
+    8000,
+    1000,
+    0,
+    1000,
+    50_000,
+    30,
+    2,
+    0,
+)
 
 
 class ExecutionModelPort(Protocol):
@@ -336,7 +374,13 @@ class StatelessExecutionStepExecutor:
                 or request.evidenceBundle.policyVersion != contract.definition.evidence_policy
             ):
                 raise ExecutionCapabilityError("意图解析当前系统用途绑定不一致")
-            _validate_profile_ref(request, contract.model_profile)
+            _validate_intent_resolver_tuple(
+                registry,
+                contract.model_profile,
+                contract.output_schema,
+                contract.step_budget,
+                current=True,
+            )
             _validate_output_schema_ref(request, contract.output_schema)
             _validate_step_budget(request, contract.step_budget)
             for available in context.availableOperations:
@@ -367,7 +411,7 @@ class StatelessExecutionStepExecutor:
             and _step_budget_matches(request, budget)
             and (
                 request.purpose != "resolve_intent"
-                or budget.key.startswith("step_budget.system.resolve_intent.v")
+                or budget.key == "step_budget.system.resolve_intent.v1"
             )
         )
         if not matching_budgets:
@@ -390,10 +434,15 @@ class StatelessExecutionStepExecutor:
             if (
                 profile.purpose != "generation"
                 or output_schema.purpose != "generation"
-                or not profile.key.startswith("system.intent_resolver.v")
-                or not output_schema.key.startswith("output.proposed_command.v")
             ):
                 raise ExecutionCapabilityError("意图解析 Profile/Output 用途不一致")
+            _validate_intent_resolver_tuple(
+                registry,
+                profile,
+                output_schema,
+                budget,
+                current=False,
+            )
             rubric_version = None
         else:
             raise ExecutionCapabilityError("当前执行器只支持 generation/review Step")
@@ -986,6 +1035,63 @@ def _validate_profile_ref(
     )
     if actual != expected or not profile.supported:
         raise ExecutionCapabilityError("Execution Model Profile 与 Registry 不一致")
+
+
+def _validate_intent_resolver_tuple(
+    registry: ExecutionRegistry,
+    profile: ProfileDefinition,
+    output_schema: OutputSchemaDefinition,
+    budget: StepBudgetDefinition,
+    *,
+    current: bool,
+) -> None:
+    expected_profile = _INTENT_RESOLVER_PROFILE_TUPLES.get(profile.key)
+    deployment = registry.deployment_profiles.get(profile.deployment_profile_key)
+    if expected_profile is None or deployment is None:
+        raise ExecutionCapabilityError("意图解析冻结资产不是受支持的 v1/v2 组合")
+    actual_profile = (
+        profile.version,
+        profile.prompt_profile.key,
+        profile.prompt_profile.version,
+        profile.prompt_profile.sha256,
+        profile.deployment_profile_key,
+        deployment.version,
+    )
+    actual_output = (output_schema.key, output_schema.version, output_schema.sha256)
+    actual_budget = (
+        budget.key,
+        budget.version,
+        budget.max_model_calls,
+        budget.max_input_tokens,
+        budget.max_prompt_cache_miss_tokens,
+        budget.max_completion_tokens,
+        budget.max_reasoning_tokens,
+        budget.max_visible_output_tokens,
+        budget.max_cost_micros,
+        budget.max_wall_clock_seconds,
+        budget.max_provider_retries,
+        budget.max_protocol_corrections,
+    )
+    if (
+        actual_profile != expected_profile
+        or actual_output != _INTENT_OUTPUT_TUPLE
+        or actual_budget != _INTENT_BUDGET_TUPLE
+        or (current and profile.key != _CURRENT_INTENT_RESOLVER_PROFILE)
+        or not profile.supported
+        or profile.reasoning_mode != "disabled"
+        or profile.purpose != "generation"
+        or not profile.prompt_profile.supported
+        or profile.prompt_profile.purpose != "generation"
+        or hashlib.sha256(profile.prompt_profile.system_prompt.encode("utf-8")).hexdigest()
+        != profile.prompt_profile.sha256
+        or not deployment.supported
+        or deployment.purpose != "generation"
+        or not output_schema.supported
+        or output_schema.purpose != "generation"
+        or canonical_execution_sha256(output_schema.json_schema_value()) != output_schema.sha256
+        or not budget.supported
+    ):
+        raise ExecutionCapabilityError("意图解析冻结资产不是受支持的 v1/v2 组合")
 
 
 def _validate_prompt_profile_ref(

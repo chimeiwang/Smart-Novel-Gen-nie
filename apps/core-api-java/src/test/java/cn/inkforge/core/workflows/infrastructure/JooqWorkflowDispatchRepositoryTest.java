@@ -23,6 +23,8 @@ import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.protocol.ExecutionProtocolDateTime;
 import cn.inkforge.core.workflows.protocol.WorkflowEventPayloadCodec;
 import jakarta.validation.Validation;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -52,6 +54,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.MountableFile;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 @Testcontainers
@@ -242,7 +245,7 @@ class JooqWorkflowDispatchRepositoryTest {
         assertThat(request.getRunId()).isEqualTo(fixture.runId());
         assertThat(request.getPurpose()).isEqualTo("resolve_intent");
         assertThat(request.getOperation()).isNull();
-        assertThat(request.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(request.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v2");
         assertThat(request.getBudget().getMaxInputTokens()).isEqualTo(8000);
         assertThat(request.getEvidenceBundle().getId()).isEqualTo(fixture.intentBundleId());
         assertRequestHashes(request);
@@ -254,6 +257,42 @@ class JooqWorkflowDispatchRepositoryTest {
         assertThat(replay.getRequestHash()).isEqualTo(request.getRequestHash());
         assertThat(replay.getOperation()).isNull();
         assertThat(replay.getFencingToken()).isEqualTo(2);
+    }
+
+    @Test
+    void 历史v1解析器持久后首次派发与租约恢复仍使用原冻结依赖() {
+        IntentExecutionPlanSnapshot historical = historicalIntentPlan();
+        IntentFixture fixture = intentFixture(
+                "intent-dispatch-historical-v1", null, "valid", historical);
+
+        ExecutionStepRequest initial = dispatches.claimNext().orElseThrow();
+        assertThat(initial.getDispatchMode()).isEqualTo(ExecutionStepRequest.DispatchModeEnum.INITIAL);
+        assertThat(initial.getOperation()).isNull();
+        assertThat(initial.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(initial.getModelProfile().getVersion()).isEqualTo(1);
+        assertThat(initial.getModelProfile().getDeploymentProfileKey())
+                .isEqualTo("deployment.system.intent_resolver.v1");
+        assertThat(initial.getModelProfile().getPromptProfile().getName())
+                .isEqualTo("prompt.system.intent_resolver.v1");
+        assertThat(initial.getModelProfile().getPromptProfile().getVersion()).isEqualTo(1);
+        assertThat(initial.getModelProfile().getPromptProfile().getSha256())
+                .isEqualTo("4ebf30f06de85e21db42275f10e88a9ce309ee037dfebfd0fc921bfc77796f63");
+        assertThat(initial.getOutputSchema().getName()).isEqualTo("output.proposed_command.v1");
+        assertThat(initial.getOutputSchema().getVersion()).isEqualTo(1);
+        assertThat(initial.getEvidenceBundle().getPolicyVersion()).isEqualTo("evidence.system.intent.v1");
+        assertRequestHashes(initial);
+
+        expireLease(initial.getStepId(), "pending");
+        ExecutionStepRequest recovery = dispatches.claimNext().orElseThrow();
+        assertThat(recovery.getDispatchMode())
+                .isEqualTo(ExecutionStepRequest.DispatchModeEnum.PENDING_RECOVERY);
+        assertThat(recovery.getFencingToken()).isEqualTo(2);
+        assertThat(recovery.getInput()).isEqualTo(initial.getInput());
+        assertThat(recovery.getInputHash()).isEqualTo(initial.getInputHash());
+        assertThat(recovery.getRequestHash()).isEqualTo(initial.getRequestHash());
+        assertThat(recovery.getModelProfile()).isEqualTo(initial.getModelProfile());
+        assertThat(recovery.getOutputSchema()).isEqualTo(initial.getOutputSchema());
+        assertRequestHashes(recovery);
     }
 
     @ParameterizedTest
@@ -852,9 +891,20 @@ class JooqWorkflowDispatchRepositoryTest {
     }
 
     private static IntentFixture intentFixture(String prefix, String selectedOperation, String variant) {
+        return intentFixture(
+                prefix,
+                selectedOperation,
+                variant,
+                IntentExecutionPlanSnapshot.freeze(registry,
+                        List.of("long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter")));
+    }
+
+    private static IntentFixture intentFixture(
+            String prefix,
+            String selectedOperation,
+            String variant,
+            IntentExecutionPlanSnapshot plan) {
         Fixture owner = fixture(prefix);
-        IntentExecutionPlanSnapshot plan = IntentExecutionPlanSnapshot.freeze(registry,
-                List.of("long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter"));
         String runId = prefix + "-run";
         String intentBundleId = prefix + "-intent-bundle";
         String resolverId = prefix + "-resolver";
@@ -916,6 +966,17 @@ class JooqWorkflowDispatchRepositoryTest {
         insertIntentModelStep(runId, owner.novelId(), generationId, 4, business.generator(), original,
                 bundleId, 2, manifestHash, selectedOperation, "pending");
         return new IntentFixture(runId, generationId, intentBundleId);
+    }
+
+    private static IntentExecutionPlanSnapshot historicalIntentPlan() {
+        try (InputStream input = JooqWorkflowDispatchRepositoryTest.class.getResourceAsStream(
+                "/historical-fixtures/intent-execution-plan-94a5298.json")) {
+            if (input == null) throw new IllegalStateException("缺少 94a5298 历史自然计划向量");
+            Map<String, Object> fixture = json.readValue(input, new TypeReference<>() {});
+            return IntentExecutionPlanSnapshot.fromStored(object(fixture.get("snapshot")));
+        } catch (IOException exception) {
+            throw new IllegalStateException("读取 94a5298 历史自然计划向量失败", exception);
+        }
     }
 
     private static String insertIntentEvidence(String runId, String bundleId, int version, String chapterId,
@@ -1317,6 +1378,11 @@ class JooqWorkflowDispatchRepositoryTest {
                 + POSTGRES.getFirstMappedPort()
                 + "/"
                 + POSTGRES.getDatabaseName();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> object(Object value) {
+        return (Map<String, Object>) value;
     }
 
     private record Fixture(String userId, String novelId, String chapterId, String sessionId) {}

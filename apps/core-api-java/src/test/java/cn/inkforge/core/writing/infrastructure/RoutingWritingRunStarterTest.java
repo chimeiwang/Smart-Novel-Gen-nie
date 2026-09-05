@@ -137,7 +137,7 @@ class RoutingWritingRunStarterTest {
         var response = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(), request);
         assertThat(response.getOperation()).isNull();
         assertThat(response.getCurrentStep().getPurpose()).isEqualTo("resolve_intent");
-        assertThat(response.getCurrentStep().getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(response.getCurrentStep().getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v2");
         Record run = database.dsl().fetchOne("SELECT operation, \"targetType\", \"targetId\", \"modelPolicyJson\", input FROM public.\"WorkflowRun\" WHERE id = ?", response.getRunId());
         assertThat(run.get("operation")).isNull();
         assertThat(run.get("targetType", String.class)).isEqualTo("chapter");

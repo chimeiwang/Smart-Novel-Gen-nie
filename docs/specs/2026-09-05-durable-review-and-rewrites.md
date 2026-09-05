@@ -1,6 +1,6 @@
 # Durable Agent V2 整章审阅与改写迁移
 
-日期：2026-09-05。状态：三项操作本地验收完成；完整 Agent 重构仍在实施。
+日期：2026-09-05。状态：三项业务链及意图提示词版本补充均已完成本地验收；完整 Agent 重构仍在实施。
 
 ## 目标与范围
 
@@ -126,7 +126,7 @@ CLI 只访问 Core 公共接口。同步 Java/Python 对照、Web 完成报告�
 - 独立复核收回了两项不应夹带的行为：保持原同章节 mutation 互斥，额外覆盖不同章节但同一大纲来源；
   任务列表不加载或返回完整报告，只有 GET 投影全文。没有修改生产部署、DDL 或活动 Skills。
 
-当前 Catalog 7/21 已启用，共享 Schema 238 个，执行资产 fingerprint 为
+三项业务首次验收时 Catalog 7/21 已启用，共享 Schema 238 个，执行资产 fingerprint 为
 `2db29fa6d5e31651e0932e710c8da991c8ecdffe12dcafca57ca617f6023edbb`。
 公共 Core 152、内部 Core 34、供应商媒体入口 1、CLI 125 和 Operator 45 命令均未增加。
 
@@ -141,15 +141,74 @@ CLI 只访问 Core 公共接口。同步 Java/Python 对照、Web 完成报告�
   批准已完成，但脚本错误要求决定回执与 GET 完全相等。源码确认决定回执 taskId 为空、GET 为 runId 是
   既有兼容投影；现只允许这一处差异，剔除该别名后其他完整字段必须相等，revision/Artifact 漂移有负例。
   没有为此修改业务响应，清理有效。
-- 最终 `output/durable-agent-v2-e2e/20260905-review-rewrites-4/report.json` 为 passed，九场景全部通过：
+- 提示词补充修复前的最终 `output/durable-agent-v2-e2e/20260905-review-rewrites-4/report.json` 为 passed，九场景全部通过：
   无会话审阅、有会话且 Core 重启恢复报告、自然审阅、显式场景全文编辑批准、自然场景批准/丢弃、
   总纲选区编辑批准、节点选区编辑批准、大纲选区同 Run 返工后丢弃。
   每个模型 Step 的 Fake Provider 物理调用恰好一次，独立 reservation/TokenUsage 精确匹配；
   无 V1 Task/Command、无重复候选/消息/事件/应用。审阅未改正式层，场景采用失效旧终检，
   大纲选区外逐字不变且其他正式层哈希不变。容器、网络、卷和临时密钥全部清理，零残留。
 
-最终验收复用的 Core 镜像为
+提示词补充修复前的验收复用 Core 镜像为
 `sha256:4f718f71bd6354512d04bd6fde759ea0950578f7f4a25dfe7a8e767163ca321f`，Agent 为
 `sha256:122348dab2aa1d6eac65538d82cc79eacd47b942261b96255b7bc756846134e4`，Agent 关键源码与镜像哈希一致。
 本阶段没有访问真实开发库、生产或真实供应商，2 核 2 GB 整机性能仍为 not_proven；未更新活动 Skill 或本机固定 JAR。
 其余 14 项业务 Catalog、需要的系统用途、V1 退役和真实环境切换/验收仍属于原总目标，不把本阶段完成当作总重构完成。
+
+## 补充：意图提示词与五项授权保持一致
+
+`a150db0` 后的独立源码复核发现：旧 `prompt.system.intent_resolver.v1` 明写只选择问答/规划/正文三项，
+与新冻结的五项 availableOperations 不一致。上面的 Fake Provider 验收绕过了真实模型对提示词的理解，
+不能用于证明这处语义矛盾已解决。本补充先修复该问题，再继续下一组业务迁移。
+
+- 保留 v1 Prompt、Model Profile 和 Deployment 的原内容/哈希，新增版本 2 的三个资产，
+  resolve_intent 系统用途的新请求指向 v2。Output Schema、Evidence 形状、StepBudget 和总预算算法不变。
+- 新提示词以本次冻结的 availableOperations 及各项 description 为唯一可选操作列表，明确区分只读审阅与
+  产生候选的改写，不再把前三项名称硬编码为固定全集。它仍不得生成正文、调用工具或自行指定资源身份。
+- Core 只接受版本 1/2 各自完整一致的 Profile/Prompt/Deployment 组合，拒绝交叉拼接；旧三项和本地五项
+  已冻结计划按原 snapshot、hash 和预算恢复，不用新提示替换旧事实。
+- Agent 对旧冻结 v1 的首次派发和 journal 恢复同样保留完整依赖复验；首次派发的当前系统用途仍须授权
+  本 workflow、lane、Evidence 等约束。恢复保持原语义，不因当前用途退役或引用切换而改写冻结依赖；
+  两条路径均不能为了兼容任意放开 Profile。新请求使用 v2，旧请求原样使用 v1。
+- 增加真实模型请求信封的回归，确认新调用实际使用 v2 systemPrompt 和冻结的五项描述；
+  保留历史 literal 恢复测试、v1 初始/保留执行与拒绝混搭测试。
+- 刷新资产 manifest 和关联测试指纹，完成相关/全仓验证后重建 Core/Agent 镜像重跑九场景，
+  再复用同一组源码一致的镜像验证既有自然问答、澄清及正文五场景，覆盖此次提示词影响的原入口。
+  本补充不更改 CLI 命令、公开 API、数据库、安装包或发布流程。
+
+### 意图提示词补充验收记录
+
+新 `system.intent_resolver.v2`、`prompt.system.intent_resolver.v2` 和
+`deployment.system.intent_resolver.v2` 已接通。v2 Prompt SHA 为
+`5f1b980a61c8c66f9e43b06824816cfbdff723eada0784b2e2f5d7c6796fb5bd`，当前执行资产 fingerprint 为
+`f7be00d2eb2cde1185e917f916ce0006a469d89f46fbdc236a8ecac5c2ecba05`。
+Catalog 仍为 7/21、共享 Schema 238；公共 Core 152、内部 Core 34、供应商媒体 1、CLI 125、Operator 45 均不变。
+
+- 定向 Python 337 项通过；全仓 Python 4567 passed、3 skipped，仅保留既有 Starlette 弃用警告。
+  全仓日志 `/tmp/inkforge-intent-v2-python-full.log`。
+- 最终 `./mvnw verify` 五个 reactor 全绿：服务身份 11、共享契约 5、Core 871（3 skipped）、CLI 127。
+  日志 `/tmp/inkforge-intent-v2-maven-final.log`。首轮只发现当前流程测试仍传入 profileVersion=1，
+  已改用冻结计划的版本值，未修改业务行为以绕过失败；首轮日志保留在 `/tmp/inkforge-intent-v2-maven-full.log`。
+- Ruff 全仓、Mypy 服务源码 280 文件、CLI 41 文件、两份相关 E2E 模块、api:check、派生资产检查及
+  git diff --check 通过。日志分别为 `/tmp/inkforge-intent-v2-ruff.log`、
+  `/tmp/inkforge-intent-v2-mypy-services.log`、`/tmp/inkforge-intent-v2-mypy-cli.log`、
+  `/tmp/inkforge-intent-v2-mypy-e2e.log`、`/tmp/inkforge-intent-v2-api-check.log`。
+  本补充未改 Web/客户端源码或公共 Schema，沿用三项业务首次验收的 Web/typecheck/lint/build 结果，
+  不将其重复报告成此次重新执行。
+- 旧 94a 三项 literal 保持不变；新增 a150 五项 literal 来源提交
+  `a150db05b6243c2cba45c2e72a2625ca2acfac30`，文件 SHA
+  `7c2b73244e9a2563e7905033d94eea7d895aaacdf16bfd8ac9975974d6ebbcc9`，外层计划 SHA
+  `9df0f3c3b16e62897e546fbcdb6b705c4f249c2c5b7a5b38c27c4b22b9d3f473`。
+  五个子计划及 11 个 resolver/generator/reviewer 的完整资产依赖已与历史提交逐项复核；
+  恢复测试只读 literal，不读取当前 Registry。另用真实 PostgreSQL 验证历史 v1 首次派发和租约恢复时
+  Profile/Prompt/Deployment、inputHash/requestHash 均未被当前 v2 替换。
+- 重建 Core/Agent 后，`output/durable-agent-v2-e2e/20260905-review-rewrites-5/report.json`
+  九场景全部 passed；再复用同一镜像，`output/durable-agent-v2-e2e/20260905-intent-v2-natural-entry/report.json`
+  五场景全部 passed，覆盖问答、同会话新消息、澄清后重启/规划批准、两次回答仍不明确、正文双复审批准。
+  所有自然场景数据库中的 badResolverProfileCount 均为 0，确认新任务实际冻结 resolver v2。
+
+两组报告的 Core 镜像均为
+`sha256:ea6bd1c7586d922f468cb7d8646b2223557bd9dd26f0605d85392aa32e9ace60`，Agent 均为
+`sha256:5f6669bfe3aa7e1a5d02a082c147eb742097846a45e4eab9e06696267d3e0f23`；Agent 关键源码哈希与镜像一致。
+两组清理均有效，容器/网络/卷零残留且临时密钥已移除。验收仅使用隔离 PostgreSQL、Redis 与 Fake Provider，
+不证明真实供应商的语义理解效果或 2 核 2 GB 整机性能，也不表示生产生效；没有远程写、真实库迁移、
+部署、固定 JAR 安装或活动 Skill 更新。下一组业务实现必须另写 spec，不以本补充顺带扩大功能。

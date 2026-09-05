@@ -139,7 +139,8 @@ class WorkflowExecutionContextTest {
                 .isInstanceOf(IllegalStateException.class);
         ExecutionPlanSnapshot.Step resolver = INTENT.resolver();
         assertThatThrownBy(() -> context.requireStep("resolve_intent", "creative",
-                resolver.modelProfile().profile(), 1, resolver.outputSchema().name(), 1, resolver.stepBudget().stored()))
+                resolver.modelProfile().profile(), resolver.modelProfile().version(),
+                resolver.outputSchema().name(), resolver.outputSchema().version(), resolver.stepBudget().stored()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -148,11 +149,13 @@ class WorkflowExecutionContextTest {
         WorkflowExecutionContext context = unresolved();
         WorkflowStepSnapshotFactory snapshots = new WorkflowStepSnapshotFactory(new ObjectMapper());
         var pending = snapshots.modelStep(context, "resolver-1", 1, "resolve_intent", "interactive", "pending",
-                0, 0, null, INTENT.resolver().modelProfile().profile(), 1, null);
+                0, 0, null, INTENT.resolver().modelProfile().profile(),
+                INTENT.resolver().modelProfile().version(), null);
         assertThat(pending.getPurpose()).isEqualTo("resolve_intent");
-        assertThat(pending.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v1");
+        assertThat(pending.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v2");
         assertThatThrownBy(() -> snapshots.modelStep(context, "resolver-1", 1, "resolve_intent", "interactive", "running",
-                1, 1, null, INTENT.resolver().modelProfile().profile(), 1, null))
+                1, 1, null, INTENT.resolver().modelProfile().profile(),
+                INTENT.resolver().modelProfile().version(), null))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("resolvedModel");
     }
 

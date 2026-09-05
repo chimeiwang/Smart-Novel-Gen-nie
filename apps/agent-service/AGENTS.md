@@ -181,8 +181,10 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   执行器只消费完整指令、有序澄清回答和唯一 intent_context，使用 disabled reasoning、interactive lane 和
   专用有限预算，输出严格 ProposedCommand，不生成正文或调用工具。资源身份、有效命令和同 Run 后续
   编排仍由 Core 决定；当前分支已接自然请求及澄清的 Core/Web/CLI，但执行器支持和代码接线均不代表真实
-  环境已经切换，完整验收状态见自然入口规格。恢复只复验请求冻结的
-  完整保留依赖，不能用当前系统用途引用覆盖历史 Profile；缺 execution journal 的 running recovery
+  环境已经切换，完整验收状态见自然入口规格。新请求使用 `system.intent_resolver.v2`，其提示词以
+  冻结的 availableOperations 与 description 为唯一操作列表；历史 v1 首次派发及恢复仍使用原完整依赖。
+  首次派发仍由当前系统用途约束 workflow、lane 和 Evidence；恢复按完整保留依赖复验，不因当前用途退役
+  或切换引用而覆盖历史事实。不得以任意版本前缀放开未授权的 Profile/Prompt/Deployment 组合；缺 execution journal 的 running recovery
   仍以 MODEL_OUTCOME_UNKNOWN 收敛，不重复调用模型。
 - V2 `long_serial.plan_chapter` 的生成使用 `plot.chapter_plan.v1`，编辑复审使用
   `reviewer.chapter_plan_editorial.v1`。Agent 只消费 Core 冻结的 `chapter_plan_context` JSON Evidence 和严格
@@ -202,7 +204,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   生成提示、完整 ChapterDraft 结果与正文双 Reviewer；真实 operation 始终保留，不生成程序场景范围。
   `rewrite_outline_selection` 只消费总纲/节点的完整 text Evidence 和精确 range，返回 replacement 与
   程序派生哈希，单独大纲编辑 Reviewer 复审。Core 独占拼接、返工和最终采用。
-  自然解析支持新冻结的五项无选区操作；旧三项快照仍按原授权集合恢复。具体本地验收状态见
+  自然解析支持新冻结的五项无选区操作；旧三项及五项快照仍按原授权集合和解析器版本恢复。具体本地验收状态见
   `docs/specs/2026-09-05-durable-review-and-rewrites.md`，代码支持不表示服务器已开放。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
