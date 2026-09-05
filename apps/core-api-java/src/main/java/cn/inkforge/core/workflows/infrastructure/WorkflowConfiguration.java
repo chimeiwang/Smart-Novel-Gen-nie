@@ -85,14 +85,16 @@ class WorkflowConfiguration {
             ExecutionRegistry workflowExecutionRegistry,
             WorkflowExecutionContextReader contexts,
             ObjectProvider<WorkflowIntentBusinessPreparation> preparations,
-            ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates) {
+            ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates,
+            ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
                 coreClock,
                 objectMapper,
                 workflowExecutionRegistry,
-                Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable);
+                Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
+                shortMediumCompletion::getIfAvailable);
     }
 
     @Bean

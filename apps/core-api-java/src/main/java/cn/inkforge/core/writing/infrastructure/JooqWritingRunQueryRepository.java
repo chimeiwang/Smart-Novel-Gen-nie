@@ -27,6 +27,7 @@ import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
 import cn.inkforge.core.workflows.domain.WorkflowUsageStatus;
+import cn.inkforge.core.workflows.domain.ShortMediumSegments;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.protocol.WorkflowOutputValidator;
 import cn.inkforge.core.writing.application.WritingRunQueryRepository;
@@ -136,6 +137,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                     related.failedSteps().get(taskId),
                     related.artifacts().get(taskId),
                     related.completedGenerations().getOrDefault(taskId, List.of()),
+                    related.shortMediumManifests().getOrDefault(taskId, List.of()),
                     true);
         });
     }
@@ -217,6 +219,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                             related.failedSteps().get(run.id()),
                             related.artifacts().get(run.id()),
                             related.completedGenerations().getOrDefault(run.id(), List.of()),
+                            related.shortMediumManifests().getOrDefault(run.id(), List.of()),
                             false);
                     if (operation != null && !operation.equals(response.getOperation())) continue;
                     if (outcome != null && !outcome.equals(v2Outcome(response.getStatus()))) {
@@ -457,6 +460,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
         Map<String, List<V2Step>> activeSteps = new LinkedHashMap<>();
         Map<String, V2Step> failedSteps = new LinkedHashMap<>();
         Map<String, List<V2CompletedGeneration>> completedGenerations = new LinkedHashMap<>();
+        Map<String, List<V2ShortMediumManifest>> shortMediumManifests = new LinkedHashMap<>();
         String completedGenerationColumns = includeCompletedGenerations
                 ? """
                   , step."stepType"::text AS step_type, step.input, step."inputHash",
@@ -464,7 +468,13 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                     step."outputSchemaVersion", step."budgetJson", step."usageJson",
                     step."artifactId", step."artifactRevision"
                   """
-                : "";
+                : """
+                  , step."stepType"::text AS step_type,
+                    CASE WHEN step.purpose = 'short_medium_manifest' THEN step.input END AS input,
+                    CASE WHEN step.purpose = 'short_medium_manifest' THEN step."inputHash" END AS "inputHash",
+                    CASE WHEN step.purpose = 'short_medium_manifest' THEN step.output END AS output,
+                    CASE WHEN step.purpose = 'short_medium_manifest' THEN step."resultHash" END AS "resultHash"
+                  """;
         context.fetch(
                 """
                         WITH selected_steps AS (
@@ -517,6 +527,12 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                     if ("failed".equals(step.status())) {
                         failedSteps.put(step.runId(), step);
                     }
+                    if (ShortMediumSegments.MANIFEST_PURPOSE.equals(step.purpose()) && "completed".equals(step.status())) {
+                        shortMediumManifests.computeIfAbsent(step.runId(), ignored -> new ArrayList<>())
+                                .add(new V2ShortMediumManifest(step.id(), value.get("step_type", String.class),
+                                        value.get("input", String.class), value.get("inputHash", String.class),
+                                        value.get("output", String.class), value.get("resultHash", String.class)));
+                    }
                     if (includeCompletedGenerations
                             && "generation".equals(step.purpose())
                             && "completed".equals(step.status())) {
@@ -563,7 +579,8 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 });
         activeSteps.replaceAll((ignored, values) -> List.copyOf(values));
         completedGenerations.replaceAll((ignored, values) -> List.copyOf(values));
-        return new V2Related(activeSteps, failedSteps, artifacts, completedGenerations);
+        shortMediumManifests.replaceAll((ignored, values) -> List.copyOf(values));
+        return new V2Related(activeSteps, failedSteps, artifacts, completedGenerations, shortMediumManifests);
     }
 
     private WritingRunV2Response v2Response(
@@ -573,6 +590,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             V2Step failedStep,
             V2Artifact artifact,
             List<V2CompletedGeneration> completedGenerations,
+            List<V2ShortMediumManifest> shortMediumManifests,
             boolean includeReviewReport) {
         boolean cancelRequested = run.cancelRequestedAt() != null;
         if ("cancelled".equals(run.status()) && !cancelRequested) {
@@ -638,11 +656,88 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 .reviewReport(includeReviewReport
                         ? reviewReport(executionPlan, run, completedGenerations)
                         : null);
+        if ("short_medium".equals(run.workflow()) && "completed".equals(run.status())) {
+            ShortMediumResult result = shortMediumResult(run, executionPlan.requireBusinessPlan(), artifact,
+                    completedGenerations, shortMediumManifests, includeReviewReport);
+            response.candidateVersionId(result.candidateVersionId()).checkReport(result.checkReport());
+        }
         if (executionPlan.initialIntentPlan() != null && executionContexts != null) {
             response.clarification(executionContexts.pendingClarification(transaction, run.id(), run.status()));
         }
         return response;
     }
+
+    private ShortMediumResult shortMediumResult(V2Run run, ExecutionPlanSnapshot plan, V2Artifact artifact,
+            List<V2CompletedGeneration> generations, List<V2ShortMediumManifest> manifests, boolean includeContent) {
+        if (manifests.size() != 1) throw new IllegalStateException("中短篇完成缺少唯一持久化汇总");
+        V2ShortMediumManifest stored = manifests.getFirst();
+        Map<String, Object> manifest = readObject(stored.input(), "中短篇完成清单");
+        Map<String, Object> result = readObject(stored.output(), "中短篇完成引用");
+        Set<String> fields = Set.of("schema", "runId", "operation", "evidenceBundleId", "contextItemId",
+                "contextContentSha256", "segmentCount", "segments", "contentSha256");
+        if (!"persistence".equals(stored.stepType()) || !manifest.keySet().equals(fields)
+                || !ShortMediumSegments.MANIFEST_SCHEMA.equals(manifest.get("schema"))
+                || !run.id().equals(manifest.get("runId")) || !plan.operation().operation().equals(manifest.get("operation"))
+                || !ExecutionCanonicalJson.sha256(manifest).equals(stored.inputHash())
+                || !ExecutionCanonicalJson.sha256(Map.of("inputHash", stored.inputHash(), "output", result)).equals(stored.resultHash())) {
+            throw new IllegalStateException("中短篇完成清单身份或结果哈希不一致");
+        }
+        int count = ShortMediumSegments.integer(manifest.get("segmentCount"));
+        if (count < 1 || count > 6 || !"generate_manuscript".equals(plan.operation().operation()) && count != 1
+                || !(manifest.get("segments") instanceof List<?> references) || references.size() != count) {
+            throw new IllegalStateException("中短篇完成清单段数不一致");
+        }
+        List<ShortMediumSegments.Segment> segments = new ArrayList<>();
+        Set<String> seen = new java.util.HashSet<>();
+        if (includeContent && generations.size() != count) throw new IllegalStateException("中短篇生产 Step 数量与清单不一致");
+        for (int index = 0; index < references.size(); index++) {
+            Object raw = references.get(index);
+            if (!(raw instanceof Map<?, ?> ref) || !ref.keySet().equals(Set.of("index", "stepId", "contentSha256", "resultHash"))
+                    || ShortMediumSegments.integer(ref.get("index")) != index || !(ref.get("stepId") instanceof String stepId)
+                    || !seen.add(stepId) || !(ref.get("contentSha256") instanceof String hash) || !hash.matches("[0-9a-f]{64}")
+                    || !(ref.get("resultHash") instanceof String resultHash) || !resultHash.matches("[0-9a-f]{64}")) {
+                throw new IllegalStateException("中短篇完成清单段身份无效");
+            }
+            if (!includeContent) continue;
+            V2CompletedGeneration step = generations.get(index);
+            if (!step.id().equals(stepId) || !"agent".equals(step.stepType()) || step.artifactId() != null
+                    || !resultHash.equals(step.resultHash())) throw new IllegalStateException("中短篇清单引用了错误生产 Step");
+            Map<String, Object> input = readObject(step.input(), "中短篇生产输入");
+            if (!input.keySet().equals(Set.of("segmentIndex", "segmentCount"))
+                    || ShortMediumSegments.integer(input.get("segmentIndex")) != index
+                    || ShortMediumSegments.integer(input.get("segmentCount")) != count
+                    || !ExecutionCanonicalJson.sha256(input).equals(step.inputHash())) {
+                throw new IllegalStateException("中短篇生产 Step 输入哈希或段号不一致");
+            }
+            var frozen = plan.requireStep(step.purpose(), step.lane(), step.modelProfile(), Integer.parseInt(step.modelProfileVersion()),
+                    step.outputSchema(), Integer.parseInt(step.outputSchemaVersion()), readObject(step.budgetJson(), "中短篇生产预算"));
+            Map<String, Object> output = readObject(step.output(), "中短篇生产结果");
+            String content = ShortMediumSegments.output(plan.operation().operation(), output, frozen.outputSchema().jsonSchema());
+            Map<String, Object> resolved = readObject(step.resolvedModelJson(), "中短篇生产模型");
+            Map<String, Object> usage = readObject(step.usageJson(), "中短篇生产用量");
+            requireResolvedModel(resolved, frozen);
+            requireUsage(usage, frozen);
+            if (!ExecutionCanonicalJson.sha256(Map.of("resultKind", "output", "value", output, "resolvedModel", resolved, "usage", usage)).equals(resultHash)) {
+                throw new IllegalStateException("中短篇生产完整结果哈希不一致");
+            }
+            segments.add(new ShortMediumSegments.Segment(stepId, index, content, hash, resultHash));
+        }
+        String content = includeContent ? ShortMediumSegments.join(segments, count) : null;
+        if (content != null && !ShortMediumSegments.sha256(content).equals(manifest.get("contentSha256"))) {
+            throw new IllegalStateException("中短篇完整结果与清单哈希不一致");
+        }
+        if ("full_check".equals(plan.operation().operation())) {
+            if (!result.keySet().equals(Set.of("checkReportStepId")) || !seen.contains(result.get("checkReportStepId")) || artifact != null) {
+                throw new IllegalStateException("中短篇检查结果必须是本次唯一报告且没有候选");
+            }
+            return new ShortMediumResult(null, content == null ? null : Map.of("text", content));
+        }
+        if (!result.keySet().equals(Set.of("candidateVersionId")) || artifact == null
+                || !artifact.id().equals(result.get("candidateVersionId"))) throw new IllegalStateException("中短篇候选不属于精确完成结果");
+        return new ShortMediumResult(artifact.id(), null);
+    }
+
+    private record ShortMediumResult(String candidateVersionId, Map<String, Object> checkReport) {}
 
     private String reviewReport(
             WorkflowExecutionContext executionPlan,
@@ -964,10 +1059,13 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             Map<String, List<V2Step>> activeSteps,
             Map<String, V2Step> failedSteps,
             Map<String, V2Artifact> artifacts,
-            Map<String, List<V2CompletedGeneration>> completedGenerations) {
+            Map<String, List<V2CompletedGeneration>> completedGenerations,
+            Map<String, List<V2ShortMediumManifest>> shortMediumManifests) {
 
         private static V2Related empty() {
-            return new V2Related(Map.of(), Map.of(), Map.of(), Map.of());
+            return new V2Related(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
     }
+
+    private record V2ShortMediumManifest(String id, String stepType, String input, String inputHash, String output, String resultHash) {}
 }

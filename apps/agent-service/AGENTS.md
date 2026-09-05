@@ -19,11 +19,17 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 
 - `short_medium` 只执行 `generate_outline`、`generate_manuscript`、`replace_selection` 和
   `full_check` 四种专用操作，不复用长篇多 Agent 自动评审链。
-- 运行只信任 Core 随 QueueJob 提供的不可变来源、基础版本、当前蓝图和正文快照；不得用可变
-  `coreContext` 覆盖它们。
-- 6000 到 15000 字正文单次生成，超过 15000 字时按蓝图顺序串行分段并保存检查点。
-- 选区操作只能返回 replacement；Agent Service 不负责拼接全文。文档运行只回传一个最终候选
-  结果，全文检查只回传报告。
+- V1 运行只信任 Core 随 QueueJob 提供的不可变来源、基础版本、当前蓝图和正文快照；V2 只消费 Core
+  冻结的完整 `short_medium_context` Evidence 和已完成段，不得用可变 `coreContext` 或工作区覆盖它们。
+- 6000 到 15000 字正文单次生成，超过 15000 字时按蓝图顺序串行分段。V1 保存检查点；V2 每段为一个
+  独立模型 Step，下一段携带全部已完成正文前缀，最多六段，重启不得重调已经完成的段。
+- 选区操作只能返回 replacement；Agent Service 不负责拼接选区全文。V1 文档运行回传一个最终候选结果，
+  V2 逐 Step 回传完整段，由 Core 汇总成唯一候选；全文检查只回传报告。
+- 四项 V2 已完成仓内接线和本地真实 Core/Agent 独立进程、受控 Fake Provider 验收，Catalog 当前为
+  16/21。V2 原始段结果、计费与最终唯一候选/报告由 Core 持久化，零模型汇总 Step 固定结果引用；不创建
+  V1 影子任务或命令，不新增 Reviewer。生成 Run 为 `completed`、候选独立为 `awaiting_user`；全文检查
+  只生成完整文本报告。真实供应商、固定 CLI 包、活动 Skills 与生产未随本批更新，详见
+  `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
 
 ### 历史长篇视频导演规划收敛
 
@@ -217,7 +223,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   保留旧来源；没有新增来源、来源冲突或额度不足时明确终止，不无限调用。旧 v2 仅按原依赖恢复，仍只接受
   summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
   不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
-  Core 已接显式与自然入口、最多一次自动完整返工和作者采用，仓内 Catalog 为 12/21；另外九项尚未迁移，
+  Core 已接显式与自然入口、最多一次自动完整返工和作者采用；加上中短篇四项后仓内 Catalog 为 16/21，
+  一致性终检、文风画像、RAG 索引和两个开发视频操作共五项尚未迁移，
   不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
   其余问题或额度不足交作者，旧冻结策略不扩大。来源补齐计模型额度但不冒充候选 revision，结构化业务最多四次调用。
   显式 scope：设定两项/创建大纲为 novel，修改大纲为 novel 或 outline_node，伏笔为 novel 或当前 chapter；

@@ -22,6 +22,7 @@ import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.domain.ShortMediumSegments;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.time.Clock;
@@ -444,6 +445,76 @@ class JooqWritingRunQueryRepositoryTest {
     }
 
     @Test
+    void 中短篇两段正文仅投影本Run精确候选且列表不携带全文() {
+        Fixture owner = fixture("writing-query-short-candidate");
+        String runId = "run-short-candidate";
+        insertCompletedShortRun(owner, runId, "generate_manuscript",
+                List.of("首段😀\r\n", "第二段完整尾部  \n"), "candidate-short", "candidate-short", null, false);
+
+        WritingRunV2Response response = v2(owner.userId(), runId);
+        assertThat(response.getWorkflow()).isEqualTo("short_medium");
+        assertThat(response.getCandidateVersionId()).isEqualTo("candidate-short");
+        assertThat(response.getArtifact().getArtifactId()).isEqualTo("candidate-short");
+        assertThat(response.getCheckReport()).isNull();
+        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.COMPLETED);
+        assertThat(repository.list(owner.userId(), owner.novelId(), null, null, null, null, null, 10).getItems())
+                .singleElement().satisfies(item -> {
+                    WritingRunV2Response listed = (WritingRunV2Response) item;
+                    assertThat(listed.getCandidateVersionId()).isEqualTo("candidate-short");
+                    assertThat(listed.getCheckReport()).isNull();
+                });
+    }
+
+    @Test
+    void 中短篇全文检查仅GET返回完整文本且没有版本候选() {
+        Fixture owner = fixture("writing-query-short-report");
+        String report = "  完整检查报告😀\r\n" + "长报告不能截断。".repeat(3000) + "尾部  \n";
+        insertCompletedShortRun(owner, "run-short-report", "full_check", List.of(report), null, null, null, false);
+        WritingRunV2Response response = v2(owner.userId(), "run-short-report");
+        assertThat(response.getCheckReport()).containsExactlyEntriesOf(Map.of("text", report));
+        assertThat(response.getCandidateVersionId()).isNull();
+        assertThat(response.getArtifact()).isNull();
+        assertThat(repository.list(owner.userId(), owner.novelId(), null, null, null, null, null, 10).getItems())
+                .singleElement().satisfies(item -> assertThat(((WritingRunV2Response) item).getCheckReport()).isNull());
+    }
+
+    @Test
+    void 中短篇完成缺少汇总或全文哈希不符时不能宣称成功() {
+        Fixture owner = fixture("writing-query-short-invalid");
+        ExecutionPlanSnapshot plan = shortPlan("full_check");
+        insertV2Run(owner, "run-short-missing", "completed", plan, NOW,
+                owner.chapterId(), null, null, null, "quality_check", "short_medium_manuscript");
+        assertThatThrownBy(() -> v2(owner.userId(), "run-short-missing"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("唯一持久化汇总");
+        insertCompletedShortRun(owner, "run-short-invalid-hash", "full_check", List.of("完整报告"),
+                null, null, "0".repeat(64), false);
+        assertThatThrownBy(() -> v2(owner.userId(), "run-short-invalid-hash"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("完整结果与清单哈希不一致");
+    }
+
+    @Test
+    void 中短篇候选不能用本Run另一个版本替代清单引用() {
+        Fixture owner = fixture("writing-query-short-wrong-candidate");
+        insertCompletedShortRun(owner, "run-short-wrong-candidate", "generate_outline", List.of("完整蓝图"),
+                "candidate-actual", "candidate-wrong", null, false);
+        assertThatThrownBy(() -> v2(owner.userId(), "run-short-wrong-candidate"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("精确完成结果");
+    }
+
+    @Test
+    void 中短篇检查拒绝生产结果哈希漂移及夹带候选() {
+        Fixture owner = fixture("writing-query-short-wrong-producer");
+        insertCompletedShortRun(owner, "run-short-wrong-producer", "full_check", List.of("完整报告"),
+                null, null, null, true);
+        assertThatThrownBy(() -> v2(owner.userId(), "run-short-wrong-producer"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("错误生产 Step");
+        insertCompletedShortRun(owner, "run-short-report-artifact", "full_check", List.of("完整报告"),
+                "candidate-in-report", null, null, false);
+        assertThatThrownBy(() -> v2(owner.userId(), "run-short-report-artifact"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("没有候选");
+    }
+
+    @Test
     void 列表按创建时间和ID稳定倒序且保留无会话任务() {
         Fixture fixture = fixture("writing-query-list");
         insertTask(fixture, "task-older", NOW, "session-1");
@@ -730,9 +801,15 @@ class JooqWritingRunQueryRepositoryTest {
                 null,
                 "chat",
                 "chapter");
-        ExecutionPlanSnapshot.Step generator = REVIEW_PLAN.generator();
         Map<String, Object> input = Map.of("userInstruction", "请完整审阅当前章节");
         Map<String, Object> output = Map.of("report", report);
+        insertCompletedGeneration(runId, "step-" + runId, 1, REVIEW_PLAN, input, output, createdAt);
+    }
+
+    private String insertCompletedGeneration(String runId, String stepId, int ordinal,
+            ExecutionPlanSnapshot plan, Map<String, Object> input, Map<String, Object> output,
+            LocalDateTime createdAt) {
+        ExecutionPlanSnapshot.Step generator = plan.generator();
         String deploymentProfile = generator.modelProfile().deploymentProfileKey();
         String reasoningMode = generator.modelProfile().reasoningMode();
         Map<String, Object> resolvedModel = Map.of(
@@ -783,17 +860,18 @@ class JooqWritingRunQueryRepositoryTest {
                   "submittedAt", "updatedAt", "completedAt"
                 ) VALUES (
                   ?, ?, 'editor', CAST('agent' AS public."WorkflowStepType"),
-                  CAST('completed' AS public."WorkflowStepStatus"), ?, ?, ?, 1,
+                  CAST('completed' AS public."WorkflowStepStatus"), ?, ?, ?, ?,
                   'generation', ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
-                "step-" + runId,
+                stepId,
                 runId,
                 JSON.writeValueAsString(input),
                 JSON.writeValueAsString(output),
                 createdAt,
+                ordinal,
                 generator.lane(),
-                "idempotency-step-" + runId,
+                "idempotency-" + stepId,
                 "b".repeat(64),
                 ExecutionCanonicalJson.sha256(input),
                 ExecutionCanonicalJson.sha256(resultMaterial),
@@ -807,6 +885,52 @@ class JooqWritingRunQueryRepositoryTest {
                 createdAt,
                 createdAt,
                 createdAt.plusSeconds(1));
+        return ExecutionCanonicalJson.sha256(resultMaterial);
+    }
+
+    private static ExecutionPlanSnapshot shortPlan(String operation) {
+        return ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST)
+                .freezePlan("short_medium." + operation, false);
+    }
+
+    private void insertCompletedShortRun(Fixture owner, String runId, String operation, List<String> contents,
+            String artifactId, String manifestCandidateId, String wrongContentHash, boolean wrongProducerHash) {
+        ExecutionPlanSnapshot plan = shortPlan(operation);
+        insertV2Run(owner, runId, "completed", plan, NOW, owner.chapterId(), null, null, null,
+                "full_check".equals(operation) ? "quality_check" : "chapter_generation", "short_medium_manuscript");
+        List<Map<String, Object>> references = new ArrayList<>();
+        for (int index = 0; index < contents.size(); index++) {
+            String stepId = runId + "-generation-" + index;
+            String content = contents.get(index);
+            String key = ShortMediumSegments.textKey(operation);
+            String hash = ShortMediumSegments.sha256(content);
+            String resultHash = insertCompletedGeneration(runId, stepId, index + 1, plan,
+                    Map.of("segmentIndex", index, "segmentCount", contents.size()),
+                    Map.of(key, content, key + "Sha256", hash), NOW);
+            references.add(Map.of("index", index, "stepId", stepId, "contentSha256", hash,
+                    "resultHash", wrongProducerHash ? "0".repeat(64) : resultHash));
+        }
+        Map<String, Object> manifest = Map.of("schema", ShortMediumSegments.MANIFEST_SCHEMA,
+                "runId", runId, "operation", operation, "evidenceBundleId", "bundle-" + runId,
+                "contextItemId", "context-" + runId, "contextContentSha256", "c".repeat(64),
+                "segmentCount", contents.size(), "segments", references,
+                "contentSha256", wrongContentHash == null ? ShortMediumSegments.sha256(String.join("", contents)) : wrongContentHash);
+        Map<String, Object> output = "full_check".equals(operation)
+                ? Map.of("checkReportStepId", runId + "-generation-0")
+                : Map.of("candidateVersionId", manifestCandidateId);
+        String inputHash = ExecutionCanonicalJson.sha256(manifest);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, output, "createdAt",
+                  ordinal, purpose, lane, "attemptCount", "fencingToken", "idempotencyKey", "requestHash", "inputHash",
+                  "resultHash", "submittedAt", "updatedAt", "completedAt"
+                ) VALUES (?, ?, 'core', CAST('persistence' AS public."WorkflowStepType"),
+                  CAST('completed' AS public."WorkflowStepStatus"), ?, ?, ?, ?, 'short_medium_manifest',
+                  'control', 0, 1, ?, ?, ?, ?, ?, ?, ?)
+                """, runId + "-manifest", runId, JSON.writeValueAsString(manifest), JSON.writeValueAsString(output),
+                NOW, contents.size() + 1, runId + "-manifest-key", inputHash, inputHash,
+                ExecutionCanonicalJson.sha256(Map.of("inputHash", inputHash, "output", output)), NOW, NOW, NOW);
+        if (artifactId != null) insertV2Artifact(owner, runId, artifactId, "awaiting_user", 1, NOW);
     }
 
     private void insertV2Step(

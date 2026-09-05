@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { decideShortRunOutcome } from "../short-run-outcome";
+import { decideShortRunOutcome, decideShortRunStatus, type ShortRunStatus } from "../short-run-outcome";
 
 const base = {
   code: "TEST",
@@ -92,5 +92,44 @@ describe("中短篇运行结果", () => {
       }),
       { kind: "failed", code: "WRITING_RUN_CANCELLED" },
     );
+  });
+});
+
+const v2 = {
+  engineVersion: 2, runId: "short-run-1", taskId: "short-run-1", workflow: "short_medium",
+  chapterId: "chapter-1", commandId: null, commandStatus: null, operation: "generate_manuscript",
+  status: "completed", activeSteps: [], lastEventSequence: 8, revision: 3,
+} as const;
+
+describe("中短篇 V2 权威结果", () => {
+  it("只使用精确候选引用，不把完成事件或普通Artifact猜成候选", () => {
+    const candidate: ShortRunStatus = { ...v2, candidateVersionId: "candidate-1", artifact: {
+      artifactId: "candidate-1", artifactRevision: 1, status: "awaiting_user", actionable: false,
+    }, activeSteps: [] };
+    assert.deepEqual(decideShortRunStatus(candidate), {
+      kind: "succeeded", resultKind: "short_candidate", resultId: "candidate-1",
+    });
+    assert.equal(decideShortRunStatus({ ...candidate, candidateVersionId: "other" }).kind, "inconsistent");
+    assert.equal(decideShortRunStatus({ ...candidate, candidateVersionId: undefined }).kind, "inconsistent");
+  });
+
+  it("完整检查报告不产生候选，缺少结果不能显示成功", () => {
+    const report: ShortRunStatus = { ...v2, activeSteps: [], operation: "full_check", checkReport: { text: "完整检查😀\r\n" } };
+    assert.equal(decideShortRunStatus(report).kind, "succeeded");
+    assert.equal(decideShortRunStatus({ ...report, checkReport: undefined }).kind, "inconsistent");
+    assert.equal(decideShortRunStatus({ ...report, checkReport: { summary: "不是完整报告" } }).kind, "inconsistent");
+    assert.equal(decideShortRunStatus({ ...report, checkReport: { text: "" } }).kind, "inconsistent");
+    assert.equal(decideShortRunStatus({ ...report, candidateVersionId: "candidate-1" }).kind, "inconsistent");
+  });
+
+  it("运行、取消和错误引擎业务身份分别收敛", () => {
+    assert.equal(decideShortRunStatus({ ...v2, activeSteps: [], status: "running" }).kind, "continue");
+    assert.equal(decideShortRunStatus({ ...v2, activeSteps: [], status: "cancelled" }).kind, "failed");
+    assert.deepEqual(decideShortRunStatus({ ...v2, activeSteps: [], status: "failed",
+      error: { errorCode: "MODEL_OUTCOME_UNKNOWN", outcomeUnknown: true } }), {
+      kind: "failed", code: "MODEL_OUTCOME_UNKNOWN",
+    });
+    assert.equal(decideShortRunStatus({ ...v2, activeSteps: [], workflow: "long_serial" }).kind, "inconsistent");
+    assert.equal(decideShortRunStatus({ ...v2, activeSteps: [], status: "waiting_user" }).kind, "inconsistent");
   });
 });

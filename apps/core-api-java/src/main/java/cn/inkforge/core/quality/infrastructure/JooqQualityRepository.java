@@ -254,10 +254,12 @@ final class JooqQualityRepository implements QualityRepository {
     public List<QualityDispatchRecord> listDispatchable(int limit) {
         if (limit < 1) throw new IllegalArgumentException("质量检查领取数量无效");
         return database.transactionResult(transaction -> {
+            // kind 也被 V2 全文检查复用；旧队列只领取自身来源，不能解析或改写其他执行器的 Run。
             // skip locked 允许多个后台领取者分工；损坏单条只收敛自身，不阻断同批其他运行。
             List<WorkflowrunRecord> runs = transaction.selectFrom(WORKFLOWRUN)
                     .where(
                             WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                            WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
                             WORKFLOWRUN.STATUS.in(ACTIVE_RUN_STATUSES))
                     .orderBy(WORKFLOWRUN.UPDATEDAT.asc(), WORKFLOWRUN.ID.asc())
                     .limit(limit)
@@ -517,6 +519,7 @@ final class JooqQualityRepository implements QualityRepository {
         return transaction.selectFrom(WORKFLOWRUN)
                 .where(
                         WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                        WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
                         WORKFLOWRUN.SOURCEID.eq(checkId),
                         WORKFLOWRUN.STATUS.in(ACTIVE_RUN_STATUSES))
                 .orderBy(WORKFLOWRUN.CREATEDAT.asc(), WORKFLOWRUN.ID.asc())
@@ -528,7 +531,8 @@ final class JooqQualityRepository implements QualityRepository {
         WorkflowrunRecord run = transaction.selectFrom(WORKFLOWRUN)
                 .where(
                         WORKFLOWRUN.ID.eq(runId),
-                        WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check))
+                        WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                        WORKFLOWRUN.SOURCETYPE.eq("quality_check"))
                 .forUpdate()
                 .fetchOne();
         if (run == null) {
@@ -564,6 +568,7 @@ final class JooqQualityRepository implements QualityRepository {
                 .from(WORKFLOWRUN)
                 .where(
                         WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                        WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
                         WORKFLOWRUN.SOURCEID.eq(run.getSourceid()))
                 .orderBy(WORKFLOWRUN.CREATEDAT.desc(), WORKFLOWRUN.ID.desc())
                 .limit(1)

@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 276,
+  "modelCount": 285,
   "models": [
     {
       "model": "AgentUpdates",
@@ -853,6 +853,60 @@
       "module": "short_medium",
       "path": "short_medium/ShortMediumRunPayload.schema.json",
       "sha256": "df8cfd31939b09da2d56b54fe539f25be50f0159ba24d7a9e4761c701604c4dc"
+    },
+    {
+      "model": "ShortMediumCheckOutput",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumCheckOutput.schema.json",
+      "sha256": "31752903e1d6eb4cf1abb5d1fdb3a0d48ac7dbb9e738f1840b6ad9f98e071fbd"
+    },
+    {
+      "model": "ShortMediumCheckResult",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumCheckResult.schema.json",
+      "sha256": "ff693ce3690d72f0d65c2c4dbbb5b638de97390af9f25e72024e7cddb80f4247"
+    },
+    {
+      "model": "ShortMediumContentOutput",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumContentOutput.schema.json",
+      "sha256": "807015f2234e3f78affe24f2508de7dec0ebe16a8356ccf44c1a2ab77d19bb75"
+    },
+    {
+      "model": "ShortMediumContentResult",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumContentResult.schema.json",
+      "sha256": "d0e254171bca0b93e4fa5cde52cf278491e3c727bbe3a4a0beb769992e13fbb8"
+    },
+    {
+      "model": "ShortMediumContextV2",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumContextV2.schema.json",
+      "sha256": "bf85ac8d18c75dd9ff06a690e03cfe1527ca9b26d774975d48128eaf4bf6af53"
+    },
+    {
+      "model": "ShortMediumPriorSegment",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumPriorSegment.schema.json",
+      "sha256": "16fd87a854c6ca23520344c2ad81391a8057caf242421eb1c17f1dcb15de4d20"
+    },
+    {
+      "model": "ShortMediumReplacementOutput",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumReplacementOutput.schema.json",
+      "sha256": "c110dfd3149b53f96669c7602a1051cb70393672f78c67134ca4c265943b97d7"
+    },
+    {
+      "model": "ShortMediumReplacementResult",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumReplacementResult.schema.json",
+      "sha256": "e496f10e7e43efa506b631fe61448ce5644f66d517b36db8f983392e06f93049"
+    },
+    {
+      "model": "ShortMediumStepInput",
+      "module": "short_medium_execution",
+      "path": "short_medium_execution/ShortMediumStepInput.schema.json",
+      "sha256": "58b5783d32b5666c1a624aa97864c143389458bb2131332a86849db508793e5f"
     },
     {
       "model": "ToolCallRequest",

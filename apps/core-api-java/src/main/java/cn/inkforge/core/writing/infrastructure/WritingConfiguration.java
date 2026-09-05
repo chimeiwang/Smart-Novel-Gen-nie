@@ -13,6 +13,7 @@ import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.writing.application.EngineIdentityProbe;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
+import cn.inkforge.core.writing.application.ShortMediumDurableRunStarter;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.writing.application.WritingCallbackRepository;
@@ -52,6 +53,7 @@ import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
+import cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import jakarta.validation.Validator;
 import java.time.Clock;
@@ -145,6 +147,11 @@ class WritingConfiguration {
     }
 
     @Bean
+    ShortMediumRunAssembler shortMediumRunAssembler(ObjectMapper objectMapper) {
+        return new ShortMediumRunAssembler(objectMapper);
+    }
+
+    @Bean
     @ConditionalOnProperty(
             name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
             havingValue = "true")
@@ -163,6 +170,30 @@ class WritingConfiguration {
         return new JooqLongSerialDurableRunStarter(
                 database, assembler, workflows, registry, ids, coreClock, objectMapper,
                 chapterPlanningSources, chapterWritingSources, executionContexts, agentUpdatesSources);
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
+            havingValue = "true")
+    ShortMediumDurableRunStarter shortMediumDurableRunStarter(
+            CoreDatabase database,
+            ShortMediumRunAssembler assembler,
+            DurableWorkflowService workflows,
+            ExecutionRegistry registry,
+            WritingRunQueryRepository queries,
+            ObjectMapper objectMapper) {
+        return new JooqShortMediumDurableRunStarter(
+                database, assembler, workflows, registry, queries, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
+            havingValue = "true")
+    WorkflowShortMediumCompletion workflowShortMediumCompletion(
+            CuidV1Generator ids, Clock coreClock, ObjectMapper objectMapper) {
+        return new JooqWorkflowShortMediumCompletion(ids, coreClock, objectMapper);
     }
 
     @Bean
@@ -199,6 +230,7 @@ class WritingConfiguration {
             CoreDatabase database,
             WritingCommandRepository legacy,
             ObjectProvider<LongSerialDurableRunStarter> durableStarters,
+            ObjectProvider<ShortMediumDurableRunStarter> shortMediumDurableStarters,
             ObjectProvider<DurableAgentExecutionReadiness> agentReadinessChecks,
             CommandIdempotencyStore writingCommandIdempotencyStore,
             CoreSettings settings,
@@ -216,10 +248,16 @@ class WritingConfiguration {
         if (durable == null) {
             throw new IllegalStateException("耐久 Agent 数据库结构已就绪但 V2 启动器未装配");
         }
+        ShortMediumDurableRunStarter shortMediumDurable =
+                shortMediumDurableStarters.getIfAvailable();
+        if (shortMediumDurable == null) {
+            throw new IllegalStateException("耐久 Agent 数据库结构已就绪但中短篇 V2 启动器未装配");
+        }
         return new RoutingWritingRunStarter(
                 database,
                 legacy,
                 durable,
+                shortMediumDurable,
                 writingCommandIdempotencyStore,
                 settings,
                 () -> {

@@ -19,6 +19,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
+import cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
@@ -40,6 +41,7 @@ import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.protocol.WorkflowOutputValidator;
 import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
+import cn.inkforge.core.workflows.domain.ShortMediumSegments;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -56,6 +58,7 @@ import java.util.Set;
 import java.util.Objects;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import org.jooq.impl.DSL;
 import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -77,6 +80,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final WorkflowExecutionContextReader contexts;
     private final java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation;
     private final java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates;
+    private final java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -101,6 +105,15 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             WorkflowExecutionContextReader contexts,
             java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
             java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates) {
+        this(database, ids, clock, json, registry, leaseDuration, contexts, businessPreparation, structuredCandidates, () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
+            java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
+            java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -108,6 +121,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         ExecutionRegistry requiredRegistry = Objects.requireNonNull(registry);
         WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
                 requiredRegistry.enabledOperationKeys("long_serial", false));
+        WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
+                requiredRegistry.enabledOperationKeys("short_medium", false));
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow callback lease 必须为正数");
         }
@@ -116,6 +131,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.contexts = Objects.requireNonNull(contexts);
         this.businessPreparation = Objects.requireNonNull(businessPreparation);
         this.structuredCandidates = Objects.requireNonNull(structuredCandidates);
+        this.shortMediumCompletion = Objects.requireNonNull(shortMediumCompletion);
     }
 
     @Override
@@ -699,6 +715,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid(exception.getMessage());
         }
         switch (materializer) {
+            case SHORT_MEDIUM -> completeShortMedium(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CHAT_ANSWER -> completeChatAnswer(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CHAPTER_REVIEW_REPORT -> completeChapterReview(
@@ -714,6 +732,93 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             case AGENT_UPDATES_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
+    }
+
+    private void completeShortMedium(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+            ExecutionPlanSnapshot.Step generator, ExecutionStepResult body, WorkflowStepUsage usage,
+            Map<String, Object> output, LocalDateTime now) {
+        if (!"short_medium".equals(plan.operation().workflow()) || !plan.reviewers().isEmpty()
+                || !"none".equals(plan.reviewPolicy().mode()) || locked.step().get("artifactId") != null) {
+            throw invalid("中短篇生成不能绑定长篇复审或候选返工");
+        }
+        String runId = locked.run().get("id", String.class);
+        String novelId = locked.run().get("novelId", String.class);
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        if (!Objects.equals(bundleId, locked.run().get("currentEvidenceBundleId", String.class))) {
+            throw invalid("中短篇生成必须绑定当前不可变来源");
+        }
+        var evidence = new JooqShortMediumWorkflowEvidence(json);
+        var snapshot = evidence.load(tx, runId, novelId, bundleId, plan);
+        String operation = plan.operation().operation();
+        Map<String, Object> input = readObject(locked.step().get("input", String.class));
+        requireHash(locked.step().get("inputHash", String.class), input, "short medium generation input");
+        int index = ShortMediumSegments.index(operation, snapshot.context(), input);
+        int count = ShortMediumSegments.segmentCount(operation, snapshot.context());
+        if (index != snapshot.segments().size()) throw invalid("中短篇生成前缀不完整或序号重复");
+        String text = ShortMediumSegments.output(operation, output, generator.outputSchema().jsonSchema());
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null, locked.run().get("lastEventSequence", Long.class), now);
+        var completed = new ShortMediumSegments.Segment(body.getStepId(), index, text, ShortMediumSegments.sha256(text), body.getResultHash());
+        List<ShortMediumSegments.Segment> segments = new ArrayList<>(snapshot.segments());
+        segments.add(completed);
+        if (index + 1 < count) {
+            if (count > plan.runBudget().maxModelCalls()) throw invalid("分段计划超过原 Run 调用额度");
+            List<WorkflowEvidenceItemPlan> items = new ArrayList<>(snapshot.items());
+            items.add(new WorkflowEvidenceItemPlan("short_medium_segment", body.getStepId(), true, null, null, null,
+                    Map.of("index", index, "content", text, "contentSha256", completed.contentSha256()), null, null,
+                    Map.of("role", "completed_segment")));
+            var next = new JooqWorkflowStartRepository(database, ids, clock, json).appendEvidence(tx, runId,
+                    snapshot.version() + 1, generator.evidencePolicy(), items, now);
+            appendGenerationStep(tx, locked, generator, Map.of("segmentIndex", index + 1, "segmentCount", count), next.id(), null, now);
+            tx.execute("UPDATE public.\"WorkflowRun\" SET \"currentEvidenceBundleId\" = ? WHERE id = ?", next.id(), runId);
+            sequence = appendEvent(tx, runId, sequence, "evidence_ready", Map.of("bundleId", next.id(), "bundleVersion", next.version(),
+                    "manifestSha256", next.manifestSha256(), "totalBytes", next.totalBytes()), "evidence:" + next.version(), now);
+            updateRun(tx, runId, "running", sequence, null, null, now);
+            return;
+        }
+        String fullText = ShortMediumSegments.join(segments, count);
+        WorkflowShortMediumCompletion completion = shortMediumCompletion.get();
+        if (completion == null) throw new IllegalStateException("中短篇业务完成端口未装配");
+        WorkflowShortMediumCompletion.Completion result;
+        try {
+            // 业务冲突回滚候选写入，但已发生的模型结果和用量仍能收敛为明确失败。
+            result = tx.transactionResult(configuration -> completion.complete(DSL.using(configuration),
+                    new WorkflowShortMediumCompletion.CompletionRequest(locked.run().get("userId", String.class), novelId,
+                            locked.run().get("chapterId", String.class), operation, runId, body.getStepId(), body.getResultHash(),
+                            bundleId, snapshot.contextItemId(), snapshot.contextHash(), snapshot.context(), fullText)));
+        } catch (ApiException error) {
+            if (error.statusCode() >= 500 || error.statusCode() == 408 || error.statusCode() == 429) throw error;
+            failRun(tx, locked, error.code(), false, sequence, now);
+            return;
+        }
+        boolean report = "full_check".equals(operation);
+        if (report != (result.checkReport() != null)
+                || report && !Map.of("text", fullText).equals(result.checkReport())) {
+            throw new IllegalStateException("中短篇业务结果与冻结操作不一致");
+        }
+        String resultId = report ? body.getStepId() : result.candidateVersionId();
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("schema", ShortMediumSegments.MANIFEST_SCHEMA);
+        manifest.put("runId", runId);
+        manifest.put("operation", operation);
+        manifest.put("evidenceBundleId", bundleId);
+        manifest.put("contextItemId", snapshot.contextItemId());
+        manifest.put("contextContentSha256", snapshot.contextHash());
+        manifest.put("segmentCount", count);
+        manifest.put("segments", segments.stream().map(ShortMediumSegments.Segment::reference).toList());
+        manifest.put("contentSha256", ShortMediumSegments.sha256(fullText));
+        String manifestId = appendIntentControl(tx, runId, ShortMediumSegments.MANIFEST_PURPOSE, "persistence", manifest, bundleId, now);
+        Map<String, Object> resultReference = Map.of(report ? "checkReportStepId" : "candidateVersionId", resultId);
+        String resultHash = ExecutionCanonicalJson.sha256(Map.of("inputHash", ExecutionCanonicalJson.sha256(manifest), "output", resultReference));
+        tx.execute("UPDATE public.\"WorkflowStep\" SET output = ?, \"resultHash\" = ? WHERE id = ? AND \"runId\" = ?",
+                canonicalJson(resultReference), resultHash, manifestId, runId);
+        if (!report) {
+            sequence = appendEvent(tx, runId, sequence, "candidate_ready", Map.of("stepId", body.getStepId(),
+                    "artifactId", resultId, "artifactRevision", 1), "candidate:" + resultId + ":1", now);
+        }
+        sequence = appendEvent(tx, runId, sequence, "completed", Map.of("outcomeType", report ? "check_report" : "short_candidate",
+                "resultId", resultId), "run:completed", now);
+        updateRun(tx, runId, "completed", sequence, null, now, now);
     }
 
     private void completeEvidenceExpansion(DSLContext tx, Locked locked, ExecutionStepResult body,

@@ -18089,6 +18089,17 @@
             ],
             "title": "Cancelrequestedat"
           },
+          "candidateVersionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidateversionid"
+          },
           "chapterId": {
             "anyOf": [
               {
@@ -18099,6 +18110,20 @@
               }
             ],
             "title": "Chapterid"
+          },
+          "checkReport": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkreport"
           },
           "clarification": {
             "anyOf": [

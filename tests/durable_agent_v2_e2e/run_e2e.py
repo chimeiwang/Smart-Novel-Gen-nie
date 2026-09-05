@@ -2197,7 +2197,12 @@ def run(
                 }
             )
 
-        if phase == "natural-entry":
+        if phase == "short-medium":
+            from tests.durable_agent_v2_e2e.short_medium import scenarios as short_scenarios
+
+            for scenario in short_scenarios(acceptance):
+                record_scenario(scenario)
+        elif phase == "natural-entry":
             from tests.durable_agent_v2_e2e.natural_entry import scenarios as natural_scenarios
 
             for scenario in natural_scenarios(acceptance):
@@ -2304,6 +2309,7 @@ def main() -> int:
             "chapter-writing",
             "natural-entry",
             "review-rewrites",
+            "short-medium",
         ),
         default="minimum",
         help=(
@@ -2313,7 +2319,8 @@ def main() -> int:
             "chapter-writing 单独验证完整正文、双复审、全文编辑批准、完整返工、"
             "无模型局部修改及冲突回退、Core 重启、幂等与 submit 前取消；"
             "natural-entry 验证自然问答、重启后澄清、两回答未决失败、规划/写章审核与作者决定；"
-            "review-rewrites 验证整章审阅、场景改写和两类大纲选区的完整 V2 闭环"
+            "review-rewrites 验证整章审阅、场景改写和两类大纲选区的完整 V2 闭环；"
+            "short-medium 验证四操作、双段完整前缀、Agent重启恢复、精确候选采用与完整报告"
         ),
     )
     parser.add_argument(

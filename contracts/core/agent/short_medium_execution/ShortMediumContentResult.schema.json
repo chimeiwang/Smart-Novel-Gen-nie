@@ -1,0 +1,24 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium_execution/ShortMediumContentResult/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    },
+    "contentSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contentsha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "content",
+    "contentSha256"
+  ],
+  "title": "ShortMediumContentResult",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium_execution.ShortMediumContentResult"
+}

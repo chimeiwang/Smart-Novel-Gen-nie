@@ -1,0 +1,26 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium_execution/ShortMediumStepInput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "segmentCount": {
+      "maximum": 6,
+      "minimum": 1,
+      "title": "Segmentcount",
+      "type": "integer"
+    },
+    "segmentIndex": {
+      "maximum": 5,
+      "minimum": 0,
+      "title": "Segmentindex",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "segmentIndex",
+    "segmentCount"
+  ],
+  "title": "ShortMediumStepInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium_execution.ShortMediumStepInput"
+}

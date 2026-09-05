@@ -3,7 +3,8 @@
 ## 状态与适用边界
 
 - 日期：2026-09-01
-- 最近更新：2026-09-05；补充结构化五项显式/自然接线与仓内 12/21 状态，本批全量门禁见对应规格最终记录。
+- 最近更新：2026-09-05；结构化五项与中短篇四项均已仓内接通，Catalog 当前为 16/21。中短篇完成本地
+  独立 Core/Agent、受控 Fake Provider 验收及全仓门禁；真实供应商、固定包/活动 Skills 与生产另行验收。
 - 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
@@ -116,7 +117,8 @@ CLI 白名单遗漏的 rewrite_scene。命令总数仍为 125，不新增参数�
   结构化部分采用继续遵循本文件专节，不能把受理、自动复审或来源补齐当作正式写入。
 
 普通 CLI 的完整输入示例见 `tools/inkforge-cli/README.md`“结构化资料的显式启动”。本批仅更新仓内源码及
-说明；五项已在仓内启用，Catalog 为 12/21，公共 HTTP 接线定向验证通过，全量门禁与实际跨进程/供应商状态以
+说明；五项使仓内 Catalog 达到阶段性的 12/21，当前加上中短篇四项为 16/21。结构化五项公共 HTTP 接线
+定向验证通过，全量门禁与实际跨进程/供应商状态以
 `2026-09-05-durable-structured-agent-updates.md` 为准；未安装固定 JAR，
 未修改活动 Skills，未部署服务器。两份 Operator 的 45 命令及三操作允许集合保持不变，这 6 项仍被拒绝；
 本节示例不得直接复制成受限 Skill 的可执行步骤，也不得改走裸 CLI 绕过 Operator。
@@ -278,7 +280,8 @@ requestId；新修改要求或新 revision 不能复用旧请求内容，也不�
 ## 2026-09-05 结构化资料 V2 部分采用
 
 本节最初记录部分采用接线检查点，当时 Catalog 为 7/21、五项结构化操作尚未启用。随后显式/自然入口、自动
-返工和作者采用完成定向验证，当前仓内已启用 12/21；最新门禁及未部署状态见结构化资料规格。
+返工和作者采用完成定向验证，该阶段仓内已启用 12/21；当前加上中短篇四项为 16/21。结构化五项的门禁及
+未部署状态见结构化资料规格，历史阶段数字不代表当前总数。
 普通 Java/Python CLI 仍为 125 个命令；两份 Operator
 仍为 45 个命令，`long.agent.start` 仍只允许 `plan_chapter`、`write_chapter`、`review_chapter` 三种 Operation。
 本节没有增加命令、启动参数或 Skill 白名单。
@@ -312,6 +315,37 @@ Agent 仍没有 CLI 直连入口。链路保持
 `Skill scripts/run.sh → Java Operator/CLI → Core /api/v1/** → Agent`，候选生成、来源复验、事务采用和最终状态均由
 Core 负责；CLI 透传选择不等于自行写资料。五项仓内启用不替代固定 JAR/Skill 更新、服务器部署及生产验收，
 后者仍须分别完成，不能由本节代替。
+
+## 2026-09-05 中短篇四操作观察
+
+本节是后续两份 Skill 的更新契约，不直接编辑活动 `SKILL.md`、脚本或固定 JAR。中短篇四项已仓内启用，
+Catalog 当前为 16/21；一致性终检、文风画像、RAG 索引和两个开发视频操作仍未迁移。四项已完成本地独立
+Java Core/Python Agent、受控 Fake Provider 验收与全仓门禁，包含双段正文的 Agent 重启、每段仅一次实际
+Fake 调用、三类候选幂等采用和全文检查零候选；不是实际供应商或生产验收。
+完整证据以 `2026-09-05-durable-short-medium-workflows.md` 为准。
+普通 CLI 125、短篇 13 与 Operator 45 命令不变，长篇三操作允许集合不变；不新增 short.agent.cancel。
+
+后续应在现有 cli-contract、短篇工作流和 recovery 说明中同步：
+
+1. short.agent.start 继续使用 outline/manuscript/selection/full_check 四个原别名、原公共字段和稳定
+   clientRequestId，不传模型、Prompt、预算、segmentIndex/segmentCount 或新来源正文。保留实际响应 runId，
+   short.agent.watch 仍输入 `{"taskId":"<runId>"}`，可选 lastEventId 仍为字符串。
+2. V1 缺少 engineVersion 的历史响应仍兼容原 phase/commandStatus；显式字段只能是整数 1 或 2。
+   V2 只按 status 判定，不借旧 phase/commandStatus 假报成功，观察期间不能换引擎。V1 原终态退出 0 不改，
+   必须另外核对旧状态；V2 completed 退出 0，failed/cancelled 退出 5。
+3. 数字事件 ID 和 run_snapshot.baseSequence（含 0）作为 SSE 重连游标；快照/完成事件不是业务结果。
+   V2 断线或终态事件后必须 GET 同一 Run，最终 terminal.data 原样来自该 GET，不从 SSE payload.resultId、
+   版本列表最后一项、可变工作稿或日志拼造候选和报告。
+4. generate_outline/generate_manuscript/replace_selection 的 completed 必须带真实 candidateVersionId。
+   用该精确 ID 执行现有 short.version.get、short.version.preview，并在阅读完整内容和 Diff、作者确认
+   confirmationHash 后采用。Run 完成仅代表一份待采用候选，不能跳到 long.artifact.approve 或自动下一阶段。
+5. full_check 的 completed 必须带完整 checkReport.text，且没有 candidateVersionId；逐字显示报告，
+   不 trim、摘要代替原文或截断，不执行采用。输出文件和版本下载继续保留完整 UTF-8 内容与原换行。
+6. 缺少对应结果、显式类型错误或任务身份不匹配时，保留 CORE_RESPONSE_CONTRACT_ERROR/5 并停止；不得
+   回落 V1 或新建任务猜测重试。SSE 最多三次重连后仍非终态继续保留 SSE_RECONNECT_EXHAUSTED/5；停止
+   watcher 只停止观察，服务端任务未取消，恢复时观察同一个 Run。
+
+发布构建、固定安装包与活动说明更新分别核对，不能把本节或源码测试当成已安装/生产开放；本批不安装 Skill。
 
 ## 观察与结果恢复
 

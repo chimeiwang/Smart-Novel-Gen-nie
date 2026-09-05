@@ -10,9 +10,17 @@ from inkforge_agents.providers.base import (
     ModelStructuredOutputRoute,
     ModelTurnRequest,
     ModelTurnResult,
+    ModelUsage,
+    ModelUsageDiagnostics,
 )
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_contracts import ChapterDraftResult, EvaluationFinding
+
+if __package__:
+    from .short_medium_fixture import short_medium_output
+else:
+    # Compose 将整个既有测试目录只读挂到 /e2e，以顶层模块加载 Agent 工厂。
+    from short_medium_fixture import short_medium_output
 
 _WRITING_REVIEW_ROLES = {
     "reviewer.chapter_draft_consistency.v1": "consistency",
@@ -68,7 +76,29 @@ class ControlledFakeModelProvider:
             },
         )
         response.raise_for_status()
-        result = await self._delegate.complete_turn(request)
+        short_output = short_medium_output(request)
+        if short_output is None:
+            result = await self._delegate.complete_turn(request)
+        else:
+            prompt_tokens = sum(len(message.content) for message in request.messages)
+            completion_tokens = len(json.dumps(short_output, ensure_ascii=False))
+            result = ModelTurnResult(
+                content="",
+                toolCalls=[],
+                structuredOutput=short_output,
+                finishReason="stop",
+                rawFinishReason="stop",
+                usage=ModelUsage(
+                    promptTokens=prompt_tokens,
+                    cachedTokens=0,
+                    completionTokens=completion_tokens,
+                    totalTokens=prompt_tokens + completion_tokens,
+                ),
+                diagnostics=ModelUsageDiagnostics(
+                    promptCacheMissTokens=prompt_tokens, reasoningTokens=0
+                ),
+                effectiveMaxOutputTokens=request.maxOutputTokens,
+            )
         if request.policy.policyId == "reviewer.chapter_plan_editorial.v1":
             decision = await self._http.post(
                 "/control/provider/chapter-plan-review-decision",

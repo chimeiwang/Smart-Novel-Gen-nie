@@ -25,6 +25,7 @@ CONTRACT_MODULES = (
     "read_tools",
     "runs",
     "short_medium",
+    "short_medium_execution",
     "tools",
     "video",
     "video_adaptation",
@@ -44,7 +45,11 @@ ABSTRACT_MODELS = {
     "VideoAdaptationContractModel",
     "VideoRenderContractModel",
 }
-MODULE_SCHEMA_VERSIONS = {"execution": "2.0", "workflow_events": "2.0"}
+MODULE_SCHEMA_VERSIONS = {
+    "execution": "2.0",
+    "workflow_events": "2.0",
+    "short_medium_execution": "2.0",
+}
 
 
 def _json_bytes(value: object) -> bytes:

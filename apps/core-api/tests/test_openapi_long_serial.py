@@ -288,6 +288,8 @@ def test_openapi_run_responses_use_explicit_engine_discriminators() -> None:
         "error",
         "clarification",
         "reviewReport",
+        "candidateVersionId",
+        "checkReport",
         "commandId",
         "commandStatus",
     }

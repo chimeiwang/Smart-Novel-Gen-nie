@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium_execution/ShortMediumReplacementOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "replacement": {
+      "minLength": 1,
+      "title": "Replacement",
+      "type": "string"
+    }
+  },
+  "required": [
+    "replacement"
+  ],
+  "title": "ShortMediumReplacementOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium_execution.ShortMediumReplacementOutput"
+}

@@ -4,6 +4,7 @@ import cn.inkforge.cli.runtime.CliInputException;
 import cn.inkforge.cli.runtime.CommandContext;
 import cn.inkforge.cli.runtime.CommandHandler;
 import cn.inkforge.cli.runtime.CommandResult;
+import cn.inkforge.cli.transport.CoreResponseContractException;
 import cn.inkforge.cli.transport.CoreSseConnectionException;
 import cn.inkforge.cli.transport.SseStream;
 import java.util.LinkedHashMap;
@@ -58,39 +59,45 @@ final class ShortAgentCommands {
             CommandResult.FrameEmitter emitter) {
         String cursor = initialCursor;
         int reconnects = 0;
+        Integer observedEngine = null;
         while (true) {
             boolean disconnected = false;
             try (SseStream stream = context.requireApi().openSse(taskId, cursor)) {
                 while (stream.hasNext()) {
                     ObjectNode event = VideoPayloads.object(
                             stream.next(), "SSE 事件不是 JSON 对象");
-                    JsonNode eventId = event.get("id");
-                    if (eventId != null
-                            && eventId.isTextual()
-                            && !eventId.textValue().isEmpty()) {
-                        cursor = eventId.textValue();
+                    Observation observation = observe(event, taskId);
+                    if (observation.cursor() != null) cursor = observation.cursor();
+                    if (observation.engine() != null) {
+                        requireSameEngine(observedEngine, observation.engine());
+                        observedEngine = observation.engine();
                     }
                     ObjectNode frame = context.dependencies().json().createObjectNode();
                     frame.put("type", "event");
                     event.properties().forEach(entry ->
                             frame.set(entry.getKey(), entry.getValue().deepCopy()));
                     emitter.emit(frame);
+                    if (observation.terminalHint()) break;
                 }
             } catch (CoreSseConnectionException exception) {
                 disconnected = true;
             }
 
             JsonNode state = null;
-            if (!disconnected || reconnects >= 3) {
+            if (!disconnected || Integer.valueOf(2).equals(observedEngine) || reconnects >= 3) {
                 state = context.requireApi().request(
                         "GET",
                         "/api/v1/writing/runs/" + Payloads.segment(taskId));
-                if (shortTerminal(state)) {
+                int engine = engineVersion(state);
+                requireSameEngine(observedEngine, engine);
+                observedEngine = engine;
+                Integer terminalExit = terminalExit(state, taskId);
+                if (terminalExit != null) {
                     ObjectNode frame = context.dependencies().json().createObjectNode();
                     frame.put("type", "terminal");
                     frame.set("data", state.deepCopy());
                     emitter.emit(frame);
-                    return 0;
+                    return terminalExit;
                 }
             }
             if (reconnects >= 3) {
@@ -111,18 +118,115 @@ final class ShortAgentCommands {
         }
     }
 
-    private static boolean shortTerminal(JsonNode state) {
-        if (!(state instanceof ObjectNode object)) return false;
+    private static Integer terminalExit(JsonNode state, String taskId) {
+        if (!(state instanceof ObjectNode object)) return null;
+        if (engineVersion(state) == 2) {
+            if (!object.path("workflow").asText().equals("short_medium")
+                    || !object.path("runId").asText().equals(taskId)
+                    || !object.path("activeSteps").isArray()
+                    || !object.path("status").isTextual()
+                    || !Set.of("pending", "running", "completed", "failed", "cancelled")
+                            .contains(object.path("status").asText())) {
+                throw new CoreResponseContractException("V2 中短篇任务身份或状态无效");
+            }
+            for (String field : Set.of("artifact", "error", "checkReport")) {
+                JsonNode value = object.get(field);
+                if (value != null && !value.isNull() && !value.isObject()) {
+                    throw new CoreResponseContractException("V2 中短篇任务结果字段无效");
+                }
+            }
+            JsonNode candidate = object.get("candidateVersionId");
+            boolean hasCandidate = candidate != null && !candidate.isNull();
+            if (hasCandidate && (!candidate.isTextual() || candidate.textValue().isEmpty())) {
+                throw new CoreResponseContractException("V2 中短篇候选版本身份无效");
+            }
+            String status = object.path("status").asText();
+            if (Set.of("failed", "cancelled").contains(status)) return 5;
+            if (!status.equals("completed")) return null;
+            JsonNode report = object.get("checkReport");
+            if (object.path("operation").asText().equals("full_check")) {
+                if (hasCandidate || report == null || !report.isObject()
+                        || !report.path("text").isTextual() || report.path("text").asText().isEmpty()) {
+                    throw new CoreResponseContractException("V2 全文检查缺少权威完整报告");
+                }
+            } else if (!Set.of("generate_outline", "generate_manuscript", "replace_selection")
+                            .contains(object.path("operation").asText())
+                    || !hasCandidate || (report != null && !report.isNull())) {
+                throw new CoreResponseContractException("V2 中短篇生成缺少权威候选版本");
+            }
+            return 0;
+        }
         JsonNode phase = object.get("phase");
         JsonNode commandStatus = object.get("commandStatus");
-        return phase != null
+        boolean terminal = phase != null
                         && phase.isTextual()
                         && Set.of("completed", "error", "cancelled", "canceled")
                                 .contains(phase.textValue())
                 || commandStatus != null
                         && commandStatus.isTextual()
                         && Set.of("succeeded", "failed").contains(commandStatus.textValue());
+        return terminal ? 0 : null;
     }
+
+    private static int engineVersion(JsonNode state) {
+        if (state == null || !state.isObject()) {
+            throw new CoreResponseContractException("任务状态不是 JSON 对象");
+        }
+        JsonNode value = state.get("engineVersion");
+        if (value == null) return 1;
+        if (!value.isIntegralNumber() || !value.canConvertToInt()
+                || (value.intValue() != 1 && value.intValue() != 2)) {
+            throw new CoreResponseContractException("任务状态缺少有效 engineVersion");
+        }
+        return value.intValue();
+    }
+
+    private static void requireSameEngine(Integer observed, int current) {
+        if (observed != null && observed != current) {
+            throw new CoreResponseContractException("同一任务的 engineVersion 在观察期间发生变化");
+        }
+    }
+
+    private static Observation observe(ObjectNode event, String taskId) {
+        JsonNode rawCursor = event.get("id");
+        String cursor = null;
+        if (rawCursor != null && !rawCursor.isNull()) {
+            if (rawCursor.isTextual()) {
+                if (!rawCursor.textValue().isEmpty()) cursor = rawCursor.textValue();
+            } else if (rawCursor.isIntegralNumber() && rawCursor.bigIntegerValue().signum() >= 0) {
+                cursor = rawCursor.asText();
+            } else {
+                throw new CoreResponseContractException("SSE 事件包含无效游标");
+            }
+        }
+        JsonNode data = event.get("data");
+        Integer engine = data != null && data.isObject() && data.has("engineVersion")
+                ? engineVersion(data) : null;
+        boolean terminalHint = false;
+        if (Integer.valueOf(2).equals(engine)) {
+            if (data.has("runId") && !data.path("runId").asText().equals(taskId)) {
+                throw new CoreResponseContractException("V2 SSE 事件不属于当前任务");
+            }
+            String eventName = event.path("event").asText();
+            terminalHint = Set.of("completed", "failed", "cancelled").contains(eventName);
+            if (eventName.equals("run_snapshot")) {
+                JsonNode base = data.get("baseSequence");
+                JsonNode snapshot = data.get("snapshot");
+                if (base == null || !base.isIntegralNumber() || base.bigIntegerValue().signum() < 0
+                        || snapshot == null || !snapshot.isObject()
+                        || (cursor != null && !cursor.equals(base.asText()))) {
+                    throw new CoreResponseContractException("V2 run_snapshot 游标或快照无效");
+                }
+                cursor = base.asText();
+                terminalHint = Set.of("completed", "failed", "cancelled")
+                        .contains(snapshot.path("status").asText());
+            }
+        }
+        return new Observation(cursor, engine, terminalHint);
+    }
+
+    private record Observation(String cursor, Integer engine, boolean terminalHint) {}
+
 
     private static CommandResult start(CommandContext context, ObjectNode payload) {
         String novelId = Payloads.requireShortString(payload, "novelId");

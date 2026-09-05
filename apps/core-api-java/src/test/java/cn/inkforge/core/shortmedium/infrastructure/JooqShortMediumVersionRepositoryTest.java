@@ -59,11 +59,12 @@ class JooqShortMediumVersionRepositoryTest {
     private static final LocalDateTime INITIAL = LocalDateTime.parse("2026-08-24T10:00:00.000");
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-08-25T06:00:00.123Z"), ZoneOffset.UTC);
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @Container
     private static final PostgreSQLContainer POSTGRES =
             new PostgreSQLContainer("pgvector/pgvector:0.8.0-pg14")
-                    .withDatabaseName("inkforge_short_medium_test")
+                    .withDatabaseName("novelwriterdev")
                     .withUsername("inkforge")
                     .withPassword("test-only-password");
 
@@ -74,32 +75,48 @@ class JooqShortMediumVersionRepositoryTest {
 
     @BeforeAll
     static void 重建冻结结构() throws Exception {
-        POSTGRES.copyFileToContainer(
-                MountableFile.forClasspathResource("db/novelwriterdev-schema.sql"),
-                "/tmp/novelwriterdev-schema.sql");
-        ExecResult result = POSTGRES.execInContainer(
-                "psql",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-U",
-                POSTGRES.getUsername(),
-                "-d",
-                POSTGRES.getDatabaseName(),
-                "-f",
-                "/tmp/novelwriterdev-schema.sql");
-        assertThat(result.getExitCode()).as(result.getStderr()).isZero();
+        for (String path : List.of(
+                "db/novelwriterdev-schema.sql",
+                "migrations/20260831_durable_agent_execution.sql")) {
+            String target = "/tmp/" + path.substring(path.lastIndexOf('/') + 1);
+            POSTGRES.copyFileToContainer(
+                    MountableFile.forClasspathResource(path), target);
+            ExecResult result = POSTGRES.execInContainer(
+                    "psql",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-U",
+                    POSTGRES.getUsername(),
+                    "-d",
+                    POSTGRES.getDatabaseName(),
+                    "-f",
+                    target);
+            assertThat(result.getExitCode()).as(result.getStderr()).isZero();
+        }
         database = CoreDatabase.connect(PostgresConnectionSettings.parse(databaseUrl()));
         repository = new JooqShortMediumVersionRepository(
-                database, new CuidV1Generator(CLOCK), CLOCK, new ObjectMapper());
+                database, new CuidV1Generator(CLOCK), CLOCK, JSON, true);
         service = new ShortMediumVersionService(repository);
     }
 
     @AfterEach
     void cleanup() {
-        if (!users.isEmpty()) {
-            database.dsl().deleteFrom(NOVEL).where(NOVEL.USERID.in(users)).execute();
-            database.dsl().deleteFrom(USER).where(USER.ID.in(users)).execute();
+        // V2 Run/Step 是数据库触发器保护的不可删除审计事实；对应 fixture 留给临时容器整体销毁。
+        List<String> legacyUsers = users.stream()
+                .filter(userId -> !Boolean.TRUE.equals(database.dsl().fetchValue(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM public."WorkflowRun"
+                          WHERE "userId" = ? AND "engineVersion" = 2
+                        )
+                        """,
+                        userId)))
+                .toList();
+        if (!legacyUsers.isEmpty()) {
+            database.dsl().deleteFrom(NOVEL).where(NOVEL.USERID.in(legacyUsers)).execute();
+            database.dsl().deleteFrom(USER).where(USER.ID.in(legacyUsers)).execute();
         }
+        users.clear();
     }
 
     @AfterAll
@@ -198,6 +215,71 @@ class JooqShortMediumVersionRepositoryTest {
                         WRITINGRUNCOMMAND.IDEMPOTENCYKEY.eq(
                                 "short-medium:adopt:" + candidate.id() + ":short-adopt-0002")))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void V2候选采用必须写同Run零模型回执且不伪造WritingTask或反转Run() {
+        String owner = user("short-version-owner-v2");
+        Project project = project("short-version-novel-v2", owner, true, "基础大纲", "");
+        ShortMediumVersion base = submitOutline(owner, project.novelId());
+        String runId = completedV2Run(owner, project, "generate_outline");
+        ShortMediumVersion candidate = workflowCandidate(
+                owner,
+                project,
+                new VersionDocumentBinding("outline", null),
+                base,
+                "V2候选大纲😀完整尾部",
+                null,
+                runId,
+                "short-v2-producer-step");
+        String confirmation = service.get(owner, project.novelId(), candidate.id())
+                .getDiff()
+                .getConfirmationHash();
+        VersionActionRequest request = new VersionActionRequest(
+                        "short-v2-adopt-0001", confirmation, DocumentType.OUTLINE)
+                .baseVersionId(base.id());
+
+        var adopted = service.adopt(owner, project.novelId(), candidate.id(), request);
+        var replay = service.adopt(owner, project.novelId(), candidate.id(), request);
+
+        assertThat(adopted.getId()).isEqualTo(candidate.id());
+        assertThat(adopted.getTaskId()).isNull();
+        assertThat(replay.getId()).isEqualTo(candidate.id());
+        assertThat(database.dsl().fetchCount(
+                        WRITINGRUNCOMMAND,
+                        WRITINGRUNCOMMAND.ARTIFACTID.eq(candidate.id())))
+                .isZero();
+        var receipt = database.dsl().fetchOne(
+                """
+                SELECT step."runId", step."stepType"::text AS "stepType",
+                       step.status::text AS status, step.purpose, step."artifactId",
+                       step."artifactRevision", step."requestHash", step.input,
+                       run.status::text AS "runStatus", run."completedAt"
+                FROM public."WorkflowStep" AS step
+                JOIN public."WorkflowRun" AS run ON run.id = step."runId"
+                WHERE step."runId" = ? AND step.purpose = 'user_decision'
+                """,
+                runId);
+        assertThat(receipt.get("stepType", String.class)).isEqualTo("user_confirmation");
+        assertThat(receipt.get("status", String.class)).isEqualTo("completed");
+        assertThat(receipt.get("artifactId", String.class)).isEqualTo(candidate.id());
+        assertThat(receipt.get("artifactRevision", Integer.class)).isEqualTo(1);
+        assertThat(receipt.get("requestHash", String.class)).matches("[0-9a-f]{64}");
+        assertThat(receipt.get("input", String.class)).contains(confirmation);
+        assertThat(receipt.get("runStatus", String.class)).isEqualTo("completed");
+        assertThat(receipt.get("completedAt", LocalDateTime.class)).isEqualTo(INITIAL);
+        assertThat(database.dsl().fetchOne(
+                                "SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'user_decision'",
+                                runId)
+                        .get(0, Long.class))
+                .isEqualTo(1L);
+
+        VersionActionRequest conflicting = new VersionActionRequest(
+                        "short-v2-adopt-0001", "0".repeat(64), DocumentType.OUTLINE)
+                .baseVersionId(base.id());
+        assertCode(
+                () -> service.adopt(owner, project.novelId(), candidate.id(), conflicting),
+                "IDEMPOTENCY_KEY_REUSED");
     }
 
     @Test
@@ -337,6 +419,136 @@ class JooqShortMediumVersionRepositoryTest {
                             base.payload().contentHash(),
                             created.id()));
         });
+    }
+
+    private static String completedV2Run(
+            String owner, Project project, String operation) {
+        String runId = project.novelId() + "-v2-run";
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowRun" (
+                  id, "novelId", "chapterId", "userId", kind, status, input,
+                  "createdAt", "updatedAt", "engineVersion", workflow, operation,
+                  "operationCatalogVersion", "idempotencyKey", "requestHash",
+                  "targetType", "targetId", "budgetJson", "modelPolicyJson",
+                  "lastEventSequence", revision, "completedAt"
+                ) VALUES (
+                  ?, ?, NULL, ?, CAST('chapter_generation' AS "WorkflowRunKind"),
+                  CAST('completed' AS "WorkflowRunStatus"), '{}', ?, ?, 2,
+                  'short_medium', ?, 'agent-operation-catalog.v1', ?, ?,
+                  'short_medium_outline', ?, '{}', '{}', 1, 1, ?
+                )
+                """,
+                runId,
+                project.novelId(),
+                owner,
+                INITIAL,
+                INITIAL,
+                operation,
+                runId + "-start-request",
+                ShortMediumText.sha256(runId),
+                project.novelId(),
+                INITIAL);
+        String emptyHash = ShortMediumText.sha256("{}");
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, output,
+                  "durationMs", "createdAt", ordinal, purpose, lane, "attemptCount",
+                  "fencingToken", "idempotencyKey", "requestHash", "inputHash",
+                  "resultHash", "submittedAt", "updatedAt", "completedAt"
+                ) VALUES (
+                  'short-v2-producer-step', ?, '写作', CAST('agent' AS "WorkflowStepType"),
+                  CAST('completed' AS "WorkflowStepStatus"), '{}', '{}', 1, ?, 1,
+                  'generation', 'creative', 1, 1, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                runId,
+                INITIAL,
+                runId + ".short-v2-producer-step",
+                ShortMediumText.sha256(runId + ":producer-request"),
+                emptyHash,
+                emptyHash,
+                INITIAL,
+                INITIAL,
+                INITIAL);
+        return runId;
+    }
+
+    private static ShortMediumVersion workflowCandidate(
+            String owner,
+            Project project,
+            VersionDocumentBinding binding,
+            ShortMediumVersion base,
+            String content,
+            String sourceOutlineVersionId,
+            String runId,
+            String producerStepId) {
+        String id = runId + "-candidate";
+        ShortMediumVersionPayload payload = new ShortMediumVersionPayload(
+                "outline".equals(binding.documentType()) ? "outline_draft" : "chapter_draft",
+                binding.documentType(),
+                base.versionNumber() + 1,
+                base.id(),
+                null,
+                "agent",
+                content,
+                ShortMediumText.sha256(content),
+                runId,
+                producerStepId,
+                sourceOutlineVersionId,
+                "生成V2候选",
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                null);
+        var diff = DocumentDiffEngine.bind(
+                DocumentDiffEngine.build(base.content(), content, base.id(), id),
+                binding.documentType(),
+                binding.chapterId(),
+                base.id(),
+                base.payload().contentHash(),
+                id);
+        String payloadJson = JSON.writeValueAsString(payload);
+        String diffJson = JSON.writeValueAsString(diff);
+        database.dsl().insertInto(REVIEWARTIFACT)
+                .set(REVIEWARTIFACT.ID, id)
+                .set(REVIEWARTIFACT.NOVELID, project.novelId())
+                .set(REVIEWARTIFACT.CHAPTERID, binding.chapterId())
+                .setNull(REVIEWARTIFACT.TASKID)
+                .set(REVIEWARTIFACT.WORKFLOWRUNID, runId)
+                .set(REVIEWARTIFACT.ARTIFACTKEY, binding.artifactKey(project.novelId()))
+                .set(
+                        REVIEWARTIFACT.KIND,
+                        "outline".equals(binding.documentType())
+                                ? cn.inkforge.core.db.generated.enums.Reviewartifactkind.outline_draft
+                                : cn.inkforge.core.db.generated.enums.Reviewartifactkind.chapter_draft)
+                .set(
+                        REVIEWARTIFACT.STATUS,
+                        cn.inkforge.core.db.generated.enums.Reviewartifactstatus.awaiting_user)
+                .set(REVIEWARTIFACT.SUMMARY, "生成V2候选")
+                .set(REVIEWARTIFACT.PAYLOADJSON, payloadJson)
+                .set(REVIEWARTIFACT.DIFFJSON, diffJson)
+                .set(REVIEWARTIFACT.CREATEDBYAGENT, "剧情")
+                .set(REVIEWARTIFACT.UPDATEDBYAGENT, "剧情")
+                .set(REVIEWARTIFACT.REVISION, 1)
+                .set(REVIEWARTIFACT.CREATEDAT, INITIAL)
+                .set(REVIEWARTIFACT.UPDATEDAT, INITIAL)
+                .execute();
+        database.dsl().insertInto(REVIEWARTIFACTREVISION)
+                .set(REVIEWARTIFACTREVISION.ID, id + "-revision")
+                .set(REVIEWARTIFACTREVISION.ARTIFACTID, id)
+                .set(REVIEWARTIFACTREVISION.REVISION, 1)
+                .set(REVIEWARTIFACTREVISION.SUMMARY, "生成V2候选")
+                .set(REVIEWARTIFACTREVISION.PAYLOADJSON, payloadJson)
+                .set(REVIEWARTIFACTREVISION.DIFFJSON, diffJson)
+                .set(REVIEWARTIFACTREVISION.CREATEDBYAGENT, "剧情")
+                .set(REVIEWARTIFACTREVISION.CREATEDAT, INITIAL)
+                .execute();
+        return repository.requireVersion(owner, project.novelId(), id);
     }
 
     private String user(String id) {

@@ -405,6 +405,42 @@
       "purpose": "review",
       "promptProfile": "prompt.reviewer.agent_updates_editorial.v1",
       "deploymentProfileKey": "deployment.reviewer.agent_updates_editorial.v1"
+    },
+    {
+      "key": "plot.short_medium_outline.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.short_medium_outline.v2",
+      "deploymentProfileKey": "deployment.plot.short_medium_outline.v2"
+    },
+    {
+      "key": "writer.short_medium_manuscript.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.writer.short_medium_manuscript.v2",
+      "deploymentProfileKey": "deployment.writer.short_medium_manuscript.v2"
+    },
+    {
+      "key": "writer.short_medium_selection.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.writer.short_medium_selection.v2",
+      "deploymentProfileKey": "deployment.writer.short_medium_selection.v2"
+    },
+    {
+      "key": "quality.short_medium_full_check.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.quality.short_medium_full_check.v2",
+      "deploymentProfileKey": "deployment.quality.short_medium_full_check.v2"
     }
   ]
 }

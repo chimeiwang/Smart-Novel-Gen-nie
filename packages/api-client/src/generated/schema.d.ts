@@ -7807,6 +7807,12 @@ export interface components {
             commandStatus: null;
             /** Reviewreport */
             reviewReport?: string | null;
+            /** Candidateversionid */
+            candidateVersionId?: string | null;
+            /** Checkreport */
+            checkReport?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
         };
         /** WritingSessionDetail */
         WritingSessionDetail: {

@@ -86,6 +86,83 @@ class WatchCommandsTest {
     }
 
     @Test
+    void 短篇V2按权威状态区分完成失败取消并保留完整报告() {
+        for (String status : List.of("completed", "failed", "cancelled")) {
+            WatchApi api = new WatchApi(json);
+            ObjectNode terminal = shortV2Status(status);
+            terminal.put("phase", "completed");
+            terminal.put("commandStatus", "succeeded");
+            api.stream();
+            api.response(terminal);
+            Invocation result = invoke("short.agent.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+            assertThat(result.exit()).as(status).isEqualTo(status.equals("completed") ? 0 : 5);
+            assertThat(result.frames().getLast().path("type").asText()).isEqualTo("terminal");
+            assertThat(result.frames().getLast().path("data")).isEqualTo(terminal);
+        }
+        WatchApi api = new WatchApi(json);
+        ObjectNode terminal = shortV2Status("completed");
+        String report = "全文检查😀\r\n".repeat(20_001) + "完整尾部🚀";
+        terminal.put("operation", "full_check");
+        terminal.putNull("candidateVersionId");
+        terminal.putObject("checkReport").put("text", report);
+        api.stream();
+        api.response(terminal);
+        Invocation result = invoke("short.agent.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+        assertThat(result.exit()).isZero();
+        assertThat(result.frames().getLast().at("/data/checkReport/text").asText()).isEqualTo(report);
+    }
+
+    @Test
+    void 短篇V2数字快照游标断线重连而候选只来自GET() {
+        WatchApi api = new WatchApi(json);
+        api.stream(v2RunSnapshot(4, "running"), new CoreSseConnectionException());
+        api.response(shortV2Status("running"));
+        api.stream(json.readTree("""
+                {"id":5,"event":"completed","data":{"engineVersion":2,"resultId":"伪候选"}}
+                """), new AssertionError("完成事件之后应先回读 GET"));
+        api.response(shortV2Status("completed"));
+        Invocation result = invoke("short.agent.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+        assertThat(result.exit()).isZero();
+        assertThat(api.sseCursors).containsExactly(null, "4");
+        assertThat(result.frames().getFirst().path("id").asInt()).isEqualTo(4);
+        assertThat(result.frames().getLast().at("/data/candidateVersionId").asText())
+                .isEqualTo("candidate-exact");
+    }
+
+    @Test
+    void 短篇V2空快照游标可重连且非法完成响应失败关闭() {
+        WatchApi api = new WatchApi(json);
+        ObjectNode zero = (ObjectNode) v2RunSnapshot(0, "running");
+        zero.remove("id");
+        api.stream(zero, new CoreSseConnectionException());
+        api.response(shortV2Status("running"));
+        api.stream();
+        api.response(shortV2Status("completed"));
+        assertThat(invoke("short.agent.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock()).exit())
+                .isZero();
+        assertThat(api.sseCursors).containsExactly(null, "0");
+        for (String field : List.of("engineVersion", "activeSteps", "candidateVersionId")) {
+            WatchApi invalid = new WatchApi(json);
+            ObjectNode terminal = shortV2Status("completed");
+            terminal.putNull(field);
+            invalid.stream();
+            invalid.response(terminal);
+            Invocation result = invoke("short.agent.watch", "{\"taskId\":\"t/1\"}", invalid, new FakeClock());
+            assertThat(result.exit()).isEqualTo(5);
+            assertThat(result.frames().getLast().at("/error/code").asText())
+                    .isEqualTo("CORE_RESPONSE_CONTRACT_ERROR");
+        }
+    }
+
+    private ObjectNode shortV2Status(String status) {
+        ObjectNode value = (ObjectNode) v2Status(status, null, 5);
+        value.put("workflow", "short_medium");
+        value.put("operation", "generate_outline");
+        if (status.equals("completed")) value.put("candidateVersionId", "candidate-exact");
+        return value;
+    }
+
+    @Test
     void 长篇任务观察先读权威outcome再接SSE并返回等待复审Artifact() {
         WatchApi api = new WatchApi(json);
         api.response(status("running", null));

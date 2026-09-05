@@ -133,10 +133,18 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
         "plot.outline_generator.v2",
         "plot.outline_reviser.v2",
         "plot.foreshadowing.v2",
+        "plot.short_medium_outline.v1",
+        "writer.short_medium_manuscript.v1",
+        "writer.short_medium_selection.v1",
+        "quality.short_medium_full_check.v1",
     }
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
-    {"output.agent_updates.v1", "output.agent_updates.v2"}
+    {
+        "output.agent_updates.v1", "output.agent_updates.v2",
+        "output.short_medium_outline.v1", "output.short_medium_segment_manifest.v1",
+        "output.short_medium_replacement.v1", "output.short_medium_check_report.v1",
+    }
 )
 AGENT_UPDATES_V2_ASSET_SHA256 = {
     "lore.generator": (
@@ -293,6 +301,10 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         "long_serial.rewrite_chapter_selection",
         "long_serial.rewrite_outline_selection",
         "long_serial.review_chapter",
+        "short_medium.generate_outline",
+        "short_medium.generate_manuscript",
+        "short_medium.replace_selection",
+        "short_medium.full_check",
     }
     answer = next(
         operation
@@ -582,6 +594,54 @@ def test_agent_updates_step_schema_is_closed_and_requests_only_bounded_sources()
     ]
 
 
+def test_short_medium_v2_assets_are_enabled_and_keep_placeholders() -> None:
+    purposes = _system_purposes()
+    short_operations = {key for key in EXPECTED_OPERATION_KEYS if key.startswith("short_medium.")}
+    assert short_operations <= set(purposes["summarize_evidence"]["parentOperations"])
+    assert not short_operations & set(purposes["protocol_correction"]["parentOperations"])
+    assert purposes["protocol_correction"]["supported"] is False
+    operations = {operation["key"]: operation for operation in _operations()}
+    profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
+    outputs = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
+    cases = (
+        ("generate_outline", "plot.short_medium_outline", "outline", "content"),
+        ("generate_manuscript", "writer.short_medium_manuscript", "segment", "content"),
+        ("replace_selection", "writer.short_medium_selection", "replacement", "replacement"),
+        ("full_check", "quality.short_medium_full_check", "check_report", "text"),
+    )
+    for name, profile, schema, field in cases:
+        operation = operations["short_medium." + name]
+        assert operation["v2Enabled"] is True
+        assert operation["generatorProfile"] == profile + ".v2"
+        assert operation["generatorStepBudgetProfile"] == (
+            f"step_budget.short_medium.{name}.generator.v2"
+        )
+        assert operation["reviewPolicy"]["mode"] == "none"
+        assert operation["reviewPolicy"]["reviewerProfiles"] == []
+        assert operation["runBudgetProfile"]["maxProtocolCorrectionSteps"] == 0
+        old_purpose = "evaluation" if name == "full_check" else "generation"
+        assert profiles[profile + ".v1"] == {
+            "key": profile + ".v1", "version": 1, "supported": False,
+            "reasoningMode": "disabled" if name == "full_check" else "bounded",
+            "purpose": old_purpose,
+            "promptProfile": f"prompt.unavailable.{old_purpose}.v1",
+            "deploymentProfileKey": f"deployment.unavailable.{old_purpose}.v1",
+        }
+        assert profiles[profile + ".v2"]["purpose"] == "generation"
+        old_schema = "segment_manifest" if name == "generate_manuscript" else schema
+        retained = outputs[f"output.short_medium_{old_schema}.v1"]
+        assert retained["supported"] is False
+        assert retained["sha256"] == (
+            "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5"
+        )
+        output = outputs[operation["outputSchema"]]
+        assert output["purpose"] == "generation"
+        assert output["supported"] is True
+        assert output["jsonSchema"]["required"] == [field]
+        assert output["jsonSchema"]["properties"] == {field: {"minLength": 1, "type": "string"}}
+        assert output["jsonSchema"]["additionalProperties"] is False
+
+
 def test_structured_updates_business_enabled_assets_keep_complete_and_retained_contracts() -> None:
     operations = {operation["operation"]: operation for operation in _operations()}
     profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
@@ -771,6 +831,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "long_serial.rewrite_outline_selection",
         "long_serial.review_chapter",
         "long_serial.manage_foreshadowing",
+        "short_medium.generate_outline",
+        "short_medium.generate_manuscript",
+        "short_medium.replace_selection",
+        "short_medium.full_check",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
@@ -780,7 +844,11 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         expected_reasoning = (
             "disabled"
             if operation["key"]
-            in {"long_serial.answer_question", "long_serial.review_chapter"}
+            in {
+                "long_serial.answer_question",
+                "long_serial.review_chapter",
+                "short_medium.full_check",
+            }
             else "bounded"
         )
         assert generator["reasoningMode"] == expected_reasoning
@@ -872,6 +940,18 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert schema["properties"]["updates"]["additionalProperties"] is False
             assert schema["properties"]["evidenceRequest"]["minItems"] == 1
             assert schema["properties"]["evidenceRequest"]["maxItems"] == 100
+        elif operation["workflow"] == "short_medium":
+            expected_field = {
+                "generate_outline": "content",
+                "generate_manuscript": "content",
+                "replace_selection": "replacement",
+                "full_check": "text",
+            }[operation["operation"]]
+            assert output_schema["jsonSchema"]["required"] == [expected_field]
+            assert output_schema["jsonSchema"]["properties"] == {
+                expected_field: {"type": "string", "minLength": 1},
+            }
+            assert output_schema["jsonSchema"]["additionalProperties"] is False
         else:
             expected_output_field = (
                 "answer"

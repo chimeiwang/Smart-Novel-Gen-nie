@@ -174,10 +174,30 @@ Java CLI 的输入映射、watcher 与双环境 Operator 拒绝模式有定向 J
 完整矩阵与 JSON 示例见 `../inkforge-cli/README.md` 的“结构化资料的显式启动”。
 
 Java 与 Python 对照 CLI 同步校验范围、原样发送指令和 scope，不猜测来源或直接访问 Agent。五项的运行、
-候选与采用均由 Core 组织；五项显式/自然入口与最多一次自动完整返工现已接通，仓内 Catalog 为 12/21，
+候选与采用均由 Core 组织；五项显式/自然入口与最多一次自动完整返工现已接通，该阶段使仓内 Catalog 达到 12/21，
+当前加上中短篇四项为 16/21。
 公共 HTTP 接线定向验证通过。本批全量门禁及实际跨进程/供应商验收见结构化资料规格，不能据此宣称生产已开放。
 新自然请求使用 resolver v3 的冻结十项授权：设定两项/大纲两项默认 novel，伏笔及原章节五项默认当前 chapter；
 明确节点等不匹配范围须澄清或走显式入口，模型不猜 ID/scope，CLI 不新增参数或传提示词版本。
 两份 Operator 仍只允许 plan_chapter/write_chapter/review_chapter，未开放这 6 项；本批不安装固定 JAR 或修改
 活动 Skills，也未部署服务器。公共 Core 152 个操作、普通 CLI 125 个命令与 Operator 45 个命令不变。
 后续说明更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。
+
+## 中短篇四操作的 V2 观察
+
+2026-09-05 仓内源码更新 `short.agent.watch` 的消费者，不增加命令或启动字段；短篇仍 13 命令，start 仍用
+outline/manuscript/selection/full_check 四个别名，lastEventId 仍为字符串。V1 phase/commandStatus 和原退出
+语义保持；V2 显式按 engineVersion=2/status 分流，completed 退出 0，failed/cancelled 退出 5。
+
+数字 SSE ID、run_snapshot.baseSequence（包括 0）只用于观察与重连，断线或终态事件后回读同一 Run 的 GET。
+最终 JSONL `type=terminal,data` 保留完整 GET 对象，生成三项必须带真实 candidateVersionId，全文检查必须
+带完整 checkReport.text 且没有候选。报告不去首尾空格、不改换行或 Unicode；缺失或错误结果以
+CORE_RESPONSE_CONTRACT_ERROR/5 停止，不能从事件或版本列表猜测。候选仍使用现有 short.version.get/preview/adopt
+和 confirmationHash，生成 completed 不表示已采用；停止观察不取消任务，不新增 short.agent.cancel。
+原版本下载、outputFile 和完整文件读取语义不变。
+
+中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，Catalog 当前为 16/21；
+其余一致性终检、文风画像、RAG 索引和两个开发视频操作尚未迁移。这不是实际供应商或生产验收，本批没有
+更新固定安装 JAR、活动 Skills 或服务器。普通 CLI 125 与 Operator 45 命令及三种长篇操作范围不变。后续说明更新依据
+`../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“中短篇四操作观察”专节；
+完整验收见 `../../docs/specs/2026-09-05-durable-short-medium-workflows.md`。

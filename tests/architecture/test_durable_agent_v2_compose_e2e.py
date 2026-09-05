@@ -157,6 +157,33 @@ def test_e2e_agent_uses_test_only_injected_provider_without_real_credentials() -
         assert forbidden not in source
 
 
+def test_short_medium_phase_extends_same_harness_and_keeps_production_provider_unchanged() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    scenarios = (ROOT / "tests/durable_agent_v2_e2e/short_medium.py").read_text(encoding="utf-8")
+    fixture_path = ROOT / "tests/durable_agent_v2_e2e/short_medium_fixture.py"
+    fixture = fixture_path.read_text(encoding="utf-8")
+    provider = PROVIDER.read_text(encoding="utf-8")
+    assert 'phase == "short-medium"' in runner
+    assert '"short-medium"' in runner
+    assert "short_medium_output(request)" in provider
+    assert "from .short_medium_fixture import short_medium_output" in provider
+    for operation in (
+        "generate_outline", "generate_manuscript", "replace_selection", "full_check",
+    ):
+        assert operation in scenarios and operation in fixture
+    assert 'restart_and_wait("agent-service")' in scenarios
+    assert '"hold_before_forward"' in scenarios
+    assert "minimum_reached=2" in scenarios
+    assert "physical_calls" in scenarios
+    assert '"fullPrefixVerified": True' in scenarios
+    assert "confirmationHash" in scenarios
+    assert "public.\"WorkflowEvidenceItem\"" in scenarios
+    for forbidden in (
+        "INSERT INTO", "UPDATE public.", "DELETE FROM", "compose.yaml", "api.deepseek.com",
+    ):
+        assert forbidden not in scenarios
+
+
 def test_callback_proxy_records_complete_identity_and_can_drop_only_after_forward() -> None:
     source = CONTROL.read_text(encoding="utf-8")
     for field in (

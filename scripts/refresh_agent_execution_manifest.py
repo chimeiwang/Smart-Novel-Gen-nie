@@ -19,6 +19,11 @@ from inkforge_contracts.execution import (
     OutlineSelectionOutput,
     canonical_execution_sha256,
 )
+from inkforge_contracts.short_medium_execution import (
+    ShortMediumCheckOutput,
+    ShortMediumContentOutput,
+    ShortMediumReplacementOutput,
+)
 from pydantic import BaseModel
 
 
@@ -122,6 +127,14 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
+        short_medium_models = {
+            "output.short_medium_outline.v2": ShortMediumContentOutput,
+            "output.short_medium_segment.v2": ShortMediumContentOutput,
+            "output.short_medium_replacement.v2": ShortMediumReplacementOutput,
+            "output.short_medium_check_report.v2": ShortMediumCheckOutput,
+        }
+        if output["key"] in short_medium_models:
+            output["jsonSchema"] = model_output_schema(short_medium_models[output["key"]])
         if output["key"] == "output.agent_updates_step.v1":
             output["jsonSchema"] = step_schema
         elif output["key"] == "output.agent_updates.v2":

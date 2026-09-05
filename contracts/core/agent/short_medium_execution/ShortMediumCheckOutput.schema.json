@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium_execution/ShortMediumCheckOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "title": "ShortMediumCheckOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium_execution.ShortMediumCheckOutput"
+}

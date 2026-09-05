@@ -32,6 +32,10 @@ final class WorkflowResultMaterializerRegistry {
         for (String operation : Set.of("create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing")) {
             result.put("long_serial." + operation, new Binding("apply.agent_updates.v1", Materializer.AGENT_UPDATES_REVIEW_ARTIFACT));
         }
+        result.put("short_medium.generate_outline", new Binding("apply.short_medium_outline.v1", Materializer.SHORT_MEDIUM));
+        result.put("short_medium.generate_manuscript", new Binding("apply.short_medium_manuscript.v1", Materializer.SHORT_MEDIUM));
+        result.put("short_medium.replace_selection", new Binding("apply.short_medium_selection.v1", Materializer.SHORT_MEDIUM));
+        result.put("short_medium.full_check", new Binding("apply.short_medium_check_report.v1", Materializer.SHORT_MEDIUM));
         return Map.copyOf(result);
     }
 
@@ -70,7 +74,8 @@ final class WorkflowResultMaterializerRegistry {
         CHAPTER_DRAFT_REVIEW_ARTIFACT,
         CHAPTER_SELECTION_REVIEW_ARTIFACT,
         OUTLINE_SELECTION_REVIEW_ARTIFACT,
-        AGENT_UPDATES_REVIEW_ARTIFACT
+        AGENT_UPDATES_REVIEW_ARTIFACT,
+        SHORT_MEDIUM
     }
 
     private record Binding(String applyHandler, Materializer materializer) {}

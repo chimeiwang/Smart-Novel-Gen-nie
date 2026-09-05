@@ -13,6 +13,7 @@ import cn.inkforge.contracts.api.VersionPreviewResponse;
 import cn.inkforge.contracts.api.VersionSource;
 import cn.inkforge.contracts.api.VersionStatus;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.shortmedium.domain.DocumentDiff;
 import cn.inkforge.core.shortmedium.domain.DocumentDiffBlock;
 import cn.inkforge.core.shortmedium.domain.DocumentDiffEngine;
@@ -21,8 +22,11 @@ import cn.inkforge.core.shortmedium.domain.ShortMediumVersion;
 import cn.inkforge.core.shortmedium.domain.ShortMediumVersionPayload;
 import cn.inkforge.core.shortmedium.domain.VersionDocumentBinding;
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.databind.JsonNode;
@@ -186,7 +190,16 @@ public final class ShortMediumVersionService {
             VersionActionRequest request) {
         VersionDocumentBinding binding = binding(
                 request.getDocumentType(), nullable(request.getChapterId()));
-        return repository.inDocument(userId, novelId, binding, transaction -> {
+        AdoptionIdentity identity = adoptionIdentity(novelId, versionId, request);
+        return repository.inAdoption(
+                userId,
+                novelId,
+                binding,
+                versionId,
+                request.getClientRequestId(),
+                identity.requestHash(),
+                identity.normalizedRequest(),
+                transaction -> {
             ShortMediumVersion candidate = find(transaction.versions(), versionId);
             String key = "short-medium:adopt:" + candidate.id() + ":" + request.getClientRequestId();
             String replay = transaction.findAdoptionReplay(key);
@@ -441,6 +454,23 @@ public final class ShortMediumVersionService {
         return first != null && second != null && first.toInstant().equals(second.toInstant());
     }
 
+    private static AdoptionIdentity adoptionIdentity(
+            String novelId, String versionId, VersionActionRequest request) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("documentType", request.getDocumentType().getValue());
+        body.put("chapterId", nullable(request.getChapterId()));
+        body.put("baseVersionId", nullable(request.getBaseVersionId()));
+        body.put("confirmationHash", request.getConfirmationHash());
+        Map<String, Object> normalized =
+                Collections.unmodifiableMap(new LinkedHashMap<>(body));
+        String requestHash = CommandIdempotency.requestFingerprint(
+                "short_medium_version_adopt",
+                Map.of("novelId", novelId, "versionId", versionId),
+                normalized,
+                JSON);
+        return new AdoptionIdentity(normalized, requestHash);
+    }
+
     private static <T> T nullable(JsonNullable<T> value) {
         return value == null || value.isUndefined() ? null : value.orElse(null);
     }
@@ -541,4 +571,7 @@ public final class ShortMediumVersionService {
         result.setSelectedTextHash(value.selectedTextHash());
         return result;
     }
+
+    private record AdoptionIdentity(
+            Map<String, Object> normalizedRequest, String requestHash) {}
 }

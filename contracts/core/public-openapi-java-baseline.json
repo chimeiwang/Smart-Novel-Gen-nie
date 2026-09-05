@@ -15545,9 +15545,22 @@
             "type": "string",
             "x-inkforge-source-nullable": true
           },
+          "candidateVersionId": {
+            "title": "Candidateversionid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
           "chapterId": {
             "title": "Chapterid",
             "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "checkReport": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Checkreport",
+            "type": "object",
             "x-inkforge-source-nullable": true
           },
           "clarification": {

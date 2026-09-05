@@ -53,6 +53,7 @@ from inkforge_contracts.execution import (
     materialize_chapter_plan_output,
     materialize_outline_selection_output,
 )
+from inkforge_contracts.short_medium_execution import materialize_short_medium_output
 from pydantic import JsonValue, ValidationError
 
 from ..providers.base import (
@@ -75,6 +76,7 @@ from .registry import (
     PromptProfileDefinition,
     StepBudgetDefinition,
 )
+from .short_medium import SHORT_MEDIUM_HANDLERS, validate_short_medium_request
 
 ExecutionPurpose = Literal["generation", "review", "resolve_intent"]
 FailureCategory = Literal[
@@ -89,6 +91,7 @@ FailureCategory = Literal[
 BeginAttempt = Callable[[], Awaitable[int]]
 _SUPPORTED_OPERATION_HANDLERS = frozenset(
     {
+        *(("short_medium", operation) for operation in SHORT_MEDIUM_HANDLERS),
         ("long_serial", "answer_question"),
         ("long_serial", "create_lore"),
         ("long_serial", "create_outline"),
@@ -1397,6 +1400,12 @@ def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCo
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if request.workflow == "short_medium":
+        try:
+            validate_short_medium_request(request)
+        except (ValueError, ValidationError) as exc:
+            raise ExecutionCapabilityError("中短篇单 Step 冻结来源无效") from exc
+        return
     if request.workflow == "long_serial" and request.operation in _AGENT_UPDATES_OPERATIONS:
         _validate_agent_updates_input(request)
         return
@@ -1980,6 +1989,8 @@ def _validate_provider_result(
         return "provider_terminal", "MODEL_OUTPUT_FILTERED"
     if result.finishReason != "stop":
         return "protocol", "MODEL_FINISH_REASON_INVALID"
+    if request.workflow == "short_medium" and result.toolCalls:
+        return "protocol", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if result.structuredOutputDiagnostic is not None or result.structuredOutput is None:
         return "protocol", "MODEL_STRUCTURED_OUTPUT_INVALID"
     if request.purpose == "generation":
@@ -2001,6 +2012,11 @@ def _validate_provider_result(
         try:
             ChatAnswerOutput.model_validate(result.structuredOutput)
         except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.workflow == "short_medium":
+        try:
+            materialize_short_medium_output(request.operation or "", result.structuredOutput)
+        except (ValueError, ValidationError):
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation == "plan_chapter":
         try:
@@ -2072,6 +2088,8 @@ def _derive_generation_output(
     provider_output: Mapping[str, JsonValue],
 ) -> dict[str, JsonValue]:
     output = dict(provider_output)
+    if request.workflow == "short_medium":
+        return materialize_short_medium_output(request.operation or "", output)
     if request.workflow == "long_serial" and request.operation == "rewrite_chapter_selection":
         replacement = output.get("replacement")
         if not isinstance(replacement, str) or not replacement.strip():

@@ -242,6 +242,74 @@
         "maxProviderRetries": 2,
         "maxProtocolCorrections": 1
       }
+    },
+    {
+      "key": "step_budget.short_medium.generate_outline.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 120000,
+        "maxPromptCacheMissTokens": 120000,
+        "maxCompletionTokens": 24000,
+        "maxReasoningTokens": 12000,
+        "maxVisibleOutputTokens": 12000,
+        "maxCostMicros": 500000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
+      }
+    },
+    {
+      "key": "step_budget.short_medium.generate_manuscript.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 40000,
+        "maxReasoningTokens": 8000,
+        "maxVisibleOutputTokens": 32000,
+        "maxCostMicros": 1000000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
+      }
+    },
+    {
+      "key": "step_budget.short_medium.replace_selection.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 24000,
+        "maxReasoningTokens": 12000,
+        "maxVisibleOutputTokens": 12000,
+        "maxCostMicros": 500000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
+      }
+    },
+    {
+      "key": "step_budget.short_medium.full_check.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 24000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 24000,
+        "maxCostMicros": 500000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
+      }
     }
   ]
 }

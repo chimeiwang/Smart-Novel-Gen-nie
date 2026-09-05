@@ -85,6 +85,7 @@ class RoutingWritingRunStarterTest {
     private static WritingRunStartRequestParser parser;
     private static JooqWritingCommandRepository legacy;
     private static JooqLongSerialDurableRunStarter durable;
+    private static JooqShortMediumDurableRunStarter shortMediumDurable;
     private static ExecutionRegistry registry;
 
     @BeforeAll
@@ -126,6 +127,13 @@ class RoutingWritingRunStarterTest {
                 new JooqChapterWritingEvidenceReader(json),
                 new JooqWorkflowExecutionContextReader(json),
                 new JooqAgentUpdatesEvidenceReader(json));
+        shortMediumDurable = new JooqShortMediumDurableRunStarter(
+                database,
+                new ShortMediumRunAssembler(json),
+                workflows,
+                registry,
+                queries(),
+                json);
     }
 
     @AfterAll
@@ -1789,6 +1797,7 @@ class RoutingWritingRunStarterTest {
                 database,
                 legacy,
                 durable,
+                shortMediumDurable,
                 new CommandIdempotencyStore(json, true),
                 CoreSettings.from(settings),
                 readiness,

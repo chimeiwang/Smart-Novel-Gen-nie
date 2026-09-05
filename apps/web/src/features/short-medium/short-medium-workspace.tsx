@@ -29,8 +29,11 @@ import {
 } from "./short-workspace-state";
 import {
   decideShortRunOutcome,
+  decideShortRunStatus,
+  type ShortRunStatus,
   type ShortRunOutcome,
 } from "./short-run-outcome";
+import { observeShortV2Run } from "./short-run-observer";
 
 type DocumentType = "outline" | "manuscript";
 
@@ -130,9 +133,15 @@ export function ShortMediumWorkspace({
   const [instruction, setInstruction] = useState("");
   const [selection, setSelection] = useState<SelectionIdentity | null>(null);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const runObserver = useRef<AbortController | null>(null);
   const [checkReport, setCheckReport] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    // 离开当前作品只断开观察，不向 Core 发送业务取消。
+    runObserver.current?.abort();
+  }, [novelId]);
   const outlineCoordinatorRef = useRef<ChapterSaveCoordinator | null>(null);
   const manuscriptCoordinatorRef = useRef<ChapterSaveCoordinator | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -537,19 +546,40 @@ export function ShortMediumWorkspace({
           userInstruction: instruction.trim() || null,
         },
       }));
-      if (run.engineVersion !== 1) {
-        throw new Error("中短篇任务被错误路由到不支持的执行引擎。");
+      const runId = run.engineVersion === 2 ? run.runId : run.id;
+      setRunningTaskId(runId);
+      let terminal: ShortRunStatus;
+      if (run.engineVersion === 2) {
+        const observer = new AbortController();
+        runObserver.current = observer;
+        const timeout = window.setTimeout(() => observer.abort(), 30 * 60_000);
+        try {
+          terminal = await observeShortV2Run(run, {
+            signal: observer.signal,
+            open: (headers, signal) => fetch(`/api/v1/writing/runs/${encodeURIComponent(runId)}/events`, {
+              credentials: "include", headers, signal,
+            }),
+            readRun: async () => requireApiData(await browserApi.GET(
+              "/api/v1/writing/runs/{task_id}",
+              { params: { path: { task_id: runId } }, signal: observer.signal },
+            )),
+          });
+          if (observer.signal.aborted) return;
+        } finally {
+          window.clearTimeout(timeout);
+          if (runObserver.current === observer) runObserver.current = null;
+        }
+      } else {
+        await waitForTerminalOutcome(runId);
+        terminal = requireApiData(await browserApi.GET(
+          "/api/v1/writing/runs/{task_id}",
+          { params: { path: { task_id: runId } } },
+        ));
       }
-      setRunningTaskId(run.id);
-      await waitForTerminalOutcome(run.id);
-      const terminal = requireApiData(await browserApi.GET(
-        "/api/v1/writing/runs/{task_id}",
-        { params: { path: { task_id: run.id } } },
-      ));
-      if (terminal.engineVersion !== 1) {
+      if (terminal.engineVersion !== run.engineVersion || terminal.runId !== runId) {
         throw new Error("中短篇任务的权威状态引擎发生变化，已停止处理。");
       }
-      const outcomeDecision = decideShortRunOutcome(terminal.outcome);
+      const outcomeDecision = decideShortRunStatus(terminal);
       if (outcomeDecision.kind === "failed") {
         throw new Error(
           terminal.error

@@ -76,10 +76,19 @@ ReviewArtifact 是 Agent 产物正式落库前的持久中间层。
 过期摘要、dirty 工作稿、过期基础版本和重复采用返回冲突，不能自动变基或静默覆盖。网络结果不
 确定时依靠 `clientRequestId`、taskId 或 jobId 对账并幂等重放；版本内容和 Diff 不得截断。
 
-Agent 完成回调必须在同一 Core 事务中创建候选或保存检查报告、收敛 WritingTask 与命令终态，并插入唯一 `WritingEventOutbox` 边界事件；Redis 通知失败不得否定已经提交的业务结果。
+V1 Agent 完成回调必须在同一 Core 事务中创建候选或保存检查报告、收敛 WritingTask 与命令终态，并插入唯一 `WritingEventOutbox` 边界事件；Redis 通知失败不得否定已经提交的业务结果。
 任一步失败都整体回滚，不能出现“任务完成但候选不存在”或“候选存在但任务仍运行”的状态。
 终态稳定 checkpoint 只保存可重放的图快照，不得提前把数据库任务写成 completed/error；否则在完成回调到达前会形成任务终态、命令仍 processing 的伪冲突。
 终态重复回调只有在 Agent 原始 result 与首次应用完全一致时才可视为已应用过；Core 后续补充的候选、报告或展示字段不能反过来放宽该幂等判定。没有命令指纹的历史终态遇到无法从任务字段证明一致的额外 result 必须拒绝。SSE 中的旧边界事件只用于展示，审核动作的成功、失败和释放必须由 PostgreSQL `run_outcome` 决定；旧草案载荷不能直接恢复操作入口，非 waiting_user 终态必须清理所属任务的临时草案界面并使先前在途读取失效；同一成功 outcome 的外部完成副作用只能执行一次。
+
+2026-09-05 中短篇四项 V2 已通过仓内与本地独立 Core/Agent、受控 Fake Provider 验收。V2 每段原始结果
+独立持久化，最后由 Core 在同一事务创建唯一候选或报告、保存零模型汇总结果引用并完成 Run 与 WorkflowEvent；
+不创建 V1 影子任务、命令或 Outbox。候选以 workflowRunId 绑定 Run，生成 `completed` 不表示采用完成。
+采用仍使用原 short.version.preview/adopt、完整 Diff、confirmationHash 和稳定 clientRequestId，V2 回执保存在
+零模型 WorkflowStep；Run 保持 completed，不转成 waiting_user，也不借用 long.artifact.approve。
+全文检查不创建 Artifact；GET 同一 Run 才是 candidateVersionId 或完整 checkReport.text 的权威来源。
+正文分段恢复、三类候选幂等采用与检查零候选已有隔离验证，真实模型、固定包/Skills 和生产未随本批更新；
+证据见 `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
 
 ### 状态
 
@@ -134,7 +143,8 @@ stateDiagram-v2
 
 2026-09-05 工作分支已实现 agent_updates 的 Core 审核读取与决定适配。原始 summary/updates 保存到精确
 Artifact revision；展示的完整 Diff 和采用 payload 由 Core 从冻结来源派生，不信任模型自报旧值，也不从当前
-作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通，Catalog 为 12/21；隔离公共 HTTP
+作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通；加上中短篇四项后 Catalog 为 16/21，
+一致性终检、文风画像、RAG 索引和两个开发视频操作尚未迁移。结构化五项的隔离公共 HTTP
 接线已验证，实际 Agent/供应商、全量门禁和生产状态分别以结构化资料迁移规格记录为准。
 
 新冻结复审策略只在完整 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，

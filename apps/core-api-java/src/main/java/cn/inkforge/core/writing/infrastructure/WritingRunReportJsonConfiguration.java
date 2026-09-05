@@ -20,5 +20,9 @@ class WritingRunReportJsonConfiguration {
     abstract static class ReportMixin {
         @JsonInclude(JsonInclude.Include.NON_NULL)
         public abstract String getReviewReport();
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        public abstract String getCandidateVersionId();
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        public abstract java.util.Map<String, Object> getCheckReport();
     }
 }

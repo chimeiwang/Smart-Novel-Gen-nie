@@ -130,9 +130,11 @@
 - [x] `rewrite_outline_selection` 仓内接线：真实总纲/节点来源、选区候选、单复审与精确采用；
   本地验收见整章审阅/改写规格；
 - [ ] 上述审阅、正文、场景和大纲选区的真实供应商、开发及生产验收；本地通过不表示已安装或已发布；
-- [ ] create_lore / revise_lore；
-- [ ] create_outline / revise_outline；
-- [ ] manage_foreshadowing；
+- [x] create_lore / revise_lore 仓内接线；
+- [x] create_outline / revise_outline 仓内接线；
+- [x] manage_foreshadowing 仓内接线；三组于 `8427de6` 完成显式/自然入口、来源补齐、一次完整返工和作者采用，
+  Catalog 为 12/21，Java/Python/Web 门禁记录见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`；
+- [ ] 上述结构化五项的独立跨进程、真实供应商、开发及生产验收；仓内通过不代替生产完成；
 - [ ] 自然语言 `resolve_intent` 与具名澄清决定入口，不借用 `/resume`；
   2026-09-04 已完成章节问答/规划/正文的自然入口及五场景隔离验收，详见
   `docs/specs/2026-09-04-durable-natural-language-entry.md`；其余 Operation 的接入和生产验证仍未完成，
@@ -142,7 +144,10 @@
 
 ## Task 6：迁移其他模型工作流
 
-- [ ] 中短篇四个操作，长文使用耐久 segment manifest；
+- [x] 中短篇四个操作仓内接线，长文使用耐久 segment manifest；公共 HTTP、全仓门禁与独立 Compose 四场景
+  已通过，仓内计数为 16/21；见 `docs/specs/2026-09-05-durable-short-medium-workflows.md`，
+  继续保留生成任务完成与候选采用的独立生命周期；
+- [ ] 中短篇四项真实供应商、真实开发/生产 canary 与固定安装包更新；隔离 Fake 通过不代替这些结果；
 - [ ] 一致性终检，严格区分执行失败与内容结论；
 - [ ] 文风画像；
 - [ ] RAG embedding 与索引回调；

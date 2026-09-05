@@ -25,23 +25,32 @@ import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
+import cn.inkforge.core.platform.idempotency.CommandIdempotency;
+import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.shortmedium.application.ShortMediumVersionRepository;
 import cn.inkforge.core.shortmedium.application.ShortMediumVersionTransaction;
 import cn.inkforge.core.shortmedium.application.VersionCreation;
 import cn.inkforge.core.shortmedium.domain.DocumentDiff;
 import cn.inkforge.core.shortmedium.domain.ShortMediumDocument;
+import cn.inkforge.core.shortmedium.domain.ShortMediumText;
 import cn.inkforge.core.shortmedium.domain.ShortMediumVersion;
 import cn.inkforge.core.shortmedium.domain.ShortMediumVersionPayload;
 import cn.inkforge.core.shortmedium.domain.VersionDocumentBinding;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import org.jooq.DSLContext;
+import org.jooq.Record;
 import org.jooq.Record1;
 import org.jooq.impl.DSL;
 import tools.jackson.databind.ObjectMapper;
@@ -62,16 +71,30 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
     private final CuidV1Generator ids;
     private final Clock clock;
     private final ObjectMapper json;
+    private final boolean durableAgentSchemaReady;
+    private final CommandIdempotencyStore globalIdempotency;
 
     JooqShortMediumVersionRepository(
             CoreDatabase database,
             CuidV1Generator ids,
             Clock clock,
             ObjectMapper json) {
+        this(database, ids, clock, json, false);
+    }
+
+    JooqShortMediumVersionRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock clock,
+            ObjectMapper json,
+            boolean durableAgentSchemaReady) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
+        this.durableAgentSchemaReady = durableAgentSchemaReady;
+        this.globalIdempotency =
+                new CommandIdempotencyStore(json, durableAgentSchemaReady);
     }
 
     @Override
@@ -82,16 +105,191 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
             Function<ShortMediumVersionTransaction, T> operation) {
         return database.dsl().transactionResult(configuration -> {
             DSLContext transaction = DSL.using(configuration);
-            // inDocument 是应用层版本操作的事务边界；调用方拿到的 document 与 versions 来自同一锁定快照。
-            requireShortMediumNovel(transaction, userId, novelId, true);
-            LoadedDocument loaded = loadDocument(transaction, novelId, binding, true);
-            List<ReviewartifactRecord> artifacts = loadArtifacts(
-                    transaction, novelId, loaded.document().artifactKey(), true);
-            return operation.apply(new SqlTransaction(
-                    transaction,
-                    loaded,
-                    artifacts.stream().map(this::map).toList()));
+            return inLockedDocument(
+                    transaction, userId, novelId, binding, null, operation);
         });
+    }
+
+    @Override
+    public <T> T inAdoption(
+            String userId,
+            String novelId,
+            VersionDocumentBinding binding,
+            String versionId,
+            String clientRequestId,
+            String requestHash,
+            Map<String, Object> normalizedRequest,
+            Function<ShortMediumVersionTransaction, T> operation) {
+        return database.dsl().transactionResult(configuration -> {
+            DSLContext transaction = DSL.using(configuration);
+            Record1<String> source = transaction.select(REVIEWARTIFACT.WORKFLOWRUNID)
+                    .from(REVIEWARTIFACT)
+                    .join(NOVEL)
+                    .on(NOVEL.ID.eq(REVIEWARTIFACT.NOVELID))
+                    .where(
+                            REVIEWARTIFACT.ID.eq(versionId),
+                            REVIEWARTIFACT.NOVELID.eq(novelId),
+                            NOVEL.USERID.eq(userId))
+                    .fetchOne();
+            String runId = source == null ? null : source.value1();
+            if (runId == null) {
+                // V1 继续使用原 Novel → 文档 → Artifact 锁序和 WritingRunCommand 回执。
+                return inLockedDocument(
+                        transaction, userId, novelId, binding, null, operation);
+            }
+            if (!durableAgentSchemaReady) {
+                throw new ApiException(
+                        503,
+                        "DURABLE_WORKFLOW_SCHEMA_UNAVAILABLE",
+                        "耐久工作流数据库结构尚不可用");
+            }
+
+            // V2 采用与所有写命令共享用户级命名空间；锁序固定为 advisory → Run → Novel/文档/Artifact。
+            transaction.fetchValue(
+                    "SELECT pg_catalog.pg_advisory_xact_lock(?)",
+                    CommandIdempotency.advisoryLockKey(userId, clientRequestId));
+            CommandIdempotencyStore.Resolution global = globalIdempotency.resolve(
+                    transaction, userId, clientRequestId, requestHash);
+            Record run = transaction.fetchOne(
+                    """
+                    SELECT id, "userId", "novelId", "chapterId", workflow, operation,
+                           status::text AS status, "targetType", "targetId",
+                           "currentEvidenceBundleId", "completedAt"
+                    FROM public."WorkflowRun"
+                    WHERE id = ? AND "engineVersion" = 2
+                    FOR UPDATE
+                    """,
+                    runId);
+            requireDurableRun(run, userId, novelId, binding);
+            String replay = durableReplay(
+                    transaction,
+                    global,
+                    runId,
+                    versionId,
+                    clientRequestId,
+                    requestHash,
+                    normalizedRequest);
+            DurableAdoption adoption = new DurableAdoption(
+                    runId,
+                    run.get("operation", String.class),
+                    run.get("currentEvidenceBundleId", String.class),
+                    clientRequestId,
+                    requestHash,
+                    Collections.unmodifiableMap(new LinkedHashMap<>(normalizedRequest)),
+                    replay);
+            return inLockedDocument(
+                    transaction,
+                    userId,
+                    novelId,
+                    binding,
+                    adoption,
+                    locked -> {
+                        ((SqlTransaction) locked).requireDurableCandidate(versionId);
+                        return operation.apply(locked);
+                    });
+        });
+    }
+
+    private <T> T inLockedDocument(
+            DSLContext transaction,
+            String userId,
+            String novelId,
+            VersionDocumentBinding binding,
+            DurableAdoption adoption,
+            Function<ShortMediumVersionTransaction, T> operation) {
+        // 调用方拿到的 document 与 versions 来自同一锁定快照；V2 的 Run 已在进入本方法前锁定。
+        requireShortMediumNovel(transaction, userId, novelId, true);
+        LoadedDocument loaded = loadDocument(transaction, novelId, binding, true);
+        List<ReviewartifactRecord> artifacts = loadArtifacts(
+                transaction, novelId, loaded.document().artifactKey(), true);
+        return operation.apply(new SqlTransaction(
+                transaction,
+                loaded,
+                artifacts.stream().map(this::map).toList(),
+                adoption));
+    }
+
+    private void requireDurableRun(
+            Record run,
+            String userId,
+            String novelId,
+            VersionDocumentBinding binding) {
+        if (run == null) throw versionNotFound();
+        String operation = run.get("operation", String.class);
+        boolean operationMatches = "outline".equals(binding.documentType())
+                ? List.of("generate_outline", "replace_selection").contains(operation)
+                : List.of("generate_manuscript", "replace_selection").contains(operation);
+        String expectedTarget = "outline".equals(binding.documentType())
+                ? "short_medium_outline"
+                : "short_medium_manuscript";
+        boolean valid = userId.equals(run.get("userId", String.class))
+                && novelId.equals(run.get("novelId", String.class))
+                && Objects.equals(binding.chapterId(), run.get("chapterId", String.class))
+                && "short_medium".equals(run.get("workflow", String.class))
+                && operationMatches
+                && "completed".equals(run.get("status", String.class))
+                && expectedTarget.equals(run.get("targetType", String.class))
+                && run.get("targetId", String.class) != null
+                && run.get("completedAt", LocalDateTime.class) != null;
+        if (!valid) {
+            throw new ApiException(
+                    409,
+                    "SHORT_MEDIUM_CANDIDATE_RUN_INVALID",
+                    "候选版本的耐久运行身份无效");
+        }
+    }
+
+    private String durableReplay(
+            DSLContext transaction,
+            CommandIdempotencyStore.Resolution global,
+            String runId,
+            String versionId,
+            String clientRequestId,
+            String requestHash,
+            Map<String, Object> normalizedRequest) {
+        if (global == null) return null;
+        if (global.recordKind() != CommandIdempotencyStore.RecordKind.CONTROL_DECISION) {
+            throw CommandIdempotencyStore.reused(clientRequestId);
+        }
+        Record receipt = transaction.fetchOne(
+                """
+                SELECT id, "runId", "stepType"::text AS "stepType",
+                       status::text AS status, purpose, "idempotencyKey",
+                       "requestHash", "resultHash", "artifactId",
+                       "artifactRevision", input, output
+                FROM public."WorkflowStep" WHERE id = ?
+                """,
+                global.recordId());
+        Map<String, Object> input = global.metadata().normalizedBody();
+        boolean validInput = input.keySet().equals(Set.of(
+                        "schemaVersion",
+                        "clientRequestId",
+                        "candidateVersionId",
+                        "expectedArtifactRevision",
+                        "decision",
+                        "normalizedBody"))
+                && Integer.valueOf(1).equals(input.get("schemaVersion"))
+                && clientRequestId.equals(input.get("clientRequestId"))
+                && versionId.equals(input.get("candidateVersionId"))
+                && Integer.valueOf(1).equals(input.get("expectedArtifactRevision"))
+                && "adopt".equals(input.get("decision"))
+                && normalizedRequest.equals(input.get("normalizedBody"));
+        boolean valid = receipt != null
+                && runId.equals(receipt.get("runId", String.class))
+                && "user_confirmation".equals(receipt.get("stepType", String.class))
+                && "completed".equals(receipt.get("status", String.class))
+                && "user_decision".equals(receipt.get("purpose", String.class))
+                && ("decision:" + clientRequestId)
+                        .equals(receipt.get("idempotencyKey", String.class))
+                && requestHash.equals(receipt.get("requestHash", String.class))
+                && versionId.equals(receipt.get("artifactId", String.class))
+                && Integer.valueOf(1).equals(receipt.get("artifactRevision", Integer.class))
+                && validInput
+                && receipt.get("output", String.class) != null
+                && ShortMediumText.sha256(receipt.get("output", String.class))
+                        .equals(receipt.get("resultHash", String.class));
+        if (!valid) throw CommandIdempotencyStore.reused(clientRequestId);
+        return receipt.get("output", String.class);
     }
 
     @Override
@@ -132,16 +330,75 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
         private final DSLContext transaction;
         private final LoadedDocument loaded;
         private final List<ShortMediumVersion> versions;
+        private final DurableAdoption adoption;
         private ShortMediumDocument document;
 
         private SqlTransaction(
                 DSLContext transaction,
                 LoadedDocument loaded,
-                List<ShortMediumVersion> versions) {
+                List<ShortMediumVersion> versions,
+                DurableAdoption adoption) {
             this.transaction = transaction;
             this.loaded = loaded;
             this.document = loaded.document();
             this.versions = new ArrayList<>(versions);
+            this.adoption = adoption;
+        }
+
+        private void requireDurableCandidate(String versionId) {
+            ShortMediumVersion candidate = versions.stream()
+                    .filter(version -> version.id().equals(versionId))
+                    .findFirst()
+                    .orElseThrow(JooqShortMediumVersionRepository::versionNotFound);
+            Record exact = transaction.fetchOne(
+                    """
+                    SELECT artifact."taskId", artifact."workflowRunId", artifact.revision,
+                           artifact."payloadJson", artifact."diffJson",
+                           revision."payloadJson" AS "revisionPayloadJson",
+                           revision."diffJson" AS "revisionDiffJson"
+                    FROM public."ReviewArtifact" AS artifact
+                    JOIN public."ReviewArtifactRevision" AS revision
+                      ON revision."artifactId" = artifact.id
+                     AND revision.revision = artifact.revision
+                    WHERE artifact.id = ? AND artifact."artifactKey" = ?
+                    FOR UPDATE OF artifact, revision
+                    """,
+                    candidate.id(),
+                    document.artifactKey());
+            boolean exactRevision = exact != null
+                    && exact.get("taskId", String.class) == null
+                    && adoption.runId().equals(exact.get("workflowRunId", String.class))
+                    && Integer.valueOf(1).equals(exact.get("revision", Integer.class))
+                    && Objects.equals(
+                            exact.get("payloadJson", String.class),
+                            exact.get("revisionPayloadJson", String.class))
+                    && Objects.equals(
+                            exact.get("diffJson", String.class),
+                            exact.get("revisionDiffJson", String.class))
+                    && adoption.runId().equals(candidate.payload().sourceTaskId())
+                    && ("replace_selection".equals(adoption.operation())
+                            == candidate.payload().createdFromSelection());
+            Record producer = transaction.fetchOne(
+                    """
+                    SELECT id, "runId", "stepType"::text AS "stepType",
+                           status::text AS status, purpose, "resultHash"
+                    FROM public."WorkflowStep"
+                    WHERE id = ? AND "runId" = ?
+                    """,
+                    candidate.payload().sourceJobId(),
+                    adoption.runId());
+            boolean exactProducer = producer != null
+                    && "agent".equals(producer.get("stepType", String.class))
+                    && "completed".equals(producer.get("status", String.class))
+                    && "generation".equals(producer.get("purpose", String.class))
+                    && producer.get("resultHash", String.class) != null
+                    && producer.get("resultHash", String.class).matches("[0-9a-f]{64}");
+            if (!exactRevision || !exactProducer) {
+                throw new ApiException(
+                        409,
+                        "SHORT_MEDIUM_CANDIDATE_RUN_INVALID",
+                        "候选版本的耐久运行身份无效");
+            }
         }
 
         @Override
@@ -366,6 +623,7 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
 
         @Override
         public String findAdoptionReplay(String key) {
+            if (adoption != null) return adoption.replayJson();
             return transaction.select(WRITINGRUNCOMMAND.RESULTJSON)
                     .from(WRITINGRUNCOMMAND)
                     .where(
@@ -377,6 +635,10 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
         @Override
         public void saveAdoptionReplay(
                 String key, ShortMediumVersion candidate, String responseJson) {
+            if (adoption != null) {
+                saveDurableAdoptionReceipt(candidate, responseJson);
+                return;
+            }
             if (candidate.taskId() == null) {
                 throw new ApiException(
                         409,
@@ -404,6 +666,62 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
                     .set(WRITINGRUNCOMMAND.CREATEDAT, now)
                     .set(WRITINGRUNCOMMAND.UPDATEDAT, now)
                     .execute();
+        }
+
+        private void saveDurableAdoptionReceipt(
+                ShortMediumVersion candidate, String responseJson) {
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("schemaVersion", 1);
+            input.put("clientRequestId", adoption.clientRequestId());
+            input.put("candidateVersionId", candidate.id());
+            input.put("expectedArtifactRevision", 1);
+            input.put("decision", "adopt");
+            input.put("normalizedBody", adoption.normalizedRequest());
+            String inputJson = new String(
+                    CommandIdempotency.canonicalJsonBytes(input, json),
+                    StandardCharsets.UTF_8);
+            int ordinal = transaction.fetchOne(
+                            "SELECT coalesce(max(ordinal), 0) + 1 FROM public.\"WorkflowStep\" WHERE \"runId\" = ?",
+                            adoption.runId())
+                    .get(0, Integer.class);
+            LocalDateTime now = DatabaseTimestamp.now(clock);
+            int affected = transaction.execute(
+                    """
+                    INSERT INTO public."WorkflowStep" (
+                      id, "runId", "agentId", "stepType", status, input, output,
+                      "durationMs", "createdAt", ordinal, purpose, lane, "attemptCount",
+                      "nextAttemptAt", "fencingToken", "leaseExpiresAt", "heartbeatAt",
+                      "activeJobId", "idempotencyKey", "requestHash", "inputHash",
+                      "resultHash", "evidenceBundleId", "artifactId", "artifactRevision",
+                      "modelProfile", "modelProfileVersion", "outputSchema",
+                      "outputSchemaVersion", "budgetJson", "resolvedModelJson", "usageJson",
+                      "lastProgressSequence", "cancelRequestId", "submittedAt", "updatedAt",
+                      "completedAt", "errorCode"
+                    ) VALUES (
+                      ?, ?, NULL, CAST('user_confirmation' AS "WorkflowStepType"),
+                      CAST('completed' AS "WorkflowStepStatus"), ?, ?, 0, ?, ?,
+                      'user_decision', 'control', 0, NULL, 0, NULL, NULL, NULL, ?, ?, ?,
+                      ?, ?, ?, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL
+                    )
+                    """,
+                    ids.next(),
+                    adoption.runId(),
+                    inputJson,
+                    responseJson,
+                    now,
+                    ordinal,
+                    "decision:" + adoption.clientRequestId(),
+                    adoption.requestHash(),
+                    ShortMediumText.sha256(inputJson),
+                    ShortMediumText.sha256(responseJson),
+                    adoption.evidenceBundleId(),
+                    candidate.id(),
+                    now,
+                    now,
+                    now);
+            if (affected != 1) {
+                throw new IllegalStateException("中短篇 V2 采用回执未写入");
+            }
         }
 
         @Override
@@ -507,6 +825,18 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
             if (!expectedKey.equals(artifact.getArtifactkey())) {
                 throw new IllegalArgumentException("版本文档绑定不一致");
             }
+            boolean v1Agent = artifact.getTaskid() != null
+                    && artifact.getWorkflowrunid() == null
+                    && artifact.getTaskid().equals(payload.sourceTaskId());
+            boolean v2Agent = artifact.getTaskid() == null
+                    && artifact.getWorkflowrunid() != null
+                    && artifact.getWorkflowrunid().equals(payload.sourceTaskId());
+            boolean manual = artifact.getTaskid() == null
+                    && artifact.getWorkflowrunid() == null
+                    && !"agent".equals(payload.source());
+            if ("agent".equals(payload.source()) ? !v1Agent && !v2Agent : !manual) {
+                throw new IllegalArgumentException("版本来源归属不一致");
+            }
             DocumentDiff diff = artifact.getDiffjson() == null
                     ? null
                     : json.readValue(artifact.getDiffjson(), DocumentDiff.class);
@@ -548,4 +878,13 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
 
     private record LoadedDocument(
             ShortMediumDocument document, OutlineRecord outline, ChapterRecord chapter) {}
+
+    private record DurableAdoption(
+            String runId,
+            String operation,
+            String evidenceBundleId,
+            String clientRequestId,
+            String requestHash,
+            Map<String, Object> normalizedRequest,
+            String replayJson) {}
 }

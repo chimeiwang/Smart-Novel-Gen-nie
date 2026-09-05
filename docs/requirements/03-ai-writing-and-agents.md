@@ -140,8 +140,9 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 补齐新版本来源并接续生成，不覆盖旧快照，不扩大原模型调用额度。重复请求、无新增来源或来源冲突都有明确收敛。
 完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 
-五项显式/自然入口、最多一次自动完整返工及作者采用已接通，仓内 Catalog 已启用 12/21，其中自然入口支持
-十项无选区操作；另九项尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
+五项显式/自然入口、最多一次自动完整返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21；随后中短篇
+四项接线与本地验收使当前总数达到 16/21，自然入口仍支持十项无选区操作。其余一致性终检、文风画像、RAG
+索引和两个开发视频操作尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
 启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
 显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
 manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节锚点，scope 不取消既有跨分区候选能力。
@@ -174,7 +175,7 @@ Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组�
 
 `short_medium` 不进入长篇 CreativeOperation 的多 Agent 自动评审链。公开入口只接受
 `generate_outline`、`generate_manuscript`、`replace_selection`、`full_check` 四种显式操作，
-并由 Core 从权威来源素材、基础版本和当前应用蓝图组装不可变运行快照。浏览器和 CLI 不能提交
+并由 Core 从权威来源素材、基础版本和引用的已应用蓝图组装不可变运行快照。浏览器和 CLI 不能提交
 正文、来源文本或目标字数来替代服务端事实。
 
 - 6000 到 15000 字正文允许一次模型生成；更长正文按蓝图顺序串行分段，禁止并行拼接。
@@ -183,6 +184,17 @@ Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组�
   Core 确定性拼接并验证选区外内容逐字不变。
 - 全文检查只返回报告，不创建候选版本。
 - 模型提示必须使用创建任务时的不可变快照，不能用运行中的可变工作区上下文替换蓝图或正文。
+
+2026-09-05 四项已接入 Core-owned V2，并通过本地独立 Java Core/Python Agent 与受控 Fake Provider 验收。
+V2 只消费完整冻结的 `short_medium_context` 与已完成段；正文按目标字数确定 1～6 个串行模型 Step，每段
+独立预留、结算和保存完整结果，后段带齐完整前缀。Core 最后写零模型汇总 Step，固定唯一候选/报告引用；
+不创建 V1 WritingTask/WritingRunCommand，不引入长篇 Reviewer 或自动返工。
+
+V2 生成 Run 的 `completed` 与候选的 `awaiting_user` 是两个生命周期，仍通过原版本 preview/adopt 和
+confirmationHash 采用；检查直接以 GET 的 `checkReport.text` 返回完整报告，无 Artifact。Web 和两端 CLI
+按 engineVersion 分流并回读同一 Run，不能从事件猜结果。双段正文的 Agent 重启恢复、每段仅一次实际 Fake
+调用、三类候选幂等采用和检查零候选均已验证；这不是实际供应商或生产验收，也没有更新固定 CLI 包和活动
+Skills。完整证据见 `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
 
 ## 创作操作
 

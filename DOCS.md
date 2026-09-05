@@ -106,6 +106,7 @@
 - V2 章节规划与 CLI 消费契约：`docs/specs/2026-09-04-durable-chapter-planning.md`
 - 普通聊天耐久意图与澄清（本地验收完成）：`docs/specs/2026-09-04-durable-natural-language-entry.md`
 - 整章审阅与场景/大纲选区改写（本地验收完成）：`docs/specs/2026-09-05-durable-review-and-rewrites.md`
+- 中短篇四操作耐久执行（仓内及隔离跨进程验收完成）：`docs/specs/2026-09-05-durable-short-medium-workflows.md`
 - Java CLI 构建与使用：`tools/inkforge-cli-java/README.md`
 - V1/V2 联合 drain：`docs/specs/2026-09-01-durable-agent-joint-drain.md`
 - 个人项目 Agent 发布范围：`docs/specs/2026-09-04-personal-durable-agent-release-scope.md`

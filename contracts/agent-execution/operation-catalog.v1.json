@@ -560,16 +560,26 @@
       "key": "short_medium.generate_outline",
       "workflow": "short_medium",
       "operation": "generate_outline",
-      "labels": {"zh-CN": "生成中短篇大纲"},
-      "targetKinds": ["short_medium_outline"],
-      "scopeKinds": ["novel"],
+      "labels": {
+        "zh-CN": "生成中短篇大纲"
+      },
+      "targetKinds": [
+        "short_medium_outline"
+      ],
+      "scopeKinds": [
+        "novel"
+      ],
       "mutating": true,
       "developmentOnly": false,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.short_medium.outline.v1",
-      "generatorProfile": "plot.short_medium_outline.v1",
-      "outputSchema": "output.short_medium_outline.v1",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.complete_output.v1", "validator.short_medium_source_binding.v1"],
+      "generatorProfile": "plot.short_medium_outline.v2",
+      "outputSchema": "output.short_medium_outline.v2",
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.complete_output.v1",
+        "validator.short_medium_source_binding.v1"
+      ],
       "reviewPolicy": {
         "profile": "review.none.v1",
         "mode": "none",
@@ -580,34 +590,46 @@
       },
       "applyHandler": "apply.short_medium_outline.v1",
       "runBudgetProfile": {
-        "profile": "budget.short_medium.outline.v1",
+        "profile": "budget.short_medium.outline.v2",
         "maxModelCalls": 1,
-        "maxInputTokens": 100000,
-        "maxPromptCacheMissTokens": 80000,
+        "maxInputTokens": 120000,
+        "maxPromptCacheMissTokens": 120000,
         "maxCompletionTokens": 24000,
         "maxReasoningTokens": 12000,
         "maxVisibleOutputTokens": 12000,
         "maxCostMicros": 500000,
         "maxWallClockSeconds": 300,
-        "maxProtocolCorrectionSteps": 1,
+        "maxProtocolCorrectionSteps": 0,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "creative"
+      "lane": "creative",
+      "generatorStepBudgetProfile": "step_budget.short_medium.generate_outline.generator.v2"
     },
     {
       "key": "short_medium.generate_manuscript",
       "workflow": "short_medium",
       "operation": "generate_manuscript",
-      "labels": {"zh-CN": "生成中短篇正文"},
-      "targetKinds": ["short_medium_manuscript"],
-      "scopeKinds": ["novel"],
+      "labels": {
+        "zh-CN": "生成中短篇正文"
+      },
+      "targetKinds": [
+        "short_medium_manuscript"
+      ],
+      "scopeKinds": [
+        "novel"
+      ],
       "mutating": true,
       "developmentOnly": false,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.short_medium.manuscript.v1",
-      "generatorProfile": "writer.short_medium_manuscript.v1",
-      "outputSchema": "output.short_medium_segment_manifest.v1",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.segment_manifest.v1", "validator.short_medium_source_binding.v1", "validator.short_medium_length.v1"],
+      "generatorProfile": "writer.short_medium_manuscript.v2",
+      "outputSchema": "output.short_medium_segment.v2",
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.segment_manifest.v1",
+        "validator.short_medium_source_binding.v1",
+        "validator.short_medium_length.v1"
+      ],
       "reviewPolicy": {
         "profile": "review.none.v1",
         "mode": "none",
@@ -618,34 +640,47 @@
       },
       "applyHandler": "apply.short_medium_manuscript.v1",
       "runBudgetProfile": {
-        "profile": "budget.short_medium.manuscript.v1",
+        "profile": "budget.short_medium.manuscript.v2",
         "maxModelCalls": 6,
-        "maxInputTokens": 480000,
-        "maxPromptCacheMissTokens": 120000,
-        "maxCompletionTokens": 160000,
-        "maxReasoningTokens": 32000,
-        "maxVisibleOutputTokens": 128000,
+        "maxInputTokens": 1440000,
+        "maxPromptCacheMissTokens": 1440000,
+        "maxCompletionTokens": 240000,
+        "maxReasoningTokens": 48000,
+        "maxVisibleOutputTokens": 192000,
         "maxCostMicros": 6000000,
         "maxWallClockSeconds": 1800,
-        "maxProtocolCorrectionSteps": 1,
+        "maxProtocolCorrectionSteps": 0,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "creative"
+      "lane": "creative",
+      "generatorStepBudgetProfile": "step_budget.short_medium.generate_manuscript.generator.v2"
     },
     {
       "key": "short_medium.replace_selection",
       "workflow": "short_medium",
       "operation": "replace_selection",
-      "labels": {"zh-CN": "修改中短篇选区"},
-      "targetKinds": ["short_medium_outline", "short_medium_manuscript"],
-      "scopeKinds": ["document_selection"],
+      "labels": {
+        "zh-CN": "修改中短篇选区"
+      },
+      "targetKinds": [
+        "short_medium_outline",
+        "short_medium_manuscript"
+      ],
+      "scopeKinds": [
+        "document_selection"
+      ],
       "mutating": true,
       "developmentOnly": false,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.short_medium.selection.v1",
-      "generatorProfile": "writer.short_medium_selection.v1",
-      "outputSchema": "output.short_medium_replacement.v1",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.unicode_selection.v1", "validator.selection_source_hash.v1", "validator.selection_outside_unchanged.v1"],
+      "generatorProfile": "writer.short_medium_selection.v2",
+      "outputSchema": "output.short_medium_replacement.v2",
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.unicode_selection.v1",
+        "validator.selection_source_hash.v1",
+        "validator.selection_outside_unchanged.v1"
+      ],
       "reviewPolicy": {
         "profile": "review.none.v1",
         "mode": "none",
@@ -656,34 +691,45 @@
       },
       "applyHandler": "apply.short_medium_selection.v1",
       "runBudgetProfile": {
-        "profile": "budget.short_medium.selection.v1",
+        "profile": "budget.short_medium.selection.v2",
         "maxModelCalls": 1,
-        "maxInputTokens": 120000,
-        "maxPromptCacheMissTokens": 80000,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
         "maxCompletionTokens": 24000,
         "maxReasoningTokens": 12000,
         "maxVisibleOutputTokens": 12000,
         "maxCostMicros": 500000,
         "maxWallClockSeconds": 300,
-        "maxProtocolCorrectionSteps": 1,
+        "maxProtocolCorrectionSteps": 0,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "creative"
+      "lane": "creative",
+      "generatorStepBudgetProfile": "step_budget.short_medium.replace_selection.generator.v2"
     },
     {
       "key": "short_medium.full_check",
       "workflow": "short_medium",
       "operation": "full_check",
-      "labels": {"zh-CN": "检查中短篇全文"},
-      "targetKinds": ["short_medium_manuscript"],
-      "scopeKinds": ["novel"],
+      "labels": {
+        "zh-CN": "检查中短篇全文"
+      },
+      "targetKinds": [
+        "short_medium_manuscript"
+      ],
+      "scopeKinds": [
+        "novel"
+      ],
       "mutating": false,
       "developmentOnly": false,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.short_medium.full_check.v1",
-      "generatorProfile": "quality.short_medium_full_check.v1",
-      "outputSchema": "output.short_medium_check_report.v1",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.evidence_references.v1", "validator.complete_output.v1"],
+      "generatorProfile": "quality.short_medium_full_check.v2",
+      "outputSchema": "output.short_medium_check_report.v2",
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.evidence_references.v1",
+        "validator.complete_output.v1"
+      ],
       "reviewPolicy": {
         "profile": "review.none.v1",
         "mode": "none",
@@ -694,19 +740,20 @@
       },
       "applyHandler": "apply.short_medium_check_report.v1",
       "runBudgetProfile": {
-        "profile": "budget.short_medium.full_check.v1",
+        "profile": "budget.short_medium.full_check.v2",
         "maxModelCalls": 1,
-        "maxInputTokens": 120000,
-        "maxPromptCacheMissTokens": 100000,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
         "maxCompletionTokens": 24000,
         "maxReasoningTokens": 0,
         "maxVisibleOutputTokens": 24000,
         "maxCostMicros": 500000,
         "maxWallClockSeconds": 300,
-        "maxProtocolCorrectionSteps": 1,
+        "maxProtocolCorrectionSteps": 0,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "batch_media"
+      "lane": "batch_media",
+      "generatorStepBudgetProfile": "step_budget.short_medium.full_check.generator.v2"
     },
     {
       "key": "quality.consistency",

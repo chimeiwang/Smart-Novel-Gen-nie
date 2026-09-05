@@ -1,0 +1,31 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium_execution/ShortMediumPriorSegment/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    },
+    "contentSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contentsha256",
+      "type": "string"
+    },
+    "index": {
+      "maximum": 5,
+      "minimum": 0,
+      "title": "Index",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "content",
+    "contentSha256",
+    "index"
+  ],
+  "title": "ShortMediumPriorSegment",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium_execution.ShortMediumPriorSegment"
+}

@@ -57,6 +57,28 @@ printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar long.n
 Codex 的完整操作规程位于用户安装的 `inkforge-short-story-operator` 与
 `inkforge-production-short-story-operator` Skill；macOS 使用各自的 `scripts/run.sh`，不是以上裸 CLI 示例。
 
+### 中短篇 V2 观察补充（2026-09-05 源码）
+
+`short.agent.start` 的四个别名、请求字段和中短篇 13 个命令不变。保留启动返回的 runId，以
+`short.agent.watch` 输入 `{"taskId":"<runId>"}` 观察；可选 lastEventId 仍是字符串。
+watcher 保留 V1 phase/commandStatus 兼容；显式 engineVersion=2 时只认 V2 status，不从旧字段猜结果。
+
+V2 `run_snapshot.baseSequence`（包括 0）与数字事件 ID 用作重连游标，事件只供观察；断线或终态事件后
+必须 GET 同一 Run。最后的 `type=terminal,data` 是该 GET 的完整原对象：completed 退出码 0，failed/cancelled
+退出码 5。V1 仍保留原“终态观察成功返回 0”契约，须同时看 phase/commandStatus，不能把退出 0 一概当成生成成功。
+
+生成蓝图、正文或替换选区后，从 terminal.data.candidateVersionId 读取精确候选，接着使用现有
+short.version.get/preview/adopt 查看完整版本和 Diff、确认 confirmationHash；Run completed 不表示版本已采用。
+全文检查从 terminal.data.checkReport.text 读取完整报告，不创建候选、不调用 adopt；首尾空格、换行和 Unicode
+原样保留。缺少对应结果、引擎类型错误或任务身份不匹配时以 CORE_RESPONSE_CONTRACT_ERROR/5 停止，不能选
+版本列表最后一项或从 SSE resultId 拼造结果。停止 watcher 不取消服务端任务，未新增 short.agent.cancel；
+既有版本下载和 outputFile 的完整 UTF-8 文件语义不变。
+
+中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，Catalog 当前为 16/21；
+其余一致性终检、文风画像、RAG 索引和两个开发视频操作尚未迁移。真实供应商和生产尚未验收，固定 JAR、活动
+Skills 和服务器未随源码更新。后续 Skill 说明更新见 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
+的“中短篇四操作观察”专节，完整验收见中短篇迁移规格。普通 CLI 125、Operator 45 命令及三种长篇操作范围不变。
+
 ## 长篇写作边界
 
 `long.agent.start` 的 `rewrite_chapter_selection`/`rewrite_outline_selection` 必须携带 `selectionTarget`（资源身份、`baseUpdatedAt`、正文 hash、Unicode 码点范围和选区 hash）。CLI 不接受 `selectedText`，也不把选区正文作为权威输入；正文由 Core 按来源绑定冻结。选区操作仍走 proposal → ReviewArtifact → 用户确认 → Core 应用。
@@ -79,7 +101,8 @@ revise/discard 保持既有拒绝规则。这组 kind/updates 条件只决定结
 拒绝且不 POST；省略选择字段或其他 V2 候选沿既有语义忽略显式 null 时，不会因此新增 Artifact 类型门禁。
 Core 按精确 revision 和冻结来源在同一事务采用，冲突后必须重新读取并确认。
 这没有增加 125 个普通 CLI 命令，也没有扩大 45 命令/三 Operation 的 Operator 范围。五项结构化资料入口、
-自动返工及作者采用已接通，当前仓内 Catalog 为 12/21；本批定向验证通过，全量门禁见结构化资料规格最终记录。
+自动返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21，当前加上中短篇四项为 16/21；结构化资料定向验证
+与全量门禁见对应规格最终记录。
 源码、构建产物与固定包分别验收，本批没有更新固定 JAR、活动 Skills 或部署服务器。
 
 ### 结构化资料的显式启动（当前源码）

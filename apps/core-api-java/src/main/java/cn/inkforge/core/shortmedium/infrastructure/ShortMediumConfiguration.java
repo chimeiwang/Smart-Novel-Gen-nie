@@ -1,6 +1,7 @@
 package cn.inkforge.core.shortmedium.infrastructure;
 
 import cn.inkforge.contracts.api.DocumentType;
+import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.shortmedium.application.ShortMediumVersionRepository;
@@ -21,9 +22,14 @@ class ShortMediumConfiguration {
             CoreDatabase database,
             CuidV1Generator ids,
             Clock coreClock,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            CoreSettings settings) {
         return new JooqShortMediumVersionRepository(
-                database, ids, coreClock, objectMapper);
+                database,
+                ids,
+                coreClock,
+                objectMapper,
+                settings.durableAgentExecutionSchemaReady());
     }
 
     @Bean

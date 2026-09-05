@@ -1,6 +1,7 @@
 package cn.inkforge.core.writing.infrastructure;
 
 import cn.inkforge.contracts.api.LongSerialStartWritingRunRequest;
+import cn.inkforge.contracts.api.ShortMediumStartWritingRunRequest;
 import cn.inkforge.contracts.api.WritingRunStartResponse;
 import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.platform.db.CoreDatabase;
@@ -10,6 +11,7 @@ import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
+import cn.inkforge.core.writing.application.ShortMediumDurableRunStarter;
 import cn.inkforge.core.writing.application.WritingCommandRepository;
 import cn.inkforge.core.writing.application.WritingRunStarter;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
@@ -37,12 +39,14 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     private final CoreDatabase database;
     private final WritingCommandRepository legacy;
     private final LongSerialDurableRunStarter durable;
+    private final ShortMediumDurableRunStarter shortMediumDurable;
     private final CommandIdempotencyStore idempotency;
     private final CoreSettings settings;
     private final DurableAgentExecutionReadiness agentReadiness;
     private final ObjectMapper json;
     private final ExecutionRegistry registry;
     private final Set<String> routableOperationKeys;
+    private final Set<String> routableShortMediumOperationKeys;
     private final WorkflowExecutionContextReader executionContexts;
 
     RoutingWritingRunStarter(
@@ -54,16 +58,26 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             DurableAgentExecutionReadiness agentReadiness,
             ObjectMapper json,
             ExecutionRegistry registry) {
-        this(database, legacy, durable, idempotency, settings, agentReadiness, json, registry, null);
+        this(database, legacy, durable, null, idempotency, settings, agentReadiness, json, registry, null);
     }
 
     RoutingWritingRunStarter(CoreDatabase database, WritingCommandRepository legacy,
             LongSerialDurableRunStarter durable, CommandIdempotencyStore idempotency, CoreSettings settings,
             DurableAgentExecutionReadiness agentReadiness, ObjectMapper json, ExecutionRegistry registry,
             WorkflowExecutionContextReader executionContexts) {
+        this(database, legacy, durable, null, idempotency, settings, agentReadiness, json, registry,
+                executionContexts);
+    }
+
+    RoutingWritingRunStarter(CoreDatabase database, WritingCommandRepository legacy,
+            LongSerialDurableRunStarter durable, ShortMediumDurableRunStarter shortMediumDurable,
+            CommandIdempotencyStore idempotency, CoreSettings settings,
+            DurableAgentExecutionReadiness agentReadiness, ObjectMapper json, ExecutionRegistry registry,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.legacy = Objects.requireNonNull(legacy);
         this.durable = Objects.requireNonNull(durable);
+        this.shortMediumDurable = shortMediumDurable;
         this.idempotency = Objects.requireNonNull(idempotency);
         this.settings = Objects.requireNonNull(settings);
         this.agentReadiness = Objects.requireNonNull(agentReadiness);
@@ -71,8 +85,16 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         this.registry = Objects.requireNonNull(registry);
         this.executionContexts = executionContexts;
         this.routableOperationKeys = registry.enabledOperationKeys("long_serial", false);
+        this.routableShortMediumOperationKeys =
+                registry.enabledOperationKeys("short_medium", false);
         Set<String> missingHandlers = new HashSet<>(routableOperationKeys);
         missingHandlers.removeAll(durable.supportedOperationKeys());
+        Set<String> missingShortMediumHandlers =
+                new HashSet<>(routableShortMediumOperationKeys);
+        if (shortMediumDurable != null) {
+            missingShortMediumHandlers.removeAll(shortMediumDurable.supportedOperationKeys());
+        }
+        missingHandlers.addAll(missingShortMediumHandlers);
         if (!missingHandlers.isEmpty()) {
             throw new IllegalStateException(
                     "Operation Catalog 已启用但 Core 未装配 V2 handler：" + missingHandlers);
@@ -127,23 +149,30 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 return replayExisting(userId, request, clientRequestId, existing);
             }
             if (routeDurable && !agentCompatible) throw agentUnavailable();
-            StartScope scope = startScope(request);
-            boolean locked = scope != null && lockStartScope(transaction, userId, scope);
+            StartScope requestedScope = startScope(request);
+            StartScope scope = requestedScope == null
+                    ? null
+                    : lockStartScope(transaction, userId, requestedScope);
+            boolean locked = scope != null;
             if (locked && scope.writingSessionId() != null) {
                 requireNoActiveForegroundRun(transaction, scope.writingSessionId());
             }
             if (routeDurable) {
-                if (locked && isDurableMutation(request)) {
+                if (locked && (isDurableMutation(request) || isShortMedium(request))) {
                     requireNoActiveLegacyMutation(transaction, scope);
                     requireNoActiveDurableMutation(transaction, scope);
                 }
                 if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
                     return durable.startNatural(userId, natural.request());
                 }
+                if (request instanceof ParsedWritingRunStartRequest.ShortMedium shortMedium) {
+                    return requireShortMediumDurable().startFresh(
+                            userId, shortMedium.request());
+                }
                 LongSerialStartWritingRunRequest durableRequest = durableRequest(request);
                 return durable.startFresh(userId, durableRequest);
             }
-            if (locked && isLegacyMutation(request)) {
+            if (locked && (isLegacyMutation(request) || isShortMedium(request))) {
                 requireNoActiveDurableMutation(transaction, scope);
             }
             return legacy.start(userId, request);
@@ -172,11 +201,16 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             String userId,
             ParsedWritingRunStartRequest request,
             String clientRequestId) {
-        if (!(request instanceof ParsedWritingRunStartRequest.LongSerial value)
-                || !durable.supportedOperationKeys().contains(operationKey(value.request()))) {
-            throw CommandIdempotencyStore.reused(clientRequestId);
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value
+                && durable.supportedOperationKeys().contains(operationKey(value.request()))) {
+            return durable.replayExisting(userId, value.request());
         }
-        return durable.replayExisting(userId, value.request());
+        if (request instanceof ParsedWritingRunStartRequest.ShortMedium value
+                && requireShortMediumDurable().supportedOperationKeys()
+                        .contains(operationKey(value.request()))) {
+            return requireShortMediumDurable().replayExisting(userId, value.request());
+        }
+        throw CommandIdempotencyStore.reused(clientRequestId);
     }
 
     private boolean routesDurable(
@@ -186,19 +220,26 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                     && settings.routesNewDurableAgentRun(userId, natural.request().getNovelId());
         }
         return isDurableOperation(request)
-                && settings.routesNewDurableAgentRun(
-                        userId, durableRequest(request).getNovelId());
+                && settings.routesNewDurableAgentRun(userId, novelId(request));
     }
 
     private boolean isDurableOperation(ParsedWritingRunStartRequest request) {
-        return request instanceof ParsedWritingRunStartRequest.LongSerial value
-                && routableOperationKeys.contains(operationKey(value.request()));
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return routableOperationKeys.contains(operationKey(value.request()));
+        }
+        return request instanceof ParsedWritingRunStartRequest.ShortMedium value
+                && routableShortMediumOperationKeys.contains(operationKey(value.request()));
     }
 
     private boolean isDurableMutation(ParsedWritingRunStartRequest request) {
         if (request instanceof ParsedWritingRunStartRequest.Natural) return true;
-        if (!(request instanceof ParsedWritingRunStartRequest.LongSerial value)) return false;
-        return registry.requireKnownOperation(operationKey(value.request())).mutating();
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return registry.requireKnownOperation(operationKey(value.request())).mutating();
+        }
+        if (request instanceof ParsedWritingRunStartRequest.ShortMedium value) {
+            return registry.requireKnownOperation(operationKey(value.request())).mutating();
+        }
+        return false;
     }
 
     private boolean isDurableAnswerWithoutSession(
@@ -225,6 +266,20 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
 
     private static String operationKey(LongSerialStartWritingRunRequest request) {
         return "long_serial." + request.getOperation().getValue();
+    }
+
+    private static String operationKey(ShortMediumStartWritingRunRequest request) {
+        return "short_medium." + request.getOperation().getValue();
+    }
+
+    private static String novelId(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return value.request().getNovelId();
+        }
+        if (request instanceof ParsedWritingRunStartRequest.ShortMedium value) {
+            return value.request().getNovelId();
+        }
+        throw new IllegalArgumentException("当前请求没有显式 V2 作品身份");
     }
 
     static String clientRequestId(ParsedWritingRunStartRequest request) {
@@ -260,10 +315,20 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             return new StartScope(body.getNovelId(), body.getChapterId(), nullable(body.getWritingSessionId()),
                     mutationTarget("chapter", body.getChapterId()));
         }
+        if (request instanceof ParsedWritingRunStartRequest.ShortMedium value) {
+            ShortMediumStartWritingRunRequest body = value.request();
+            String chapterId = nullable(body.getChapterId());
+            MutationTarget target = body.getDocumentType()
+                            == ShortMediumStartWritingRunRequest.DocumentTypeEnum.OUTLINE
+                    ? mutationTarget("short_medium_outline", body.getNovelId())
+                    : mutationTarget("short_medium_manuscript", chapterId);
+            return new StartScope(
+                    body.getNovelId(), chapterId, null, target, true);
+        }
         return null;
     }
 
-    private static boolean lockStartScope(
+    private static StartScope lockStartScope(
             DSLContext transaction, String userId, StartScope scope) {
         // 所有新建入口必须先锁 Novel 再锁 Chapter；这样嵌套的 V1/V2 starter
         // 只会重复取得同序锁，不会从 Chapter 回头等待 Novel。
@@ -275,17 +340,39 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 """,
                 scope.novelId(),
                 userId);
-        if (novel == null) return false;
-        var chapter = transaction.fetchOne(
-                """
-                SELECT id FROM public."Chapter"
-                WHERE id = ? AND "novelId" = ?
-                FOR UPDATE
-                """,
-                scope.chapterId(),
-                scope.novelId());
-        if (chapter == null) return false;
-        if (scope.writingSessionId() == null) return true;
+        if (novel == null) return null;
+        String chapterId = scope.chapterId();
+        if (chapterId == null && scope.shortMedium()) {
+            List<Record> chapters = transaction.fetch(
+                    """
+                    SELECT id FROM public."Chapter"
+                    WHERE "novelId" = ?
+                    ORDER BY "order", id
+                    FOR UPDATE
+                    """,
+                    scope.novelId());
+            if (chapters.size() != 1) return null;
+            chapterId = chapters.getFirst().get("id", String.class);
+        } else {
+            var chapter = transaction.fetchOne(
+                    """
+                    SELECT id FROM public."Chapter"
+                    WHERE id = ? AND "novelId" = ?
+                    FOR UPDATE
+                    """,
+                    chapterId,
+                    scope.novelId());
+            if (chapter == null) return null;
+        }
+        MutationTarget target = scope.mutationTarget();
+        if (scope.shortMedium()
+                && "short_medium_manuscript".equals(target.type())
+                && target.id() == null) {
+            target = mutationTarget(target.type(), chapterId);
+        }
+        StartScope locked = new StartScope(
+                scope.novelId(), chapterId, scope.writingSessionId(), target, scope.shortMedium());
+        if (scope.writingSessionId() == null) return locked;
         var session = transaction.fetchOne(
                 """
                 SELECT id FROM public."WritingSession"
@@ -294,8 +381,8 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 """,
                 scope.writingSessionId(),
                 scope.novelId(),
-                scope.chapterId());
-        return session != null;
+                chapterId);
+        return session == null ? null : locked;
     }
 
     private void requireNoActiveLegacyMutation(DSLContext transaction, StartScope scope) {
@@ -317,7 +404,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                     row.get("payloadJson", String.class),
                     row.get("chapterId", String.class),
                     scope)) {
-                throw busy();
+                throw busy(scope);
             }
         }
     }
@@ -341,11 +428,12 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                             json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<Map<String, Object>>() {})).conservativeMutating();
             String targetType = run.get("targetType", String.class);
             String targetId = run.get("targetId", String.class);
-            boolean sameChapter = scope.chapterId().equals(run.get("chapterId", String.class));
+            boolean sameChapter = Objects.equals(
+                    scope.chapterId(), run.get("chapterId", String.class));
             boolean sameTarget = targetType == null || targetId == null
                     || scope.mutationTarget().equals(mutationTarget(targetType, targetId));
-            if (mutating && (sameChapter || sameTarget)) {
-                throw busy();
+            if (mutating && (scope.shortMedium() || sameChapter || sameTarget)) {
+                throw busy(scope);
             }
         }
     }
@@ -398,7 +486,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
 
     private boolean startPayloadConflicts(
             String serialized, String existingChapterId, StartScope requested) {
-        boolean sameChapter = requested.chapterId().equals(existingChapterId);
+        boolean sameChapter = Objects.equals(requested.chapterId(), existingChapterId);
         if (serialized == null) return sameChapter;
         Map<String, Object> payload;
         try {
@@ -411,6 +499,12 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             }
         } catch (RuntimeException exception) {
             return sameChapter;
+        }
+        if (requested.shortMedium()
+                && "short_medium".equals(payload.get("workflow"))
+                && payload.get("operation") instanceof String operation) {
+            return Set.of("generate_outline", "generate_manuscript", "replace_selection")
+                    .contains(operation);
         }
         Object metadata = payload.get("_inkforgeCommand");
         if (!(metadata instanceof Map<?, ?> map)
@@ -439,6 +533,16 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     private static ApiException busy() {
         return new ApiException(
                 409, "WRITING_TARGET_BUSY", "当前写作目标已有进行中的写作任务");
+    }
+
+    private static ApiException busy(StartScope scope) {
+        if (scope.shortMedium()) {
+            return new ApiException(
+                    409,
+                    "SHORT_MEDIUM_DOCUMENT_RUN_ACTIVE",
+                    "该中短篇作品已有文档任务正在处理");
+        }
+        return busy();
     }
 
     private static ApiException foregroundBusy() {
@@ -470,7 +574,30 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         return new MutationTarget("chapter".equals(type) ? "chapter_content" : type, id);
     }
 
+    private ShortMediumDurableRunStarter requireShortMediumDurable() {
+        if (shortMediumDurable == null) {
+            throw new IllegalStateException("中短篇 V2 启动器未装配");
+        }
+        return shortMediumDurable;
+    }
+
+    private static boolean isShortMedium(ParsedWritingRunStartRequest request) {
+        return request instanceof ParsedWritingRunStartRequest.ShortMedium;
+    }
+
     private record MutationTarget(String type, String id) {}
     private record StartScope(
-            String novelId, String chapterId, String writingSessionId, MutationTarget mutationTarget) {}
+            String novelId,
+            String chapterId,
+            String writingSessionId,
+            MutationTarget mutationTarget,
+            boolean shortMedium) {
+        private StartScope(
+                String novelId,
+                String chapterId,
+                String writingSessionId,
+                MutationTarget mutationTarget) {
+            this(novelId, chapterId, writingSessionId, mutationTarget, false);
+        }
+    }
 }
