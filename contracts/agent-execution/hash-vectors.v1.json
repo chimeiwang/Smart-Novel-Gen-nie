@@ -19,6 +19,17 @@
       },
       "canonicalUtf8": "{\"a\":[1,0,0.0000001,\"换行\\n😀\",{\"\":1,\"😀\":2}],\"decimal\":1.23,\"z\":null}",
       "sha256": "8120300c6d33bc324976d7175a1311532a5f69f3a45775a3e6f8b94999fb134e"
+    },
+    {
+      "name": "control-escapes-preserve-literal",
+      "value": {
+        "text": "\u001c\u001f\u000b",
+        "literal": "\\u001C",
+        "line": "\n\t\r\b\f",
+        "null": null
+      },
+      "canonicalUtf8": "{\"line\":\"\\n\\t\\r\\b\\f\",\"literal\":\"\\\\u001C\",\"null\":null,\"text\":\"\\u001c\\u001f\\u000b\"}",
+      "sha256": "1a0ca655621bf0dcb612419f3601ec1f91ac226a5386751f4e74fb580fff5134"
     }
   ]
 }

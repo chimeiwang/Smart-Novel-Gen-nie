@@ -15,6 +15,11 @@ public interface WorkflowRunCancellationRepository {
         throw new UnsupportedOperationException("质量来源取消端口未实现");
     }
 
+    default WorkflowCancellationRequestResult requestDeletedStyle(
+            String userId, String runId, String clientRequestId) {
+        throw new UnsupportedOperationException("已删除文风的取消端口未实现");
+    }
+
     Optional<ExecutionCancelRequest> claimCancellationRetry();
 
     int settleExpired(int limit);

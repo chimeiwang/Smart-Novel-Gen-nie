@@ -34,6 +34,11 @@ public final class ExecutionRegistryFixtures {
         return modifiedOperation(environment, "quality.consistency", operation -> operation.put("v2Enabled", true));
     }
 
+    /** 只在内存启用画像，复用真实纯文本部署、五节预算与输出契约。 */
+    public static ExecutionRegistry styleOperationEnabled(ExecutionRegistry.Environment environment) {
+        return modifiedOperation(environment, "style.portrait", operation -> operation.put("v2Enabled", true));
+    }
+
     private static ExecutionRegistry modifiedSelectionOperation(
             ExecutionRegistry.Environment environment,
             Consumer<Map<String, Object>> modification) {

@@ -148,6 +148,14 @@ class CoreSettingsTest {
         assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-1")).isFalse();
         assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-x")).isFalse();
         assertThat(allowlist.routesNewDurableAgentRun("user-1", null)).isFalse();
+        assertThat(allowlist.routesNewUserScopedDurableAgentRun("user-1")).isTrue();
+        assertThat(allowlist.routesNewUserScopedDurableAgentRun("user-x")).isFalse();
+        assertThat(allowlist.routesNewUserScopedDurableAgentRun(null)).isFalse();
+        assertThat(CoreSettings.from(Map.of()).routesNewUserScopedDurableAgentRun("user-1"))
+                .isFalse();
+        assertThat(CoreSettings.from(Map.of("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true"))
+                        .routesNewUserScopedDurableAgentRun("user-1"))
+                .isFalse();
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))

@@ -25,6 +25,7 @@ from inkforge_contracts.short_medium_execution import (
     ShortMediumContentOutput,
     ShortMediumReplacementOutput,
 )
+from inkforge_contracts.style_execution import StylePortraitSectionOutput
 from pydantic import BaseModel
 
 
@@ -128,6 +129,8 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
+        if output["key"] == "output.style_portrait_section.v2":
+            output["jsonSchema"] = model_output_schema(StylePortraitSectionOutput)
         if output["key"] == "output.consistency_quality_report.v2":
             output["jsonSchema"] = model_output_schema(ConsistencyQualityReport)
         short_medium_models = {

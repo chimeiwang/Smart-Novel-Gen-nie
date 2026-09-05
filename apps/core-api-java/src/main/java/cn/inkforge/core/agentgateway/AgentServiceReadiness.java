@@ -2,6 +2,7 @@ package cn.inkforge.core.agentgateway;
 
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.quality.application.QualityExecutionReadiness;
+import cn.inkforge.core.styles.application.StylePortraitExecutionReadiness;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -15,7 +16,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** 对 Agent 执行一次 POST 协议门禁，并持续检查内部就绪接口。 */
-public final class AgentServiceReadiness implements DurableAgentExecutionReadiness, QualityExecutionReadiness {
+public final class AgentServiceReadiness implements DurableAgentExecutionReadiness, QualityExecutionReadiness,
+        StylePortraitExecutionReadiness {
 
     private static final String READY_PATH = "/internal/v1/health/ready";
     private static final String RUNS_PATH = "/internal/v1/runs";

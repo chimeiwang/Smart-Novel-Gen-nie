@@ -34,8 +34,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Comparator;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 基于冻结 PostgreSQL 结构的私有文风与画像任务仓储。
@@ -48,11 +50,20 @@ final class JooqStyleRepository implements StyleRepository {
     private final CoreDatabase database;
     private final CuidV1Generator ids;
     private final Clock clock;
+    private final boolean durableSchemaReady;
+    private final ObjectMapper json;
 
     JooqStyleRepository(CoreDatabase database, CuidV1Generator ids, Clock clock) {
+        this(database, ids, clock, false, new ObjectMapper());
+    }
+
+    JooqStyleRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            boolean durableSchemaReady, ObjectMapper json) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
+        this.durableSchemaReady = durableSchemaReady;
+        this.json = Objects.requireNonNull(json);
     }
 
     @Override
@@ -84,6 +95,10 @@ final class JooqStyleRepository implements StyleRepository {
                 .forEach(value -> tasks
                         .computeIfAbsent(value.getStyleid(), ignored -> new ArrayList<>())
                         .add(task(value)));
+        for (PortraitTaskSnapshot task : durableTasks(context, styleIds)) {
+            tasks.computeIfAbsent(task.styleId(), ignored -> new ArrayList<>()).add(task);
+        }
+        tasks.values().forEach(JooqStyleRepository::sortTasks);
         return styles.stream()
                 .map(value -> style(
                         value,
@@ -191,17 +206,7 @@ final class JooqStyleRepository implements StyleRepository {
                 throw new ApiException(
                         409, "STYLE_REFERENCE_REQUIRED", "请先上传可用的文风参考资料");
             }
-            String active = transaction.select(STYLEPORTRAITTASK.ID)
-                    .from(STYLEPORTRAITTASK)
-                    .where(STYLEPORTRAITTASK.STYLEID.eq(styleId)
-                            .and(STYLEPORTRAITTASK.STATUS.in("pending", "processing")))
-                    .limit(1)
-                    .fetchOne(STYLEPORTRAITTASK.ID);
-            // 单活动任务保证多个分节回调不会同时覆盖同一组画像字段。
-            if (active != null) {
-                throw new ApiException(
-                        409, "PORTRAIT_TASK_ACTIVE", "该文风已有画像任务正在执行");
-            }
+            requireNoActivePortrait(transaction, styleId);
             if (style.getErrormessage() != null) {
                 style.setErrormessage(null);
                 style.setUpdatedat(DatabaseTimestamp.next(clock, style.getUpdatedat()));
@@ -247,6 +252,20 @@ final class JooqStyleRepository implements StyleRepository {
 
     @Override
     public PortraitTaskSnapshot getPortraitTask(String userId, String taskId) {
+        if (durableSchemaReady && database.dsl().fetchExists(org.jooq.impl.DSL.selectOne()
+                .from(org.jooq.impl.DSL.table(org.jooq.impl.DSL.name("public", "WorkflowRun")))
+                .where(org.jooq.impl.DSL.field(org.jooq.impl.DSL.name("id")).eq(taskId))
+                .and(org.jooq.impl.DSL.field(org.jooq.impl.DSL.name("engineVersion")).eq(2)))) {
+            final DurableStylePortraitRun run;
+            try { run = DurableStylePortraitRun.load(database.dsl(), json, taskId); }
+            catch (IllegalArgumentException exception) { throw taskNotFound(); }
+            if (run == null || !userId.equals(run.userId())) throw taskNotFound();
+            if (database.dsl().select(WRITINGSTYLE.ID).from(WRITINGSTYLE)
+                    .where(WRITINGSTYLE.ID.eq(run.styleId()), WRITINGSTYLE.USERID.eq(userId)).fetchOne() == null) {
+                throw taskNotFound();
+            }
+            return run.snapshot();
+        }
         StyleportraittaskRecord value = database.dsl().select(STYLEPORTRAITTASK.fields())
                 .from(STYLEPORTRAITTASK)
                 .join(WRITINGSTYLE)
@@ -430,19 +449,21 @@ final class JooqStyleRepository implements StyleRepository {
         });
     }
 
-    private static StyleSnapshot aggregate(DSLContext context, WritingstyleRecord style) {
+    private StyleSnapshot aggregate(DSLContext context, WritingstyleRecord style) {
         List<StyleReferenceSnapshot> references = context.selectFrom(STYLEREFERENCE)
                 .where(STYLEREFERENCE.STYLEID.eq(style.getId()))
                 .orderBy(STYLEREFERENCE.CREATEDAT.asc(), STYLEREFERENCE.ID.asc())
                 .fetch(JooqStyleRepository::reference);
-        List<PortraitTaskSnapshot> tasks = context.selectFrom(STYLEPORTRAITTASK)
+        List<PortraitTaskSnapshot> tasks = new ArrayList<>(context.selectFrom(STYLEPORTRAITTASK)
                 .where(STYLEPORTRAITTASK.STYLEID.eq(style.getId()))
                 .orderBy(STYLEPORTRAITTASK.CREATEDAT.asc(), STYLEPORTRAITTASK.ID.asc())
-                .fetch(JooqStyleRepository::task);
+                .fetch(JooqStyleRepository::task));
+        tasks.addAll(durableTasks(context, List.of(style.getId())));
+        sortTasks(tasks);
         return style(style, references, tasks);
     }
 
-    private static WritingstyleRecord requireOwnedStyle(
+    static WritingstyleRecord requireOwnedStyle(
             DSLContext context, String userId, String styleId, boolean lock) {
         var query = context.selectFrom(WRITINGSTYLE)
                 .where(WRITINGSTYLE.ID.eq(styleId).and(WRITINGSTYLE.USERID.eq(userId)));
@@ -478,7 +499,7 @@ final class JooqStyleRepository implements StyleRepository {
         }
     }
 
-    private static Map<String, String> sections(WritingstyleRecord style) {
+    static Map<String, String> sections(WritingstyleRecord style) {
         LinkedHashMap<String, String> values = new LinkedHashMap<>();
         values.put("creativeMethodology", style.getCreativemethodology());
         values.put("uniqueMarkers", style.getUniquemarkers());
@@ -488,7 +509,7 @@ final class JooqStyleRepository implements StyleRepository {
         return values;
     }
 
-    private static void setSection(
+    static void setSection(
             WritingstyleRecord style, PortraitSection section, String content) {
         switch (section) {
             case CREATIVE_METHODOLOGY -> style.setCreativemethodology(content);
@@ -552,5 +573,37 @@ final class JooqStyleRepository implements StyleRepository {
 
     private static ApiException taskNotFound() {
         return new ApiException(404, "PORTRAIT_TASK_NOT_FOUND", "画像任务不存在");
+    }
+
+    void requireNoActivePortrait(DSLContext transaction, String styleId) {
+        String active = transaction.select(STYLEPORTRAITTASK.ID).from(STYLEPORTRAITTASK)
+                .where(STYLEPORTRAITTASK.STYLEID.eq(styleId), STYLEPORTRAITTASK.STATUS.in("pending", "processing"))
+                .limit(1).fetchOne(STYLEPORTRAITTASK.ID);
+        boolean durableActive = durableSchemaReady && transaction.fetchOne("""
+                SELECT id FROM public."WorkflowRun"
+                WHERE "engineVersion" = 2 AND workflow = 'style' AND operation = 'portrait'
+                  AND "sourceType" = 'style_portrait_v2' AND "sourceId" = ?
+                  AND status IN ('pending','running') LIMIT 1
+                """, styleId) != null;
+        if (active != null || durableActive) throw new ApiException(
+                409, "PORTRAIT_TASK_ACTIVE", "该文风已有画像任务正在执行");
+    }
+
+    private List<PortraitTaskSnapshot> durableTasks(DSLContext transaction, List<String> styleIds) {
+        if (!durableSchemaReady || styleIds.isEmpty()) return List.of();
+        String placeholders = String.join(",", java.util.Collections.nCopies(styleIds.size(), "?"));
+        return transaction.fetch("""
+                SELECT id, "userId", "novelId", "chapterId", workflow, operation,
+                       "sourceType", "sourceId", "targetType", "targetId", input,
+                       status::text AS "runStatus", "currentEvidenceBundleId", "createdAt", "updatedAt"
+                FROM public."WorkflowRun"
+                WHERE "engineVersion" = 2 AND workflow = 'style' AND operation = 'portrait'
+                  AND "sourceType" = 'style_portrait_v2' AND "sourceId" IN (%s)
+                ORDER BY "createdAt", id
+                """.formatted(placeholders), styleIds.toArray()).map(value -> DurableStylePortraitRun.from(value, json).snapshot());
+    }
+
+    private static void sortTasks(List<PortraitTaskSnapshot> tasks) {
+        tasks.sort(Comparator.comparing(PortraitTaskSnapshot::createdAt).thenComparing(PortraitTaskSnapshot::id));
     }
 }

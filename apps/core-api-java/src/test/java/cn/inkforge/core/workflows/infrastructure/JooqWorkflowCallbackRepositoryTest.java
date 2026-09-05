@@ -113,6 +113,174 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 画像五节串行复用冻结来源且逐节原文与空小说账务都可重放() {
+        StyleFlow flow = styleFlow("portrait-full", null, true);
+        var request = flow.request();
+        String runId = request.getRunId();
+        var bundle = request.getEvidenceBundle();
+        Map<String, String> expected = new LinkedHashMap<>();
+        for (String section : cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion.SECTIONS) {
+            assertThat(request.getNovelId()).isNull();
+            assertThat(request.getInput()).containsExactlyInAnyOrderEntriesOf(Map.of("section", section));
+            assertThat(request.getEvidenceBundle()).isEqualTo(bundle);
+            String raw = " \u0085\uFEFF完整" + section + "😀\n内部尾段\u00a0 ";
+            expected.put(section, raw);
+            var result = styleResult(request, raw);
+            assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            String stored = database.dsl().fetchOne("SELECT output FROM public.\"WorkflowStep\" WHERE id = ?", request.getStepId()).get(0, String.class);
+            assertThat(json.readTree(stored).get("content").asString()).isEqualTo(raw);
+            if (expected.size() < 5) {
+                assertThat(runStatus(runId)).isEqualTo("running");
+                org.mockito.Mockito.verify(flow.projection(), org.mockito.Mockito.never()).complete(
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap());
+                request = flow.dispatches().claimNext().orElseThrow();
+                prepareStyle(flow, request);
+            }
+        }
+        assertThat(runStatus(runId)).isEqualTo("completed");
+        org.mockito.Mockito.verify(flow.projection()).complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(runId), org.mockito.ArgumentMatchers.eq(expected));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId)).isEqualTo(5);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND status = 'settled'", runId)).isEqualTo(5);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ? AND \"novelId\" IS NULL", runId)).isEqualTo(5);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvent\" WHERE \"runId\" = ? AND \"eventType\" = 'completed'", runId)).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvaluation\" WHERE \"runId\" = ?", runId)).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"artifactId\" IS NOT NULL", runId)).isZero();
+    }
+
+    @Test
+    void 画像单节只生成一次且缺失必需空小说仍拒绝() {
+        StyleFlow flow = styleFlow("portrait-section", "styleTraits", true);
+        var result = styleResult(flow.request(), "\uFEFF");
+        result.setNovelId(JsonNullable.undefined());
+        assertThatThrownBy(() -> flow.callbacks().result(result)).isInstanceOf(ApiException.class);
+        result.setNovelId(JsonNullable.of(null));
+        assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(runStatus(flow.request().getRunId())).isEqualTo("completed");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", flow.request().getRunId())).isEqualTo(1);
+        org.mockito.Mockito.verify(flow.projection()).complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(flow.request().getRunId()), org.mockito.ArgumentMatchers.eq(Map.of("styleTraits", "\uFEFF")));
+    }
+
+    @Test
+    void 画像失败拒绝空白和目标已删均不追加后续分节() {
+        StyleFlow failure = styleFlow("portrait-failure", null, true);
+        var failed = styleFailure(failure.request());
+        assertThat(failure.callbacks().failure(failed).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(failure.callbacks().failure(failed).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(runStatus(failure.request().getRunId())).isEqualTo("failed");
+        org.mockito.Mockito.verify(failure.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(failure.request().getRunId()), org.mockito.ArgumentMatchers.eq("failed"));
+
+        StyleFlow blank = styleFlow("portrait-blank", "styleTraits", true);
+        assertThatThrownBy(() -> blank.callbacks().result(styleResult(blank.request(), " \u0085\u00a0\t\n")))
+                .isInstanceOf(ApiException.class);
+        blank.callbacks().failure(styleFailure(blank.request()));
+
+        StyleFlow deleted = styleFlow("portrait-deleted", null, true);
+        org.mockito.Mockito.when(deleted.projection().targetExists(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        deleted.callbacks().result(styleResult(deleted.request(), "已删除文风的迟到原文"));
+        assertThat(runStatus(deleted.request().getRunId())).isEqualTo("cancelled");
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ? AND \"novelId\" IS NULL", deleted.request().getRunId())).isEqualTo(1);
+        org.mockito.Mockito.verify(deleted.projection(), org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap());
+        for (StyleFlow flow : List.of(failure, blank, deleted)) {
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", flow.request().getRunId())).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void 画像删除取消重新确认并支持空小说迟到终态与租约过期() {
+        StyleFlow deleted = styleFlow("portrait-cancel", null, true);
+        var request = deleted.request();
+        deleted.cancellations().requestDeletedStyle(deleted.fixture().userId(), request.getRunId(), "style-deleted." + request.getRunId());
+        assertThat(database.dsl().fetchOne("SELECT \"cancelRequestId\" FROM public.\"WorkflowRun\" WHERE id = ?", request.getRunId()).get(0, String.class)).isNull();
+        org.mockito.Mockito.when(deleted.projection().isDeleted(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        deleted.cancellations().requestDeletedStyle(deleted.fixture().userId(), request.getRunId(), "style-deleted." + request.getRunId());
+        deleted.callbacks().result(styleResult(request, "取消后迟到完整分节"));
+        assertThat(runStatus(request.getRunId())).isEqualTo("cancelled");
+        org.mockito.Mockito.verify(deleted.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(request.getRunId()), org.mockito.ArgumentMatchers.eq("cancelled"));
+
+        StyleFlow expired = styleFlow("portrait-expire", null, true);
+        expired.cancellations().request(expired.fixture().userId(), expired.request().getRunId(), "portrait-expire-request");
+        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"leaseExpiresAt\" = ? WHERE id = ?", NOW.minusSeconds(1), expired.request().getStepId());
+        assertThat(expired.cancellations().settleExpired(20)).isEqualTo(1);
+        assertThat(runStatus(expired.request().getRunId())).isEqualTo("cancelled");
+
+        StyleFlow rejected = styleFlow("portrait-reject", null, false);
+        rejected.dispatches().recordRejected(rejected.request(), "EXECUTION_SUBMIT_REJECTED_409");
+        assertThat(runStatus(rejected.request().getRunId())).isEqualTo("failed");
+        org.mockito.Mockito.verify(rejected.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(rejected.request().getRunId()), org.mockito.ArgumentMatchers.eq("failed"));
+    }
+
+    private static StyleFlow styleFlow(String prefix, String section, boolean prepare) {
+        Fixture fixture = fixture(prefix);
+        ExecutionRegistry enabled = ExecutionRegistryFixtures.styleOperationEnabled(ExecutionRegistry.Environment.TEST);
+        var resolved = enabled.resolve("style.portrait", false);
+        var ids = new CuidV1Generator(CLOCK);
+        var projection = org.mockito.Mockito.mock(cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion.class);
+        org.mockito.Mockito.when(projection.targetExists(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        org.mockito.Mockito.when(projection.complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap())).thenReturn("completed");
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("mode", section == null ? "full" : "section"); input.put("section", section);
+        Map<String, Object> context = new LinkedHashMap<>(input);
+        String styleId = prefix + "-style";
+        context.put("styleId", styleId); context.put("originalCharCount", 3);
+        context.put("references", List.of(Map.of("referenceId", prefix + "-reference", "filename", "例子.txt", "charCount", 3, "content", "甲😀乙", "contentSha256", sha256("甲😀乙"))));
+        context.put("sourceTextSha256", sha256("参考资料：例子.txt\n\n甲😀乙"));
+        var evidence = new WorkflowEvidenceItemPlan("style_portrait_context", styleId, true, null, null, null, context, null, null, Map.of());
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request-0001", sha256(prefix),
+                "style", "portrait", enabled.catalogVersion(), "chat", null, null, null, "style_profile", styleId,
+                input, resolved.operation().evidencePolicy(), List.of(evidence), resolved.operation().runBudget(), enabled.freezePlan("style.portrait", false),
+                new WorkflowInitialStepPlan("generation", resolved.operation().lane(), Map.of("section", section == null ? "creativeMethodology" : section),
+                        resolved.generatorProfile(), resolved.generatorStepBudget(), resolved.outputSchema()), null,
+                new WorkflowStartPlan.SourceBinding("style_portrait_v2", styleId)));
+        var dispatch = new JooqWorkflowDispatchRepository(database, ids, CLOCK, json, enabled, Duration.ofSeconds(30), 3,
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> projection);
+        var callback = new JooqWorkflowCallbackRepository(database, ids, CLOCK, json, enabled, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> null, () -> projection);
+        var cancel = new JooqWorkflowRunCancellationRepository(database, ids, CLOCK, json, enabled, () -> null, () -> projection);
+        var request = dispatch.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        var flow = new StyleFlow(fixture, request, dispatch, callback, cancel, projection);
+        if (prepare) prepareStyle(flow, request);
+        return flow;
+    }
+
+    private static void prepareStyle(StyleFlow flow, ExecutionStepRequest request) {
+        flow.dispatches().recordAccepted(request, accepted(request, styleAgentResolved(request)));
+        flow.callbacks().progress(progress(request, unknownUsage()).resolvedModel(styleApiResolved(request)));
+    }
+
+    private static cn.inkforge.contracts.agent.ResolvedModelRef styleAgentResolved(ExecutionStepRequest request) {
+        var resolved = fakeAgentResolved(request);
+        resolved.setStructuredOutputRoute(cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.fromValue("plain_text_v1"));
+        resolved.setDeploymentFingerprint(WorkflowResolvedModel.fingerprint(resolved.getDeploymentProfileKey(), "fake", "fake",
+                "transport.fake.v1", "endpoint.local-fake.v1", "plain_text_v1", "capability.fake.structured-output.v1", "disabled", true));
+        return resolved;
+    }
+
+    private static ResolvedModelRef styleApiResolved(ExecutionStepRequest request) {
+        var resolved = styleAgentResolved(request);
+        return new ResolvedModelRef(resolved.getCapabilityVersion(), resolved.getDeploymentFingerprint(), resolved.getDeploymentProfileKey(),
+                resolved.getEndpointProfile(), resolved.getModel(), resolved.getProvider(), ResolvedModelRef.ReasoningModeEnum.DISABLED,
+                ResolvedModelRef.StructuredOutputRouteEnum.fromValue("plain_text_v1"), true, resolved.getTransportProfile());
+    }
+
+    private static ExecutionStepResult styleResult(ExecutionStepRequest request, String raw) {
+        var result = outputResult(request, "占位").resolvedModel(styleApiResolved(request)).usage(answerUsage()).output(Map.of("content", raw));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private static ExecutionStepFailure styleFailure(ExecutionStepRequest request) {
+        var failure = reviewFailure(request).resolvedModel(styleApiResolved(request)).usage(answerUsage());
+        failure.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.failureHashMaterial(failure)));
+        return failure;
+    }
+
+    private record StyleFlow(Fixture fixture, ExecutionStepRequest request, JooqWorkflowDispatchRepository dispatches,
+            JooqWorkflowCallbackRepository callbacks, JooqWorkflowRunCancellationRepository cancellations,
+            cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion projection) {}
+
+    @Test
     void 质量坏报告独立纠正且重复回调不重复调用或结算() {
         QualityFlow flow = qualityFlow("quality-correction");
         var first = flow.request();

@@ -8,6 +8,7 @@ import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowCancellationRequestResult;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
+import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
@@ -38,6 +39,7 @@ final class JooqWorkflowRunCancellationRepository
     private final ObjectMapper json;
     private final WorkflowBillingCoordinator billing;
     private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
+    private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion;
 
     JooqWorkflowRunCancellationRepository(
             CoreDatabase database,
@@ -51,12 +53,20 @@ final class JooqWorkflowRunCancellationRepository
     JooqWorkflowRunCancellationRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
             ObjectMapper json, ExecutionRegistry registry,
             java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion) {
+        this(database, ids, clock, json, registry, qualityCompletion, () -> null);
+    }
+
+    JooqWorkflowRunCancellationRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.billing = new WorkflowBillingCoordinator(ids, json, registry);
         this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
+        this.styleCompletion = Objects.requireNonNull(styleCompletion);
     }
 
     @Override
@@ -87,6 +97,20 @@ final class JooqWorkflowRunCancellationRepository
             if (!qualityCompletion().isInvalidated(tx, runId)) {
                 return new WorkflowCancellationRequestResult(List.of());
             }
+            return request(tx, userId, runId, clientRequestId);
+        });
+    }
+
+    @Override
+    public WorkflowCancellationRequestResult requestDeletedStyle(String userId, String runId, String clientRequestId) {
+        requireNonBlank(userId, "userId"); requireNonBlank(runId, "runId"); requireNonBlank(clientRequestId, "clientRequestId");
+        return database.transactionResult(tx -> {
+            Record run = lockRun(tx, runId, userId);
+            if (TERMINAL_RUNS.contains(run.get("status", String.class))
+                    || run.get("cancelRequestedAt", LocalDateTime.class) != null) return new WorkflowCancellationRequestResult(List.of());
+            if (!isStyleRun(run)) throw new IllegalArgumentException("已删除文风取消只能引用画像运行");
+            // 只读复验已提交的目标缺失；公开文风 ID 不复用，不在 Style 锁内反等计费 User。
+            if (!styleCompletion().isDeleted(tx, runId)) return new WorkflowCancellationRequestResult(List.of());
             return request(tx, userId, runId, clientRequestId);
         });
     }
@@ -389,6 +413,9 @@ final class JooqWorkflowRunCancellationRepository
         if (isQualityRun(run)) {
             qualityCompletion().finish(transaction, run.get("id", String.class), "cancelled");
         }
+        if (isStyleRun(run)) {
+            styleCompletion().finish(transaction, run.get("id", String.class), "cancelled");
+        }
         long sequence = Math.addExact(previousSequence, 1L);
         transaction.execute(
                 """
@@ -427,6 +454,16 @@ final class JooqWorkflowRunCancellationRepository
     private WorkflowQualityCompletion qualityCompletion() {
         WorkflowQualityCompletion completion = qualityCompletion.get();
         if (completion == null) throw new IllegalStateException("质量取消投影端口未装配");
+        return completion;
+    }
+
+    private static boolean isStyleRun(Record run) {
+        return "style".equals(run.get("workflow", String.class)) && "portrait".equals(run.get("operation", String.class));
+    }
+
+    private WorkflowStylePortraitCompletion styleCompletion() {
+        WorkflowStylePortraitCompletion completion = styleCompletion.get();
+        if (completion == null) throw new IllegalStateException("画像取消投影端口未装配");
         return completion;
     }
 

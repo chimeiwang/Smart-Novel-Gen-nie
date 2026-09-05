@@ -19,15 +19,15 @@ class ExecutionCanonicalJsonTest {
         Map<String, Object> fixture = fixture();
         assertThat(fixture.get("algorithm")).isEqualTo(ExecutionCanonicalJson.ALGORITHM);
         @SuppressWarnings("unchecked")
-        Map<String, Object> vector = ((List<Map<String, Object>>) fixture.get("vectors")).getFirst();
-        Object value = vector.get("value");
-
-        byte[] canonical = ExecutionCanonicalJson.bytes(value);
-
-        assertThat(new String(canonical, StandardCharsets.UTF_8))
-                .isEqualTo(vector.get("canonicalUtf8"));
-        assertThat(ExecutionCanonicalJson.sha256(value))
-                .isEqualTo(vector.get("sha256"));
+        List<Map<String, Object>> vectors = (List<Map<String, Object>>) fixture.get("vectors");
+        for (Map<String, Object> vector : vectors) {
+            Object value = vector.get("value");
+            byte[] canonical = ExecutionCanonicalJson.bytes(value);
+            assertThat(new String(canonical, StandardCharsets.UTF_8)).as(vector.get("name").toString())
+                    .isEqualTo(vector.get("canonicalUtf8"));
+            assertThat(ExecutionCanonicalJson.sha256(value)).as(vector.get("name").toString())
+                    .isEqualTo(vector.get("sha256"));
+        }
     }
 
     @Test

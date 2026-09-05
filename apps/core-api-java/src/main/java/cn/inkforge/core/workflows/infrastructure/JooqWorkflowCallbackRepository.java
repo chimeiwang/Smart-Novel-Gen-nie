@@ -21,6 +21,7 @@ import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
+import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
@@ -85,6 +86,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates;
     private final java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion;
     private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
+    private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -129,6 +131,18 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
             java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion,
             java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion) {
+        this(database, ids, clock, json, registry, leaseDuration, contexts, businessPreparation,
+                structuredCandidates, shortMediumCompletion, qualityCompletion, () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
+            java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
+            java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -140,6 +154,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 requiredRegistry.enabledOperationKeys("short_medium", false));
         WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
                 requiredRegistry.enabledOperationKeys("quality", false));
+        WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
+                requiredRegistry.enabledOperationKeys("style", false));
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow callback lease 必须为正数");
         }
@@ -150,6 +166,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.structuredCandidates = Objects.requireNonNull(structuredCandidates);
         this.shortMediumCompletion = Objects.requireNonNull(shortMediumCompletion);
         this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
+        this.styleCompletion = Objects.requireNonNull(styleCompletion);
     }
 
     @Override
@@ -741,6 +758,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid(exception.getMessage());
         }
         switch (materializer) {
+            case STYLE_PORTRAIT -> completeStylePortrait(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CONSISTENCY_QUALITY -> completeQuality(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case SHORT_MEDIUM -> completeShortMedium(
@@ -760,6 +779,113 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             case AGENT_UPDATES_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
+    }
+
+    private void completeStylePortrait(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+            ExecutionPlanSnapshot.Step generator, ExecutionStepResult body, WorkflowStepUsage usage,
+            Map<String, Object> output, LocalDateTime now) {
+        if (!isStyleRun(locked.run()) || locked.run().get("novelId") != null
+                || locked.run().get("chapterId") != null || locked.run().get("writingSessionId") != null
+                || !"style_profile".equals(locked.run().get("targetType", String.class))
+                || !GENERATION.equals(locked.step().get("purpose", String.class))
+                || locked.step().get("artifactId") != null || !plan.reviewers().isEmpty() || !plan.systemSteps().isEmpty()) {
+            throw invalid("文风画像必须是无小说、无草案或系统纠正的串行生成");
+        }
+        Map<String, Object> runInput = readObject(locked.run().get("input", String.class));
+        if (!runInput.keySet().equals(Set.of("mode", "section"))) throw invalid("画像运行模式字段不完整");
+        List<String> expected;
+        if ("full".equals(runInput.get("mode")) && runInput.get("section") == null) {
+            expected = WorkflowStylePortraitCompletion.SECTIONS;
+        } else if ("section".equals(runInput.get("mode"))
+                && runInput.get("section") instanceof String section
+                && WorkflowStylePortraitCompletion.SECTIONS.contains(section)) {
+            expected = List.of(section);
+        } else throw invalid("画像运行模式与分节不匹配");
+        String runId = body.getRunId();
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        if (!Objects.equals(bundleId, locked.run().get("currentEvidenceBundleId", String.class))) {
+            throw invalid("画像分节必须使用原冻结来源");
+        }
+        List<Record> previous = tx.fetch("""
+                SELECT input, "inputHash", output, "evidenceBundleId", "modelProfile", "outputSchema"
+                FROM public."WorkflowStep" WHERE "runId" = ? AND purpose = 'generation' AND status = 'completed'
+                ORDER BY ordinal, id
+                """, runId);
+        if (previous.size() >= expected.size()) throw invalid("画像分节数量超出冻结模式");
+        Map<String, String> sections = new LinkedHashMap<>();
+        for (int index = 0; index < previous.size(); index++) {
+            Record step = previous.get(index);
+            Map<String, Object> input = readObject(step.get("input", String.class));
+            requireHash(step.get("inputHash", String.class), input, "portrait section input");
+            if (!Map.of("section", expected.get(index)).equals(input)
+                    || !Objects.equals(bundleId, step.get("evidenceBundleId", String.class))
+                    || !generator.modelProfile().profile().equals(step.get("modelProfile", String.class))
+                    || !generator.outputSchema().name().equals(step.get("outputSchema", String.class))) {
+                throw invalid("已完成画像分节顺序或来源不匹配");
+            }
+            sections.put(expected.get(index), portraitText(generator, readObject(step.get("output", String.class))));
+        }
+        Map<String, Object> input = readObject(locked.step().get("input", String.class));
+        requireHash(locked.step().get("inputHash", String.class), input, "portrait section input");
+        String section = expected.get(previous.size());
+        if (!Map.of("section", section).equals(input)) throw invalid("画像当前分节不符合固定顺序");
+        sections.put(section, portraitText(generator, output));
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null,
+                locked.run().get("lastEventSequence", Long.class), now);
+        WorkflowStylePortraitCompletion completion = styleCompletion();
+        if (!completion.targetExists(tx, runId)) {
+            cancelDeletedStyle(tx, locked, sequence, now);
+            return;
+        }
+        if (sections.size() < expected.size()) {
+            if (expected.size() > plan.runBudget().maxModelCalls()) throw invalid("画像计划超过冻结调用额度");
+            appendGenerationStep(tx, locked, generator, Map.of("section", expected.get(sections.size())), bundleId, null, now);
+            updateRun(tx, runId, "running", sequence, null, null, now);
+            return;
+        }
+        String status = completion.complete(tx, runId, sections);
+        if ("cancelled".equals(status)) {
+            cancelDeletedStyle(tx, locked, sequence, now);
+            return;
+        }
+        if (!"completed".equals(status)) throw invalid("画像物化端口返回非法状态");
+        sequence = appendEvent(tx, runId, sequence, "completed", Map.of("outcomeType", "style_portrait",
+                "resultId", locked.run().get("targetId", String.class)), "run:completed", now);
+        updateRun(tx, runId, "completed", sequence, null, now, now);
+    }
+
+    private static String portraitText(ExecutionPlanSnapshot.Step generator, Map<String, Object> output) {
+        try {
+            WorkflowOutputValidator.validate(generator.outputSchema().jsonSchema(), output);
+        } catch (IllegalArgumentException exception) {
+            throw invalid("画像分节不符合冻结 Schema");
+        }
+        if (!output.keySet().equals(Set.of("content")) || !(output.get("content") instanceof String content)
+                || content.codePoints().allMatch(point -> Character.isWhitespace(point)
+                        || Character.isSpaceChar(point) || point == 0x85)) {
+            throw invalid("画像分节必须是按原空白规则非空的完整文本");
+        }
+        return content;
+    }
+
+    private static boolean isStyleRun(Record run) {
+        return "style".equals(run.get("workflow", String.class)) && "portrait".equals(run.get("operation", String.class));
+    }
+
+    private WorkflowStylePortraitCompletion styleCompletion() {
+        WorkflowStylePortraitCompletion completion = styleCompletion.get();
+        if (completion == null) throw new IllegalStateException("文风画像耐久投影端口未装配");
+        return completion;
+    }
+
+    private void cancelDeletedStyle(DSLContext tx, Locked locked, long sequence, LocalDateTime now) {
+        String runId = locked.run().get("id", String.class);
+        String cancelRequestId = "style-deleted." + runId;
+        tx.execute("UPDATE public.\"WorkflowRun\" SET \"cancelRequestId\" = ?, \"cancelRequestedAt\" = ? WHERE id = ?",
+                cancelRequestId, now, runId);
+        sequence = appendEvent(tx, runId, sequence, "cancelled", Map.of("cancelRequestId", cancelRequestId), "run:cancelled", now);
+        updateRun(tx, runId, "cancelled", sequence, "RUN_CANCELLED", now, now);
     }
 
     private void completeQuality(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
@@ -2329,6 +2455,13 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             Boolean outcomeUnknown,
             long previousSequence,
             LocalDateTime now) {
+        if (isStyleRun(locked.run())) {
+            if (!styleCompletion().targetExists(transaction, locked.run().get("id", String.class))) {
+                cancelDeletedStyle(transaction, locked, previousSequence, now);
+                return;
+            }
+            styleCompletion().finish(transaction, locked.run().get("id", String.class), "failed");
+        }
         if (isQualityRun(locked.run())) {
             String terminal = qualityCompletion().finish(transaction, locked.run().get("id", String.class), "failed");
             if ("cancelled".equals(terminal)) {
@@ -2415,6 +2548,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         }
         if (isQualityRun(locked.run())) {
             qualityCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled");
+        }
+        if (isStyleRun(locked.run())) {
+            styleCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled");
         }
         sequence = appendEvent(
                 transaction,

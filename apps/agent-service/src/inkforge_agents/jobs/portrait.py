@@ -7,6 +7,7 @@ from ..providers.base import ModelMessage, ModelTurnRequest
 from ..queue.repository import QueueJob
 from ..runtime.model_policy import resolve_portrait_model_policy
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
+from ..runtime.portrait_prompts import PORTRAIT_SECTION_INSTRUCTIONS, PORTRAIT_SYSTEM_PROMPT
 from .workflow_log import WorkflowLogPort
 
 
@@ -15,9 +16,7 @@ class PortraitCorePort(Protocol):
         self, resource: RunResource, style_id: str
     ) -> dict[str, Any]: ...
 
-    async def mark_portrait_processing(
-        self, resource: RunResource, style_id: str
-    ) -> None: ...
+    async def mark_portrait_processing(self, resource: RunResource, style_id: str) -> None: ...
 
     async def complete_portrait(
         self,
@@ -121,13 +120,7 @@ class PortraitJobHandler:
 
 
 class ModelPortraitGenerator:
-    _SECTIONS = {
-        "creativeMethodology": "分析作者组织素材、推进叙事和构造场景的创作方法论。",
-        "uniqueMarkers": "分析可辨识的语言习惯、意象、句式和独特标记。",
-        "generationStyle": "总结可直接指导后续正文生成的文风规则。",
-        "expressionFeatures": "分析叙述视角、节奏、对白和描写的表达特征。",
-        "styleTraits": "概括整体文风特质，并为每项结论指出文本证据。",
-    }
+    _SECTIONS = PORTRAIT_SECTION_INSTRUCTIONS
 
     def __init__(
         self,
@@ -146,9 +139,7 @@ class ModelPortraitGenerator:
     ) -> dict[str, str]:
         result: dict[str, str] = {}
         selected = (
-            self._SECTIONS.items()
-            if section is None
-            else ((section, self._SECTIONS[section]),)
+            self._SECTIONS.items() if section is None else ((section, self._SECTIONS[section]),)
         )
         for section_name, instruction in selected:
             response = await self._runtime.run_turn(
@@ -156,10 +147,7 @@ class ModelPortraitGenerator:
                     messages=[
                         ModelMessage(
                             role="system",
-                            content=(
-                                "你是中文小说文风分析师。只依据用户提供的完整参考资料分析，"
-                                "证据不足时明确说明，不得编造。只输出本维度正文。"
-                            ),
+                            content=PORTRAIT_SYSTEM_PROMPT,
                         ),
                         ModelMessage(
                             role="user",
@@ -180,9 +168,7 @@ class ModelPortraitGenerator:
                 lane="batch_media",
             )
             raw_finish_reason = (
-                response.rawFinishReason
-                if response.rawFinishReason is not None
-                else "未提供"
+                response.rawFinishReason if response.rawFinishReason is not None else "未提供"
             )
             if response.finishReason == "length":
                 raise RuntimeError(

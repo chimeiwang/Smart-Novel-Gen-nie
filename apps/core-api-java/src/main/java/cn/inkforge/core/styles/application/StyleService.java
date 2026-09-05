@@ -35,14 +35,21 @@ public final class StyleService {
     private final StyleRepository repository;
     private final StyleFileStorage storage;
     private final PortraitRunSubmitter submitter;
+    private final StylePortraitRunStarter starter;
 
     public StyleService(
             StyleRepository repository,
             StyleFileStorage storage,
             PortraitRunSubmitter submitter) {
+        this(repository, storage, submitter, null);
+    }
+
+    public StyleService(StyleRepository repository, StyleFileStorage storage, PortraitRunSubmitter submitter,
+            StylePortraitRunStarter starter) {
         this.repository = java.util.Objects.requireNonNull(repository);
         this.storage = java.util.Objects.requireNonNull(storage);
         this.submitter = submitter;
+        this.starter = starter;
     }
 
     public List<StyleResponse> list(String userId) {
@@ -82,6 +89,7 @@ public final class StyleService {
 
     public PortraitAcceptedResponse createPortrait(
             String userId, String styleId, PortraitSection section) {
+        if (starter != null) return new PortraitAcceptedResponse("pending", starter.start(userId, styleId, section).id());
         if (submitter == null) {
             throw new ApiException(
                     503,

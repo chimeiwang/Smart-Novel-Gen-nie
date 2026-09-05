@@ -95,6 +95,8 @@ class ExecutionCallbackClient:
             callback_kind=callback_kind,
         )
         payload = callback.model_dump(mode="json", by_alias=True, exclude_none=True)
+        # novelId 为必填 nullable 身份；其他可选空字段继续省略，不能把显式 null 变成缺失。
+        payload["novelId"] = callback.novelId
         body = canonical_json_body(payload)
         signed = self._signer.sign_request(
             body=body,

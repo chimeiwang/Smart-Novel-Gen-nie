@@ -11,13 +11,17 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.json.JsonWriteFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /** `inkforge-canonical-json/1` 的 Java 实现；用于 V2 执行协议全部哈希材料。 */
 public final class ExecutionCanonicalJson {
 
     public static final String ALGORITHM = "inkforge-canonical-json/1";
 
-    private static final ObjectMapper JSON = new ObjectMapper();
+    // 与 Python canonical JSON 保持控制字符转义的小写十六进制，不能改写字面正文。
+    private static final ObjectMapper JSON = JsonMapper.builder()
+            .disable(JsonWriteFeature.WRITE_HEX_UPPER_CASE).build();
     private static final Comparator<String> UNICODE_CODE_POINT_ORDER =
             ExecutionCanonicalJson::compareCodePoints;
 

@@ -75,7 +75,8 @@ short.version.get/preview/adopt 查看完整版本和 Diff、确认 confirmation
 既有版本下载和 outputFile 的完整 UTF-8 文件语义不变。
 
 中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，当时 Catalog 为 16/21；
-当前加上一致性终检为 17/21，其余文风画像、RAG 索引和两个开发视频操作尚未迁移。真实供应商和生产尚未验收，固定 JAR、活动
+一致性终检阶段达到 17/21，当前加入文风画像后为 18/21，剩余 RAG 索引和两个开发视频操作共三项尚未迁移。
+文风画像全仓与隔离跨进程验证通过，结果见其规格最终记录。真实供应商和生产尚未验收，固定 JAR、活动
 Skills 和服务器未随源码更新。后续 Skill 说明更新见 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
 的“中短篇四操作观察”专节，完整验收见中短篇迁移规格。普通 CLI 125、Operator 45 命令及三种长篇操作范围不变。
 
@@ -101,7 +102,8 @@ revise/discard 保持既有拒绝规则。这组 kind/updates 条件只决定结
 拒绝且不 POST；省略选择字段或其他 V2 候选沿既有语义忽略显式 null 时，不会因此新增 Artifact 类型门禁。
 Core 按精确 revision 和冻结来源在同一事务采用，冲突后必须重新读取并确认。
 这没有增加 125 个普通 CLI 命令，也没有扩大 45 命令/三 Operation 的 Operator 范围。五项结构化资料入口、
-自动返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21，当前加上中短篇四项与一致性终检为 17/21；结构化资料定向验证
+自动返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21，随后中短篇四项与一致性终检达到 17/21，
+当前加入文风画像后为 18/21；结构化资料定向验证
 与全量门禁见对应规格最终记录。
 源码、构建产物与固定包分别验收，本批没有更新固定 JAR、活动 Skills 或部署服务器。
 
@@ -111,6 +113,15 @@ Core 按精确 revision 和冻结来源在同一事务采用，冲突后必须�
 本 Python 实现仅作契约对照，活动入口仍为 Java。Skills 更新说明见
 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“一致性终检迁移说明”，
 具体实现和验收见 `docs/specs/2026-09-05-durable-consistency-quality.md`。
+
+文风画像迁移不改变 `long.style.apply/clear` 的参数、输出和确认规则，也不新增画像创建、上传、编辑或
+删除命令。`style.portrait` 是 Core 原文风接口的内部执行操作，不能作为 `long.agent.start` 的 operation；
+画像任务也不改用长篇写作 watcher。新 V2 按用户级无小说 Run 冻结完整参考，整套五节或目标单节输出纯文本，
+由 Core 沿原业务直接物化 WritingStyle；原 V1 任务保留，新 V2 不造旧任务影子行。Agent/Core、全仓及隔离
+独立进程验证通过。完整行为及验收见
+[文风画像迁移规格](../../docs/specs/2026-09-05-durable-style-portrait.md)，后续 Skills 更新说明见
+[Operator Skill 更新文档](../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md)。
+本轮源码修改不表示固定 JAR、活动 Skills 或服务器已经更新。
 
 ### 结构化资料的显式启动（当前源码）
 

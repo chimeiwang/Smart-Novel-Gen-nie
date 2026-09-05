@@ -37,6 +37,11 @@ public final class WorkflowRunCancellationService {
                 .executorRequests().forEach(this::deliver);
     }
 
+    public void cancelDeletedStyle(WorkflowStylePortraitCompletion.DeletedRun run) {
+        repository.requestDeletedStyle(run.userId(), run.runId(), run.cancelRequestId())
+                .executorRequests().forEach(this::deliver);
+    }
+
     /** 每轮先结算取消中的过期租约，再限量重投仍运行的精确取消。 */
     public int runOnce() {
         int settled = repository.settleExpired(batchSize);

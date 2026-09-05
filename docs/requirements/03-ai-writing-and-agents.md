@@ -141,8 +141,8 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 
 五项显式/自然入口、最多一次自动完整返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21；随后中短篇
-四项接线与本地验收达到 16/21，本轮接入一致性终检后当前 Catalog 为 17/21，自然入口仍支持十项无选区操作。其余文风画像、RAG
-索引和两个开发视频操作尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
+四项接线与本地验收达到 16/21，一致性终检阶段达到 17/21，当前加入文风画像后 Catalog 为 18/21，
+自然入口仍支持十项无选区操作。剩余 RAG 索引和两个开发视频操作共三项尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
 启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
 显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
 manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节锚点，scope 不取消既有跨分区候选能力。
@@ -155,6 +155,19 @@ Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组�
 已完成报告，不新增 Reviewer、候选或写作限制。原可选 taskId 兼容同归属 V1 Task 与 V2 写作 Run，
 CLI 继续 `long.quality.*`，不新增参数或直接访问 Agent。实现及验收见
 `docs/specs/2026-09-05-durable-consistency-quality.md`，固定安装与生产状态分别核对。
+
+## V2 文风画像迁移进度
+
+`style.portrait` 使用用户级 Run，显式 `novelId=null`，不伪造小说身份。Core 受理时完整冻结 ready 参考文件为
+`style_portrait_context`，后续各节复用同一来源，不向 Agent 传路径。`style.portrait.v2` 按创作方法、独特标记、
+生成风格、表达特征、风格特质五节固定串行；单节重做只执行目标节。模型沿纯文本路线、关闭 thinking，不带工具、
+结构化输出或 Reviewer。Step 保存完整原始回复；Core 保留原 Python 去空白语义，整套全部完成才一次性写入
+WritingStyle，单节只更新目标字段及原汇总，不新增 ReviewArtifact 或用户采用流程。
+
+V1 StylePortraitTask 与旧恢复继续保留；新 V2 只使用 WorkflowRun/Step，不创建旧任务影子行，原任务查询双读。
+参考增删和手工编辑仍允许；删除文风后原耐久取消路径收敛，迟到结果不能重建文风。原公共入口和 CLI 范围不变。
+Agent/Core、全仓门禁与隔离独立进程验证均通过，结果见
+`docs/specs/2026-09-05-durable-style-portrait.md` 最终记录为准，不宣称真实供应商、生产或固定安装已生效。
 
 ## 目标
 
@@ -545,7 +558,7 @@ DeepSeek 工具 arguments 解析失败时，Provider 必须在可靠 usage 已�
 - 人工模型日志按 v2 长度分帧保存；Core 成功接受 usage report 后形成的 billable 模型调用区块，可用
   计费 `requestId` 与 `TokenUsage` 对账，report 失败不形成该次区块。日志正文不参与结构解析，旧版
   原文处于未验证边界，残缺尾部隔离后才恢复追加，完整输入输出不截断。
-- Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列。文风画像以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实；各自 dispatcher 使用稳定任务标识补投，Redis 只承载可重建的投递状态。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
+- V1 写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列；V1 文风画像仍以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实。新 V2 文风画像使用 WorkflowRun/Step，不创建 StylePortraitTask 影子行，原公开查询双读；普通 Redis 不替代数据库执行或业务状态，V2 独立 execution journal 只持有调用边界和待送达终态。Agent 通过签名回调交付结果，正式文风仅由 Core 物化。
 - 草案进入等待用户确认时，Agent Service 使用下一个连续序号直接保存稳定快照，不再先直发等待事件；Core 在保存快照的同一事务中创建 `artifact_awaiting_user_approval` Outbox。后续 resume/artifact_decision 命令会在自身事务内作废尚未发布的旧 waiting，Publisher 遇到 waiting 序号竞争时也会再次核对并转为 superseded。长篇 completed/error 稳定 checkpoint 只保存图内终态，数据库任务和命令保持非终态，直到 complete/fail 与 terminal Outbox 在同一事务收敛。SSE 只重放 published 边界事件，跳过 superseded，并在 pending/delivering/blocked 边界前保留原游标等待；同时发送不带游标的 PostgreSQL `run_outcome` 控制帧。客户端在建连或断流后重新读取 outcome，只按 `streamShouldClose` 收敛生命周期，legacy 事件只承担展示兼容且不能直接恢复可操作草案；非 waiting_user 终态按任务清理临时草案入口并使较早的在途读取失效，相同 succeeded outcome 的完成副作用按任务、命令和结果只执行一次。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent 队列消费者已在单进程内提供默认三个执行槽，不同 `novelId` 可并行、同一 `novelId` 只执行一个 job，每个 claim 独立续租；共享 `ModelRuntime` 同时把普通 Agent、Reviewer、中短篇、质量和画像的模型调用总数限制为三个。消费槽致命错误会立即停止新领取并使 readiness 失败，其他已领取任务排空后由监督器重启；配置 1 保留串行回退路径。

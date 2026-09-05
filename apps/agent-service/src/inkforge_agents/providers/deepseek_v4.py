@@ -104,12 +104,14 @@ class DeepSeekV4Provider:
             await self._client.aclose()
 
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
-        return route == "chat_json_output_v1" or (
+        return route in {"chat_json_output_v1", "plain_text_v1"} or (
             route == "quality_strict_tool_v1" and self._strict_endpoint is not None
         )
 
     def execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
         """质量调用依据真实 strict 端点授权，不借普通 base URL 冒充官方端点。"""
+        if route == "plain_text_v1":
+            return self.endpoint_profile, "capability.deepseek-v4.plain-text.v1"
         if route == "quality_strict_tool_v1":
             if self._strict_endpoint is None:
                 raise ValueError("质量 strict 路由未配置")

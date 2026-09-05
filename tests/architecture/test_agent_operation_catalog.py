@@ -121,6 +121,7 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
 )
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
     {
+        "style.portrait.v1",
         "quality.consistency.v1",
         "system.protocol_corrector.v1",
         "system.intent_resolver.v1",
@@ -143,6 +144,7 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
     {
+        "output.style_portrait.v1",
         "output.consistency_quality_report.v1", "output.protocol_correction.v1",
         "output.agent_updates.v1", "output.agent_updates.v2",
         "output.short_medium_outline.v1", "output.short_medium_segment_manifest.v1",
@@ -309,6 +311,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         "short_medium.replace_selection",
         "short_medium.full_check",
         "quality.consistency",
+        "style.portrait",
     }
     answer = next(
         operation
@@ -463,6 +466,8 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
                 assert allowed["structuredOutputRoute"] == (
                     "quality_strict_tool_v1"
                     if deployment["key"] == "deployment.quality.consistency.v2"
+                    else "plain_text_v1"
+                    if deployment["key"] == "deployment.style.portrait.v2"
                     else "chat_json_output_v1"
                 )
 
@@ -851,6 +856,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "short_medium.replace_selection",
         "short_medium.full_check",
         "quality.consistency",
+        "style.portrait",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
@@ -865,6 +871,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 "long_serial.review_chapter",
                 "short_medium.full_check",
                 "quality.consistency",
+                "style.portrait",
             }
             else "bounded"
         )
@@ -966,6 +973,18 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert schema["properties"]["qualityGate"]["enum"] == ["pass", "revise"]
             assert schema["properties"]["issues"]["maxItems"] == 100
             assert schema["properties"]["report"] == {"minLength": 1, "type": "string"}
+        elif operation["key"] == "style.portrait":
+            schema = output_schema["jsonSchema"]
+            assert schema["required"] == ["content"]
+            assert schema["properties"] == {"content": {"minLength": 1, "type": "string"}}
+            assert schema["additionalProperties"] is False
+            assert generator["key"] == "style.portrait.v2"
+            assert {
+                item["structuredOutputRoute"] for item in generator_deployment["allowedModels"]
+            } == {"plain_text_v1"}
+            assert operation["runBudgetProfile"]["maxModelCalls"] == 5
+            assert operation["runBudgetProfile"]["maxPromptCacheMissTokens"] == 300000
+            assert operation["runBudgetProfile"]["maxProtocolCorrectionSteps"] == 0
         elif operation["workflow"] == "short_medium":
             expected_field = {
                 "generate_outline": "content",

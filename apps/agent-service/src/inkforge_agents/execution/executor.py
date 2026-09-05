@@ -54,6 +54,7 @@ from inkforge_contracts.execution import (
     materialize_outline_selection_output,
 )
 from inkforge_contracts.short_medium_execution import materialize_short_medium_output
+from inkforge_contracts.style_execution import StylePortraitSectionOutput, StylePortraitStepInput
 from pydantic import JsonValue, ValidationError
 
 from ..providers.base import (
@@ -68,6 +69,8 @@ from ..providers.base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
+from ..runtime.portrait_prompts import PORTRAIT_SECTION_INSTRUCTIONS
+from .portrait import portrait_context
 from .quality import (
     QUALITY_CORRECTION_REQUIRED,
     QUALITY_TOOL,
@@ -100,6 +103,7 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
     {
         *(("short_medium", operation) for operation in SHORT_MEDIUM_HANDLERS),
         ("quality", "consistency"),
+        ("style", "portrait"),
         ("long_serial", "answer_question"),
         ("long_serial", "create_lore"),
         ("long_serial", "create_outline"),
@@ -413,16 +417,17 @@ class StatelessExecutionStepExecutor:
         if request.budget.maxCompletionTokens > self._max_output_tokens:
             raise ExecutionCapabilityError("Step completion 预算超过当前部署模型能力")
 
-        structured_output_route = self._structured_output_route()
+        structured_output_route = self._structured_output_route(request)
+        endpoint, capability = self._execution_identity(structured_output_route)
         try:
             registry.require_authorized_deployment(
                 deployment_profile_key=profile.deployment_profile_key,
                 provider=self._model.provider_name,
                 model=self._model.model_name,
                 transport_profile=self._model.transport_profile,
-                endpoint_profile=self._model.endpoint_profile,
+                endpoint_profile=endpoint,
                 structured_output_route=structured_output_route,
-                capability_version=self._model.capability_version,
+                capability_version=capability,
                 reasoning_mode=profile.reasoning_mode,
                 supports_request_idempotency=self._model.supports_request_idempotency,
             )
@@ -434,9 +439,9 @@ class StatelessExecutionStepExecutor:
             provider=self._model.provider_name,
             model=self._model.model_name,
             transport_profile=self._model.transport_profile,
-            endpoint_profile=self._model.endpoint_profile,
+            endpoint_profile=endpoint,
             structured_output_route=structured_output_route,
-            capability_version=self._model.capability_version,
+            capability_version=capability,
             supports_request_idempotency=self._model.supports_request_idempotency,
         )
         return ResolvedExecutionStep(
@@ -546,6 +551,10 @@ class StatelessExecutionStepExecutor:
             budget
             for budget in registry.step_budgets.values()
             if budget.supported
+            and (
+                request.workflow != "style"
+                or budget.key == "step_budget.style.portrait.generator.v2"
+            )
             and _step_budget_matches(request, budget)
             and (
                 request.purpose != "resolve_intent"
@@ -651,6 +660,33 @@ class StatelessExecutionStepExecutor:
     ) -> ModelTurnRequest:
         route = resolved.structured_output_route
         system_prompt = resolved.prompt_profile.system_prompt
+        if route == "plain_text_v1":
+            context = portrait_context(request)
+            section = StylePortraitStepInput.model_validate(request.input).section
+            instruction = PORTRAIT_SECTION_INSTRUCTIONS[section]
+            model_request = ModelTurnRequest(
+                messages=[
+                    ModelMessage(role="system", content=system_prompt),
+                    ModelMessage(
+                        role="user",
+                        content=f"任务：{instruction}\n\n完整参考资料：\n{context.source_text}",
+                    ),
+                ],
+                tools=[],
+                maxOutputTokens=request.budget.maxCompletionTokens,
+                policy=ModelExecutionPolicy(
+                    policyId=request.modelProfile.profile, thinkingMode="disabled"
+                ),
+                thinkingMode="disabled",
+                parallelToolCalls=False,
+                requestIdempotencyKey=request.idempotencyKey,
+            )
+            if (
+                sum(len(message.content) for message in model_request.messages)
+                > request.budget.maxInputTokens
+            ):
+                raise ExecutionCapabilityError("完整画像来源超过 Step maxInputTokens")
+            return model_request
         input_envelope = {
             "protocolVersion": "2.0",
             "workflow": request.workflow,
@@ -997,6 +1033,21 @@ class StatelessExecutionStepExecutor:
                     "finishReason": "stop",
                 }
             )
+        if request.workflow == "style":
+            failure = _validate_portrait_provider_result(result)
+            if failure is not None:
+                if _step_budget_exceeded(request, usage):
+                    failure = ("validation", "STEP_BUDGET_EXCEEDED")
+                return _failure(
+                    request,
+                    resolved.resolved_model,
+                    usage=usage,
+                    category=failure[0],
+                    code=failure[1],
+                    outcome_unknown=False,
+                    failed_at=now,
+                )
+            result = result.model_copy(update={"structuredOutput": {"content": result.content}})
         failure = _validate_provider_result(request, result, usage)
         if failure is not None:
             return _failure(
@@ -1152,6 +1203,10 @@ class StatelessExecutionStepExecutor:
             if self._model.supports_structured_output("quality_strict_tool_v1"):
                 return "quality_strict_tool_v1"
             raise ExecutionCapabilityError("当前 Provider 不支持质量 strict 工具路由")
+        if request is not None and request.workflow == "style":
+            if self._model.supports_structured_output("plain_text_v1"):
+                return "plain_text_v1"
+            raise ExecutionCapabilityError("当前 Provider 不支持画像纯文本路由")
         for route in ("responses_json_schema_v1", "chat_json_output_v1"):
             if self._model.supports_structured_output(route):
                 return route
@@ -1518,6 +1573,12 @@ def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCo
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if request.workflow == "style":
+        try:
+            portrait_context(request)
+        except (ValueError, ValidationError) as exc:
+            raise ExecutionCapabilityError("画像输入与冻结来源不一致") from exc
+        return
     if request.workflow == "quality":
         try:
             validate_quality_request(request)
@@ -2187,6 +2248,30 @@ def _validate_provider_result(
             _intent_command(request, result.structuredOutput)
         except (ValueError, ValidationError, ExecutionCapabilityError):
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    return None
+
+
+def _validate_portrait_provider_result(
+    result: ModelTurnResult,
+) -> tuple[Literal["provider_terminal", "protocol", "validation"], str] | None:
+    if result.finishReason == "length":
+        return "provider_terminal", "MODEL_OUTPUT_TRUNCATED"
+    if result.finishReason == "content_filter":
+        return "provider_terminal", "MODEL_OUTPUT_FILTERED"
+    if result.finishReason != "stop":
+        return "protocol", "MODEL_FINISH_REASON_INVALID"
+    if (
+        result.toolCalls
+        or result.invalidToolCallCount
+        or result.recoveredToolCallCount
+        or result.structuredOutput is not None
+        or result.structuredOutputDiagnostic is not None
+    ):
+        return "protocol", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    try:
+        StylePortraitSectionOutput(content=result.content)
+    except ValidationError:
+        return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
 

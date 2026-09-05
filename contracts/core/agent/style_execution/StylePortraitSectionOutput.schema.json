@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/style_execution/StylePortraitSectionOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    }
+  },
+  "required": [
+    "content"
+  ],
+  "title": "StylePortraitSectionOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.style_execution.StylePortraitSectionOutput"
+}

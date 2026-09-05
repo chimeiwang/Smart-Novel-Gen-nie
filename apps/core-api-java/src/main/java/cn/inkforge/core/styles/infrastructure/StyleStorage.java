@@ -277,7 +277,7 @@ public final class StyleStorage implements StyleFileStorage {
         return bounded + suffix;
     }
 
-    private static String stripPythonWhitespace(String value) {
+    static String stripPythonWhitespace(String value) {
         int start = 0;
         int end = value.length();
         while (start < end) {

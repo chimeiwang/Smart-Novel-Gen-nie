@@ -5411,7 +5411,7 @@ export interface components {
              * Structuredoutputroute
              * @enum {string}
              */
-            structuredOutputRoute: "responses_json_schema_v1" | "chat_json_output_v1" | "quality_strict_tool_v1";
+            structuredOutputRoute: "responses_json_schema_v1" | "chat_json_output_v1" | "quality_strict_tool_v1" | "plain_text_v1";
             /** Capabilityversion */
             capabilityVersion: string;
             /**

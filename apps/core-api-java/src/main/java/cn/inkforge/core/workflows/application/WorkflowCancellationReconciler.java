@@ -11,6 +11,7 @@ public final class WorkflowCancellationReconciler {
     private final Duration interval;
     private final AtomicBoolean stop = new AtomicBoolean();
     private final java.util.function.Supplier<WorkflowQualityCompletion> quality;
+    private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styles;
 
     public WorkflowCancellationReconciler(
             WorkflowRunCancellationService cancellations, Duration interval) {
@@ -19,8 +20,15 @@ public final class WorkflowCancellationReconciler {
 
     public WorkflowCancellationReconciler(WorkflowRunCancellationService cancellations, Duration interval,
             java.util.function.Supplier<WorkflowQualityCompletion> quality) {
+        this(cancellations, interval, quality, () -> null);
+    }
+
+    public WorkflowCancellationReconciler(WorkflowRunCancellationService cancellations, Duration interval,
+            java.util.function.Supplier<WorkflowQualityCompletion> quality,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styles) {
         this.cancellations = Objects.requireNonNull(cancellations);
         this.quality = Objects.requireNonNull(quality);
+        this.styles = Objects.requireNonNull(styles);
         if (interval == null || interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("Workflow 取消对账间隔必须为正数");
         }
@@ -33,6 +41,13 @@ public final class WorkflowCancellationReconciler {
         if (projection != null) {
             for (var run : projection.findInvalidatedRuns(20)) {
                 cancellations.cancelInvalidatedQuality(run);
+                invalidated++;
+            }
+        }
+        WorkflowStylePortraitCompletion portraits = styles.get();
+        if (portraits != null) {
+            for (var run : portraits.findDeletedRuns(20)) {
+                cancellations.cancelDeletedStyle(run);
                 invalidated++;
             }
         }

@@ -20,6 +20,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
+import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -68,7 +69,8 @@ class WorkflowConfiguration {
             ExecutionRegistry workflowExecutionRegistry,
             CoreSettings settings,
             WorkflowExecutionContextReader contexts,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
         return new JooqWorkflowDispatchRepository(
                 database,
                 ids,
@@ -76,7 +78,7 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30),
-                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable);
+                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
     }
 
     @Bean
@@ -90,7 +92,8 @@ class WorkflowConfiguration {
             ObjectProvider<WorkflowIntentBusinessPreparation> preparations,
             ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates,
             ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
@@ -98,7 +101,7 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
-                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable);
+                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
     }
 
     @Bean
@@ -125,9 +128,10 @@ class WorkflowConfiguration {
             Clock coreClock,
             ObjectMapper objectMapper,
             ExecutionRegistry workflowExecutionRegistry,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
         return new JooqWorkflowRunCancellationRepository(
-                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable);
+                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
     }
 
     @Bean
@@ -141,8 +145,9 @@ class WorkflowConfiguration {
     @Bean
     WorkflowCancellationReconciler workflowCancellationReconciler(
             WorkflowRunCancellationService cancellations,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
-        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1), qualityCompletion::getIfAvailable);
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
+        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1), qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
     }
 
     @Bean

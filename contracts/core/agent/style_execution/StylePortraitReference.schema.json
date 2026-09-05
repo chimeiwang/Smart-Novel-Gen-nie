@@ -1,0 +1,44 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/style_execution/StylePortraitReference/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "charCount": {
+      "minimum": 0,
+      "title": "Charcount",
+      "type": "integer"
+    },
+    "content": {
+      "minLength": 1,
+      "title": "Content",
+      "type": "string"
+    },
+    "contentSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contentsha256",
+      "type": "string"
+    },
+    "filename": {
+      "minLength": 1,
+      "title": "Filename",
+      "type": "string"
+    },
+    "referenceId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Referenceid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "referenceId",
+    "filename",
+    "charCount",
+    "content",
+    "contentSha256"
+  ],
+  "title": "StylePortraitReference",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.style_execution.StylePortraitReference"
+}

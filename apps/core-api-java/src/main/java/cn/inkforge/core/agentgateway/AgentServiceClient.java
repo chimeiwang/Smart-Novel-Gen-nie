@@ -157,6 +157,10 @@ public final class AgentServiceClient {
         }
         ExecutionStepAccepted accepted;
         try {
+            // novelId 是必需但可空的身份字段，省略不能等价于用户级任务的显式 null。
+            if (!objectMapper.readTree(response.body()).has("novelId")) {
+                throw executionSubmitFailed();
+            }
             accepted = objectMapper.readValue(response.body(), ExecutionStepAccepted.class);
         } catch (RuntimeException exception) {
             throw executionSubmitFailed();
@@ -202,6 +206,9 @@ public final class AgentServiceClient {
         }
         ExecutionCancelAccepted accepted;
         try {
+            if (!objectMapper.readTree(response.body()).has("novelId")) {
+                throw executionCancelFailed();
+            }
             accepted = objectMapper.readValue(response.body(), ExecutionCancelAccepted.class);
         } catch (RuntimeException exception) {
             throw executionCancelFailed();

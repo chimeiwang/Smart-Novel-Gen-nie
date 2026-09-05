@@ -284,6 +284,13 @@ public final class CoreSettings {
         };
     }
 
+    /** 用户私有资产没有小说归属；只用于显式用户级入口，不放宽既有小说级双 allowlist。 */
+    public boolean routesNewUserScopedDurableAgentRun(String userId) {
+        return durableAgentExecutionSchemaReady
+                && durableAgentRouteMode == DurableAgentRouteMode.ALLOWLIST
+                && userId != null && durableAgentUserAllowlist.contains(userId);
+    }
+
     public Path uploadsRoot() {
         return uploadsRoot;
     }

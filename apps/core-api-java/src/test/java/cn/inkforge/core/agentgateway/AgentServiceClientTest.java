@@ -129,6 +129,9 @@ class AgentServiceClientTest {
             assertThat(method.get()).isEqualTo("POST");
             assertThat(path.get()).isEqualTo("/internal/v1/executions");
             assertThat(body.get()).contains("\"stepId\":\"step-1\"");
+            JsonNode requestBody = new ObjectMapper().readTree(body.get());
+            assertThat(requestBody.has("novelId")).isTrue();
+            assertThat(requestBody.get("novelId").isNull()).isTrue();
             JsonNode claims = jwtClaims(authorization.get());
             assertThat(claims.path("scope").get(0).asString()).isEqualTo("execution:submit");
             assertThat(claims.path("task_id").asString()).isEqualTo("step-1");
@@ -137,6 +140,38 @@ class AgentServiceClientTest {
             assertThat(claims.path("http_method").asString()).isEqualTo("POST");
             assertThat(claims.path("http_path").asString())
                     .isEqualTo("/internal/v1/executions");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void V2用户级提交与取消必须区分必需空小说和省略字段() throws Exception {
+        AtomicReference<String> responseBody = new AtomicReference<>();
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = server("/internal/v1/executions", exchange -> {
+            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, 202, responseBody.get());
+        });
+        try {
+            AgentServiceClient gateway = client(server, Duration.ofSeconds(2));
+            responseBody.set(executionAcceptedJson(null).replace("\"novelId\":null,", ""));
+            assertThatThrownBy(() -> gateway.submitExecution(executionStep(null)))
+                    .isInstanceOf(AgentGatewayException.class)
+                    .extracting(error -> ((AgentGatewayException) error).code())
+                    .isEqualTo("AGENT_EXECUTION_SUBMIT_FAILED");
+            ExecutionCancelRequest cancel = executionCancel().novelId(null);
+            String accepted = executionCancelAcceptedJson().replace("\"novelId\":\"novel-1\"", "\"novelId\":null");
+            responseBody.set(accepted);
+            assertThat(gateway.cancelExecution("job-1", cancel).getNovelId()).isNull();
+            JsonNode sent = new ObjectMapper().readTree(requestBody.get());
+            assertThat(sent.has("novelId")).isTrue();
+            assertThat(sent.get("novelId").isNull()).isTrue();
+            responseBody.set(accepted.replace("\"novelId\":null,", ""));
+            assertThatThrownBy(() -> gateway.cancelExecution("job-1", cancel))
+                    .isInstanceOf(AgentGatewayException.class)
+                    .extracting(error -> ((AgentGatewayException) error).code())
+                    .isEqualTo("AGENT_EXECUTION_CANCEL_FAILED");
         } finally {
             server.stop(0);
         }

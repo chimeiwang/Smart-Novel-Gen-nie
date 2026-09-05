@@ -479,6 +479,20 @@ class ComposeStack:
         )
         return completed.stdout.splitlines()
 
+    def redis_hash(self, key: str) -> dict[str, str]:
+        # 原文 JSON 可包含 U+0085 等 Unicode 分行符，不能用文本行拆分 HGETALL。
+        completed = self.run(
+            ["exec", "-T", "execution-redis", "redis-cli", "--json", "HGETALL", key],
+            timeout=30,
+        )
+        value = json.loads(completed.stdout)
+        if not isinstance(value, dict) or any(
+            not isinstance(field, str) or not isinstance(content, str)
+            for field, content in value.items()
+        ):
+            raise AssertionError("execution journal HGETALL 不是字符串键值对象")
+        return value
+
     def restart(self, service: str) -> None:
         self.run(["restart", service], timeout=120)
 
@@ -1153,12 +1167,7 @@ class Acceptance:
         }
 
     def journal_facts(self, step_id: str) -> dict[str, object]:
-        values = self.stack.redis("HGETALL", f"inkforge:executions:{step_id}")
-        if values == [""]:
-            values = []
-        if len(values) % 2 != 0:
-            raise AssertionError("execution journal HGETALL 返回了不完整的键值对")
-        entry = dict(zip(values[::2], values[1::2], strict=True))
+        entry = self.stack.redis_hash(f"inkforge:executions:{step_id}")
         raw_fence = entry.get("fencing_token")
         try:
             fencing_token = int(raw_fence) if raw_fence is not None else None
@@ -2198,7 +2207,12 @@ def run(
                 }
             )
 
-        if phase == "quality":
+        if phase == "style":
+            from tests.durable_agent_v2_e2e.style import scenarios as style_scenarios
+
+            for scenario in style_scenarios(acceptance):
+                record_scenario(scenario)
+        elif phase == "quality":
             from tests.durable_agent_v2_e2e.quality import scenarios as quality_scenarios
 
             for scenario in quality_scenarios(acceptance):
@@ -2317,6 +2331,7 @@ def main() -> int:
             "review-rewrites",
             "short-medium",
             "quality",
+            "style",
         ),
         default="minimum",
         help=(
@@ -2328,7 +2343,8 @@ def main() -> int:
             "natural-entry 验证自然问答、重启后澄清、两回答未决失败、规划/写章审核与作者决定；"
             "review-rewrites 验证整章审阅、场景改写和两类大纲选区的完整 V2 闭环；"
             "short-medium 验证四操作、双段完整前缀、Agent重启恢复、精确候选采用与完整报告；"
-            "quality 验证原终检接口、完整报告、一次独立纠正和失败终态的 Agent 重启重放"
+            "quality 验证原终检接口、完整报告、一次独立纠正和失败终态的 Agent 重启重放；"
+            "style 验证用户级画像完整五节、首节重启重放、原空白与字数规则及单节重做"
         ),
     )
     parser.add_argument(

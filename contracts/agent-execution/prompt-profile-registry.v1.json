@@ -3,6 +3,14 @@
   "hashAlgorithm": "sha256-utf8/1",
   "prompts": [
     {
+      "key": "prompt.style.portrait.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "e2ad15acafaf6c713bcf7ed577975fda41b72ba17b3d3586084551d2e1d47c7b",
+      "systemPrompt": "你是中文小说文风分析师。只依据用户提供的完整参考资料分析，证据不足时明确说明，不得编造。只输出本维度正文。"
+    },
+    {
       "key": "prompt.quality.consistency.v2",
       "version": 2,
       "supported": true,

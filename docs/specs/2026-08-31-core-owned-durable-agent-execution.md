@@ -721,6 +721,9 @@ V2 的 input、request、manifest、output schema 与 result 哈希统一使用
 最短十进制定点形式，`-0` 归一为 `0`，拒绝 NaN、Infinity、非字符串对象键和未配对代理字符。Pydantic
 可空模型字段在进入哈希材料前统一省略；任意 JSON 值中的显式 `null` 不得省略。成功与失败的 `resultHash`
 都绑定完整 usage。Python 与 Java 必须共享字节级 golden vector，协议版本不允许隐式改变算法。
+控制字符的 JSON Unicode 转义固定使用小写十六进制（如实际 U+001C 编码为 `\u001c`）；这不改变原始字符，
+也不改变字面文本 `\u001C` 中的大小写。Java canonical 编码不得依赖 Jackson 默认的大写转义；2026-09-05
+画像跨进程验收定位并修复该编码偏差，旧标准向量与不含此类字符的哈希保持不变，不自动改写异常历史冻结记录。
 进入 Evidence manifest 哈希的 aware datetime 必须先截到微秒，并使用跨语言唯一文本形式：秒位始终存在，
 零小数不输出 fraction，非零 fraction 固定六位，原 UTC offset 保留且 UTC 写作 `Z`。Core 构造 manifest 与持久化
 Evidence item 必须复用同一个规范化时间值；禁止直接使用 Java `OffsetDateTime.toString()` 等会省略零秒位的语言默认

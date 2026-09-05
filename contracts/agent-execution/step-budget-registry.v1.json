@@ -2,6 +2,23 @@
   "registryVersion": "1",
   "budgets": [
     {
+      "key": "step_budget.style.portrait.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 60000,
+        "maxPromptCacheMissTokens": 60000,
+        "maxCompletionTokens": 6000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 6000,
+        "maxCostMicros": 200000,
+        "maxWallClockSeconds": 180,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
+      }
+    },
+    {
       "key": "step_budget.quality.consistency.generator.v2",
       "version": 2,
       "supported": true,

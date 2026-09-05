@@ -19,10 +19,12 @@ from inkforge_contracts import ChapterDraftResult, EvaluationFinding
 if __package__:
     from .quality_fixture import quality_turn_result
     from .short_medium_fixture import short_medium_output
+    from .style_fixture import style_turn_result
 else:
     # Compose 将整个既有测试目录只读挂到 /e2e，以顶层模块加载 Agent 工厂。
     from quality_fixture import quality_turn_result
     from short_medium_fixture import short_medium_output
+    from style_fixture import style_turn_result
 
 _WRITING_REVIEW_ROLES = {
     "reviewer.chapter_draft_consistency.v1": "consistency",
@@ -80,7 +82,10 @@ class ControlledFakeModelProvider:
         response.raise_for_status()
         short_output = short_medium_output(request)
         quality_result = quality_turn_result(request)
-        if quality_result is not None:
+        style_result = style_turn_result(request)
+        if style_result is not None:
+            result = style_result
+        elif quality_result is not None:
             result = quality_result
         elif short_output is None:
             result = await self._delegate.complete_turn(request)

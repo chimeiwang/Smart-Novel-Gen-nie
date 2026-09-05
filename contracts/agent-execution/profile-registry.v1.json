@@ -2,6 +2,15 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "style.portrait.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.style.portrait.v2",
+      "deploymentProfileKey": "deployment.style.portrait.v2"
+    },
+    {
       "key": "quality.consistency.v2",
       "version": 2,
       "supported": true,

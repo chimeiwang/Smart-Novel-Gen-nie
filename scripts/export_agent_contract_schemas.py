@@ -27,6 +27,7 @@ CONTRACT_MODULES = (
     "runs",
     "short_medium",
     "short_medium_execution",
+    "style_execution",
     "tools",
     "video",
     "video_adaptation",
@@ -51,6 +52,7 @@ MODULE_SCHEMA_VERSIONS = {
     "workflow_events": "2.0",
     "short_medium_execution": "2.0",
     "quality_execution": "2.0",
+    "style_execution": "2.0",
 }
 
 

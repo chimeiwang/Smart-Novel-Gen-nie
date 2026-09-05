@@ -38,6 +38,7 @@ class ExecutionRegistryTest {
                         "long_serial.rewrite_outline_selection",
                         "long_serial.rewrite_scene",
                         "long_serial.write_chapter");
+        assertThat(registry.enabledOperationKeys("style", false)).containsExactly("style.portrait");
         ExecutionRegistry.ResolvedOperation resolved =
                 registry.resolve("long_serial.rewrite_chapter_selection", false);
 
@@ -111,6 +112,43 @@ class ExecutionRegistryTest {
         assertThatThrownBy(() -> registry.resolveSystemPurpose("summarize_evidence"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
+    }
+
+    @Test
+    void 画像冻结五次串行纯文本预算且不借用质量纠正或审核计划() {
+        ExecutionRegistry registry = ExecutionRegistryFixtures.styleOperationEnabled(ExecutionRegistry.Environment.TEST);
+        ExecutionPlanSnapshot plan = registry.freezePlan("style.portrait", false);
+        assertThat(plan.generator().lane()).isEqualTo("batch_media");
+        assertThat(plan.generator().modelProfile().profile()).isEqualTo("style.portrait.v2");
+        assertThat(plan.generator().modelProfile().deploymentProfileKey()).isEqualTo("deployment.style.portrait.v2");
+        assertThat(plan.generator().outputSchema().name()).isEqualTo("output.style_portrait_section.v2");
+        assertThat(plan.generator().stepBudget().budget().maxModelCalls()).isEqualTo(1);
+        assertThat(plan.generator().stepBudget().budget().maxProtocolCorrections()).isZero();
+        assertThat(plan.runBudget().maxModelCalls()).isEqualTo(5);
+        assertThat(plan.runBudget().maxPromptCacheMissTokens()).isEqualTo(300000);
+        assertThat(plan.runBudget().maxProtocolCorrectionSteps()).isZero();
+        assertThat(plan.systemSteps()).isEmpty();
+        assertThat(plan.reviewers()).isEmpty();
+        assertThat(ExecutionPlanSnapshot.fromStored(plan.stored()).stored()).isEqualTo(plan.stored());
+        ExecutionRegistry production = ExecutionRegistryFixtures.styleOperationEnabled(ExecutionRegistry.Environment.PRODUCTION);
+        JsonNode profile = findByKey(JSON.readTree(classpathDocuments().get("deployment-profile-registry.v1.json")).get("profiles"),
+                "deployment.style.portrait.v2");
+        boolean found = false;
+        for (JsonNode model : profile.get("allowedModels")) {
+            boolean allowed = false;
+            for (JsonNode environment : model.get("allowedEnvironments")) {
+                if ("production".equals(environment.asString())) allowed = true;
+            }
+            if (!allowed) continue;
+            found = true;
+            assertThat(production.requireAuthorizedDeployment(resolved("deployment.style.portrait.v2", model, "plain_text_v1"))
+                    .structuredOutputRoute()).isEqualTo("plain_text_v1");
+            for (String wrong : List.of("chat_json_output_v1", "quality_strict_tool_v1")) {
+                assertThatThrownBy(() -> production.requireAuthorizedDeployment(resolved("deployment.style.portrait.v2", model, wrong)))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("未被");
+            }
+        }
+        assertThat(found).isTrue();
     }
 
     @Test

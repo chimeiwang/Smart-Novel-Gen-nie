@@ -461,6 +461,7 @@ def test_database_facts_saves_scrubbed_billing_before_business_assertion() -> No
             control_token=secrets.token_urlsafe(32),
             psql=lambda *_args, **_kwargs: json.dumps(raw),
             redis=lambda *_args: [],
+            redis_hash=lambda *_args: {},
         ),
     )
     acceptance = Acceptance(stack)
@@ -637,10 +638,10 @@ def test_core_restart_preserves_single_model_billing_message_and_event_rules(
             assert_facts()
 
 
-def test_missing_execution_journal_normalizes_redis_cli_empty_line() -> None:
+def test_missing_execution_journal_uses_empty_json_hash() -> None:
     acceptance = cast(
         Acceptance,
-        SimpleNamespace(stack=SimpleNamespace(redis=lambda *_args: [""])),
+        SimpleNamespace(stack=SimpleNamespace(redis_hash=lambda *_args: {})),
     )
 
     assert Acceptance.journal_facts(acceptance, "step-missing") == {
@@ -653,3 +654,30 @@ def test_missing_execution_journal_normalizes_redis_cli_empty_line() -> None:
         "fencingToken": None,
         "terminalPayloadPresent": False,
     }
+
+
+def test_redis_json_hash_preserves_empty_values_and_all_unicode_line_separators() -> None:
+    expected = {
+        "state": "result", "novel_id": "",
+        "terminal_payload": '{"content":"前\u0085中\u2028后\u001c\ufeff尾"}',
+        "fencing_token": "1",
+    }
+
+    def run(arguments, *, timeout):
+        assert arguments == [
+            "exec", "-T", "execution-redis", "redis-cli", "--json", "HGETALL", "journal-1",
+        ]
+        assert timeout == 30
+        return SimpleNamespace(stdout=json.dumps(expected, ensure_ascii=False) + "\n")
+
+    stack = cast(ComposeStack, SimpleNamespace(run=run))
+    assert ComposeStack.redis_hash(stack, "journal-1") == expected
+
+
+@pytest.mark.parametrize("invalid", [[], None, {"state": None}, {"state": 1}])
+def test_redis_json_hash_rejects_non_string_mapping(invalid) -> None:
+    stack = cast(ComposeStack, SimpleNamespace(
+        run=lambda *_args, **_kwargs: SimpleNamespace(stdout=json.dumps(invalid)),
+    ))
+    with pytest.raises(AssertionError, match="HGETALL"):
+        ComposeStack.redis_hash(stack, "journal-1")

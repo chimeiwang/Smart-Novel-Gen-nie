@@ -12,12 +12,15 @@ from inkforge_agents.execution.callbacks import (
 )
 from inkforge_contracts.execution import (
     ExecutionCallbackReceipt,
+    ExecutionStepFailure,
     ExecutionStepProgress,
     ExecutionStepResult,
     StepUsage,
+    canonical_execution_sha256,
 )
 from inkforge_contracts.jwt_claims import ServiceScope
-from inkforge_service_auth import SignedServiceRequest
+from inkforge_service_auth import SignedServiceRequest, canonical_json_body
+from pydantic import ValidationError
 
 from .support import execution_request, execution_result, resolved_model
 
@@ -63,6 +66,116 @@ def _progress() -> ExecutionStepProgress:
             wallTimeMillis=0,
         ),
         occurredAt=datetime.now(UTC),
+    )
+
+
+def _failure() -> ExecutionStepFailure:
+    result = execution_result(execution_request())
+    material = {
+        "errorCategory": "provider_terminal",
+        "errorCode": "PROVIDER_RESPONSE_INCOMPLETE",
+        "outcomeUnknown": False,
+        "retryable": False,
+        "resolvedModel": result.resolvedModel.model_dump(mode="json", exclude_none=True),
+        "usage": result.usage.model_dump(mode="json", exclude_none=True),
+    }
+    return ExecutionStepFailure.model_validate(
+        {
+            **material,
+            "protocolVersion": "2.0",
+            "jobId": result.jobId,
+            "runId": result.runId,
+            "novelId": result.novelId,
+            "stepId": result.stepId,
+            "fencingToken": result.fencingToken,
+            "requestHash": result.requestHash,
+            "inputHash": result.inputHash,
+            "resultHash": canonical_execution_sha256(material),
+            "failedAt": datetime.now(UTC),
+        }
+    )
+
+
+def _callback(kind: str) -> ExecutionStepProgress | ExecutionStepResult | ExecutionStepFailure:
+    if kind == "progress":
+        return _progress()
+    if kind == "result":
+        return execution_result(execution_request())
+    return _failure()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["progress", "result", "failure"])
+@pytest.mark.parametrize("novel_id", [None, "novel-1"])
+@pytest.mark.parametrize("receipt_status", ["accepted", "duplicate"])
+async def test_required_nullable_novel_is_preserved_in_exact_signed_callback_body(
+    kind: str,
+    novel_id: str | None,
+    receipt_status: Literal["accepted", "duplicate"],
+) -> None:
+    callback = _callback(kind).model_copy(update={"novelId": novel_id})
+    signer = Signer()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json=_receipt(callback, status=receipt_status).model_dump(mode="json"),
+        )
+
+    async with httpx.AsyncClient(
+        base_url="http://core.test", transport=httpx.MockTransport(handler)
+    ) as http:
+        client = ExecutionCallbackClient(http, signer)
+        receipt = await getattr(client, "send_" + kind)(callback)
+
+    assert receipt.status == receipt_status
+    assert len(requests) == len(signer.calls) == 1
+    request, signed = requests[0], signer.calls[0]
+    expected = callback.model_dump(mode="json", by_alias=True, exclude_none=True)
+    expected["novelId"] = novel_id
+    assert request.content == signed["body"] == canonical_json_body(expected)
+    payload = json.loads(request.content)
+    assert "novelId" in payload and payload["novelId"] == novel_id
+    assert {key for key, value in payload.items() if value is None} == (
+        {"novelId"} if novel_id is None else set()
+    )
+    assert type(callback).model_validate_json(request.content) == callback
+    expected_scope = (
+        ServiceScope.EXECUTION_PROGRESS if kind == "progress" else ServiceScope.EXECUTION_RESULT
+    )
+    expected_key = (
+        callback.progressId
+        if isinstance(callback, ExecutionStepProgress)
+        else f"{kind}:{callback.resultHash}"
+    )
+    assert signed["scope"] == (expected_scope,)
+    assert signed["task_id"] == callback.stepId
+    assert signed["run_id"] == callback.runId
+    assert signed["novel_id"] == novel_id
+    assert signed["http_method"] == request.method == "PUT"
+    assert (
+        signed["http_path"]
+        == request.url.path
+        == f"/internal/v1/workflow-runs/{callback.runId}/steps/{callback.stepId}/{kind}"
+    )
+    assert signed["idempotency_key"] == request.headers["Idempotency-Key"] == expected_key
+
+
+@pytest.mark.parametrize("kind", ["progress", "result", "failure"])
+def test_missing_required_novel_is_still_rejected_instead_of_treated_as_null(kind: str) -> None:
+    callback = _callback(kind).model_copy(update={"novelId": None})
+    payload = callback.model_dump(mode="json", by_alias=True)
+    payload.pop("novelId")
+
+    with pytest.raises(ValidationError) as captured:
+        type(callback).model_validate(payload)
+
+    assert any(
+        error["loc"] == ("novelId",) and error["type"] == "missing"
+        for error in captured.value.errors()
     )
 
 
@@ -161,9 +274,7 @@ async def test_only_exact_http_200_can_confirm_terminal_receipt(
     result = execution_result(execution_request())
     http = httpx.AsyncClient(
         base_url="http://core.test",
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(status_code, request=request)
-        ),
+        transport=httpx.MockTransport(lambda request: httpx.Response(status_code, request=request)),
     )
     try:
         with pytest.raises(ExecutionCallbackError) as captured:
@@ -196,7 +307,7 @@ async def test_truncated_or_malformed_http_200_receipt_is_retryable(body: bytes)
 
 
 def _receipt(
-    callback: ExecutionStepProgress | ExecutionStepResult,
+    callback: ExecutionStepProgress | ExecutionStepResult | ExecutionStepFailure,
     *,
     status: Literal["accepted", "duplicate", "stale", "superseded"],
 ) -> ExecutionCallbackReceipt:
