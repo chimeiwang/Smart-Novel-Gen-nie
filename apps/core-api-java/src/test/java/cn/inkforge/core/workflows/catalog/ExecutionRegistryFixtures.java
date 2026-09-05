@@ -45,6 +45,12 @@ public final class ExecutionRegistryFixtures {
                 .withRagEmbeddingConfig("e2e-embedding-vector-v1", "http://e2e-control:8090");
     }
 
+    /** 视频测试只在内存启用两项，部署身份仍须通过 Registry 的精确环境授权。 */
+    public static ExecutionRegistry videoOperationsEnabled(ExecutionRegistry.Environment environment) {
+        return modifiedOperations(environment, java.util.Set.of("video.chapter_cinematic_adaptation_v2",
+                "video.chapter_shot_prompt_v2"), operation -> operation.put("v2Enabled", true));
+    }
+
     private static ExecutionRegistry modifiedSelectionOperation(
             ExecutionRegistry.Environment environment,
             Consumer<Map<String, Object>> modification) {
@@ -70,6 +76,11 @@ public final class ExecutionRegistryFixtures {
 
     private static ExecutionRegistry modifiedOperation(ExecutionRegistry.Environment environment, String key,
             Consumer<Map<String, Object>> modification) {
+        return modifiedOperations(environment, java.util.Set.of(key), modification);
+    }
+
+    private static ExecutionRegistry modifiedOperations(ExecutionRegistry.Environment environment, java.util.Set<String> keys,
+            Consumer<Map<String, Object>> modification) {
         Map<String, byte[]> documents = new HashMap<>();
         Map<String, Object> manifest = readObject(read("manifest.json"));
         for (Map.Entry<String, Object> entry : manifest.entrySet()) {
@@ -85,10 +96,12 @@ public final class ExecutionRegistryFixtures {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> operations =
                 (List<Map<String, Object>>) catalog.get("operations");
-        Map<String, Object> selected = operations.stream()
-                .filter(operation -> key.equals(operation.get("key"))).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("测试夹具引用未知操作"));
-        modification.accept(selected);
+        for (String key : keys) {
+            Map<String, Object> selected = operations.stream()
+                    .filter(operation -> key.equals(operation.get("key"))).findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("测试夹具引用未知操作"));
+            modification.accept(selected);
+        }
         byte[] changedCatalog = JSON.writeValueAsBytes(catalog);
         documents.put(catalogPath, changedCatalog);
         catalogEntry.put("sha256", sha256(changedCatalog));

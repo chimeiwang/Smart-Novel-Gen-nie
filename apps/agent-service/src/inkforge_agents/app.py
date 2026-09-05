@@ -45,6 +45,7 @@ from .providers.embeddings import OpenAIExecutionEmbeddingProvider
 from .providers.seedance import SeedanceProvider
 from .providers.seedance_router import router as seedance_router
 from .providers.selector import create_model_provider
+from .providers.video_responses import DeepSeekVideoResponsesProvider, ExecutionResponsesProvider
 from .queue.cancellation import RedisRunCancellation
 from .queue.consumer import JobHandler, QueueConsumer
 from .queue.repository import JobKind, RedisRunQueue
@@ -79,6 +80,7 @@ def create_app(
     execution_service: ExecutionService | None = None,
     execution_redis: AsyncJournalRedis | None = None,
     model_provider: ModelProvider | None = None,
+    responses_provider: ExecutionResponsesProvider | None = None,
 ) -> FastAPI:
     validate_public_operation_definitions()
     loaded_settings = settings or (create_testing_settings() if testing else Settings())
@@ -89,18 +91,29 @@ def create_app(
     )
     provider: ModelProvider | None = model_provider
     provider_error: str | None = None
-    if model_provider is not None:
+    if model_provider is not None or responses_provider is not None:
         if (
             loaded_settings.environment != "test"
             or loaded_settings.e2e_execution_control_url is None
             or loaded_settings.e2e_execution_control_token is None
         ):
             raise ValueError("外部 ModelProvider 注入只允许受双门禁的 E2E 测试")
-    else:
+    if model_provider is None:
         try:
             provider = create_model_provider(loaded_settings)
         except ValueError as exc:
             provider_error = str(exc)
+    video_responses = responses_provider
+    if (
+        video_responses is None
+        and loaded_settings.environment != "production"
+        and loaded_settings.model_provider != "fake"
+    ):
+        try:
+            video_responses = DeepSeekVideoResponsesProvider(loaded_settings)
+        except ValueError:
+            # 视频为独立可选能力；未配置不得让前 19 项模型路径装配失败。
+            video_responses = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -169,6 +182,9 @@ def create_app(
             )
             if embedding_http is not None:
                 await embedding_http.aclose()
+            responses_close = getattr(app.state.video_responses_provider, "aclose", None)
+            if responses_close is not None:
+                await responses_close()
             provider = cast(ModelProvider | None, getattr(app.state, "model_provider", None))
             provider_close = getattr(provider, "aclose", None)
             if provider_close is not None:
@@ -194,6 +210,7 @@ def create_app(
     app.state.execution_registry = execution_registry
     app.state.workflow_log = workflow_log
     app.state.model_provider = provider
+    app.state.video_responses_provider = video_responses
     app.state.seedance_provider = SeedanceProvider(
         api_key=loaded_settings.seedance_api_key,
         base_url=loaded_settings.seedance_base_url,
@@ -202,6 +219,7 @@ def create_app(
     app.state.model_runtime = (
         ModelRuntime(
             provider,
+            responses_provider=video_responses,
             max_concurrency=loaded_settings.agent_max_concurrency,
         )
         if provider is not None
@@ -263,16 +281,13 @@ def create_app(
                     "ok" if execution_health is not None and execution_health.ready else "failed"
                 )
             if not testing:
-                ordinary_redis_ok = await _redis_is_reachable(
-                    getattr(app.state, "redis", None)
-                )
+                ordinary_redis_ok = await _redis_is_reachable(getattr(app.state, "redis", None))
                 checks.update(
                     {
                         "redis": "ok" if ordinary_redis_ok else "failed",
                         "execution_redis": (
                             "ok"
-                            if execution_health is not None
-                            and execution_health.journal_connected
+                            if execution_health is not None and execution_health.journal_connected
                             else "failed"
                         ),
                         "execution_journal_persistence": (
@@ -452,13 +467,15 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     )
                     if settings.rag_index_enabled:
                         execution_embedding_provider = OpenAIExecutionEmbeddingProvider(
-                            embedding_http, model=settings.rag_embedding_model,
+                            embedding_http,
+                            model=settings.rag_embedding_model,
                             base_url=settings.rag_embedding_base_url,
                         )
                 app.state.embedding_provider = embedding_provider
                 model_runtime = ModelRuntime(
                     provider,
                     embedding_provider=execution_embedding_provider,
+                    responses_provider=app.state.video_responses_provider,
                     billing=CoreBillingGateway(core),
                     observer=WorkflowModelObserver(workflow_log),
                     max_concurrency=settings.agent_max_concurrency,
@@ -552,9 +569,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 model_runtime = cast(ModelRuntime, app.state.model_runtime)
                 journal = RedisExecutionJournal(
                     cast(AsyncJournalRedis, execution_redis),
-                    retention=timedelta(
-                        hours=settings.execution_terminal_retention_hours
-                    ),
+                    retention=timedelta(hours=settings.execution_terminal_retention_hours),
                     require_durability=settings.environment == "production",
                 )
                 app.state.execution_service = ExecutionService(
@@ -563,6 +578,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     executor=StatelessExecutionStepExecutor(
                         model_runtime,
                         embedding=model_runtime,
+                        responses=model_runtime,
                         max_output_tokens=settings.model_max_output_tokens,
                     ),
                     callbacks=ExecutionCallbackClient(core_http, signer),

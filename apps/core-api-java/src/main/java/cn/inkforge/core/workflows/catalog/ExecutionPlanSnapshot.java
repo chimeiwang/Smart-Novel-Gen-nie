@@ -41,6 +41,8 @@ public final class ExecutionPlanSnapshot {
     private final Step generator;
     private final List<Step> reviewers;
     private final List<Step> systemSteps;
+    private final List<StageStep> stageSteps;
+    private final String videoStagePolicy;
     private final ReviewPolicy reviewPolicy;
     private final ExecutionRegistry.RunBudget runBudget;
     private final Map<String, Object> plan;
@@ -54,6 +56,8 @@ public final class ExecutionPlanSnapshot {
             Step generator,
             List<Step> reviewers,
             List<Step> systemSteps,
+            List<StageStep> stageSteps,
+            String videoStagePolicy,
             ReviewPolicy reviewPolicy,
             ExecutionRegistry.RunBudget runBudget,
             String expectedSha256) {
@@ -68,6 +72,8 @@ public final class ExecutionPlanSnapshot {
         this.generator = Objects.requireNonNull(generator);
         this.reviewers = List.copyOf(reviewers);
         this.systemSteps = List.copyOf(systemSteps);
+        this.stageSteps = List.copyOf(stageSteps);
+        this.videoStagePolicy = videoStagePolicy;
         this.reviewPolicy = Objects.requireNonNull(reviewPolicy);
         this.runBudget = Objects.requireNonNull(runBudget);
         validateCrossReferences();
@@ -133,6 +139,10 @@ public final class ExecutionPlanSnapshot {
                 generator,
                 reviewers,
                 systemSteps,
+                resolved.stageSteps().stream().map(stage -> new StageStep(stage.stageKey(),
+                        step("generation", source.lane(), source.evidencePolicy(), stage.profile(),
+                                stage.outputSchema(), stage.stepBudget()), stage.maxInvocations())).toList(),
+                source.videoStagePolicy(),
                 new ReviewPolicy(
                         review.profile(),
                         review.mode(),
@@ -153,7 +163,13 @@ public final class ExecutionPlanSnapshot {
             throw invalid("执行计划快照哈希算法不受支持");
         }
         String expectedSha256 = sha256(root, "planSha256");
-        Map<String, Object> plan = exactObject(root.get("plan"), "执行计划", PLAN_KEYS);
+        Map<String, Object> plan = object(root.get("plan"), "执行计划");
+        Set<String> expectedKeys = new LinkedHashSet<>(PLAN_KEYS);
+        if (plan.containsKey("stageSteps") || plan.containsKey("videoStagePolicy")) {
+            expectedKeys.add("stageSteps");
+            expectedKeys.add("videoStagePolicy");
+        }
+        if (!plan.keySet().equals(expectedKeys)) throw invalid("执行计划字段集合无效");
         Operation operation = parseOperation(plan.get("operation"));
         Step generator = parseStep(plan.get("generator"), "生成 Step");
         List<Step> reviewers = parseSteps(plan.get("reviewers"), "Reviewer Steps");
@@ -167,6 +183,8 @@ public final class ExecutionPlanSnapshot {
                 generator,
                 reviewers,
                 systemSteps,
+                plan.containsKey("stageSteps") ? parseStageSteps(plan.get("stageSteps")) : List.of(),
+                plan.containsKey("videoStagePolicy") ? string(plan, "videoStagePolicy") : null,
                 reviewPolicy,
                 runBudget,
                 expectedSha256);
@@ -208,6 +226,23 @@ public final class ExecutionPlanSnapshot {
         return systemSteps;
     }
 
+    public List<StageStep> stageSteps() {
+        return stageSteps;
+    }
+
+    public String videoStagePolicy() {
+        return videoStagePolicy;
+    }
+
+    public StageStep requireVideoStage(String stageKey) {
+        return stageSteps.stream().filter(stage -> stage.stageKey().equals(stageKey)).findFirst()
+                .orElseThrow(() -> invalid("冻结视频计划没有该阶段：" + stageKey));
+    }
+
+    private List<Step> generationSteps() {
+        return stageSteps.isEmpty() ? List.of(generator) : stageSteps.stream().map(StageStep::step).toList();
+    }
+
     public ReviewPolicy reviewPolicy() {
         return reviewPolicy;
     }
@@ -234,7 +269,7 @@ public final class ExecutionPlanSnapshot {
             Map<String, Object> storedBudget) {
         StepBudgetProfile databaseBudget = parseStepBudget(storedBudget);
         List<Step> candidates = switch (purpose) {
-            case "generation" -> List.of(generator);
+            case "generation" -> generationSteps();
             case "review" -> reviewers;
             default -> systemSteps.stream()
                     .filter(step -> step.purpose().equals(purpose))
@@ -262,7 +297,7 @@ public final class ExecutionPlanSnapshot {
     public ModelProfile requireStepProfile(
             String purpose, String lane, String profile, int profileVersion) {
         List<Step> candidates = switch (purpose) {
-            case "generation" -> List.of(generator);
+            case "generation" -> generationSteps();
             case "review" -> reviewers;
             default -> systemSteps.stream()
                     .filter(step -> step.purpose().equals(purpose))
@@ -304,6 +339,12 @@ public final class ExecutionPlanSnapshot {
         }
         Set<String> profiles = new LinkedHashSet<>();
         profiles.add(generator.modelProfile().profile());
+        validateVideoStages();
+        for (int index = 1; index < stageSteps.size(); index++) {
+            if (!profiles.add(stageSteps.get(index).step().modelProfile().profile())) {
+                throw invalid("执行计划逻辑 Profile 不能重复");
+            }
+        }
         for (Step reviewer : reviewers) {
             if (!profiles.add(reviewer.modelProfile().profile())) {
                 throw invalid("执行计划逻辑 Profile 不能重复");
@@ -366,6 +407,39 @@ public final class ExecutionPlanSnapshot {
         }
     }
 
+    private void validateVideoStages() {
+        if (videoStagePolicy == null && stageSteps.isEmpty()) return;
+        List<VideoStagePolicy.Limit> expected = VideoStagePolicy.stages(operation.key(), videoStagePolicy);
+        if (stageSteps.size() != expected.size() || !generator.equals(stageSteps.getFirst().step())
+                || !reviewers.isEmpty() || !systemSteps.isEmpty() || !"none".equals(reviewPolicy.mode())
+                || runBudget.maxProtocolCorrectionSteps() != 0) {
+            throw invalid("视频阶段计划必须完整且独立于通用 Reviewer 和协议纠正");
+        }
+        List<WorkflowRunBudgetCharge> charges = new ArrayList<>();
+        for (int index = 0; index < expected.size(); index++) {
+            StageStep stage = stageSteps.get(index);
+            VideoStagePolicy.Limit limit = expected.get(index);
+            if (!stage.stageKey().equals(limit.stageKey()) || stage.maxInvocations() != limit.maxInvocations()
+                    || !"generation".equals(stage.step().purpose()) || !"batch_media".equals(stage.step().lane())
+                    || !"disabled".equals(stage.step().modelProfile().reasoningMode())
+                    || !stage.step().modelProfile().profile().equals("video." + stage.stageKey() + ".v2")
+                    || !stage.step().modelProfile().promptProfile().name().equals("prompt.video." + stage.stageKey() + ".v2")
+                    || !stage.step().outputSchema().name().equals("output.video_" + stage.stageKey() + "_stage.v2")
+                    || !stage.step().stepBudget().profile().equals("step_budget.video." + stage.stageKey() + ".v2")
+                    || stage.step().stepBudget().budget().maxModelCalls() != 1) {
+                throw invalid("视频阶段身份、顺序或次数与冻结策略不一致");
+            }
+            runBudget.toDomain().requireStepFits(stage.step().stepBudget().budget());
+            for (int call = 0; call < stage.maxInvocations(); call++) {
+                charges.add(WorkflowRunBudgetCharge.active(stage.step().stepBudget().budget()));
+            }
+        }
+        if (runBudget.maxModelCalls() != expected.stream().mapToInt(VideoStagePolicy.Limit::maxInvocations).sum()) {
+            throw invalid("视频总调用额度必须等于固定阶段上界");
+        }
+        runBudget.toDomain().requireWithin(charges);
+    }
+
     private Map<String, Object> planMap() {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("operationCatalogVersion", operationCatalogVersion);
@@ -374,6 +448,10 @@ public final class ExecutionPlanSnapshot {
         value.put("generator", generator.toMap());
         value.put("reviewers", reviewers.stream().map(Step::toMap).toList());
         value.put("systemSteps", systemSteps.stream().map(Step::toMap).toList());
+        if (videoStagePolicy != null) {
+            value.put("stageSteps", stageSteps.stream().map(StageStep::toMap).toList());
+            value.put("videoStagePolicy", videoStagePolicy);
+        }
         value.put("reviewPolicy", reviewPolicy.toMap());
         value.put("runBudget", runBudgetMap(runBudget));
         return immutableMap(value);
@@ -436,6 +514,17 @@ public final class ExecutionPlanSnapshot {
         if (!(raw instanceof List<?> values)) throw invalid(label + " 必须是数组");
         List<Step> result = new ArrayList<>();
         for (Object value : values) result.add(parseStep(value, label));
+        return List.copyOf(result);
+    }
+
+    private static List<StageStep> parseStageSteps(Object raw) {
+        if (!(raw instanceof List<?> values)) throw invalid("视频阶段必须是数组");
+        List<StageStep> result = new ArrayList<>();
+        for (Object value : values) {
+            Map<String, Object> stage = exactObject(value, "视频阶段", Set.of("stageKey", "step", "maxInvocations"));
+            result.add(new StageStep(string(stage, "stageKey"), parseStep(stage.get("step"), "视频阶段 Step"),
+                    positiveInt(stage, "maxInvocations")));
+        }
         return List.copyOf(result);
     }
 
@@ -755,6 +844,18 @@ public final class ExecutionPlanSnapshot {
 
     private static IllegalStateException invalid(String message) {
         return new IllegalStateException(message);
+    }
+
+    public record StageStep(String stageKey, Step step, int maxInvocations) {
+        public StageStep {
+            stageKey = nonBlank(stageKey, "视频 stageKey");
+            Objects.requireNonNull(step);
+            if (maxInvocations < 1) throw invalid("视频阶段次数必须为正数");
+        }
+
+        public Map<String, Object> toMap() {
+            return Map.of("stageKey", stageKey, "step", step.toMap(), "maxInvocations", maxInvocations);
+        }
     }
 
     public record Operation(

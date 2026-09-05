@@ -127,7 +127,7 @@ class ExecutionRegistryTest {
         assertThatThrownBy(() -> registry.resolve(
                         "video.chapter_cinematic_adaptation_v2", false))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("尚未启用");
+                .hasMessageContaining("开发专用");
         assertThatThrownBy(() -> registry.resolveSystemPurpose("summarize_evidence"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");

@@ -144,7 +144,9 @@ stateDiagram-v2
 2026-09-05 工作分支已实现 agent_updates 的 Core 审核读取与决定适配。原始 summary/updates 保存到精确
 Artifact revision；展示的完整 Diff 和采用 payload 由 Core 从冻结来源派生，不信任模型自报旧值，也不从当前
 作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通；中短篇与一致性终检阶段 Catalog 为 17/21，
-文风画像达到 18/21，加入 RAG 接线后为 19/21，剩余两个开发视频操作。RAG 验收状态以独立规格为准；结构化五项的隔离公共 HTTP
+文风画像达到 18/21，加入 RAG 接线后为 19/21；开发视频两项完成仓内与隔离跨进程验收后为 21/21，证据见
+`docs/specs/2026-09-06-durable-video-model-workflows.md`。它们保留原 Task→视频候选→作者确认流程，
+领域审镜不冒充通用 Artifact Reviewer，不自动写入正式方案或 PromptHead。RAG 验收状态以独立规格为准；结构化五项的隔离公共 HTTP
 接线已验证，实际 Agent/供应商、全量门禁和生产状态分别以结构化资料迁移规格记录为准。
 
 新冻结复审策略只在完整 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，

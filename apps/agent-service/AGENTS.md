@@ -60,6 +60,11 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 
 ### 长篇章节影视化
 
+- 两项现有视频模型业务的 V2 已接入 Core 冻结阶段计划并完成仓内与隔离跨进程验收，具体状态见
+  `docs/specs/2026-09-06-durable-video-model-workflows.md`。一次真实 Responses HTTP 对应一个 Step，
+  Agent 不自行接续阶段；原 Task 保留业务来源与作者候选关联，只由 Core 投影状态。已完成分析、设计或
+  提示词结果从 journal/Step 恢复，不投回旧队列；历史无 V2 绑定任务仍走下述 V1 StateGraph。
+  真实视频仍仅开发环境，保留原调度命名空间；CLI 使用原公开 Task/watch/确认入口，不直连 Agent。
 - `chapter_cinematic_adaptation_v2` 属于独立章节改编域，不创建或更新旧 `VideoScene`。Core 冻结完整章节并
   通过 `VideoAdaptationTask` 投递；Agent 不回读 PostgreSQL。
 - 工作流使用 StateGraph 按“场景/戏剧节拍/观众覆盖目标分析 → Core dramatic checkpoint → 目标驱动镜头设计
@@ -224,7 +229,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
   不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
   Core 已接显式与自然入口、最多一次自动完整返工和作者采用；中短篇四项及一致性终检阶段达到 17/21，
-  文风画像阶段仓内 Catalog 为 18/21，加入 RAG 索引接线后为 19/21，剩余两个开发视频操作尚未迁移，
+  文风画像阶段仓内 Catalog 为 18/21，加入 RAG 索引接线后为 19/21；开发视频两项完成后，仓内迁移验收为 21/21，
   RAG 最终门禁以独立规格为准，不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
   其余问题或额度不足交作者，旧冻结策略不扩大。来源补齐计模型额度但不冒充候选 revision，结构化业务最多四次调用。
   显式 scope：设定两项/创建大纲为 novel，修改大纲为 novel 或 outline_node，伏笔为 novel 或当前 chapter；

@@ -230,13 +230,24 @@ public final class ExecutionRegistry {
                 ? null
                 : outputSchemas.get(policy.reviewerOutputSchema());
         requireExecutable(operation, generator, generatorBudget, output, reviewers, reviewerOutput);
+        List<ResolvedStage> stages = operation.stageSteps().stream().map(stage -> {
+            Profile profile = profiles.get(stage.modelProfile());
+            OutputSchema schema = outputSchemas.get(stage.outputSchema());
+            StepBudgetProfile budget = stepBudgets.get(stage.stepBudgetProfile());
+            if (!profile.supported() || !profile.promptProfile().supported() || !schema.supported() || !budget.supported()) {
+                throw invalid("V2 视频阶段的 Profile、Schema 或预算尚未实现：" + stage.stageKey());
+            }
+            requireReasoningBudget(profile, budget, operation.key());
+            return new ResolvedStage(stage.stageKey(), profile, schema, budget, stage.maxInvocations());
+        }).toList();
         return new ResolvedOperation(
                 operation,
                 generator,
                 generatorBudget,
                 output,
                 List.copyOf(reviewers),
-                reviewerOutput);
+                reviewerOutput,
+                stages);
     }
 
     public ResolvedSystemPurpose resolveSystemPurpose(String purpose) {
@@ -631,11 +642,34 @@ public final class ExecutionRegistry {
                     strings(value, "deterministicValidators"),
                     review,
                     string(value, "applyHandler"),
-                    runBudget(object(value.get("runBudgetProfile"), "runBudgetProfile")));
+                    runBudget(object(value.get("runBudgetProfile"), "runBudgetProfile")),
+                    parseVideoStages(value),
+                    optionalString(value, "videoStagePolicy"));
             validateOperationReferences(parsed, profiles, outputs, budgets);
             putUnique(result, key, parsed, "Operation");
         }
         return result;
+    }
+
+    private static List<Stage> parseVideoStages(Map<String, Object> operation) {
+        if (!operation.containsKey("stageSteps") && !operation.containsKey("videoStagePolicy")) return List.of();
+        String policy = string(operation, "videoStagePolicy");
+        List<VideoStagePolicy.Limit> limits = VideoStagePolicy.stages(string(operation, "key"), policy);
+        List<Stage> stages = new ArrayList<>();
+        for (Object raw : list(operation, "stageSteps")) {
+            Map<String, Object> value = exactObject(raw, "视频阶段引用",
+                    Set.of("stageKey", "modelProfile", "outputSchema", "stepBudgetProfile", "maxInvocations"));
+            stages.add(new Stage(string(value, "stageKey"), string(value, "modelProfile"),
+                    string(value, "outputSchema"), string(value, "stepBudgetProfile"), positiveInt(value, "maxInvocations")));
+        }
+        if (stages.size() != limits.size()) throw invalid("视频阶段集合不完整");
+        for (int index = 0; index < limits.size(); index++) {
+            if (!limits.get(index).stageKey().equals(stages.get(index).stageKey())
+                    || limits.get(index).maxInvocations() != stages.get(index).maxInvocations()) {
+                throw invalid("视频阶段顺序或次数与策略不一致");
+            }
+        }
+        return List.copyOf(stages);
     }
 
     private static ReviewPolicy reviewPolicy(Map<String, Object> value) {
@@ -757,6 +791,33 @@ public final class ExecutionRegistry {
             Map<String, Profile> profiles,
             Map<String, OutputSchema> outputs,
             Map<String, StepBudgetProfile> budgets) {
+        if (!operation.stageSteps().isEmpty()) {
+            Stage first = operation.stageSteps().getFirst();
+            if (!operation.developmentOnly() || !"batch_media".equals(operation.lane())
+                    || !"none".equals(operation.reviewPolicy().mode())
+                    || operation.runBudget().maxProtocolCorrectionSteps() != 0
+                    || operation.runBudget().maxModelCalls() != operation.stageSteps().stream().mapToInt(Stage::maxInvocations).sum()
+                    || !first.modelProfile().equals(operation.generatorProfile())
+                    || !first.outputSchema().equals(operation.outputSchema())
+                    || !first.stepBudgetProfile().equals(operation.generatorStepBudgetProfile())) {
+                throw invalid("视频阶段必须为开发专用且首阶段与 generator 完全一致");
+            }
+            Set<String> stageProfiles = new LinkedHashSet<>();
+            for (Stage stage : operation.stageSteps()) {
+                requireReference(profiles, stage.modelProfile(), operation.key(), "stage modelProfile");
+                requireReference(outputs, stage.outputSchema(), operation.key(), "stage outputSchema");
+                requireReference(budgets, stage.stepBudgetProfile(), operation.key(), "stage stepBudgetProfile");
+                if (!stageProfiles.add(stage.modelProfile())
+                        || !stage.modelProfile().equals("video." + stage.stageKey() + ".v2")
+                        || !stage.outputSchema().equals("output.video_" + stage.stageKey() + "_stage.v2")
+                        || !stage.stepBudgetProfile().equals("step_budget.video." + stage.stageKey() + ".v2")
+                        || !"generation".equals(profiles.get(stage.modelProfile()).purpose())
+                        || !"generation".equals(outputs.get(stage.outputSchema()).purpose())
+                        || !"disabled".equals(profiles.get(stage.modelProfile()).reasoningMode())) {
+                    throw invalid("视频阶段 Profile 不得重复且必须关闭 reasoning");
+                }
+            }
+        }
         requireReference(
                 profiles, operation.generatorProfile(), operation.key(), "generatorProfile");
         requireReference(outputs, operation.outputSchema(), operation.key(), "outputSchema");
@@ -1293,13 +1354,32 @@ public final class ExecutionRegistry {
             List<String> deterministicValidators,
             ReviewPolicy reviewPolicy,
             String applyHandler,
-            RunBudget runBudget) {
+            RunBudget runBudget,
+            List<Stage> stageSteps,
+            String videoStagePolicy) {
         public Operation {
             targetKinds = List.copyOf(targetKinds);
             scopeKinds = List.copyOf(scopeKinds);
             deterministicValidators = List.copyOf(deterministicValidators);
+            stageSteps = List.copyOf(stageSteps);
+        }
+
+        public Operation(String key, String workflow, String operation, List<String> targetKinds,
+                List<String> scopeKinds, boolean v2Enabled, boolean developmentOnly, boolean mutating,
+                String lane, String evidencePolicy, String generatorProfile, String generatorStepBudgetProfile,
+                String outputSchema, List<String> deterministicValidators, ReviewPolicy reviewPolicy,
+                String applyHandler, RunBudget runBudget) {
+            this(key, workflow, operation, targetKinds, scopeKinds, v2Enabled, developmentOnly, mutating,
+                    lane, evidencePolicy, generatorProfile, generatorStepBudgetProfile, outputSchema,
+                    deterministicValidators, reviewPolicy, applyHandler, runBudget, List.of(), null);
         }
     }
+
+    public record Stage(String stageKey, String modelProfile, String outputSchema,
+            String stepBudgetProfile, int maxInvocations) {}
+
+    public record ResolvedStage(String stageKey, Profile profile, OutputSchema outputSchema,
+            StepBudgetProfile stepBudget, int maxInvocations) {}
 
     public record SystemPurpose(
             String purpose,
@@ -1325,9 +1405,16 @@ public final class ExecutionRegistry {
             StepBudgetProfile generatorStepBudget,
             OutputSchema outputSchema,
             List<ResolvedReviewer> reviewers,
-            OutputSchema reviewerOutputSchema) {
+            OutputSchema reviewerOutputSchema,
+            List<ResolvedStage> stageSteps) {
         public ResolvedOperation {
             reviewers = List.copyOf(reviewers);
+            stageSteps = List.copyOf(stageSteps);
+        }
+
+        public ResolvedOperation(Operation operation, Profile generatorProfile, StepBudgetProfile generatorStepBudget,
+                OutputSchema outputSchema, List<ResolvedReviewer> reviewers, OutputSchema reviewerOutputSchema) {
+            this(operation, generatorProfile, generatorStepBudget, outputSchema, reviewers, reviewerOutputSchema, List.of());
         }
     }
 

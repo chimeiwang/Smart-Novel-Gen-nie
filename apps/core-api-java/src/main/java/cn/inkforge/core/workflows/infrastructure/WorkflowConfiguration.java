@@ -22,6 +22,7 @@ import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePrepara
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
+import cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -72,7 +73,8 @@ class WorkflowConfiguration {
             WorkflowExecutionContextReader contexts,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
             ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
+            ObjectProvider<WorkflowVideoAdaptationCompletion> videoCompletion) {
         return new JooqWorkflowDispatchRepository(
                 database,
                 ids,
@@ -80,7 +82,9 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30),
-                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
+                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable,
+                ragCompletion::getIfAvailable, videoCompletion::getIfAvailable,
+                settings.videoPreviewEnabled() && settings.videoDispatchEnabled(), settings.videoDispatchNamespace());
     }
 
     @Bean
@@ -96,7 +100,8 @@ class WorkflowConfiguration {
             ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
             ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
+            ObjectProvider<WorkflowVideoAdaptationCompletion> videoCompletion) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
@@ -104,7 +109,8 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
-                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
+                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable,
+                ragCompletion::getIfAvailable, videoCompletion::getIfAvailable);
     }
 
     @Bean
@@ -133,9 +139,11 @@ class WorkflowConfiguration {
             ExecutionRegistry workflowExecutionRegistry,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
             ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
+            ObjectProvider<WorkflowVideoAdaptationCompletion> videoCompletion) {
         return new JooqWorkflowRunCancellationRepository(
-                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
+                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable,
+                styleCompletion::getIfAvailable, ragCompletion::getIfAvailable, videoCompletion::getIfAvailable);
     }
 
     @Bean

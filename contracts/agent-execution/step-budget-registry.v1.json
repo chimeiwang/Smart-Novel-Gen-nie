@@ -2,6 +2,91 @@
   "registryVersion": "1",
   "budgets": [
     {
+      "key": "step_budget.video.shot_prompt.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 48000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 48000,
+        "maxCostMicros": 1500000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.video.cinematic_review.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 12000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 12000,
+        "maxCostMicros": 1000000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.video.missing_beat_shots.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 16000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 16000,
+        "maxCostMicros": 1000000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.video.shot_design.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 48000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 48000,
+        "maxCostMicros": 1500000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.video.dramatic_structure.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 240000,
+        "maxPromptCacheMissTokens": 240000,
+        "maxCompletionTokens": 48000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 48000,
+        "maxCostMicros": 1500000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.rag.embedding.generator.v2", "version": 2, "supported": true,
       "budget": {
         "maxModelCalls": 1, "maxInputTokens": 60000, "maxPromptCacheMissTokens": 60000,

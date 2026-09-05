@@ -541,3 +541,24 @@ CLI 调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary �
   不通过 `long.task.watch` 假造原接口未返回的 RAG taskId，不给 CLI 开 Agent 直连入口。
 
 维护 Skill 时只同步上述观察和恢复说明，无需增加命令、Python 依赖或新的凭据存储方式。
+
+## 开发视频耐久迁移（2026-09-06，仓内与隔离跨进程验收完成）
+
+最终状态以 `2026-09-06-durable-video-model-workflows.md` 为准。本批只替换已有拆镜、逐镜提示词的内部
+执行方式，公开 Task 身份不变，不新增 CLI 命令、参数或 Agent 直连入口，也不替换本机固定 JAR。
+
+- 仍用 `long.video.plan.start` 或 `long.video.prompt.start` 受理；保存原响应中的 taskId，使用
+  `long.video.adaptation.watch` 观察原 adaptationId/taskId。断线后先用 `long.video.adaptation.get`
+  回读状态，不用新的 clientRequestId 自动重启模型任务。watch 退出不等于取消。
+- 内部逐阶段 Step ID、模型路由、预算和纠正次数不成为 CLI 参数。原 Task 的 pending/processing/completed
+  等状态仍由 Core 投影；受理成功不表示生成或作者采用已经完成。
+  原 Task.attemptCount 保留兼容计数，不等于 V2 模型 Step 数，也不能据此判断模型是否已执行；完成仍以
+  Core 回读的任务状态和对应完整候选为准。
+- 拆镜完成只提供候选，仍由作者使用原 `long.video.plan.confirm` 的 revision 参数确认；提示词仍是待保存
+  批次，原 `long.video.prompt.save` 使用 candidateTaskId 等原字段保存。不能借用长篇 Agent 批准命令，
+  不能直接覆盖正式方案或 PromptHead。
+- 保持普通 CLI 的 125 个命令与两份 Operator 的 45 个允许命令。普通 CLI 存在视频命令不表示 Operator
+  获准使用；本轮不向活动 Skill 白名单加入视频、不开放生产视频，不要求安装 Python/uv。
+- Seedance 渲染、关键帧和整集导出不是本次模型迁移范围，不得把其恢复、收费或完成状态类推为已验证。
+
+Skill 维护者只需同步任务观察、恢复与作者确认说明；如将来申请视频能力，仍需另行确定允许范围。

@@ -1,0 +1,54 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoScaleParameters/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "conflictingScales": {
+      "items": {
+        "enum": [
+          "过肩镜头",
+          "双人镜头",
+          "主观镜头",
+          "大特写",
+          "中近景",
+          "大全景",
+          "大远景",
+          "特写",
+          "近景",
+          "中景",
+          "全景",
+          "远景"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Conflictingscales",
+      "type": "array"
+    },
+    "requiredScale": {
+      "enum": [
+        "过肩镜头",
+        "双人镜头",
+        "主观镜头",
+        "大特写",
+        "中近景",
+        "大全景",
+        "大远景",
+        "特写",
+        "近景",
+        "中景",
+        "全景",
+        "远景"
+      ],
+      "title": "Requiredscale",
+      "type": "string"
+    }
+  },
+  "required": [
+    "requiredScale",
+    "conflictingScales"
+  ],
+  "title": "VideoScaleParameters",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoScaleParameters"
+}

@@ -150,6 +150,16 @@ class _RunBudgetDocument(_StrictModel):
         return self
 
 
+class _VideoStageDocument(_StrictModel):
+    stageKey: Literal[
+        "dramatic_structure", "shot_design", "missing_beat_shots", "cinematic_review", "shot_prompt"
+    ]
+    modelProfile: str
+    outputSchema: str
+    stepBudgetProfile: str
+    maxInvocations: int = Field(ge=1, le=3)
+
+
 class _OperationDocument(_StrictModel):
     key: str
     workflow: str
@@ -169,6 +179,10 @@ class _OperationDocument(_StrictModel):
     applyHandler: str
     runBudgetProfile: _RunBudgetDocument
     lane: Lane
+    stageSteps: list[_VideoStageDocument] | None = None
+    videoStagePolicy: Literal["video.cinematic-stages.v1", "video.shot-prompt-stages.v1"] | None = (
+        None
+    )
 
 
 class _CatalogDocument(_StrictModel):
@@ -411,6 +425,15 @@ class SystemPurposeDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class VideoStageDefinition:
+    stage_key: str
+    model_profile_key: str
+    output_schema_key: str
+    step_budget_key: str
+    max_invocations: int
+
+
+@dataclass(frozen=True, slots=True)
 class OperationDefinition:
     key: str
     workflow: str
@@ -430,6 +453,8 @@ class OperationDefinition:
     apply_handler: str
     run_budget: RunBudgetProfile
     lane: Lane
+    stage_steps: tuple[VideoStageDefinition, ...] = ()
+    video_stage_policy: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -563,7 +588,7 @@ class ExecutionRegistry:
         definition = self.operations.get(key)
         if definition is None:
             raise ExecutionOperationNotFoundError(f"未知 V2 Operation：{key}")
-        if definition.development_only and self.environment != "dev":
+        if definition.development_only and self.environment not in {"dev", "test"}:
             raise ExecutionOperationEnvironmentError(f"当前环境禁止 Operation：{key}")
         if not definition.v2_enabled:
             raise ExecutionOperationDisabledError(f"Operation 尚未启用 V2：{key}")
@@ -578,9 +603,7 @@ class ExecutionRegistry:
         if generator_budget_key is None:
             raise ExecutionRegistryReferenceError(f"V2 Operation 执行引用不完整：{key}")
         reviewer_output_schema = (
-            None
-            if reviewer_schema_key is None
-            else self.output_schemas[reviewer_schema_key]
+            None if reviewer_schema_key is None else self.output_schemas[reviewer_schema_key]
         )
         return ResolvedExecutionOperation(
             operation=definition,
@@ -759,9 +782,7 @@ def _prompt_profiles(
                 f"Prompt Profile Registry 存在重复 key：{item.key}"
             )
         if hashlib.sha256(item.systemPrompt.encode("utf-8")).hexdigest() != item.sha256:
-            raise ExecutionRegistryHashError(
-                f"Prompt Profile UTF-8 SHA-256 不一致：{item.key}"
-            )
+            raise ExecutionRegistryHashError(f"Prompt Profile UTF-8 SHA-256 不一致：{item.key}")
         result[item.key] = PromptProfileDefinition(
             key=item.key,
             version=item.version,
@@ -890,8 +911,7 @@ def _profiles(
                 f"已启用 Profile {item.key} 引用了未发布 Deployment Profile"
             )
         if any(
-            allowed.reasoning_mode != item.reasoningMode
-            for allowed in deployment.allowed_models
+            allowed.reasoning_mode != item.reasoningMode for allowed in deployment.allowed_models
         ):
             raise ExecutionRegistryReferenceError(
                 f"Profile {item.key} 与 Deployment Profile reasoningMode 不一致"
@@ -1035,6 +1055,17 @@ def _operations(document: _CatalogDocument) -> dict[str, OperationDefinition]:
                 max_provider_retries_per_step=budget.maxProviderRetriesPerStep,
             ),
             lane=item.lane,
+            stage_steps=tuple(
+                VideoStageDefinition(
+                    stage.stageKey,
+                    stage.modelProfile,
+                    stage.outputSchema,
+                    stage.stepBudgetProfile,
+                    stage.maxInvocations,
+                )
+                for stage in (item.stageSteps or [])
+            ),
+            video_stage_policy=item.videoStagePolicy,
         )
     return result
 
@@ -1047,6 +1078,7 @@ def _validate_references(
     system_purposes: Mapping[str, SystemPurposeDefinition],
 ) -> None:
     for operation in operations.values():
+        _validate_video_stages(operation, profiles, output_schemas, step_budgets)
         profile_keys = (
             operation.generator_profile_key,
             *operation.review_policy.reviewer_profile_keys,
@@ -1212,6 +1244,73 @@ def _validate_step_within_run(
         raise ExecutionRegistryReferenceError(
             f"Operation {operation.key} 的 Step Budget 超过 Run 总预算"
         )
+
+
+def _validate_video_stages(
+    operation: OperationDefinition,
+    profiles: Mapping[str, ProfileDefinition],
+    schemas: Mapping[str, OutputSchemaDefinition],
+    budgets: Mapping[str, StepBudgetDefinition],
+) -> None:
+    if not operation.stage_steps and operation.video_stage_policy is None:
+        return
+    expected = {
+        "video.chapter_cinematic_adaptation_v2": (
+            "video.cinematic-stages.v1",
+            (
+                ("dramatic_structure", 2),
+                ("shot_design", 3),
+                ("missing_beat_shots", 3),
+                ("cinematic_review", 2),
+            ),
+        ),
+        "video.chapter_shot_prompt_v2": ("video.shot-prompt-stages.v1", (("shot_prompt", 2),)),
+    }.get(operation.key)
+    if (
+        expected is None
+        or operation.video_stage_policy != expected[0]
+        or tuple((stage.stage_key, stage.max_invocations) for stage in operation.stage_steps)
+        != expected[1]
+        or not operation.development_only
+        or operation.lane != "batch_media"
+        or operation.review_policy.mode != "none"
+        or operation.run_budget.max_protocol_correction_steps != 0
+    ):
+        raise ExecutionRegistryReferenceError("视频阶段必须使用精确领域阶段策略")
+    for stage in operation.stage_steps:
+        if (
+            stage.model_profile_key != f"video.{stage.stage_key}.v2"
+            or stage.output_schema_key != f"output.video_{stage.stage_key}_stage.v2"
+            or stage.step_budget_key != f"step_budget.video.{stage.stage_key}.v2"
+        ):
+            raise ExecutionRegistryReferenceError("视频阶段资产引用不能跨阶段替换")
+        profile = profiles.get(stage.model_profile_key)
+        schema = schemas.get(stage.output_schema_key)
+        budget = budgets.get(stage.step_budget_key)
+        if (
+            profile is None
+            or schema is None
+            or budget is None
+            or not profile.supported
+            or not schema.supported
+            or not budget.supported
+            or profile.purpose != "generation"
+            or schema.purpose != "generation"
+            or profile.reasoning_mode != "disabled"
+        ):
+            raise ExecutionRegistryReferenceError("视频阶段依赖必须完整且使用 generation 用途")
+        _validate_step_within_run(operation, budget)
+    first = operation.stage_steps[0]
+    if (
+        operation.generator_profile_key,
+        operation.output_schema_key,
+        operation.generator_step_budget_key,
+    ) != (first.model_profile_key, first.output_schema_key, first.step_budget_key):
+        raise ExecutionRegistryReferenceError("视频首阶段必须与 generator 引用精确一致")
+    if operation.run_budget.max_model_calls != sum(
+        stage.max_invocations for stage in operation.stage_steps
+    ):
+        raise ExecutionRegistryReferenceError("视频总模型调用额度必须等于固定阶段上界")
 
 
 def _validate_system_purpose_references(

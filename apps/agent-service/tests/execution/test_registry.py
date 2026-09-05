@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "9f679762c74ec39314e0daa222db3a5a98ad15309fedd44ce496822398b891a5"
+        "920ca5f4a4b98e078bdf620dcc4f1b2e943d2290029718aa3aa749277ad15b75"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -232,8 +232,21 @@ def test_loader_rejects_disabled_and_environment_forbidden_operations(contract_c
         production.resolve("video", "chapter_cinematic_adaptation_v2")
 
     development = load_execution_registry(CONTRACT_ROOT, environment="dev")
+    video = development.resolve("video", "chapter_cinematic_adaptation_v2")
+    assert video.operation.v2_enabled
+    assert video.operation.review_policy.mode == "none"
+    assert [(stage.stage_key, stage.max_invocations) for stage in video.operation.stage_steps] == [
+        ("dramatic_structure", 2), ("shot_design", 3),
+        ("missing_beat_shots", 3), ("cinematic_review", 2)
+    ]
+    selected = next(item for item in catalog["operations"]
+                    if item["key"] == "video.chapter_cinematic_adaptation_v2")
+    selected["v2Enabled"] = False
+    _write_json(catalog_path, catalog)
+    _refresh_manifest_hash(contract_copy, "catalog")
     with pytest.raises(ExecutionOperationDisabledError):
-        development.resolve("video", "chapter_cinematic_adaptation_v2")
+        load_execution_registry(contract_copy, environment="dev").resolve(
+            "video", "chapter_cinematic_adaptation_v2")
 
 
 def test_enabled_no_review_operation_rejects_hidden_reviewer_execution_refs(

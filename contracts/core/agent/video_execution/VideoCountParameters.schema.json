@@ -1,0 +1,24 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoCountParameters/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actual": {
+      "minimum": 0,
+      "title": "Actual",
+      "type": "integer"
+    },
+    "maximum": {
+      "minimum": 1,
+      "title": "Maximum",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "actual",
+    "maximum"
+  ],
+  "title": "VideoCountParameters",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoCountParameters"
+}

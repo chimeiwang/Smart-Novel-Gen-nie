@@ -32,6 +32,7 @@ CONTRACT_MODULES = (
     "tools",
     "video",
     "video_adaptation",
+    "video_execution",
     "video_render",
     "workflow_events",
 )
@@ -47,6 +48,8 @@ ABSTRACT_MODELS = {
     "VideoContractModel",
     "VideoAdaptationContractModel",
     "VideoRenderContractModel",
+    "_VideoInput",
+    "_VideoOutput",
 }
 MODULE_SCHEMA_VERSIONS = {
     "execution": "2.0",
@@ -55,6 +58,7 @@ MODULE_SCHEMA_VERSIONS = {
     "quality_execution": "2.0",
     "style_execution": "2.0",
     "rag_execution": "2.0",
+    "video_execution": "2.0",
 }
 
 

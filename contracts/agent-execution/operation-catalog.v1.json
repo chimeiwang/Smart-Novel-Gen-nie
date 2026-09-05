@@ -876,54 +876,108 @@
       "key": "video.chapter_cinematic_adaptation_v2",
       "workflow": "video",
       "operation": "chapter_cinematic_adaptation_v2",
-      "labels": {"zh-CN": "章节电影化拆镜"},
-      "targetKinds": ["video_adaptation"],
-      "scopeKinds": ["chapter"],
+      "labels": {
+        "zh-CN": "章节电影化拆镜"
+      },
+      "targetKinds": [
+        "video_adaptation"
+      ],
+      "scopeKinds": [
+        "chapter"
+      ],
       "mutating": true,
       "developmentOnly": true,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.video.chapter_adaptation.v2",
-      "generatorProfile": "video.chapter_adaptation.v2",
-      "outputSchema": "output.video_adaptation_plan.v2",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.video_source_anchors.v2", "validator.video_timeline.v2", "validator.video_shot_structure.v2"],
+      "generatorProfile": "video.dramatic_structure.v2",
+      "outputSchema": "output.video_dramatic_structure_stage.v2",
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.video_source_anchors.v2",
+        "validator.video_timeline.v2",
+        "validator.video_shot_structure.v2"
+      ],
       "reviewPolicy": {
-        "profile": "review.single_cinematic.v2",
-        "mode": "single",
-        "reviewerProfiles": ["reviewer.cinematic.v2"],
-        "mergePolicy": "review.merge_all_pass_else_author.v1",
-        "maxAutomaticRevisions": 1,
-        "onUnavailable": "awaiting_user"
+        "profile": "review.none.v1",
+        "mode": "none",
+        "reviewerProfiles": [],
+        "mergePolicy": "review.merge_none.v1",
+        "maxAutomaticRevisions": 0,
+        "onUnavailable": "continue"
       },
       "applyHandler": "apply.video_adaptation_plan.v2",
       "runBudgetProfile": {
         "profile": "budget.video.chapter_adaptation.v2",
-        "maxModelCalls": 5,
-        "maxInputTokens": 300000,
-        "maxPromptCacheMissTokens": 80000,
-        "maxCompletionTokens": 80000,
+        "maxModelCalls": 10,
+        "maxInputTokens": 2400000,
+        "maxPromptCacheMissTokens": 2400000,
+        "maxCompletionTokens": 312000,
         "maxReasoningTokens": 0,
-        "maxVisibleOutputTokens": 80000,
-        "maxCostMicros": 4000000,
-        "maxWallClockSeconds": 1500,
-        "maxProtocolCorrectionSteps": 1,
+        "maxVisibleOutputTokens": 312000,
+        "maxCostMicros": 13000000,
+        "maxWallClockSeconds": 3000,
+        "maxProtocolCorrectionSteps": 0,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "batch_media"
+      "lane": "batch_media",
+      "generatorStepBudgetProfile": "step_budget.video.dramatic_structure.v2",
+      "videoStagePolicy": "video.cinematic-stages.v1",
+      "stageSteps": [
+        {
+          "stageKey": "dramatic_structure",
+          "modelProfile": "video.dramatic_structure.v2",
+          "outputSchema": "output.video_dramatic_structure_stage.v2",
+          "stepBudgetProfile": "step_budget.video.dramatic_structure.v2",
+          "maxInvocations": 2
+        },
+        {
+          "stageKey": "shot_design",
+          "modelProfile": "video.shot_design.v2",
+          "outputSchema": "output.video_shot_design_stage.v2",
+          "stepBudgetProfile": "step_budget.video.shot_design.v2",
+          "maxInvocations": 3
+        },
+        {
+          "stageKey": "missing_beat_shots",
+          "modelProfile": "video.missing_beat_shots.v2",
+          "outputSchema": "output.video_missing_beat_shots_stage.v2",
+          "stepBudgetProfile": "step_budget.video.missing_beat_shots.v2",
+          "maxInvocations": 3
+        },
+        {
+          "stageKey": "cinematic_review",
+          "modelProfile": "video.cinematic_review.v2",
+          "outputSchema": "output.video_cinematic_review_stage.v2",
+          "stepBudgetProfile": "step_budget.video.cinematic_review.v2",
+          "maxInvocations": 2
+        }
+      ]
     },
     {
       "key": "video.chapter_shot_prompt_v2",
       "workflow": "video",
       "operation": "chapter_shot_prompt_v2",
-      "labels": {"zh-CN": "生成逐镜即梦提示词"},
-      "targetKinds": ["video_shot_prompt"],
-      "scopeKinds": ["shot_batch"],
+      "labels": {
+        "zh-CN": "生成逐镜即梦提示词"
+      },
+      "targetKinds": [
+        "video_shot_prompt"
+      ],
+      "scopeKinds": [
+        "shot_batch"
+      ],
       "mutating": true,
       "developmentOnly": true,
-      "v2Enabled": false,
+      "v2Enabled": true,
       "evidencePolicy": "evidence.video.shot_prompt.v2",
       "generatorProfile": "video.shot_prompt.v2",
-      "outputSchema": "output.video_shot_prompt_batch.v2",
-      "deterministicValidators": ["validator.schema_strict.v1", "validator.video_prompt_source_binding.v2", "validator.video_prompt_compile.v2", "validator.video_prompt_budget.v2"],
+      "outputSchema": "output.video_shot_prompt_stage.v2",
+      "deterministicValidators": [
+        "validator.schema_strict.v1",
+        "validator.video_prompt_source_binding.v2",
+        "validator.video_prompt_compile.v2",
+        "validator.video_prompt_budget.v2"
+      ],
       "reviewPolicy": {
         "profile": "review.none.v1",
         "mode": "none",
@@ -936,17 +990,28 @@
       "runBudgetProfile": {
         "profile": "budget.video.shot_prompt.v2",
         "maxModelCalls": 2,
-        "maxInputTokens": 120000,
-        "maxPromptCacheMissTokens": 60000,
-        "maxCompletionTokens": 48000,
+        "maxInputTokens": 480000,
+        "maxPromptCacheMissTokens": 480000,
+        "maxCompletionTokens": 96000,
         "maxReasoningTokens": 0,
-        "maxVisibleOutputTokens": 48000,
-        "maxCostMicros": 1500000,
+        "maxVisibleOutputTokens": 96000,
+        "maxCostMicros": 3000000,
         "maxWallClockSeconds": 600,
-        "maxProtocolCorrectionSteps": 1,
+        "maxProtocolCorrectionSteps": 0,
         "maxProviderRetriesPerStep": 2
       },
-      "lane": "batch_media"
+      "lane": "batch_media",
+      "generatorStepBudgetProfile": "step_budget.video.shot_prompt.v2",
+      "videoStagePolicy": "video.shot-prompt-stages.v1",
+      "stageSteps": [
+        {
+          "stageKey": "shot_prompt",
+          "modelProfile": "video.shot_prompt.v2",
+          "outputSchema": "output.video_shot_prompt_stage.v2",
+          "stepBudgetProfile": "step_budget.video.shot_prompt.v2",
+          "maxInvocations": 2
+        }
+      ]
     }
   ]
 }

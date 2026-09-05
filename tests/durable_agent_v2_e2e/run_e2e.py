@@ -278,6 +278,7 @@ class ComposeStack:
         self._started = False
         self.last_service_restart: dict[str, object] = {}
         self.rag_embeddings = False
+        self.video_responses = False
 
     def activate_durable_scope(self, *, user_id: str, novel_id: str) -> None:
         self.environment.update(
@@ -311,6 +312,8 @@ class ComposeStack:
         ]
         if self.rag_embeddings:
             command.extend(["-f", str(ROOT / "tests/durable_agent_v2_e2e/compose.rag.yaml")])
+        if self.video_responses:
+            command.extend(["-f", str(ROOT / "tests/durable_agent_v2_e2e/compose.video.yaml")])
         return command
 
     def run(
@@ -2160,6 +2163,7 @@ def run(
     evidence_dir.mkdir(parents=True, mode=0o700)
     stack = ComposeStack(evidence_dir)
     stack.rag_embeddings = phase == "rag"
+    stack.video_responses = phase == "video"
     sampler = ResourceSampler(stack)
     acceptance: Acceptance | None = None
     report: dict[str, object] = {
@@ -2184,6 +2188,10 @@ def run(
         report["scope"] = "local-isolated-controlled-embeddings-http"
         report["composeOverrideSha256"] = hashlib.sha256(
             (ROOT / "tests/durable_agent_v2_e2e/compose.rag.yaml").read_bytes()
+        ).hexdigest()
+    if phase == "video":
+        report["composeOverrideSha256"] = hashlib.sha256(
+            (ROOT / "tests/durable_agent_v2_e2e/compose.video.yaml").read_bytes()
         ).hexdigest()
     try:
         if rebuild_agent:
@@ -2217,7 +2225,12 @@ def run(
                 }
             )
 
-        if phase == "rag":
+        if phase == "video":
+            from tests.durable_agent_v2_e2e.video import scenarios as video_scenarios
+
+            for scenario in video_scenarios(acceptance):
+                record_scenario(scenario)
+        elif phase == "rag":
             from tests.durable_agent_v2_e2e.rag import scenarios as rag_scenarios
 
             for scenario in rag_scenarios(acceptance):
@@ -2348,6 +2361,7 @@ def main() -> int:
             "quality",
             "style",
             "rag",
+            "video",
         ),
         default="minimum",
         help=(
@@ -2361,7 +2375,8 @@ def main() -> int:
             "short-medium 验证四操作、双段完整前缀、Agent重启恢复、精确候选采用与完整报告；"
             "quality 验证原终检接口、完整报告、一次独立纠正和失败终态的 Agent 重启重放；"
             "style 验证用户级画像完整五节、首节重启重放、原空白与字数规则及单节重做；"
-            "rag 验证真实本地 embeddings HTTP、多批索引原子完成、重启重放与未知用量零扣费"
+            "rag 验证真实本地 embeddings HTTP、多批索引原子完成、重启重放与未知用量零扣费；"
+            "video 验证开发拆镜三阶段、终态重启恢复、作者确认与提示词一次纠正后的原保存路径"
         ),
     )
     parser.add_argument(

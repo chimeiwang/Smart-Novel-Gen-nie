@@ -7,8 +7,10 @@ import static cn.inkforge.core.db.generated.Tables.VIDEOCHAPTERADAPTATION;
 import static cn.inkforge.core.db.generated.Tables.VIDEOCHAPTERADAPTATIONHEAD;
 import static cn.inkforge.core.db.generated.Tables.VIDEOPROJECT;
 import static cn.inkforge.core.db.generated.Tables.VIDEOSHOT;
+import static cn.inkforge.core.db.generated.Tables.WORKFLOWRUN;
 
 import cn.inkforge.contracts.api.ChapterAdaptationTaskResponse;
+import cn.inkforge.contracts.api.ChapterAdaptationPlanCandidate;
 import cn.inkforge.contracts.api.DramaticStructureCheckpoint;
 import cn.inkforge.contracts.api.ShotPromptSpecBatch;
 import cn.inkforge.contracts.api.StartPromptRunRequest;
@@ -27,6 +29,7 @@ import cn.inkforge.core.db.generated.tables.records.VideochapteradaptationheadRe
 import cn.inkforge.core.db.generated.tables.records.VideoprojectRecord;
 import cn.inkforge.core.db.generated.tables.records.VideoshotRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
@@ -36,6 +39,9 @@ import cn.inkforge.core.video.application.VideoAdaptationTaskAcceptance;
 import cn.inkforge.core.video.application.VideoAdaptationTaskDispatch;
 import cn.inkforge.core.video.application.VideoAdaptationTaskStore;
 import cn.inkforge.core.video.domain.VideoAdaptationPlans;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -45,6 +51,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
+import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.openapitools.jackson.nullable.JsonNullable;
@@ -58,7 +66,7 @@ import tools.jackson.databind.ObjectMapper;
  * <p>任务创建时冻结章节、正式镜头版本、设定和目标镜头；Agent 回调只能完成同一最新 task/job/run 绑定。
  * 拆镜完成只创建待审 Artifact，提示词完成只保存候选批次，二者都不能越过作者确认直接改正式方案或 PromptHead。
  */
-public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskStore {
+public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskStore, WorkflowVideoAdaptationCompletion {
 
     private static final Set<String> ACTIVE = Set.of("pending", "submitted", "processing");
     private static final Set<String> TERMINAL = Set.of("completed", "failed", "cancelled");
@@ -72,6 +80,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
     private final JooqVideoAdaptationReadModel readModel;
     private final JooqVideoVisualCanonRepository visualCanons;
     private final JooqVideoSettingSnapshotBuilder settings;
+    private final JooqVideoModelRunStarter durableStarter;
 
     public JooqVideoAdaptationTaskStore(
             CoreDatabase database,
@@ -80,6 +89,12 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
             ObjectMapper json,
             JooqVideoVisualCanonRepository visualCanons,
             String dispatchNamespace) {
+        this(database, ids, clock, json, visualCanons, dispatchNamespace, null, null, null);
+    }
+
+    public JooqVideoAdaptationTaskStore(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, JooqVideoVisualCanonRepository visualCanons, String dispatchNamespace,
+            CoreSettings coreSettings, ExecutionRegistry registry, Supplier<DurableWorkflowService> workflows) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -89,12 +104,14 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
         this.settings = new JooqVideoSettingSnapshotBuilder(json);
         String namespace = dispatchNamespace == null ? "default" : dispatchNamespace;
         this.jobPrefix = "video-adaptation-" + namespace + "-";
+        this.durableStarter = coreSettings == null ? null : new JooqVideoModelRunStarter(coreSettings, registry, workflows, json);
     }
 
     @Override
     public VideoAdaptationTaskAcceptance createPlanTask(
             String userId, String adaptationId, StartShotPlanRunRequest request) {
         return database.transactionResult(transaction -> {
+            if (durableStarter != null) JooqVideoModelRunStarter.lockStartOwner(transaction, userId);
             var owned = VideoDatabaseAccess.ownedAdaptation(
                     transaction, userId, adaptationId, true);
             VideochapteradaptationRecord adaptation = owned.adaptation();
@@ -216,6 +233,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
                             DatabaseTimestamp.next(clock, head.getUpdatedat()))
                     .where(VIDEOCHAPTERADAPTATIONHEAD.ADAPTATIONID.eq(adaptationId))
                     .execute();
+            if (durableStarter != null) durableStarter.bind(userId, adaptation.getNovelid(), taskId, payload, inheritedCheckpoint);
             return new VideoAdaptationTaskAcceptance(adaptationId, taskId);
         });
     }
@@ -224,6 +242,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
     public VideoAdaptationTaskAcceptance createPromptTask(
             String userId, String adaptationId, StartPromptRunRequest request) {
         return database.transactionResult(transaction -> {
+            if (durableStarter != null) JooqVideoModelRunStarter.lockStartOwner(transaction, userId);
             var owned = VideoDatabaseAccess.ownedAdaptation(
                     transaction, userId, adaptationId, true);
             var adaptation = owned.adaptation();
@@ -356,6 +375,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
                     .set(VIDEOADAPTATIONTASK.CREATEDAT, now)
                     .set(VIDEOADAPTATIONTASK.UPDATEDAT, now)
                     .execute();
+            if (durableStarter != null) durableStarter.bind(userId, adaptation.getNovelid(), taskId, payload, null);
             return new VideoAdaptationTaskAcceptance(adaptationId, taskId);
         });
     }
@@ -403,6 +423,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
                             VIDEOADAPTATIONTASK.JOBID.like(jobPrefix + "%"),
                             VIDEOADAPTATIONTASK.STATUS.in(ACTIVE),
                             VIDEOADAPTATIONTASK.NEXTATTEMPTAT.le(now),
+                            legacyTaskCondition(),
                             VIDEOPROJECT.DELETEDAT.isNull())
                     .orderBy(
                             VIDEOADAPTATIONTASK.NEXTATTEMPTAT,
@@ -448,7 +469,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
     public void markSubmitted(String taskId) {
         database.transactionResult(transaction -> {
             VideoadaptationtaskRecord task = lockTask(transaction, taskId);
-            if (task != null && ACTIVE.contains(task.getStatus())) {
+            if (task != null && !hasDurableBinding(transaction, taskId) && ACTIVE.contains(task.getStatus())) {
                 LocalDateTime now = DatabaseTimestamp.now(clock);
                 transaction.update(VIDEOADAPTATIONTASK)
                         .set(
@@ -475,7 +496,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
             String taskId, String errorCode, boolean transientFailure) {
         database.transactionResult(transaction -> {
             VideoadaptationtaskRecord task = lockTask(transaction, taskId);
-            if (task == null || TERMINAL.contains(task.getStatus())) return null;
+            if (task == null || hasDurableBinding(transaction, taskId) || TERMINAL.contains(task.getStatus())) return null;
             if (transientFailure) {
                 int attempts = task.getAttemptcount() + 1;
                 LocalDateTime now = DatabaseTimestamp.now(clock);
@@ -515,7 +536,7 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
         }
         database.transactionResult(transaction -> {
             VideoadaptationtaskRecord task = lockTask(transaction, taskId);
-            if (task == null || TERMINAL.contains(task.getStatus())) return null;
+            if (task == null || hasDurableBinding(transaction, taskId) || TERMINAL.contains(task.getStatus())) return null;
             failTask(
                     transaction,
                     task,
@@ -620,59 +641,8 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
                 throw terminalCallbackConflict();
             }
             if (!ACTIVE.contains(task.getStatus())) throw callbackStateConflict();
-            try {
-                VideoAdaptationPlans.validateAgainstSource(
-                        callback.getCandidate(),
-                        context.adaptation().getId(),
-                        context.adaptation().getSourcetext(),
-                        context.adaptation().getSourcehash());
-            } catch (IllegalArgumentException exception) {
-                throw validation(exception.getMessage());
-            }
-            String awaiting = transaction.select(REVIEWARTIFACT.ID)
-                    .from(REVIEWARTIFACT)
-                    .where(
-                            REVIEWARTIFACT.VIDEOADAPTATIONID.eq(
-                                    context.adaptation().getId()),
-                            REVIEWARTIFACT.STATUS.eq(Reviewartifactstatus.awaiting_user))
-                    .fetchAny(REVIEWARTIFACT.ID);
-            if (awaiting != null) {
-                throw new ApiException(
-                        409,
-                        "VIDEO_ADAPTATION_REVIEW_PENDING",
-                        "当前已有待确认章节镜头方案");
-            }
             LocalDateTime now = DatabaseTimestamp.now(clock);
-            // Agent 产物只是待审候选；任务终态与 Artifact 同事务写入，不能直接物化正式 Scene/Beat/Shot。
-            Map<String, Object> payload = Map.of(
-                    "applyTarget", Map.of(
-                            "type", "video_adaptation_plan",
-                            "adaptationId", context.adaptation().getId()),
-                    "candidate", VideoAdaptationPlans.candidateMap(callback.getCandidate()));
-            transaction.insertInto(REVIEWARTIFACT)
-                    .set(REVIEWARTIFACT.ID, ids.next())
-                    .set(REVIEWARTIFACT.NOVELID, context.adaptation().getNovelid())
-                    .set(REVIEWARTIFACT.CHAPTERID, context.adaptation().getChapterid())
-                    .set(REVIEWARTIFACT.KIND, Reviewartifactkind.video_adaptation_plan)
-                    .set(REVIEWARTIFACT.STATUS, Reviewartifactstatus.awaiting_user)
-                    .set(
-                            REVIEWARTIFACT.TITLE,
-                            context.adaptation().getChaptertitle() + " · 电影化镜头方案")
-                    .set(REVIEWARTIFACT.SUMMARY, summary(callback))
-                    .set(REVIEWARTIFACT.PAYLOADJSON, json.writeValueAsString(payload))
-                    .set(
-                            REVIEWARTIFACT.ARTIFACTKEY,
-                            "video-adaptation-plan:"
-                                    + context.adaptation().getId()
-                                    + ":"
-                                    + task.getId())
-                    .set(REVIEWARTIFACT.REVISION, 1)
-                    .set(REVIEWARTIFACT.CREATEDBYAGENT, "剧情")
-                    .set(REVIEWARTIFACT.VIDEOADAPTATIONID, context.adaptation().getId())
-                    .set(REVIEWARTIFACT.VIDEOADAPTATIONTASKID, task.getId())
-                    .set(REVIEWARTIFACT.CREATEDAT, now)
-                    .set(REVIEWARTIFACT.UPDATEDAT, now)
-                    .execute();
+            createPlanArtifact(transaction, context, callback.getCandidate(), now);
             completeTask(transaction, task, resultJson, now);
             return null;
         });
@@ -744,6 +714,173 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
         });
     }
 
+    @Override
+    public boolean targetExists(DSLContext transaction, String runId) {
+        return durableContext(transaction, DurableVideoAdaptationRun.load(transaction, json, runId)) != null;
+    }
+
+    @Override
+    public void markProcessing(DSLContext transaction, String runId) {
+        CallbackContext context = durableContext(transaction, DurableVideoAdaptationRun.load(transaction, json, runId));
+        if (context == null || !ACTIVE.contains(context.task().getStatus())) return;
+        LocalDateTime now = DatabaseTimestamp.now(clock);
+        transaction.update(VIDEOADAPTATIONTASK).set(VIDEOADAPTATIONTASK.STATUS, "processing")
+                .set(VIDEOADAPTATIONTASK.SUBMITTEDAT, context.task().getSubmittedat() == null ? now : context.task().getSubmittedat())
+                .set(VIDEOADAPTATIONTASK.UPDATEDAT, now)
+                .where(VIDEOADAPTATIONTASK.ID.eq(context.task().getId())).execute();
+    }
+
+    @Override
+    public void saveDramaticCheckpoint(DSLContext transaction, String runId, Map<String, Object> checkpoint) {
+        var normalized = json.convertValue(checkpoint, DramaticStructureCheckpoint.class);
+        CallbackContext context = durableContext(transaction, DurableVideoAdaptationRun.load(transaction, json, runId));
+        if (context == null || !"shot_plan".equals(context.task().getKind()) || !ACTIVE.contains(context.task().getStatus())) {
+            throw callbackStateConflict();
+        }
+        var task = context.task();
+        String value = json.writeValueAsString(normalized);
+        if ("dramatic_structure".equals(task.getCheckpointstage())) {
+            if (jsonEquivalent(task.getCheckpointjson(), value)) return;
+            throw new ApiException(409, "VIDEO_ADAPTATION_CHECKPOINT_CONFLICT", "同一戏剧结构阶段不能覆盖不同内容");
+        }
+        if (!"none".equals(task.getCheckpointstage()) || task.getCheckpointjson() != null) throw callbackStateConflict();
+        transaction.update(VIDEOADAPTATIONTASK).set(VIDEOADAPTATIONTASK.STATUS, "processing")
+                .set(VIDEOADAPTATIONTASK.CHECKPOINTSTAGE, "dramatic_structure").set(VIDEOADAPTATIONTASK.CHECKPOINTJSON, value)
+                .set(VIDEOADAPTATIONTASK.UPDATEDAT, DatabaseTimestamp.now(clock))
+                .where(VIDEOADAPTATIONTASK.ID.eq(task.getId())).execute();
+    }
+
+    @Override
+    public Completion completePlan(DSLContext transaction, String runId, Map<String, Object> candidate) {
+        var run = DurableVideoAdaptationRun.load(transaction, json, runId);
+        CallbackContext context = durableContext(transaction, run);
+        if (context == null) return new Completion("cancelled", run.taskId(), null);
+        var task = context.task();
+        if (!"shot_plan".equals(task.getKind())) throw callbackStateConflict();
+        var normalized = json.convertValue(candidate, ChapterAdaptationPlanCandidate.class);
+        String resultJson = canonicalJson(Map.of("eventId", "video-v2-result." + runId,
+                "workflow", VideoAdaptationTaskPayload.PLAN_WORKFLOW, "candidate", VideoAdaptationPlans.candidateMap(normalized)));
+        if ("completed".equals(task.getStatus())) {
+            if (!jsonEquivalent(task.getResultjson(), resultJson)) throw terminalCallbackConflict();
+            String artifactId = transaction.select(REVIEWARTIFACT.ID).from(REVIEWARTIFACT)
+                    .where(REVIEWARTIFACT.VIDEOADAPTATIONTASKID.eq(task.getId())).fetchOne(REVIEWARTIFACT.ID);
+            return new Completion("completed", task.getId(), artifactId);
+        }
+        if (!ACTIVE.contains(task.getStatus())) throw callbackStateConflict();
+        LocalDateTime now = DatabaseTimestamp.now(clock);
+        String artifactId = createPlanArtifact(transaction, context, normalized, now);
+        completeTask(transaction, task, resultJson, now);
+        return new Completion("completed", task.getId(), artifactId);
+    }
+
+    @Override
+    public Completion completePrompts(DSLContext transaction, String runId, Map<String, Object> batch) {
+        var normalized = json.convertValue(batch, ShotPromptSpecBatch.class);
+        validatePromptBatch(normalized);
+        var run = DurableVideoAdaptationRun.load(transaction, json, runId);
+        CallbackContext context = durableContext(transaction, run);
+        if (context == null) return new Completion("cancelled", run.taskId(), null);
+        var task = context.task();
+        if (!"shot_prompt".equals(task.getKind())) throw callbackStateConflict();
+        String resultJson = canonicalJson(Map.of("eventId", "video-v2-result." + runId,
+                "workflow", VideoAdaptationTaskPayload.PROMPT_WORKFLOW,
+                "promptBatch", json.convertValue(normalized, new TypeReference<Map<String, Object>>() {})));
+        if ("completed".equals(task.getStatus())) {
+            if (!jsonEquivalent(task.getResultjson(), resultJson)) throw terminalCallbackConflict();
+            return new Completion("completed", task.getId(), null);
+        }
+        if (!ACTIVE.contains(task.getStatus())) throw callbackStateConflict();
+        List<String> actual = normalized.getPrompts().stream().map(value -> value.getShotKey()).toList();
+        if (!actual.equals(parseStored(task).targetShotKeys())) {
+            throw new ApiException(409, "VIDEO_ADAPTATION_PROMPT_TARGET_MISMATCH", "逐镜提示词结果没有按请求顺序完整覆盖目标镜头");
+        }
+        completeTask(transaction, task, resultJson, DatabaseTimestamp.now(clock));
+        return new Completion("completed", task.getId(), null);
+    }
+
+    @Override
+    public String finish(DSLContext transaction, String runId, String terminal, String code, String message) {
+        if (!Set.of("failed", "cancelled").contains(terminal)) throw new IllegalArgumentException("视频失败投影终态无效");
+        var run = DurableVideoAdaptationRun.load(transaction, json, runId);
+        CallbackContext context = durableContext(transaction, run);
+        if (context == null) return "cancelled";
+        if (ACTIVE.contains(context.task().getStatus())) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("eventId", "video-v2-terminal." + runId); result.put("code", code);
+            result.put("message", message); result.put("recoverable", false);
+            failTask(transaction, context.task(), terminal, code, message, canonicalJson(result));
+        } else if (!terminal.equals(context.task().getStatus())) {
+            throw callbackStateConflict();
+        }
+        return terminal;
+    }
+
+    private CallbackContext durableContext(DSLContext transaction, DurableVideoAdaptationRun run) {
+        // 调用方先完成预算/用户账务，再按 Novel→Project→Adaptation→Head→Task 投影业务。
+        if (transaction.fetchOne("SELECT id FROM public.\"Novel\" WHERE id=? AND \"userId\"=? FOR KEY SHARE",
+                run.novelId(), run.userId()) == null) return null;
+        VideoadaptationtaskRecord observed = transaction.selectFrom(VIDEOADAPTATIONTASK)
+                .where(VIDEOADAPTATIONTASK.ID.eq(run.taskId())).fetchOne();
+        if (observed == null) return null;
+        VideoprojectRecord project = transaction.selectFrom(VIDEOPROJECT)
+                .where(VIDEOPROJECT.ID.eq(observed.getProjectid())).forUpdate().fetchOne();
+        VideochapteradaptationRecord adaptation = transaction.selectFrom(VIDEOCHAPTERADAPTATION)
+                .where(VIDEOCHAPTERADAPTATION.ID.eq(run.adaptationId())).forUpdate().fetchOne();
+        var head = transaction.selectFrom(VIDEOCHAPTERADAPTATIONHEAD)
+                .where(VIDEOCHAPTERADAPTATIONHEAD.ADAPTATIONID.eq(run.adaptationId())).forUpdate().fetchOne();
+        VideoadaptationtaskRecord task = lockTask(transaction, run.taskId());
+        if (project == null || adaptation == null || head == null || task == null) return null;
+        if (!run.novelId().equals(task.getNovelid()) || !run.novelId().equals(project.getNovelid())
+                || !run.novelId().equals(adaptation.getNovelid()) || !run.adaptationId().equals(task.getAdaptationid())
+                || !project.getId().equals(adaptation.getProjectid()) || !run.operation().equals(task.getWorkflow())) {
+            throw new IllegalArgumentException("视频 V2 Run 与原任务归属不匹配");
+        }
+        var context = run.frozenContext(transaction, json);
+        VideoAdaptationTaskPayload payload = parseStored(task);
+        validateTaskPayload(task, payload);
+        if (!jsonEquivalent(json.writeValueAsString(context.get("payload")), json.writeValueAsString(payload.agentPayload()))) {
+            throw new IllegalArgumentException("视频 V2 Task 冻结输入与 Evidence 不匹配");
+        }
+        return new CallbackContext(task, adaptation, project);
+    }
+
+    private String createPlanArtifact(DSLContext transaction, CallbackContext context,
+            ChapterAdaptationPlanCandidate candidate, LocalDateTime now) {
+        try {
+            VideoAdaptationPlans.validateAgainstSource(candidate, context.adaptation().getId(),
+                    context.adaptation().getSourcetext(), context.adaptation().getSourcehash());
+        } catch (IllegalArgumentException exception) { throw validation(exception.getMessage()); }
+        String awaiting = transaction.select(REVIEWARTIFACT.ID).from(REVIEWARTIFACT)
+                .where(REVIEWARTIFACT.VIDEOADAPTATIONID.eq(context.adaptation().getId()),
+                        REVIEWARTIFACT.STATUS.eq(Reviewartifactstatus.awaiting_user)).fetchAny(REVIEWARTIFACT.ID);
+        if (awaiting != null) throw new ApiException(409, "VIDEO_ADAPTATION_REVIEW_PENDING", "当前已有待确认章节镜头方案");
+        String artifactId = ids.next();
+        Map<String, Object> payload = Map.of("applyTarget", Map.of("type", "video_adaptation_plan",
+                "adaptationId", context.adaptation().getId()), "candidate", VideoAdaptationPlans.candidateMap(candidate));
+        transaction.insertInto(REVIEWARTIFACT).set(REVIEWARTIFACT.ID, artifactId)
+                .set(REVIEWARTIFACT.NOVELID, context.adaptation().getNovelid()).set(REVIEWARTIFACT.CHAPTERID, context.adaptation().getChapterid())
+                .set(REVIEWARTIFACT.KIND, Reviewartifactkind.video_adaptation_plan).set(REVIEWARTIFACT.STATUS, Reviewartifactstatus.awaiting_user)
+                .set(REVIEWARTIFACT.TITLE, context.adaptation().getChaptertitle() + " · 电影化镜头方案")
+                .set(REVIEWARTIFACT.SUMMARY, summary(candidate)).set(REVIEWARTIFACT.PAYLOADJSON, json.writeValueAsString(payload))
+                .set(REVIEWARTIFACT.ARTIFACTKEY, "video-adaptation-plan:" + context.adaptation().getId() + ":" + context.task().getId())
+                .set(REVIEWARTIFACT.REVISION, 1).set(REVIEWARTIFACT.CREATEDBYAGENT, "剧情")
+                .set(REVIEWARTIFACT.VIDEOADAPTATIONID, context.adaptation().getId()).set(REVIEWARTIFACT.VIDEOADAPTATIONTASKID, context.task().getId())
+                .set(REVIEWARTIFACT.CREATEDAT, now).set(REVIEWARTIFACT.UPDATEDAT, now).execute();
+        return artifactId;
+    }
+
+    private static Condition legacyTaskCondition() {
+        // sourceType/sourceId 是旧 schema 已有字段；关闭新路由也不能让已有 V2 任务被旧队列误领。
+        return org.jooq.impl.DSL.notExists(org.jooq.impl.DSL.selectOne().from(WORKFLOWRUN)
+                .where(WORKFLOWRUN.SOURCETYPE.eq(DurableVideoAdaptationRun.SOURCE_TYPE),
+                        WORKFLOWRUN.SOURCEID.eq(VIDEOADAPTATIONTASK.ID)));
+    }
+
+    private static boolean hasDurableBinding(DSLContext transaction, String taskId) {
+        return transaction.fetchExists(transaction.selectOne().from(WORKFLOWRUN)
+                .where(WORKFLOWRUN.SOURCETYPE.eq(DurableVideoAdaptationRun.SOURCE_TYPE), WORKFLOWRUN.SOURCEID.eq(taskId)));
+    }
+
     private CallbackContext callbackContext(
             DSLContext transaction, CallbackIdentity identity) {
         // 先按固定顺序锁项目、改编、Head，最后锁任务；所有回调共用顺序以规避交叉死锁。
@@ -756,6 +893,11 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
                     "VIDEO_ADAPTATION_TASK_NOT_FOUND",
                     "章节影视化任务不存在");
         }
+        if (hasDurableBinding(transaction, observed.getId())) {
+            throw new ApiException(409, "VIDEO_ADAPTATION_V2_CALLBACK_REQUIRED", "该任务由耐久执行回调收敛，不接受旧任务回调");
+        }
+        // 新旧候选投影与作者决定使用相同的 Novel→Project 顺序。
+        transaction.fetchOne("SELECT id FROM public.\"Novel\" WHERE id=? FOR KEY SHARE", observed.getNovelid());
         VideoprojectRecord project = transaction.selectFrom(VIDEOPROJECT)
                 .where(VIDEOPROJECT.ID.eq(observed.getProjectid()))
                 .forUpdate()
@@ -961,12 +1103,12 @@ public final class JooqVideoAdaptationTaskStore implements VideoAdaptationTaskSt
         }
     }
 
-    private static String summary(VideoAdaptationPlanCompletionCallback callback) {
-        int scenes = callback.getCandidate().getScenes().size();
-        int beats = callback.getCandidate().getScenes().stream()
+    private static String summary(ChapterAdaptationPlanCandidate candidate) {
+        int scenes = candidate.getScenes().size();
+        int beats = candidate.getScenes().stream()
                 .mapToInt(scene -> scene.getBeats().size())
                 .sum();
-        List<cn.inkforge.contracts.api.CinematicShotCandidate> shots = callback.getCandidate()
+        List<cn.inkforge.contracts.api.CinematicShotCandidate> shots = candidate
                 .getScenes().stream()
                 .flatMap(scene -> scene.getBeats().stream())
                 .flatMap(beat -> beat.getShots().stream())

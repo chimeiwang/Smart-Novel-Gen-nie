@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
+
 from controlled_provider import ControlledFakeModelProvider
 from fastapi import FastAPI
 from inkforge_agents.app import create_app as create_inkforge_app
 from inkforge_agents.config import Settings
+from video_fixture import ControlledVideoResponsesProvider
 
 
 def create_app() -> FastAPI:
@@ -20,4 +23,12 @@ def create_app() -> FastAPI:
         control_url=settings.e2e_execution_control_url,
         control_token=settings.e2e_execution_control_token.get_secret_value(),
     )
+    if os.environ.get("E2E_VIDEO_RESPONSES_ENABLED") == "true":
+        responses = ControlledVideoResponsesProvider(
+            control_url=settings.e2e_execution_control_url,
+            control_token=settings.e2e_execution_control_token.get_secret_value(),
+        )
+        return create_inkforge_app(
+            settings=settings, model_provider=provider, responses_provider=responses
+        )
     return create_inkforge_app(settings=settings, model_provider=provider)

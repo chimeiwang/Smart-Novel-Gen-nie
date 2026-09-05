@@ -39,6 +39,8 @@ final class WorkflowResultMaterializerRegistry {
         result.put("quality.consistency", new Binding("apply.consistency_quality_report.v1", Materializer.CONSISTENCY_QUALITY));
         result.put("style.portrait", new Binding("apply.style_portrait.v1", Materializer.STYLE_PORTRAIT));
         result.put("rag.embedding", new Binding("apply.rag_embedding.v1", Materializer.RAG_INDEX));
+        result.put("video.chapter_cinematic_adaptation_v2", new Binding("apply.video_adaptation_plan.v2", Materializer.VIDEO_STAGES));
+        result.put("video.chapter_shot_prompt_v2", new Binding("apply.video_shot_prompt_candidate.v2", Materializer.VIDEO_STAGES));
         return Map.copyOf(result);
     }
 
@@ -81,7 +83,8 @@ final class WorkflowResultMaterializerRegistry {
         SHORT_MEDIUM,
         CONSISTENCY_QUALITY,
         STYLE_PORTRAIT,
-        RAG_INDEX
+        RAG_INDEX,
+        VIDEO_STAGES
     }
 
     private record Binding(String applyHandler, Materializer materializer) {}

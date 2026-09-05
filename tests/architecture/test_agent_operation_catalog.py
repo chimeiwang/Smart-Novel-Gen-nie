@@ -121,6 +121,7 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
 )
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
     {
+        "video.chapter_adaptation.v2", "reviewer.cinematic.v2",
     "style.portrait.v1",
     "rag.embedding.v1",
         "quality.consistency.v1",
@@ -145,6 +146,7 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
     {
+        "output.video_adaptation_plan.v2", "output.video_shot_prompt_batch.v2",
     "output.style_portrait.v1",
     "output.embedding_batch.v1",
         "output.consistency_quality_report.v1", "output.protocol_correction.v1",
@@ -297,6 +299,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
 
     enabled_keys = {operation["key"] for operation in operations if operation["v2Enabled"]}
     assert enabled_keys == {
+        "video.chapter_cinematic_adaptation_v2", "video.chapter_shot_prompt_v2",
         "long_serial.answer_question",
         "long_serial.create_lore",
         "long_serial.revise_lore",
@@ -371,6 +374,10 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         for system_purpose in system_purposes.values()
     }
     for operation in operations:
+        for stage in operation.get("stageSteps", []):
+            referenced_profiles.add(stage["modelProfile"])
+            referenced_output_schemas.add(stage["outputSchema"])
+            referenced_step_budgets.add(stage["stepBudgetProfile"])
         generator_step_budget = operation.get("generatorStepBudgetProfile")
         if generator_step_budget is not None:
             referenced_step_budgets.add(cast(str, generator_step_budget))
@@ -872,9 +879,11 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "quality.consistency",
         "style.portrait",
         "rag.embedding",
+        "video.chapter_cinematic_adaptation_v2",
+        "video.chapter_shot_prompt_v2",
     ]
     for operation in enabled:
-        assert operation["developmentOnly"] is False
+        assert operation["developmentOnly"] is (operation["key"] in DEVELOPMENT_ONLY_OPERATION_KEYS)
         generator = profiles[operation["generatorProfile"]]
         assert generator["supported"] is True
         assert generator["purpose"] == (
@@ -890,6 +899,8 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 "quality.consistency",
                 "style.portrait",
                 "rag.embedding",
+                "video.chapter_cinematic_adaptation_v2",
+                "video.chapter_shot_prompt_v2",
             }
             else "bounded"
         )
@@ -1023,6 +1034,15 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert operation["runBudgetProfile"]["maxModelCalls"] == 5
             assert operation["runBudgetProfile"]["maxPromptCacheMissTokens"] == 300000
             assert operation["runBudgetProfile"]["maxProtocolCorrectionSteps"] == 0
+        elif operation["workflow"] == "video":
+            assert operation["videoStagePolicy"] in {
+                "video.cinematic-stages.v1", "video.shot-prompt-stages.v1"}
+            assert operation["stageSteps"][0]["modelProfile"] == operation["generatorProfile"]
+            assert "stageKey" in output_schema["jsonSchema"]["required"]
+            assert "outcome" in output_schema["jsonSchema"]["required"]
+            assert generator["reasoningMode"] == "disabled"
+            assert all("production" not in item["allowedEnvironments"]
+                       for item in generator_deployment["allowedModels"])
         elif operation["workflow"] == "short_medium":
             expected_field = {
                 "generate_outline": "content",
@@ -1139,6 +1159,9 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
             for _ in range(review_rounds)
             for reviewer_budget in reviewer_budgets
         )
+        if operation.get("stageSteps"):
+            planned_budgets = [step_budgets[stage["stepBudgetProfile"]]["budget"]
+                for stage in operation["stageSteps"] for _ in range(stage["maxInvocations"])]
         run_budget = operation["runBudgetProfile"]
         for field in AGGREGATE_STEP_BUDGET_FIELDS:
             assert sum(budget[field] for budget in planned_budgets) <= run_budget[field], (
@@ -1212,8 +1235,18 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
     assert rag_budget["maxProtocolCorrectionSteps"] == 0
 
     video_budget = operations["video.chapter_cinematic_adaptation_v2"]["runBudgetProfile"]
-    assert video_budget["maxModelCalls"] == 5
+    assert video_budget["maxModelCalls"] == 10
     assert operations["style.portrait"]["scopeKinds"] == ["user"]
+
+
+def test_video_migration_preserves_all_nineteen_existing_operation_values() -> None:
+    """冻结 65ebacf 的非视频 19 项完整 JSON，不只检查数量或 enabled 标记。"""
+    retained = [operation for operation in _operations()
+                if operation["key"] not in DEVELOPMENT_ONLY_OPERATION_KEYS]
+    assert len(retained) == 19
+    assert hashlib.sha256(canonical_execution_json_bytes(retained)).hexdigest() == (
+        "96afc59ca82841eeebbef5e3152c49e14902cfe1ae641501a06933a393642b12"
+    )
 
 
 def test_operation_catalog_manifest_hashes_are_stable() -> None:

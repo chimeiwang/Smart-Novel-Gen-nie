@@ -1,0 +1,33 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoEffectParameters/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "effects": {
+      "items": {
+        "enum": [
+          "火花",
+          "火焰",
+          "爆炸",
+          "闪电或电弧",
+          "粒子效果",
+          "光束或光柱",
+          "浓烟",
+          "雨雪",
+          "血迹"
+        ],
+        "type": "string"
+      },
+      "maxItems": 9,
+      "minItems": 1,
+      "title": "Effects",
+      "type": "array"
+    }
+  },
+  "required": [
+    "effects"
+  ],
+  "title": "VideoEffectParameters",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoEffectParameters"
+}

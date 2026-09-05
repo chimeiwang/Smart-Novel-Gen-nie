@@ -2,6 +2,84 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "deployment.video.shot_prompt.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "allowedModels": [
+        {
+          "provider": "openai_compatible",
+          "model": "deepseek-v4-flash",
+          "transportProfile": "transport.deepseek-responses.v1",
+          "endpointProfile": "endpoint.deepseek-responses-official.v1",
+          "structuredOutputRoute": "responses_json_schema_v1",
+          "capabilityVersion": "capability.deepseek-responses.json-schema.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": false,
+          "allowedEnvironments": [
+            "dev",
+            "test"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": true
+        },
+        {
+          "provider": "fake",
+          "model": "fake",
+          "transportProfile": "transport.fake.v1",
+          "endpointProfile": "endpoint.local-fake.v1",
+          "structuredOutputRoute": "responses_json_schema_v1",
+          "capabilityVersion": "capability.fake.structured-output.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": false,
+          "allowedEnvironments": [
+            "test"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": false
+        }
+      ]
+    },
+    {
+      "key": "deployment.video.chapter_adaptation.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "allowedModels": [
+        {
+          "provider": "openai_compatible",
+          "model": "deepseek-v4-flash",
+          "transportProfile": "transport.deepseek-responses.v1",
+          "endpointProfile": "endpoint.deepseek-responses-official.v1",
+          "structuredOutputRoute": "responses_json_schema_v1",
+          "capabilityVersion": "capability.deepseek-responses.json-schema.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": false,
+          "allowedEnvironments": [
+            "dev",
+            "test"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": true
+        },
+        {
+          "provider": "fake",
+          "model": "fake",
+          "transportProfile": "transport.fake.v1",
+          "endpointProfile": "endpoint.local-fake.v1",
+          "structuredOutputRoute": "responses_json_schema_v1",
+          "capabilityVersion": "capability.fake.structured-output.v1",
+          "reasoningMode": "disabled",
+          "supportsRequestIdempotency": false,
+          "allowedEnvironments": [
+            "test"
+          ],
+          "pricingVersion": "credit-pricing.v1",
+          "billable": false
+        }
+      ]
+    },
+    {
       "key": "deployment.rag.embedding.v2", "version": 2, "supported": true, "purpose": "embedding",
       "allowedModels": [],
       "configuredBinding": {

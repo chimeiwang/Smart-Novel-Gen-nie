@@ -1,0 +1,47 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoActionParameters/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "markers": {
+      "items": {
+        "enum": [
+          "凝成",
+          "亮起",
+          "熄灭",
+          "弹开",
+          "打开",
+          "关闭",
+          "碎裂",
+          "破裂",
+          "加速",
+          "减速",
+          "转为",
+          "变成",
+          "显现",
+          "消失",
+          "再次",
+          "再度",
+          "又一次",
+          "反复",
+          "继续",
+          "重试",
+          "回拧",
+          "反向",
+          "转动",
+          "旋转"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Markers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "markers"
+  ],
+  "title": "VideoActionParameters",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoActionParameters"
+}

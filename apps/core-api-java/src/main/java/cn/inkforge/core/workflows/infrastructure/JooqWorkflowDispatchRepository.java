@@ -59,6 +59,8 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
     private final int maxReviewLeases;
     private final WorkflowExecutionContextReader executionContexts;
     private final JooqWorkflowCallbackRepository rejectionConvergence;
+    private final boolean videoDispatchEnabled;
+    private final String videoJobPrefix;
 
     JooqWorkflowDispatchRepository(
             CoreDatabase database,
@@ -107,11 +109,29 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
             java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowQualityCompletion> qualityCompletion,
             java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion> styleCompletion,
             java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion> ragCompletion) {
+        this(database, ids, clock, json, registry, leaseDuration, maxActiveLeases, executionContexts,
+                qualityCompletion, styleCompletion, ragCompletion, () -> null, false, null);
+    }
+
+    JooqWorkflowDispatchRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration, int maxActiveLeases,
+            WorkflowExecutionContextReader executionContexts,
+            java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion> styleCompletion,
+            java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion> ragCompletion,
+            java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion> videoCompletion,
+            boolean videoDispatchEnabled, String videoDispatchNamespace) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.executionContexts = Objects.requireNonNull(executionContexts);
+        this.videoDispatchEnabled = videoDispatchEnabled;
+        if (videoDispatchEnabled && (videoDispatchNamespace == null
+                || !videoDispatchNamespace.matches("[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?"))) {
+            throw new IllegalArgumentException("视频调度必须配置原合法命名空间");
+        }
+        this.videoJobPrefix = "video-adaptation-" + videoDispatchNamespace + "-";
         Objects.requireNonNull(registry);
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow Step lease 必须为正数");
@@ -127,7 +147,7 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
         this.maxReviewLeases = Math.min(2, maxActiveLeases);
         this.rejectionConvergence = new JooqWorkflowCallbackRepository(
                 database, ids, clock, json, registry, leaseDuration, executionContexts,
-                () -> null, () -> null, () -> null, qualityCompletion, styleCompletion, ragCompletion);
+                () -> null, () -> null, () -> null, qualityCompletion, styleCompletion, ragCompletion, videoCompletion);
     }
 
     @Override
@@ -261,7 +281,7 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                 "SELECT pg_catalog.pg_advisory_xact_lock(?)", CAPACITY_LOCK_KEY);
         ActiveLeases active = activeLeases(transaction, now);
         if (active.total() >= maxActiveLeases) return Optional.empty();
-        DueLanes due = dueLanes(transaction, now);
+        DueLanes due = dueLanes(transaction, now, videoDispatchEnabled, videoJobPrefix);
         String preferredLane = due.interactive()
                         && (active.creative() >= maxCreativeLeases
                                 || active.batchMedia() > maxBatchMediaLeases)
@@ -281,6 +301,11 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                   AND step.status IN ('pending', 'running')
                   AND step."nextAttemptAt" <= ?
                   AND (step."leaseExpiresAt" IS NULL OR step."leaseExpiresAt" <= ?)
+                  AND (run.workflow <> 'video' OR (? AND EXISTS (
+                    SELECT 1 FROM public."VideoAdaptationTask" video_task
+                    WHERE run."sourceType" = 'video_adaptation_task_v2' AND video_task.id = run."sourceId"
+                      AND video_task."novelId" = run."novelId" AND starts_with(video_task."jobId", ?)
+                  )))
                   AND step.lane IN ('interactive', 'creative', 'batch_media')
                   AND NOT (step.lane = 'creative' AND ? AND ? >= ?)
                   AND NOT (step.lane = 'batch_media' AND ? AND ? >= ?)
@@ -324,6 +349,8 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                 """,
                 now,
                 now,
+                videoDispatchEnabled,
+                videoJobPrefix,
                 due.interactive(),
                 active.creative(),
                 maxCreativeLeases,
@@ -480,7 +507,7 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                 Math.toIntExact(value.get("review", Long.class)));
     }
 
-    private static DueLanes dueLanes(DSLContext transaction, LocalDateTime now) {
+    private static DueLanes dueLanes(DSLContext transaction, LocalDateTime now, boolean videoDispatchEnabled, String videoJobPrefix) {
         Record value = transaction.fetchOne(
                 """
                 SELECT COALESCE(bool_or(step.lane = 'interactive'), FALSE) AS interactive,
@@ -493,6 +520,11 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                   AND step.status IN ('pending', 'running')
                   AND step."nextAttemptAt" <= ?
                   AND (step."leaseExpiresAt" IS NULL OR step."leaseExpiresAt" <= ?)
+                  AND (run.workflow <> 'video' OR (? AND EXISTS (
+                    SELECT 1 FROM public."VideoAdaptationTask" video_task
+                    WHERE run."sourceType" = 'video_adaptation_task_v2' AND video_task.id = run."sourceId"
+                      AND video_task."novelId" = run."novelId" AND starts_with(video_task."jobId", ?)
+                  )))
                   AND step.lane IN ('interactive', 'creative', 'batch_media')
                   AND NOT EXISTS (
                     SELECT 1
@@ -520,7 +552,9 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
                   )
                 """,
                 now,
-                now);
+                now,
+                videoDispatchEnabled,
+                videoJobPrefix);
         return value == null
                 ? new DueLanes(false, false)
                 : new DueLanes(

@@ -30,6 +30,8 @@ import cn.inkforge.core.video.application.VideoRenderResultArchiver;
 import cn.inkforge.core.video.application.VideoRenderService;
 import cn.inkforge.core.video.application.VideoVisualCanonRepository;
 import cn.inkforge.core.video.application.VideoVisualCanonService;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
@@ -105,20 +107,22 @@ class VideoConfiguration {
     }
 
     @Bean
-    VideoAdaptationTaskStore videoAdaptationTaskStore(
+    JooqVideoAdaptationTaskStore videoAdaptationTaskStore(
             CoreDatabase database,
             CuidV1Generator ids,
             Clock coreClock,
             ObjectMapper json,
             JooqVideoVisualCanonRepository visualCanons,
-            CoreSettings settings) {
+            CoreSettings settings,
+            ExecutionRegistry registry,
+            ObjectProvider<DurableWorkflowService> workflows) {
         return new JooqVideoAdaptationTaskStore(
                 database,
                 ids,
                 coreClock,
                 json,
                 visualCanons,
-                settings.videoDispatchNamespace());
+                settings.videoDispatchNamespace(), settings, registry, workflows::getIfAvailable);
     }
 
     @Bean

@@ -10,6 +10,7 @@ import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
+import cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +43,7 @@ final class JooqWorkflowRunCancellationRepository
     private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
     private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion;
     private final java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion;
+    private final java.util.function.Supplier<WorkflowVideoAdaptationCompletion> videoCompletion;
 
     JooqWorkflowRunCancellationRepository(
             CoreDatabase database,
@@ -70,6 +72,15 @@ final class JooqWorkflowRunCancellationRepository
             java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
             java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion,
             java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion) {
+        this(database, ids, clock, json, registry, qualityCompletion, styleCompletion, ragCompletion, () -> null);
+    }
+
+    JooqWorkflowRunCancellationRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion,
+            java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion,
+            java.util.function.Supplier<WorkflowVideoAdaptationCompletion> videoCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -78,6 +89,7 @@ final class JooqWorkflowRunCancellationRepository
         this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
         this.styleCompletion = Objects.requireNonNull(styleCompletion);
         this.ragCompletion = Objects.requireNonNull(ragCompletion);
+        this.videoCompletion = Objects.requireNonNull(videoCompletion);
     }
 
     @Override
@@ -442,6 +454,11 @@ final class JooqWorkflowRunCancellationRepository
         }
         if (isRagRun(run)) {
             ragCompletion().finish(transaction, run.get("id", String.class), "cancelled");
+        }
+        if ("video".equals(run.get("workflow", String.class))) {
+            WorkflowVideoAdaptationCompletion completion = videoCompletion.get();
+            if (completion == null) throw new IllegalStateException("视频耐久任务投影端口未装配");
+            completion.finish(transaction, run.get("id", String.class), "cancelled", "RUN_CANCELLED", "运行已取消");
         }
         long sequence = Math.addExact(previousSequence, 1L);
         transaction.execute(

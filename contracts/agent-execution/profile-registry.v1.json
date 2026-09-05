@@ -2,6 +2,42 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "video.cinematic_review.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.cinematic_review.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
+      "key": "video.missing_beat_shots.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.missing_beat_shots.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
+      "key": "video.shot_design.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.shot_design.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
+      "key": "video.dramatic_structure.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.dramatic_structure.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
       "key": "rag.embedding.v2", "version": 2, "supported": true,
       "reasoningMode": "disabled", "purpose": "embedding",
       "promptProfile": "prompt.rag.embedding.v2", "deploymentProfileKey": "deployment.rag.embedding.v2"
@@ -252,11 +288,11 @@
     {
       "key": "video.shot_prompt.v2",
       "version": 2,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "disabled",
-      "purpose": "media",
-      "promptProfile": "prompt.unavailable.media.v1",
-      "deploymentProfileKey": "deployment.unavailable.media.v1"
+      "purpose": "generation",
+      "promptProfile": "prompt.video.shot_prompt.v2",
+      "deploymentProfileKey": "deployment.video.shot_prompt.v2"
     },
     {
       "key": "writer.chapter_draft.v1",

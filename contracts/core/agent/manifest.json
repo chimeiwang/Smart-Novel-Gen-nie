@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 295,
+  "modelCount": 316,
   "models": [
     {
       "model": "AgentUpdates",
@@ -1555,6 +1555,132 @@
       "module": "video_adaptation",
       "path": "video_adaptation/VideoAdaptationWorkflowProgressResponse.schema.json",
       "sha256": "987a471478c5623ad6675e723cf01540f0f5c205c4d95293e9c82ff81901493e"
+    },
+    {
+      "model": "VideoActionCountParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoActionCountParameters.schema.json",
+      "sha256": "8cd36c4958995ac75d1df6d0a3b1c3d69598ab84af17bafabe971a6f328ec240"
+    },
+    {
+      "model": "VideoActionParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoActionParameters.schema.json",
+      "sha256": "e8caf41ba145375219cde2bab1296a61b99ac233fff35452c27f20b694dd512a"
+    },
+    {
+      "model": "VideoCinematicReviewConclusion",
+      "module": "video_execution",
+      "path": "video_execution/VideoCinematicReviewConclusion.schema.json",
+      "sha256": "6310a1c7cfdc37115e20c4bf30d3281396a73673cabb82d1c3fc1392eba5003d"
+    },
+    {
+      "model": "VideoCinematicReviewInput",
+      "module": "video_execution",
+      "path": "video_execution/VideoCinematicReviewInput.schema.json",
+      "sha256": "8d43f79fb20e979a8817550af0247f7e7f0c5965037087288852a99505da1699"
+    },
+    {
+      "model": "VideoCinematicReviewOutput",
+      "module": "video_execution",
+      "path": "video_execution/VideoCinematicReviewOutput.schema.json",
+      "sha256": "566407ae33eff3c2d4c0edd54821b4c4d3197b9f87017a6571f55cc6a1ff9e47"
+    },
+    {
+      "model": "VideoCountParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoCountParameters.schema.json",
+      "sha256": "bd70a3696b335573f7cf63fa766a049c76f6f24071db19eac7267d720c80c412"
+    },
+    {
+      "model": "VideoDramaticStructureInput",
+      "module": "video_execution",
+      "path": "video_execution/VideoDramaticStructureInput.schema.json",
+      "sha256": "b66b45099234839473310dc8dfc84233cedcbf4f1021ad65b186aee43626483e"
+    },
+    {
+      "model": "VideoDramaticStructureOutput",
+      "module": "video_execution",
+      "path": "video_execution/VideoDramaticStructureOutput.schema.json",
+      "sha256": "19891ab0378402b352b109b24452e4a962dfa0801009c1d1f35a68fe4892fa94"
+    },
+    {
+      "model": "VideoEffectParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoEffectParameters.schema.json",
+      "sha256": "88ef4594a7c3f1efcbc28a5536007a8e9956b5d604d65dea9a80f26225fc4a16"
+    },
+    {
+      "model": "VideoMissingBeatShotsInput",
+      "module": "video_execution",
+      "path": "video_execution/VideoMissingBeatShotsInput.schema.json",
+      "sha256": "d00f7285e9628cb3e107a1f478f4145c8e37241d6fdf8f0f2cc1e2c55edd8eda"
+    },
+    {
+      "model": "VideoMissingBeatShotsOutput",
+      "module": "video_execution",
+      "path": "video_execution/VideoMissingBeatShotsOutput.schema.json",
+      "sha256": "743f384b514309ab0194dc3567e0f0d8df85d644b534915296b200cb920775ca"
+    },
+    {
+      "model": "VideoNoParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoNoParameters.schema.json",
+      "sha256": "656b34e4965ba7100577c1ca666a41870124af569ff8b307b2709de63af81270"
+    },
+    {
+      "model": "VideoRepeatedFieldParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoRepeatedFieldParameters.schema.json",
+      "sha256": "f72788b2b95a148cf935a74e083a418ac531d391455fc9db5dc8ed5a080bd789"
+    },
+    {
+      "model": "VideoScaleParameters",
+      "module": "video_execution",
+      "path": "video_execution/VideoScaleParameters.schema.json",
+      "sha256": "34afee05982b669b13c536f0ac393a870bfff5610d9b1c99b2fab81dba2dee2f"
+    },
+    {
+      "model": "VideoShotDesignInput",
+      "module": "video_execution",
+      "path": "video_execution/VideoShotDesignInput.schema.json",
+      "sha256": "e92287b9b55497075a7229e563bce807047d38b477d991ef7ef475287ec206d7"
+    },
+    {
+      "model": "VideoShotDesignOutput",
+      "module": "video_execution",
+      "path": "video_execution/VideoShotDesignOutput.schema.json",
+      "sha256": "13ae4592665be45201e9e51ac0822eee2214fcf410f911e1f873d2e9f6c83df7"
+    },
+    {
+      "model": "VideoShotPromptInput",
+      "module": "video_execution",
+      "path": "video_execution/VideoShotPromptInput.schema.json",
+      "sha256": "503f58e8f6018af9bb7bd09708f904463d66a7a0917264940a29b66e08cda1bd"
+    },
+    {
+      "model": "VideoShotPromptOutput",
+      "module": "video_execution",
+      "path": "video_execution/VideoShotPromptOutput.schema.json",
+      "sha256": "9b9f90dc355c068487497a62cf67861c749231907fde3b45df8f26141d6c5a5a"
+    },
+    {
+      "model": "VideoStageValidationFinding",
+      "module": "video_execution",
+      "path": "video_execution/VideoStageValidationFinding.schema.json",
+      "sha256": "8e73c49553fd82bcb9fdfcc2240df6b75da93c37206afee053845ef25906f804"
+    },
+    {
+      "model": "VideoStepDependency",
+      "module": "video_execution",
+      "path": "video_execution/VideoStepDependency.schema.json",
+      "sha256": "c7b98dc23f9cc078e316dedf8a41e677803170f249b302a9a495d8e8894ed643"
+    },
+    {
+      "model": "VideoTaskContextV2",
+      "module": "video_execution",
+      "path": "video_execution/VideoTaskContextV2.schema.json",
+      "sha256": "a6bc1aa5777191d68618c9283b1bf5fc18a1dca7f87023022b113d2b8ba3fb31"
     },
     {
       "model": "SeedanceRenderError",

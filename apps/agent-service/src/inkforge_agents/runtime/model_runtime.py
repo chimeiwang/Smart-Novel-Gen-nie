@@ -31,6 +31,12 @@ from ..providers.embeddings import (
     EmbeddingResult,
     ExecutionEmbeddingProvider,
 )
+from ..providers.video_responses import (
+    ExecutionResponsesProvider,
+    VideoResponsesIdentity,
+    VideoResponsesRequest,
+    VideoResponsesResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,11 +254,13 @@ class ModelRuntime:
         observer: ModelCallObserver | None = None,
         max_concurrency: int = 1,
         embedding_provider: ExecutionEmbeddingProvider | None = None,
+        responses_provider: ExecutionResponsesProvider | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("模型调用并发数必须为正整数")
         self._provider = provider
         self._embedding_provider = embedding_provider
+        self._responses_provider = responses_provider
         self._billing = billing
         self._observer = observer
         self._max_concurrency = max_concurrency
@@ -365,6 +373,29 @@ class ModelRuntime:
                 return attempt, await provider.embed_batch(request)
             async with asyncio.timeout(provider_timeout_seconds):
                 return attempt, await provider.embed_batch(request)
+
+    @property
+    def responses_identity(self) -> VideoResponsesIdentity | None:
+        return None if self._responses_provider is None else self._responses_provider.identity
+
+    async def run_execution_responses(
+        self,
+        request: VideoResponsesRequest,
+        *,
+        before_provider: Callable[[], Awaitable[int]],
+        lane: ModelLane,
+        provider_timeout_seconds: float | None = None,
+    ) -> tuple[int, VideoResponsesResult]:
+        """视频 V2 与聊天/embedding 共用同一个并发门，账务仅由 Core Step 收敛。"""
+        provider = self._responses_provider
+        if provider is None:
+            raise ValueError("独立视频 Responses 供应商未配置")
+        async with self._limiter.acquire(lane, reviewer=False):
+            attempt = await before_provider()
+            if provider_timeout_seconds is None:
+                return attempt, await provider.complete_responses(request)
+            async with asyncio.timeout(provider_timeout_seconds):
+                return attempt, await provider.complete_responses(request)
 
     async def _run_turn_limited(
         self,

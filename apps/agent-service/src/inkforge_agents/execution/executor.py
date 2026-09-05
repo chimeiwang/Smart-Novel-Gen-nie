@@ -71,6 +71,11 @@ from ..providers.base import (
     ProviderTransportError,
 )
 from ..providers.embeddings import EmbeddingExecutionPort, EmbeddingRequest, EmbeddingResult
+from ..providers.video_responses import (
+    ResponsesExecutionPort,
+    VideoResponsesRequest,
+    VideoResponsesResult,
+)
 from ..runtime.portrait_prompts import PORTRAIT_SECTION_INSTRUCTIONS
 from .portrait import portrait_context
 from .quality import (
@@ -90,6 +95,13 @@ from .registry import (
     StepBudgetDefinition,
 )
 from .short_medium import SHORT_MEDIUM_HANDLERS, validate_short_medium_request
+from .video import (
+    VIDEO_PROTOCOL_CORRECTION_REQUIRED,
+    VideoStageOutputError,
+    build_video_request,
+    materialize_video_output,
+    video_context,
+)
 
 ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]
 FailureCategory = Literal[
@@ -294,7 +306,7 @@ class ResolvedExecutionStep:
 
 @dataclass(frozen=True, slots=True)
 class ProviderCallOutcome:
-    result: ModelTurnResult | EmbeddingResult | None
+    result: ModelTurnResult | EmbeddingResult | VideoResponsesResult | None
     provider_attempts: int
     elapsed_millis: int
     failure_category: FailureCategory | None = None
@@ -310,6 +322,7 @@ class StatelessExecutionStepExecutor:
         max_output_tokens: int,
         retry_base_seconds: float = 0.05,
         embedding: EmbeddingExecutionPort | None = None,
+        responses: ResponsesExecutionPort | None = None,
     ) -> None:
         if max_output_tokens < 1:
             raise ValueError("V2 execution 模型输出能力必须为正整数")
@@ -317,6 +330,7 @@ class StatelessExecutionStepExecutor:
             raise ValueError("V2 execution 重试退避不能为负数")
         self._model = model
         self._embedding = embedding
+        self._responses = responses
         self._max_output_tokens = max_output_tokens
         self._retry_base_seconds = retry_base_seconds
 
@@ -330,6 +344,11 @@ class StatelessExecutionStepExecutor:
         if resolved.structuredOutputRoute == "embeddings_v1":
             try:
                 return self._embedding_resolved_model(profile) == resolved
+            except ExecutionCapabilityError:
+                return False
+        if profile.key.startswith("video."):
+            try:
+                return self._responses_resolved_model(profile) == resolved
             except ExecutionCapabilityError:
                 return False
         if not self._model.supports_structured_output(resolved.structuredOutputRoute):
@@ -355,6 +374,8 @@ class StatelessExecutionStepExecutor:
         request: ExecutionStepRequest,
         registry: ExecutionRegistry,
     ) -> ResolvedExecutionStep:
+        if request.workflow == "video":
+            return self._resolve_video(request, registry)
         if request.workflow == "rag":
             return self._resolve_embedding(request, registry)
         if request.purpose == "resolve_intent":
@@ -466,6 +487,79 @@ class StatelessExecutionStepExecutor:
             rubric_version=rubric_version,
             structured_output_route=structured_output_route,
             resolved_model=resolved_model,
+        )
+
+    def _responses_resolved_model(self, profile: ProfileDefinition) -> ResolvedModelRef:
+        identity = None if self._responses is None else self._responses.responses_identity
+        if identity is None:
+            raise ExecutionCapabilityError("独立视频 Responses 运行时未配置")
+        return _resolved_model(
+            profile,
+            provider=identity.provider,
+            model=identity.model,
+            transport_profile=identity.transport_profile,
+            endpoint_profile=identity.endpoint_profile,
+            structured_output_route="responses_json_schema_v1",
+            capability_version=identity.capability_version,
+            supports_request_idempotency=identity.supports_request_idempotency,
+        )
+
+    def _resolve_video(
+        self, request: ExecutionStepRequest, registry: ExecutionRegistry
+    ) -> ResolvedExecutionStep:
+        try:
+            _, value = video_context(request)
+            if request.dispatchMode == "initial":
+                if request.operation is None:
+                    raise ValueError("视频必须有精确 operation")
+                operation = registry.resolve("video", request.operation).operation
+                stage = next(
+                    stage for stage in operation.stage_steps if stage.stage_key == value.stageKey
+                )
+                profile = registry.profiles[stage.model_profile_key]
+                schema = registry.output_schemas[stage.output_schema_key]
+                budget = registry.step_budgets[stage.step_budget_key]
+            else:
+                profile = registry.profiles[f"video.{value.stageKey}.v2"]
+                schema = registry.output_schemas[f"output.video_{value.stageKey}_stage.v2"]
+                budget = registry.step_budgets[f"step_budget.video.{value.stageKey}.v2"]
+            if (
+                profile.purpose != "generation"
+                or schema.purpose != "generation"
+                or profile.reasoning_mode != "disabled"
+            ):
+                raise ValueError("视频阶段必须使用关闭思考的 generation 资产")
+            _validate_profile_ref(request, profile)
+            _validate_prompt_profile_ref(request, profile.prompt_profile)
+            _validate_output_schema_ref(request, schema)
+            _validate_step_budget(request, budget)
+            if request.budget.maxCompletionTokens > self._max_output_tokens:
+                raise ValueError("视频 Step 输出预算超过部署模型能力")
+            resolved = self._responses_resolved_model(profile)
+            registry.require_authorized_deployment(
+                deployment_profile_key=profile.deployment_profile_key,
+                provider=resolved.provider,
+                model=resolved.model,
+                transport_profile=resolved.transportProfile,
+                endpoint_profile=resolved.endpointProfile,
+                structured_output_route=resolved.structuredOutputRoute,
+                capability_version=resolved.capabilityVersion,
+                reasoning_mode=resolved.reasoningMode,
+                supports_request_idempotency=resolved.supportsRequestIdempotency,
+            )
+        except (ValueError, KeyError, StopIteration, ExecutionRegistryError) as exc:
+            raise ExecutionCapabilityError(
+                "视频 Step 未被精确冻结阶段或 Responses 部署授权"
+            ) from exc
+        return ResolvedExecutionStep(
+            "generation",
+            profile,
+            profile.prompt_profile,
+            schema,
+            budget,
+            None,
+            "responses_json_schema_v1",
+            resolved,
         )
 
     def _embedding_resolved_model(self, profile: ProfileDefinition) -> ResolvedModelRef:
@@ -736,7 +830,15 @@ class StatelessExecutionStepExecutor:
         self,
         request: ExecutionStepRequest,
         resolved: ResolvedExecutionStep,
-    ) -> ModelTurnRequest | EmbeddingRequest:
+    ) -> ModelTurnRequest | EmbeddingRequest | VideoResponsesRequest:
+        if request.workflow == "video":
+            turn = build_video_request(request, resolved.prompt_profile.system_prompt)
+            estimated = sum(len(message.content) for message in turn.messages)
+            if turn.structuredOutput is not None:
+                estimated += len(turn.structuredOutput.model_dump_json())
+            if estimated > request.budget.maxInputTokens:
+                raise ExecutionCapabilityError("完整视频消息与动态 Schema 超过 Step maxInputTokens")
+            return VideoResponsesRequest.from_turn(turn)
         route = resolved.structured_output_route
         if route == "embeddings_v1":
             embedding_context = rag_context(request)
@@ -850,7 +952,7 @@ class StatelessExecutionStepExecutor:
     async def call_provider(
         self,
         request: ExecutionStepRequest,
-        model_request: ModelTurnRequest | EmbeddingRequest,
+        model_request: ModelTurnRequest | EmbeddingRequest | VideoResponsesRequest,
         *,
         begin_attempt: BeginAttempt,
         cancel_event: asyncio.Event,
@@ -867,7 +969,7 @@ class StatelessExecutionStepExecutor:
         attempts = 0
         supports_idempotency = (
             False
-            if isinstance(model_request, EmbeddingRequest)
+            if isinstance(model_request, (EmbeddingRequest, VideoResponsesRequest))
             else self._model.supports_request_idempotency
         )
 
@@ -903,6 +1005,7 @@ class StatelessExecutionStepExecutor:
                             self._model,
                             model_request,
                             embedding=self._embedding,
+                            responses=self._responses,
                             before_provider=record_attempt,
                             cancel_event=cancel_event,
                             lane=request.lane,
@@ -915,6 +1018,7 @@ class StatelessExecutionStepExecutor:
                                 self._model,
                                 model_request,
                                 embedding=self._embedding,
+                                responses=self._responses,
                                 before_provider=record_attempt,
                                 cancel_event=cancel_event,
                                 lane=request.lane,
@@ -936,7 +1040,11 @@ class StatelessExecutionStepExecutor:
                         exc,
                         supports_request_idempotency=supports_idempotency,
                     )
-                    if retry_safe and attempts <= request.budget.maxProviderRetries:
+                    if (
+                        retry_safe
+                        and attempts <= request.budget.maxProviderRetries
+                        and not isinstance(model_request, VideoResponsesRequest)
+                    ):
                         async with asyncio.timeout(remaining_seconds()):
                             await asyncio.sleep(
                                 _retry_delay_seconds(
@@ -1108,6 +1216,8 @@ class StatelessExecutionStepExecutor:
         )
         if isinstance(result, EmbeddingResult):
             return self._embedding_terminal(request, resolved, result, usage, now)
+        if isinstance(result, VideoResponsesResult):
+            return self._video_terminal(request, resolved, result, usage, now)
         if request.workflow == "quality":
             failure = _validate_quality_provider_result(request, result, usage)
             if failure is not None:
@@ -1285,6 +1395,100 @@ class StatelessExecutionStepExecutor:
             completedAt=now,
         )
 
+    def _video_terminal(
+        self,
+        request: ExecutionStepRequest,
+        resolved: ResolvedExecutionStep,
+        result: VideoResponsesResult,
+        usage: StepUsage,
+        now: datetime,
+    ) -> ExecutionStepResult | ExecutionStepFailure:
+        code: str | None = None
+        category: FailureCategory = "validation"
+        output: dict[str, JsonValue] = {}
+        reliable = all(
+            value is not None
+            for value in (
+                usage.inputTokens,
+                usage.cachedTokens,
+                usage.promptCacheMissTokens,
+                usage.completionTokens,
+                usage.reasoningTokens,
+                usage.visibleOutputTokens,
+            )
+        )
+        _, value = video_context(request)
+        correction_available = (
+            reliable
+            and not value.correction
+            and value.cycle == 0
+            and value.stageKey in {"dramatic_structure", "shot_design", "shot_prompt"}
+        )
+        if _step_budget_exceeded(request, usage):
+            code = "STEP_BUDGET_EXCEEDED"
+        elif result.finishReason in {"length", "content_filter"} and correction_available:
+            # 只保留原视频首轮的明确结束重做；Core 结算后另建 Step，绝不续接半截正文。
+            category, code = "protocol", VIDEO_PROTOCOL_CORRECTION_REQUIRED
+        elif result.finishReason != "stop":
+            category = "provider_terminal"
+            code = {
+                "length": "MODEL_OUTPUT_TRUNCATED",
+                "content_filter": "MODEL_OUTPUT_FILTERED",
+                "insufficient_system_resource": "MODEL_INSUFFICIENT_SYSTEM_RESOURCE",
+            }.get(result.finishReason, "MODEL_FINISH_REASON_INVALID")
+        elif result.diagnostic is not None or result.structuredOutput is None:
+            category = "protocol"
+            code = (
+                VIDEO_PROTOCOL_CORRECTION_REQUIRED
+                if correction_available
+                else "VIDEO_ADAPTATION_OUTPUT_INVALID"
+            )
+        else:
+            try:
+                output = materialize_video_output(request, result.structuredOutput)
+                if output.get("outcome") == "needs_correction" and not reliable:
+                    category, code = "protocol", "MODEL_USAGE_INVALID"
+                else:
+                    jsonschema_rs.validator_for(request.outputSchema.jsonSchema).validate(output)
+            except VideoStageOutputError as exc:
+                code = exc.code
+            except (ValueError, ValidationError, jsonschema_rs.ValidationError):
+                code = "VIDEO_ADAPTATION_OUTPUT_INVALID"
+        if code is not None:
+            return _failure(
+                request,
+                resolved.resolved_model,
+                usage=usage,
+                category=category,
+                code=code,
+                outcome_unknown=False,
+                failed_at=now,
+            )
+        result_hash = canonical_execution_sha256(
+            {
+                "resultKind": "output",
+                "resolvedModel": resolved.resolved_model.model_dump(mode="json", exclude_none=True),
+                "usage": usage.model_dump(mode="json", exclude_none=True),
+                "value": output,
+            }
+        )
+        return ExecutionStepResult(
+            protocolVersion="2.0",
+            jobId=request.jobId,
+            runId=request.runId,
+            novelId=request.novelId,
+            stepId=request.stepId,
+            fencingToken=request.fencingToken,
+            requestHash=request.requestHash,
+            inputHash=request.inputHash,
+            resolvedModel=resolved.resolved_model,
+            resultKind="output",
+            output=output,
+            resultHash=result_hash,
+            usage=usage,
+            completedAt=now,
+        )
+
     def _embedding_terminal(
         self,
         request: ExecutionStepRequest,
@@ -1428,23 +1632,35 @@ class ProviderModelRuntimeAdapter:
 
 
 class _ProviderCancelled(Exception):
-    def __init__(self, result: ModelTurnResult | EmbeddingResult | None) -> None:
+    def __init__(
+        self, result: ModelTurnResult | EmbeddingResult | VideoResponsesResult | None
+    ) -> None:
         self.result = result
         super().__init__("provider_cancelled")
 
 
 async def _call_with_cancel(
     model: ExecutionModelPort,
-    request: ModelTurnRequest | EmbeddingRequest,
+    request: ModelTurnRequest | EmbeddingRequest | VideoResponsesRequest,
     *,
     embedding: EmbeddingExecutionPort | None = None,
+    responses: ResponsesExecutionPort | None = None,
     before_provider: BeginAttempt,
     cancel_event: asyncio.Event,
     lane: Literal["interactive", "creative", "batch_media"],
     reviewer: bool,
     provider_timeout_seconds: float | None,
-) -> tuple[int, ModelTurnResult | EmbeddingResult]:
-    async def invoke() -> tuple[int, ModelTurnResult | EmbeddingResult]:
+) -> tuple[int, ModelTurnResult | EmbeddingResult | VideoResponsesResult]:
+    async def invoke() -> tuple[int, ModelTurnResult | EmbeddingResult | VideoResponsesResult]:
+        if isinstance(request, VideoResponsesRequest):
+            if responses is None:
+                raise ExecutionCapabilityError("独立视频 Responses 运行时未配置")
+            return await responses.run_execution_responses(
+                request,
+                before_provider=before_provider,
+                lane=lane,
+                provider_timeout_seconds=provider_timeout_seconds,
+            )
         if isinstance(request, EmbeddingRequest):
             if embedding is None:
                 raise ExecutionCapabilityError("独立索引运行时未配置")
@@ -1470,7 +1686,7 @@ async def _call_with_cancel(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if cancel_task in done and cancel_event.is_set():
-            result: ModelTurnResult | EmbeddingResult | None = None
+            result: ModelTurnResult | EmbeddingResult | VideoResponsesResult | None = None
             if provider_task.done() and not provider_task.cancelled():
                 try:
                     _, result = provider_task.result()
@@ -1826,9 +2042,7 @@ def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
         raise ExecutionCapabilityError("结构化资料 Step 必须绑定已实现 Operation 与 novelId")
 
     index_items = [
-        item
-        for item in request.evidenceBundle.items
-        if item.resourceType == "agent_updates_index"
+        item for item in request.evidenceBundle.items if item.resourceType == "agent_updates_index"
     ]
     if len(index_items) != 1:
         raise ExecutionCapabilityError("结构化资料 Evidence 必须包含唯一 agent_updates_index")
@@ -2120,11 +2334,7 @@ def _validate_chapter_review_input(request: ExecutionStepRequest) -> None:
         for item in request.evidenceBundle.items
         if item.resourceType == "chapter_writing_context"
     ]
-    item = (
-        contexts[0]
-        if len(contexts) == 1 and len(request.evidenceBundle.items) == 1
-        else None
-    )
+    item = contexts[0] if len(contexts) == 1 and len(request.evidenceBundle.items) == 1 else None
     context = item.contentJson if item is not None else None
     chapter = context.get("currentChapter") if isinstance(context, dict) else None
     schema_version = context.get("schemaVersion") if isinstance(context, dict) else None
@@ -2265,7 +2475,7 @@ def _elapsed_millis(started: float) -> int:
 
 
 def _usage(
-    result: ModelTurnResult | EmbeddingResult | None,
+    result: ModelTurnResult | EmbeddingResult | VideoResponsesResult | None,
     *,
     provider_attempts: int,
     wall_time_millis: int,
@@ -2276,6 +2486,15 @@ def _usage(
         return _unknown_usage(
             provider_attempts=provider_attempts,
             wall_time_millis=wall_time_millis,
+        )
+    if isinstance(result, VideoResponsesResult):
+        values = result.usage.model_dump(exclude_none=True, exclude={"totalTokens"})
+        return StepUsage(
+            usageStatus="complete" if len(values) == 7 else "partial" if values else "unknown",
+            providerAttempts=provider_attempts,
+            protocolCorrections=int(result.recoveryCode is not None),
+            wallTimeMillis=wall_time_millis,
+            **values,
         )
     if isinstance(result, EmbeddingResult):
         if result.input_tokens is None:
@@ -2566,8 +2785,7 @@ def _evaluation(
         if not isinstance(finding, dict):
             raise ValueError("Reviewer finding 不是对象")
         if request.operation in _AGENT_UPDATES_OPERATIONS and (
-            finding.get("candidateRange") is not None
-            or "candidatePatch" in finding
+            finding.get("candidateRange") is not None or "candidatePatch" in finding
         ):
             raise ValueError("结构化资料 Reviewer 不允许正文定位或补丁")
         references = finding.get("evidence")

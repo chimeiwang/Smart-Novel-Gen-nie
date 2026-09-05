@@ -27,6 +27,13 @@ from inkforge_contracts.short_medium_execution import (
     ShortMediumReplacementOutput,
 )
 from inkforge_contracts.style_execution import StylePortraitSectionOutput
+from inkforge_contracts.video_execution import (
+    VideoCinematicReviewOutput,
+    VideoDramaticStructureOutput,
+    VideoMissingBeatShotsOutput,
+    VideoShotDesignOutput,
+    VideoShotPromptOutput,
+)
 from pydantic import BaseModel
 
 
@@ -130,6 +137,15 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
+        video_models = {
+            "output.video_dramatic_structure_stage.v2": VideoDramaticStructureOutput,
+            "output.video_shot_design_stage.v2": VideoShotDesignOutput,
+            "output.video_missing_beat_shots_stage.v2": VideoMissingBeatShotsOutput,
+            "output.video_cinematic_review_stage.v2": VideoCinematicReviewOutput,
+            "output.video_shot_prompt_stage.v2": VideoShotPromptOutput,
+        }
+        if output["key"] in video_models:
+            output["jsonSchema"] = model_output_schema(video_models[output["key"]])
         if output["key"] == "output.embedding_batch.v2":
             output["jsonSchema"] = model_output_schema(RagEmbeddingBatchOutput)
         if output["key"] == "output.style_portrait_section.v2":

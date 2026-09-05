@@ -1,0 +1,29 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoRepeatedFieldParameters/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "fields": {
+      "items": {
+        "enum": [
+          "subjectAndScene",
+          "visibleAction",
+          "expressionAndGaze",
+          "camera",
+          "audio"
+        ],
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "title": "Fields",
+      "type": "array"
+    }
+  },
+  "required": [
+    "fields"
+  ],
+  "title": "VideoRepeatedFieldParameters",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoRepeatedFieldParameters"
+}

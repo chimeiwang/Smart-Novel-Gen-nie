@@ -1,0 +1,26 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoStepDependency/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "resultHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Resulthash",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stepId",
+    "resultHash"
+  ],
+  "title": "VideoStepDependency",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoStepDependency"
+}

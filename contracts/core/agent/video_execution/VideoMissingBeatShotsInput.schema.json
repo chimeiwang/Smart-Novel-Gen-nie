@@ -1,0 +1,416 @@
+{
+  "$defs": {
+    "BeatCoverageGoal": {
+      "additionalProperties": false,
+      "description": "一个节拍希望观众获得的内容，不预设必须使用哪类镜头完成。",
+      "properties": {
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "goalKey": {
+          "pattern": "^G[0-9]{2,3}$",
+          "title": "Goalkey",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "story_information",
+            "action",
+            "emotion",
+            "space",
+            "relationship",
+            "motif",
+            "transition"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "essential",
+            "supporting"
+          ],
+          "title": "Priority",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goalKey",
+        "kind",
+        "priority",
+        "description"
+      ],
+      "title": "BeatCoverageGoal",
+      "type": "object"
+    },
+    "CinematicShotDesignDraft": {
+      "additionalProperties": false,
+      "description": "模型第二阶段在服务器指定的 Beat 槽内，只引用 sourceUnitIds 和 Goal Key。",
+      "properties": {
+        "audienceGain": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Audiencegain",
+          "type": "string"
+        },
+        "cameraAngle": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cameraangle",
+          "type": "string"
+        },
+        "cameraMovement": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cameramovement",
+          "type": "string"
+        },
+        "coveredGoalKeys": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Coveredgoalkeys",
+          "type": "array"
+        },
+        "cutReason": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Cutreason",
+          "type": "string"
+        },
+        "narrativePurpose": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Narrativepurpose",
+          "type": "string"
+        },
+        "shotScale": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Shotscale",
+          "type": "string"
+        },
+        "soundDesign": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Sounddesign",
+          "type": "string"
+        },
+        "sourceRelation": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Sourcerelation",
+          "type": "string"
+        },
+        "sourceUnitIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sourceunitids",
+          "type": "array"
+        },
+        "speechMode": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Speechmode",
+          "type": "string"
+        },
+        "spokenText": {
+          "anyOf": [
+            {
+              "maxLength": 800,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spokentext"
+        },
+        "storyFunction": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Storyfunction",
+          "type": "string"
+        },
+        "timelineDurationMs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Timelinedurationms"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "visualIntent": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Visualintent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "narrativePurpose",
+        "storyFunction",
+        "audienceGain",
+        "coveredGoalKeys",
+        "sourceRelation",
+        "shotScale",
+        "cameraAngle",
+        "cameraMovement",
+        "visualIntent",
+        "speechMode",
+        "soundDesign",
+        "cutReason",
+        "timelineDurationMs",
+        "sourceUnitIds"
+      ],
+      "title": "CinematicShotDesignDraft",
+      "type": "object"
+    },
+    "CinematicShotDesignResult": {
+      "additionalProperties": false,
+      "properties": {
+        "beatsByKey": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/CinematicShotDesignDraft"
+            },
+            "type": "array"
+          },
+          "title": "Beatsbykey",
+          "type": "object"
+        },
+        "suggestedEpisodeBreakAfterShotNumbers": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Suggestedepisodebreakaftershotnumbers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "beatsByKey"
+      ],
+      "title": "CinematicShotDesignResult",
+      "type": "object"
+    },
+    "DramaticBeatCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "beatKey": {
+          "pattern": "^B[0-9]{2,3}$",
+          "title": "Beatkey",
+          "type": "string"
+        },
+        "coverageGoals": {
+          "items": {
+            "$ref": "#/$defs/BeatCoverageGoal"
+          },
+          "title": "Coveragegoals",
+          "type": "array"
+        },
+        "dramaticTurn": {
+          "title": "Dramaticturn",
+          "type": "string"
+        },
+        "sourceUnitIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sourceunitids",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "visualStrategy": {
+          "title": "Visualstrategy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "beatKey",
+        "title",
+        "sourceUnitIds",
+        "dramaticTurn",
+        "visualStrategy",
+        "coverageGoals"
+      ],
+      "title": "DramaticBeatCheckpoint",
+      "type": "object"
+    },
+    "DramaticSceneCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "beats": {
+          "items": {
+            "$ref": "#/$defs/DramaticBeatCheckpoint"
+          },
+          "title": "Beats",
+          "type": "array"
+        },
+        "changeSummary": {
+          "title": "Changesummary",
+          "type": "string"
+        },
+        "locationLabel": {
+          "title": "Locationlabel",
+          "type": "string"
+        },
+        "objective": {
+          "title": "Objective",
+          "type": "string"
+        },
+        "sceneKey": {
+          "pattern": "^SC[0-9]{2,3}$",
+          "title": "Scenekey",
+          "type": "string"
+        },
+        "timeLabel": {
+          "title": "Timelabel",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sceneKey",
+        "title",
+        "locationLabel",
+        "timeLabel",
+        "objective",
+        "changeSummary",
+        "beats"
+      ],
+      "title": "DramaticSceneCheckpoint",
+      "type": "object"
+    },
+    "DramaticStructureCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/DramaticSceneCheckpoint"
+          },
+          "title": "Scenes",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "dramatic_structure_v3",
+          "default": "dramatic_structure_v3",
+          "title": "Schemaversion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenes"
+      ],
+      "title": "DramaticStructureCheckpoint",
+      "type": "object"
+    },
+    "VideoStepDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "resultHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Resulthash",
+          "type": "string"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "resultHash"
+      ],
+      "title": "VideoStepDependency",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoMissingBeatShotsInput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checkpoint": {
+      "$ref": "#/$defs/DramaticStructureCheckpoint"
+    },
+    "correction": {
+      "const": false,
+      "title": "Correction",
+      "type": "boolean"
+    },
+    "cycle": {
+      "enum": [
+        0,
+        1
+      ],
+      "title": "Cycle",
+      "type": "integer"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/$defs/VideoStepDependency"
+      },
+      "maxItems": 9,
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "design": {
+      "$ref": "#/$defs/CinematicShotDesignResult"
+    },
+    "missingBeatKeys": {
+      "items": {
+        "pattern": "^B[0-9]{2,3}$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Missingbeatkeys",
+      "type": "array"
+    },
+    "stageKey": {
+      "const": "missing_beat_shots",
+      "title": "Stagekey",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cycle",
+    "correction",
+    "dependencies",
+    "stageKey",
+    "checkpoint",
+    "design",
+    "missingBeatKeys"
+  ],
+  "title": "VideoMissingBeatShotsInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoMissingBeatShotsInput"
+}

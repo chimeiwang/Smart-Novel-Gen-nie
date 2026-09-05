@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "CinematicReviewFinding": {
+      "additionalProperties": false,
+      "description": "面向作者的非阻断审镜发现。",
+      "properties": {
+        "evidence": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "plan",
+            "scene",
+            "beat",
+            "shot"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "scopeKey": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scopekey"
+        },
+        "severity": {
+          "enum": [
+            "notice",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "suggestion": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Suggestion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "scope",
+        "message",
+        "evidence",
+        "suggestion"
+      ],
+      "title": "CinematicReviewFinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_execution/VideoCinematicReviewConclusion/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "仅扩大程序合并后的发现包络；模型本身仍最多返回 240 条。",
+  "properties": {
+    "decision": {
+      "enum": [
+        "pass",
+        "revise"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/CinematicReviewFinding"
+      },
+      "maxItems": 1203,
+      "title": "Findings",
+      "type": "array"
+    },
+    "requiredChanges": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Requiredchanges",
+      "type": "array"
+    },
+    "summary": {
+      "maxLength": 1200,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "summary",
+    "findings"
+  ],
+  "title": "VideoCinematicReviewConclusion",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_execution.VideoCinematicReviewConclusion"
+}

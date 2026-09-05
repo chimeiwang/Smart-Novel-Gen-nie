@@ -142,7 +142,9 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 
 五项显式/自然入口、最多一次自动完整返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21；随后中短篇
 四项接线与本地验收达到 16/21，一致性终检阶段达到 17/21，文风画像达到 18/21；加入 RAG 接线后 Catalog 为 19/21，
-自然入口仍支持十项无选区操作。剩余两个开发视频操作尚未迁移，RAG 最终门禁以独立规格为准。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
+自然入口仍支持十项无选区操作。2026-09-06 开发视频两项补齐接线并通过隔离跨进程与全仓验收后达到 21/21，
+具体证据以 `docs/specs/2026-09-06-durable-video-model-workflows.md` 为准，不代表真实供应商或生产已验收。
+RAG 最终门禁以独立规格为准。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
 启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
 显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
 manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节锚点，scope 不取消既有跨分区候选能力。
