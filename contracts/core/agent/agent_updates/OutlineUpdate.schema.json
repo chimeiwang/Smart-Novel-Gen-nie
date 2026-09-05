@@ -1,0 +1,42 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/OutlineUpdate/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actualWordCount": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actualwordcount"
+    },
+    "nodeId": {
+      "title": "Nodeid",
+      "type": "string"
+    },
+    "status": {
+      "default": "planned",
+      "enum": [
+        "planned",
+        "in_progress",
+        "completed",
+        "skipped"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "nodeId"
+  ],
+  "title": "OutlineUpdate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.OutlineUpdate"
+}

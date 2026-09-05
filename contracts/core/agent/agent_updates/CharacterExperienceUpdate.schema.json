@@ -1,0 +1,47 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/CharacterExperienceUpdate/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "const": "update",
+      "title": "Action",
+      "type": "string"
+    },
+    "chapterId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chapterid"
+    },
+    "content": {
+      "default": "",
+      "title": "Content",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "order": {
+      "default": 0,
+      "maximum": 2147483647,
+      "minimum": -2147483648,
+      "title": "Order",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "action",
+    "id"
+  ],
+  "title": "CharacterExperienceUpdate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.CharacterExperienceUpdate"
+}

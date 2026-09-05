@@ -1,5 +1,13 @@
 """InkForge Python 服务间的共享协议。"""
 
+from .agent_updates import (
+    AgentUpdates,
+    AgentUpdatesInput,
+    AgentUpdatesOutput,
+    AgentUpdatesPreviousCandidate,
+    AgentUpdatesResult,
+    materialize_agent_updates_output,
+)
 from .events import (
     AgentEvent,
     CallbackReceipt,
@@ -298,6 +306,12 @@ __all__ = [
     "EXECUTION_CALLBACK_STOP_RETRY_STATUSES",
     "EXECUTION_SERVICE_SCOPES",
     "WORKFLOW_EVENT_PROTOCOL_VERSION",
+    "AgentUpdates",
+    "AgentUpdatesInput",
+    "AgentUpdatesOutput",
+    "AgentUpdatesPreviousCandidate",
+    "AgentUpdatesResult",
+    "materialize_agent_updates_output",
     "AgentEvent",
     "BillingReconciliationReceipt",
     "BillingReconciliationRequest",

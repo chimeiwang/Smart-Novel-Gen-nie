@@ -1,0 +1,71 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/ForeshadowingCreate/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "const": "create",
+      "title": "Action",
+      "type": "string"
+    },
+    "expectedPayoff": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expectedpayoff"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "payoffAt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Payoffat"
+    },
+    "plantedAt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plantedat"
+    },
+    "plantedContent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plantedcontent"
+    }
+  },
+  "required": [
+    "action",
+    "name"
+  ],
+  "title": "ForeshadowingCreate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.ForeshadowingCreate"
+}

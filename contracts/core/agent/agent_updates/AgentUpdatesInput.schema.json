@@ -1,0 +1,2494 @@
+{
+  "$defs": {
+    "AgentUpdates": {
+      "additionalProperties": false,
+      "description": "一个可跨分区聚合、按字段存在性解释的结构化候选。",
+      "properties": {
+        "characterExperiences": {
+          "items": {
+            "$ref": "#/$defs/CharacterExperienceMutation"
+          },
+          "title": "Characterexperiences",
+          "type": "array"
+        },
+        "characters": {
+          "items": {
+            "$ref": "#/$defs/CharacterMutation"
+          },
+          "title": "Characters",
+          "type": "array"
+        },
+        "factions": {
+          "items": {
+            "$ref": "#/$defs/FactionMutation"
+          },
+          "title": "Factions",
+          "type": "array"
+        },
+        "foreshadowing": {
+          "items": {
+            "$ref": "#/$defs/ForeshadowingMutation"
+          },
+          "title": "Foreshadowing",
+          "type": "array"
+        },
+        "glossaries": {
+          "items": {
+            "$ref": "#/$defs/GlossaryMutation"
+          },
+          "title": "Glossaries",
+          "type": "array"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ItemMutation"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/LocationMutation"
+          },
+          "title": "Locations",
+          "type": "array"
+        },
+        "outline": {
+          "items": {
+            "$ref": "#/$defs/OutlineUpdate"
+          },
+          "title": "Outline",
+          "type": "array"
+        },
+        "outlineAdjustments": {
+          "items": {
+            "$ref": "#/$defs/OutlineAdjustment"
+          },
+          "title": "Outlineadjustments",
+          "type": "array"
+        },
+        "outlineContent": {
+          "default": "",
+          "title": "Outlinecontent",
+          "type": "string"
+        },
+        "outlineTreeMode": {
+          "default": "patch",
+          "enum": [
+            "patch",
+            "replace"
+          ],
+          "title": "Outlinetreemode",
+          "type": "string"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/ReferenceMutation"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "storyBackground": {
+          "default": "",
+          "title": "Storybackground",
+          "type": "string"
+        },
+        "worldSetting": {
+          "default": "",
+          "title": "Worldsetting",
+          "type": "string"
+        }
+      },
+      "title": "AgentUpdates",
+      "type": "object"
+    },
+    "AgentUpdatesPreviousCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "summary": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "updates": {
+          "$ref": "#/$defs/AgentUpdates"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "summary",
+        "updates"
+      ],
+      "title": "AgentUpdatesPreviousCandidate",
+      "type": "object"
+    },
+    "CharacterCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "age": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "appearance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appearance"
+        },
+        "background": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Background"
+        },
+        "behaviorBoundaries": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Behaviorboundaries"
+        },
+        "combatAbility": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Combatability"
+        },
+        "coreDesire": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coredesire"
+        },
+        "currentStatus": {
+          "default": "active",
+          "enum": [
+            "active",
+            "missing",
+            "dead",
+            "imprisoned",
+            "unknown"
+          ],
+          "title": "Currentstatus",
+          "type": "string"
+        },
+        "factionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Factionid"
+        },
+        "gender": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gender"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "personality": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Personality"
+        },
+        "powerLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Powerlevel"
+        },
+        "relationshipPrinciples": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationshipprinciples"
+        },
+        "shortTermGoal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shorttermgoal"
+        },
+        "specialSkills": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Specialskills"
+        },
+        "speechStyle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speechstyle"
+        },
+        "statusNote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statusnote"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "title": "CharacterCreate",
+      "type": "object"
+    },
+    "CharacterDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "characterId": {
+          "default": "",
+          "title": "Characterid",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "CharacterDelete",
+      "type": "object"
+    },
+    "CharacterExperienceCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "chapterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapterid"
+        },
+        "characterId": {
+          "default": "",
+          "title": "Characterid",
+          "type": "string"
+        },
+        "characterName": {
+          "default": "",
+          "title": "Charactername",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "order": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Order"
+        }
+      },
+      "required": [
+        "action",
+        "content"
+      ],
+      "title": "CharacterExperienceCreate",
+      "type": "object"
+    },
+    "CharacterExperienceDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "id"
+      ],
+      "title": "CharacterExperienceDelete",
+      "type": "object"
+    },
+    "CharacterExperienceMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CharacterExperienceCreate"
+        },
+        {
+          "$ref": "#/$defs/CharacterExperienceUpdate"
+        },
+        {
+          "$ref": "#/$defs/CharacterExperienceDelete"
+        }
+      ]
+    },
+    "CharacterExperienceUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "chapterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapterid"
+        },
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "title": "Order",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "id"
+      ],
+      "title": "CharacterExperienceUpdate",
+      "type": "object"
+    },
+    "CharacterMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CharacterCreate"
+        },
+        {
+          "$ref": "#/$defs/CharacterUpdate"
+        },
+        {
+          "$ref": "#/$defs/CharacterDelete"
+        }
+      ]
+    },
+    "CharacterUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "age": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "appearance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appearance"
+        },
+        "background": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Background"
+        },
+        "behaviorBoundaries": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Behaviorboundaries"
+        },
+        "characterId": {
+          "default": "",
+          "title": "Characterid",
+          "type": "string"
+        },
+        "combatAbility": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Combatability"
+        },
+        "coreDesire": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coredesire"
+        },
+        "currentStatus": {
+          "default": "active",
+          "enum": [
+            "active",
+            "missing",
+            "dead",
+            "imprisoned",
+            "unknown"
+          ],
+          "title": "Currentstatus",
+          "type": "string"
+        },
+        "factionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Factionid"
+        },
+        "gender": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gender"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "personality": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Personality"
+        },
+        "powerLevel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Powerlevel"
+        },
+        "relationshipPrinciples": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationshipprinciples"
+        },
+        "shortTermGoal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shorttermgoal"
+        },
+        "specialSkills": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Specialskills"
+        },
+        "speechStyle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speechstyle"
+        },
+        "statusNote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statusnote"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "CharacterUpdate",
+      "type": "object"
+    },
+    "FactionCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "baseId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseid"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "title": "FactionCreate",
+      "type": "object"
+    },
+    "FactionDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "factionId": {
+          "default": "",
+          "title": "Factionid",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "FactionDelete",
+      "type": "object"
+    },
+    "FactionMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FactionCreate"
+        },
+        {
+          "$ref": "#/$defs/FactionUpdate"
+        },
+        {
+          "$ref": "#/$defs/FactionDelete"
+        }
+      ]
+    },
+    "FactionUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "baseId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseid"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "factionId": {
+          "default": "",
+          "title": "Factionid",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "FactionUpdate",
+      "type": "object"
+    },
+    "ForeshadowingAbandon": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "abandon",
+          "title": "Action",
+          "type": "string"
+        },
+        "expectedPayoff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expectedpayoff"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "payoffAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payoffat"
+        },
+        "plantedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedat"
+        },
+        "plantedContent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedcontent"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ForeshadowingAbandon",
+      "type": "object"
+    },
+    "ForeshadowingCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "expectedPayoff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expectedpayoff"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "payoffAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payoffat"
+        },
+        "plantedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedat"
+        },
+        "plantedContent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedcontent"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "title": "ForeshadowingCreate",
+      "type": "object"
+    },
+    "ForeshadowingMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ForeshadowingCreate"
+        },
+        {
+          "$ref": "#/$defs/ForeshadowingUpdate"
+        },
+        {
+          "$ref": "#/$defs/ForeshadowingPayoff"
+        },
+        {
+          "$ref": "#/$defs/ForeshadowingAbandon"
+        }
+      ]
+    },
+    "ForeshadowingPayoff": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "payoff",
+          "title": "Action",
+          "type": "string"
+        },
+        "expectedPayoff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expectedpayoff"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "payoffAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payoffat"
+        },
+        "plantedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedat"
+        },
+        "plantedContent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedcontent"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ForeshadowingPayoff",
+      "type": "object"
+    },
+    "ForeshadowingUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "expectedPayoff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expectedpayoff"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "payoffAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payoffat"
+        },
+        "plantedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedat"
+        },
+        "plantedContent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plantedcontent"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ForeshadowingUpdate",
+      "type": "object"
+    },
+    "GlossaryCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "definition": {
+          "title": "Definition",
+          "type": "string"
+        },
+        "term": {
+          "title": "Term",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "term",
+        "definition"
+      ],
+      "title": "GlossaryCreate",
+      "type": "object"
+    },
+    "GlossaryDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "glossaryId": {
+          "default": "",
+          "title": "Glossaryid",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "term": {
+          "default": "",
+          "title": "Term",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "GlossaryDelete",
+      "type": "object"
+    },
+    "GlossaryMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GlossaryCreate"
+        },
+        {
+          "$ref": "#/$defs/GlossaryUpdate"
+        },
+        {
+          "$ref": "#/$defs/GlossaryDelete"
+        }
+      ]
+    },
+    "GlossaryUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "definition": {
+          "default": "",
+          "title": "Definition",
+          "type": "string"
+        },
+        "glossaryId": {
+          "default": "",
+          "title": "Glossaryid",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "term": {
+          "default": "",
+          "title": "Term",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "GlossaryUpdate",
+      "type": "object"
+    },
+    "ItemCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Origin"
+        },
+        "ownerId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ownerid"
+        },
+        "rarity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rarity"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "title": "ItemCreate",
+      "type": "object"
+    },
+    "ItemDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "itemId": {
+          "default": "",
+          "title": "Itemid",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ItemDelete",
+      "type": "object"
+    },
+    "ItemMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ItemCreate"
+        },
+        {
+          "$ref": "#/$defs/ItemUpdate"
+        },
+        {
+          "$ref": "#/$defs/ItemDelete"
+        }
+      ]
+    },
+    "ItemUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "effect": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effect"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "itemId": {
+          "default": "",
+          "title": "Itemid",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Origin"
+        },
+        "ownerId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ownerid"
+        },
+        "rarity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rarity"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ItemUpdate",
+      "type": "object"
+    },
+    "LocationCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "climate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Climate"
+        },
+        "culture": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Culture"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentid"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "title": "LocationCreate",
+      "type": "object"
+    },
+    "LocationDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "locationId": {
+          "default": "",
+          "title": "Locationid",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "LocationDelete",
+      "type": "object"
+    },
+    "LocationMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LocationCreate"
+        },
+        {
+          "$ref": "#/$defs/LocationUpdate"
+        },
+        {
+          "$ref": "#/$defs/LocationDelete"
+        }
+      ]
+    },
+    "LocationUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "aliases": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Aliases"
+        },
+        "climate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Climate"
+        },
+        "culture": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Culture"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "locationId": {
+          "default": "",
+          "title": "Locationid",
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentid"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "LocationUpdate",
+      "type": "object"
+    },
+    "OutlineAdjustment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutlineAdjustmentCreate"
+        },
+        {
+          "$ref": "#/$defs/OutlineAdjustmentUpdate"
+        },
+        {
+          "$ref": "#/$defs/OutlineAdjustmentDelete"
+        }
+      ]
+    },
+    "OutlineAdjustmentCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "actualWordCount": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actualwordcount"
+        },
+        "chapterEndOrder": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapterendorder"
+        },
+        "chapterStartOrder": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapterstartorder"
+        },
+        "clientKey": {
+          "default": "",
+          "title": "Clientkey",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "estimatedWordCount": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimatedwordcount"
+        },
+        "kind": {
+          "enum": [
+            "stage",
+            "plot_unit",
+            "chapter_group"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "linkedChapterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Linkedchapterid"
+        },
+        "nodeTitle": {
+          "default": "",
+          "title": "Nodetitle",
+          "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "title": "Order",
+          "type": "integer"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentid"
+        },
+        "parentKey": {
+          "default": "",
+          "title": "Parentkey",
+          "type": "string"
+        },
+        "status": {
+          "default": "planned",
+          "enum": [
+            "planned",
+            "in_progress",
+            "completed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "kind"
+      ],
+      "title": "OutlineAdjustmentCreate",
+      "type": "object"
+    },
+    "OutlineAdjustmentDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "nodeId": {
+          "default": "",
+          "title": "Nodeid",
+          "type": "string"
+        },
+        "nodeTitle": {
+          "default": "",
+          "title": "Nodetitle",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "OutlineAdjustmentDelete",
+      "type": "object"
+    },
+    "OutlineAdjustmentUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "actualWordCount": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actualwordcount"
+        },
+        "chapterEndOrder": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapterendorder"
+        },
+        "chapterStartOrder": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapterstartorder"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "estimatedWordCount": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimatedwordcount"
+        },
+        "kind": {
+          "default": "stage",
+          "enum": [
+            "stage",
+            "plot_unit",
+            "chapter_group"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "linkedChapterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Linkedchapterid"
+        },
+        "nodeId": {
+          "default": "",
+          "title": "Nodeid",
+          "type": "string"
+        },
+        "nodeTitle": {
+          "default": "",
+          "title": "Nodetitle",
+          "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "title": "Order",
+          "type": "integer"
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentid"
+        },
+        "parentKey": {
+          "default": "",
+          "title": "Parentkey",
+          "type": "string"
+        },
+        "status": {
+          "default": "planned",
+          "enum": [
+            "planned",
+            "in_progress",
+            "completed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "OutlineAdjustmentUpdate",
+      "type": "object"
+    },
+    "OutlineUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "actualWordCount": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actualwordcount"
+        },
+        "nodeId": {
+          "title": "Nodeid",
+          "type": "string"
+        },
+        "status": {
+          "default": "planned",
+          "enum": [
+            "planned",
+            "in_progress",
+            "completed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId"
+      ],
+      "title": "OutlineUpdate",
+      "type": "object"
+    },
+    "ReferenceCreate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "create",
+          "title": "Action",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "sourceUrl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceurl"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "note",
+            "web",
+            "book",
+            "image",
+            "custom"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "title",
+        "type",
+        "content"
+      ],
+      "title": "ReferenceCreate",
+      "type": "object"
+    },
+    "ReferenceDelete": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "delete",
+          "title": "Action",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "referenceId": {
+          "default": "",
+          "title": "Referenceid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ReferenceDelete",
+      "type": "object"
+    },
+    "ReferenceMutation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReferenceCreate"
+        },
+        {
+          "$ref": "#/$defs/ReferenceUpdate"
+        },
+        {
+          "$ref": "#/$defs/ReferenceDelete"
+        }
+      ]
+    },
+    "ReferenceUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "update",
+          "title": "Action",
+          "type": "string"
+        },
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "referenceId": {
+          "default": "",
+          "title": "Referenceid",
+          "type": "string"
+        },
+        "sourceUrl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceurl"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "default": "note",
+          "enum": [
+            "note",
+            "web",
+            "book",
+            "image",
+            "custom"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ReferenceUpdate",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/AgentUpdatesInput/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "初次生成和绑定精确上一候选的返工输入。",
+  "properties": {
+    "originalUserInstruction": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Originaluserinstruction"
+    },
+    "previousCandidate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentUpdatesPreviousCandidate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "userInstruction": {
+      "minLength": 1,
+      "title": "Userinstruction",
+      "type": "string"
+    }
+  },
+  "required": [
+    "userInstruction"
+  ],
+  "title": "AgentUpdatesInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.AgentUpdatesInput"
+}

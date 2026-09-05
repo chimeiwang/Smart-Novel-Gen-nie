@@ -1,0 +1,76 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/ForeshadowingAbandon/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "const": "abandon",
+      "title": "Action",
+      "type": "string"
+    },
+    "expectedPayoff": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expectedpayoff"
+    },
+    "id": {
+      "default": "",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "default": "",
+      "title": "Name",
+      "type": "string"
+    },
+    "payoffAt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Payoffat"
+    },
+    "plantedAt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plantedat"
+    },
+    "plantedContent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plantedcontent"
+    }
+  },
+  "required": [
+    "action"
+  ],
+  "title": "ForeshadowingAbandon",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.ForeshadowingAbandon"
+}

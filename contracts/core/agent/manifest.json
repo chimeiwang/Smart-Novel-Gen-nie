@@ -1,7 +1,211 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 238,
+  "modelCount": 272,
   "models": [
+    {
+      "model": "AgentUpdates",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdates.schema.json",
+      "sha256": "673d74bacd5384035d735fb19a3af3e1cf9c8096e65f7079b3a81411350c2c9e"
+    },
+    {
+      "model": "AgentUpdatesInput",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdatesInput.schema.json",
+      "sha256": "fd325662a0d5a7f48630c73b73e5fb6f8395c03407902ca55ae9f10da022605f"
+    },
+    {
+      "model": "AgentUpdatesOutput",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdatesOutput.schema.json",
+      "sha256": "85dfc0940e552a2371675ead51525803d8c884b076b20ed9779ac06abc91251d"
+    },
+    {
+      "model": "AgentUpdatesPreviousCandidate",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdatesPreviousCandidate.schema.json",
+      "sha256": "6971acfe8d7da431850459261e1a5beb72650a469d6b4f4d302e21fc78795d27"
+    },
+    {
+      "model": "AgentUpdatesResult",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdatesResult.schema.json",
+      "sha256": "c83766d634dfe181c9b8bcead3f06da6bdf59337329e2a728b8e5a726e71b686"
+    },
+    {
+      "model": "CharacterCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/CharacterCreate.schema.json",
+      "sha256": "ea69e10d8ea45df4f45d5cfa4d909945d504cdb8cad863f2d10647edb9d7f80d"
+    },
+    {
+      "model": "CharacterDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/CharacterDelete.schema.json",
+      "sha256": "5443bc7a5d2c863bcd2c302ac826e31bf1d7b6ddc59e7e6d51a7d0ee1a6d4d40"
+    },
+    {
+      "model": "CharacterExperienceCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/CharacterExperienceCreate.schema.json",
+      "sha256": "486ef039115126efe0ff8eb44f239390ce31fb0a13255ddb38f338c0d35ecc16"
+    },
+    {
+      "model": "CharacterExperienceDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/CharacterExperienceDelete.schema.json",
+      "sha256": "d2df9aa2b0199dce08f800ff729c59934271380dcc9cfa9d4e4bf11320cd4221"
+    },
+    {
+      "model": "CharacterExperienceUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/CharacterExperienceUpdate.schema.json",
+      "sha256": "8bd2f1691108db5ffbce1182051c805d33dfc924aa65ffb5a5c582ebe12f30b9"
+    },
+    {
+      "model": "CharacterUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/CharacterUpdate.schema.json",
+      "sha256": "c52bfbc52e3b92f4f83c1a3491aceb0ebff05f4552319eeac669f9f8136bc366"
+    },
+    {
+      "model": "FactionCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/FactionCreate.schema.json",
+      "sha256": "3a670ce66754db6405485753ba03bac1dde00a8b8b82501ad9cfd9ccf3119ad2"
+    },
+    {
+      "model": "FactionDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/FactionDelete.schema.json",
+      "sha256": "d86fbacb6f4a4108d375ee412fcdcdc1db2211d35572e21d49382fad35832172"
+    },
+    {
+      "model": "FactionUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/FactionUpdate.schema.json",
+      "sha256": "025906baf7dd101c9892e3cc6f89c1815c69e01d7be81c1a41f88b278de9393c"
+    },
+    {
+      "model": "ForeshadowingAbandon",
+      "module": "agent_updates",
+      "path": "agent_updates/ForeshadowingAbandon.schema.json",
+      "sha256": "0786e211fc43c2288c0ffb0b34b05b050e651a0e839480ea845b90b33c8a9ec8"
+    },
+    {
+      "model": "ForeshadowingCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/ForeshadowingCreate.schema.json",
+      "sha256": "be55b6a05f70f0be62bfad101901a794d3500143bddd92a4c0aaf57d1e874e54"
+    },
+    {
+      "model": "ForeshadowingPayoff",
+      "module": "agent_updates",
+      "path": "agent_updates/ForeshadowingPayoff.schema.json",
+      "sha256": "5247f49a9eb5adb1cf63d508534389e8c43f3419f8f6ca92a177792625a792a9"
+    },
+    {
+      "model": "ForeshadowingUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/ForeshadowingUpdate.schema.json",
+      "sha256": "a5fc39ae9acd2b3f8c630296c3f68e7172cfc405642cc222bf0623017998ff13"
+    },
+    {
+      "model": "GlossaryCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/GlossaryCreate.schema.json",
+      "sha256": "a4d03f1f17026c0baf45e6b87becce623b37dc187abb81e503b7a91041129f27"
+    },
+    {
+      "model": "GlossaryDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/GlossaryDelete.schema.json",
+      "sha256": "23f9d6c46d61bc28a667a9154dda3e0e0ecb3db8c09514bce43960c8497154ee"
+    },
+    {
+      "model": "GlossaryUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/GlossaryUpdate.schema.json",
+      "sha256": "1f798de0565f587cba7c56370c0b38c5cb68211902c266154e52d98dbfd5ca03"
+    },
+    {
+      "model": "ItemCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/ItemCreate.schema.json",
+      "sha256": "11c3919611214cbf0f4c08b206a7e8aca44c305f89f0cfdeec5e970bcceb7060"
+    },
+    {
+      "model": "ItemDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/ItemDelete.schema.json",
+      "sha256": "c18503dfc2e6a4a6e27db05c3a3b7287b13955492b847db98c2241f4ff3ed2b4"
+    },
+    {
+      "model": "ItemUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/ItemUpdate.schema.json",
+      "sha256": "50e4fbe3779de6f38784d49e23a302d0733ace8f700394aa4e98f3c5dcecf1cc"
+    },
+    {
+      "model": "LocationCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/LocationCreate.schema.json",
+      "sha256": "79d0302c1574ea3b00f1a59e4cfad5b44411b380d0803da98369d7913280e3a1"
+    },
+    {
+      "model": "LocationDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/LocationDelete.schema.json",
+      "sha256": "da2fbf2436636094a12839ad08a409ccc05aeea524b7e18bbee6c6c6b44a53d5"
+    },
+    {
+      "model": "LocationUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/LocationUpdate.schema.json",
+      "sha256": "e2659e0c26a57dcf760e23412f4a0e6a533bd10f76142d013801df44ac1fe459"
+    },
+    {
+      "model": "OutlineAdjustmentCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/OutlineAdjustmentCreate.schema.json",
+      "sha256": "d5e1c2b2cbe4983466355b8d3919f3b47f48d7d72997b47ebcbd2a7188972fcc"
+    },
+    {
+      "model": "OutlineAdjustmentDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/OutlineAdjustmentDelete.schema.json",
+      "sha256": "f7d314da6dcf14eab724d4dde18c8ea67e76a7bc297902336f10d7026c55d0b3"
+    },
+    {
+      "model": "OutlineAdjustmentUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/OutlineAdjustmentUpdate.schema.json",
+      "sha256": "1815ed0c7bf8407ff72c0e5660dd2687d43ae860c9c99de24598d3bd2c9fdc4e"
+    },
+    {
+      "model": "OutlineUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/OutlineUpdate.schema.json",
+      "sha256": "f8fbfd0cdcd3c52bc475f9535377efafb57d40b5cb9a877d70eabb16345d19e4"
+    },
+    {
+      "model": "ReferenceCreate",
+      "module": "agent_updates",
+      "path": "agent_updates/ReferenceCreate.schema.json",
+      "sha256": "d582c1685542848d245c012fdad9d6c2ea2d33c20bb5d25223a41c128396d21c"
+    },
+    {
+      "model": "ReferenceDelete",
+      "module": "agent_updates",
+      "path": "agent_updates/ReferenceDelete.schema.json",
+      "sha256": "46d77cea059d27f1558f5c078f6d75a13f5e0b6a7221a1e6b0ddbe2b418bfd88"
+    },
+    {
+      "model": "ReferenceUpdate",
+      "module": "agent_updates",
+      "path": "agent_updates/ReferenceUpdate.schema.json",
+      "sha256": "c9e0b13f8c5c20f76709a604aa409d65eb992d3249362e56b630ae6c5ddbd650"
+    },
     {
       "model": "AgentEvent",
       "module": "events",

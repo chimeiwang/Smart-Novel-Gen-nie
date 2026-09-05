@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 CONTRACT_MODULES = (
+    "agent_updates",
     "events",
     "execution",
     "identity",
@@ -31,6 +32,12 @@ CONTRACT_MODULES = (
     "workflow_events",
 )
 ABSTRACT_MODELS = {
+    "_CharacterOptionalFields",
+    "_FactionFields",
+    "_ForeshadowingFields",
+    "_ItemFields",
+    "_LocationFields",
+    "_OutlineBusinessFields",
     "_StrictModel",
     "StrictModel",
     "VideoContractModel",

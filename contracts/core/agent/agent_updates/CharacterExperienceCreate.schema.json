@@ -1,0 +1,59 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/CharacterExperienceCreate/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "const": "create",
+      "title": "Action",
+      "type": "string"
+    },
+    "chapterId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chapterid"
+    },
+    "characterId": {
+      "default": "",
+      "title": "Characterid",
+      "type": "string"
+    },
+    "characterName": {
+      "default": "",
+      "title": "Charactername",
+      "type": "string"
+    },
+    "content": {
+      "title": "Content",
+      "type": "string"
+    },
+    "order": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Order"
+    }
+  },
+  "required": [
+    "action",
+    "content"
+  ],
+  "title": "CharacterExperienceCreate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.CharacterExperienceCreate"
+}

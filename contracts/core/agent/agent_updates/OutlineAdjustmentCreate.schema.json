@@ -1,0 +1,158 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/OutlineAdjustmentCreate/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "const": "create",
+      "title": "Action",
+      "type": "string"
+    },
+    "actualWordCount": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actualwordcount"
+    },
+    "chapterEndOrder": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chapterendorder"
+    },
+    "chapterStartOrder": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chapterstartorder"
+    },
+    "clientKey": {
+      "default": "",
+      "title": "Clientkey",
+      "type": "string"
+    },
+    "content": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content"
+    },
+    "estimatedWordCount": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimatedwordcount"
+    },
+    "kind": {
+      "enum": [
+        "stage",
+        "plot_unit",
+        "chapter_group"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "linkedChapterId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Linkedchapterid"
+    },
+    "nodeTitle": {
+      "default": "",
+      "title": "Nodetitle",
+      "type": "string"
+    },
+    "order": {
+      "default": 0,
+      "maximum": 2147483647,
+      "minimum": -2147483648,
+      "title": "Order",
+      "type": "integer"
+    },
+    "parentId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parentid"
+    },
+    "parentKey": {
+      "default": "",
+      "title": "Parentkey",
+      "type": "string"
+    },
+    "status": {
+      "default": "planned",
+      "enum": [
+        "planned",
+        "in_progress",
+        "completed",
+        "skipped"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "title": {
+      "default": "",
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "kind"
+  ],
+  "title": "OutlineAdjustmentCreate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.OutlineAdjustmentCreate"
+}

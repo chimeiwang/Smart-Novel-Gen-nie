@@ -1,0 +1,40 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/GlossaryCreate/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "const": "create",
+      "title": "Action",
+      "type": "string"
+    },
+    "category": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Category"
+    },
+    "definition": {
+      "title": "Definition",
+      "type": "string"
+    },
+    "term": {
+      "title": "Term",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "term",
+    "definition"
+  ],
+  "title": "GlossaryCreate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.GlossaryCreate"
+}
