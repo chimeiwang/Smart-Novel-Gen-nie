@@ -9,6 +9,7 @@ from inkforge_agents.clients.core import CoreServiceError
 from inkforge_agents.graph.snapshots import serialize_snapshot, to_typescript_snapshot
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.jobs.writing import WritingJobHandler
+from inkforge_agents.operations.graph import _operation
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob
@@ -281,6 +282,40 @@ async def test_explicit_long_serial_job_bypasses_parent_with_trusted_operation()
         "confidence": 1.0,
         "reasoning": "显式长篇任务按服务端 Operation 定义执行。",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("operation_kind", "scope"), [
+    ("create_lore", {"kind": "novel"}),
+    ("revise_lore", {"kind": "novel"}),
+    ("create_outline", {"kind": "novel"}),
+    ("revise_outline", {"kind": "novel"}),
+    ("revise_outline", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ("manage_foreshadowing", {"kind": "novel"}),
+    ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-1"}),
+])
+async def test_structured_explicit_job_passes_actual_operation_graph_validation(
+    operation_kind, scope,
+):
+    class ValidatingGraph(Graph):
+        async def ainvoke(self, value):
+            # 使用真实图的完整入口校验，避免只比较字段却漏掉公共/内部目标不一致。
+            actual = _operation(value)
+            assert actual.kind == operation_kind
+            assert actual.targetType == "chapter"
+            assert value["scope"] == scope
+            return await super().ainvoke(value)
+
+    parent = Graph({"phase": "error", "errorMessage": "不应进入自然分类"})
+    operation = ValidatingGraph({"phase": "completed", "finalResponse": "已处理"})
+    core = CoreClient({"workspace": {}, "planning": {"graphState": None}})
+    handler = WritingJobHandler(core, parent_graph=parent, operation_graph=operation,
+                                artifacts=ArtifactHydration())
+    await handler(_explicit_job(payload_updates={"operation": operation_kind, "scope": scope}))
+    assert not parent.inputs
+    assert len(operation.inputs) == 1
+    assert len(core.completions) == 1
+    assert not core.failures
 
 
 @pytest.mark.asyncio

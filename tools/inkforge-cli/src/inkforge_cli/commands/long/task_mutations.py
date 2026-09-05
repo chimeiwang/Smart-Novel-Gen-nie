@@ -13,6 +13,12 @@ _OPERATIONS = {
     "plan_chapter",
     "write_chapter",
     "review_chapter",
+    "rewrite_scene",
+    "create_lore",
+    "revise_lore",
+    "create_outline",
+    "revise_outline",
+    "manage_foreshadowing",
     "rewrite_chapter_selection",
     "rewrite_outline_selection",
 }
@@ -154,7 +160,8 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         raise CliInputError(
             "INVALID_OPERATION",
             "operation 只能是 answer_question、plan_chapter、write_chapter、"
-            "review_chapter、rewrite_chapter_selection 或 rewrite_outline_selection",
+            "review_chapter、rewrite_scene、rewrite_chapter_selection、rewrite_outline_selection、"
+            "create_lore、revise_lore、create_outline、revise_outline 或 manage_foreshadowing",
         )
 
     target = payload.get("target")
@@ -173,7 +180,12 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         chapter_id=chapter_id,
     )
     scope = payload.get("scope")
-    if operation != "rewrite_outline_selection" and (
+    structured = operation in {
+        "create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing",
+    }
+    if structured:
+        _validate_structured_scope(scope, operation, chapter_id)
+    if not structured and operation != "rewrite_outline_selection" and (
         not isinstance(scope, dict)
         or scope.get("kind") != "chapter"
         or scope.get("chapterId") != chapter_id
@@ -239,6 +251,22 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         json=body,
     )
     return ensure_command_json_result(response)
+
+
+def _validate_structured_scope(scope: JsonValue, operation: str, chapter_id: str) -> None:
+    if not isinstance(scope, dict):
+        raise CliInputError("INVALID_SCOPE", "scope 必须是 JSON 对象")
+    kind = scope.get("kind")
+    if kind == "novel":
+        return
+    if operation == "revise_outline" and kind == "outline_node":
+        node_id = scope.get("outlineNodeId")
+        if isinstance(node_id, str) and node_id:
+            return
+    if (operation == "manage_foreshadowing" and kind == "chapter"
+            and scope.get("chapterId") == chapter_id):
+        return
+    raise CliInputError("INVALID_SCOPE", "scope 不符合当前结构化操作的范围要求")
 
 
 def resume_task(runtime: CliRuntime, payload: JsonObject) -> JsonObject:

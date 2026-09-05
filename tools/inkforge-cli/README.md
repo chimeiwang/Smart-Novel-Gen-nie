@@ -78,9 +78,36 @@ Agent 消息，不能把 SSE 或任务状态拼成回答。问答的 `writingSes
 revise/discard 保持既有拒绝规则。这组 kind/updates 条件只决定结构化选择字段能否透传：非 null 选择不满足条件时
 拒绝且不 POST；省略选择字段或其他 V2 候选沿既有语义忽略显式 null 时，不会因此新增 Artifact 类型门禁。
 Core 按精确 revision 和冻结来源在同一事务采用，冲突后必须重新读取并确认。
-这没有增加 125 个普通 CLI 命令，也没有扩大 45 命令/三 Operation 的 Operator 范围；Catalog 仍为 7/21，
-五项结构化资料 Operation 尚未启用。本项源码已构建并通过最终 Maven 门禁，但尚未更新到固定 JAR 或活动 Skills，
-也未部署服务器。
+这没有增加 125 个普通 CLI 命令，也没有扩大 45 命令/三 Operation 的 Operator 范围。五项结构化资料入口、
+自动返工及作者采用已接通，当前仓内 Catalog 为 12/21；本批定向验证通过，全量门禁见结构化资料规格最终记录。
+源码、构建产物与固定包分别验收，本批没有更新固定 JAR、活动 Skills 或部署服务器。
+
+### 结构化资料的显式启动（当前源码）
+
+本批为 `long.agent.start` 补接五项已有业务，并补回此前遗漏的 `rewrite_scene` 显式白名单，合计新增
+6 个可选 operation 值；不是新增 6 个命令。命令总数仍为 125，不新增参数或公共 target 类型。
+
+| operation | scope |
+| --- | --- |
+| `create_lore`、`revise_lore`、`create_outline` | `{"kind":"novel"}` |
+| `revise_outline` | novel，或 `{"kind":"outline_node","outlineNodeId":"节点ID"}` |
+| `manage_foreshadowing` | novel，或 `{"kind":"chapter","chapterId":"当前章节ID"}` |
+| `rewrite_scene` | `{"kind":"chapter","chapterId":"当前章节ID"}`，沿用原整章候选语义 |
+
+所有请求仍需 `chapterId` 和 `target={"type":"chapter","id":"同一章节ID"}`。节点归属由 Core 核对；
+章节范围必须等于当前章。五项不携带 `selectionTarget`，`writingSessionId` 可省略或为 null；原问答仍要求会话。
+结构化 scope 表示任务焦点，不按操作名限制候选更新分区或 create/update/delete，也不自动采用结果。
+
+普通 CLI 的输入示例（不是受限 Operator Skill 的可调用示例）：
+
+```json
+{"clientRequestId":"structured-start-20260905-0001","novelId":"novel-id","chapterId":"chapter-id","operation":"revise_outline","target":{"type":"chapter","id":"chapter-id"},"scope":{"kind":"outline_node","outlineNodeId":"node-id"},"userInstruction":"保留已有主线，调整这个节点中的行动顺序。"}
+```
+
+CLI 仍只 POST Core `/api/v1/writing/runs`；Core 命中 V2 后才由新执行链生成候选、复审与等待确认，
+受理不等于完成。五项已在仓内启用，最多一次自动完整返工后仍须作者确认；隔离接线及后续完整验收以
+`docs/specs/2026-09-05-durable-structured-agent-updates.md` 为准。两份 Operator 仍只允许原三操作，
+这 6 个新增可选值均不自动开放；固定 JAR、活动 Skills 和服务器未随此次源码修改更新。
 
 2026-09-05 的 V2 `review_chapter` 保持显式 start 可省略 writingSessionId；完成后
 `long.task.get/watch` 直接返回完整 reviewReport，不要求额外会话查询或 Artifact 决定。指定 outputFile 时
@@ -124,8 +151,10 @@ Java CLI 与 Python 对照实现共用以下输入，不新增命令名。当前
 
 自然分支要求非空会话和完整非空白指令，`targetWordCount` 可省略（默认 4000），提供时必须为
 1～10000000 的整数。不能混入 `operation/target/scope/selectionTarget/selectedAgents/workflow`；CLI
-负责补固定 `workflow=long_serial`，Core 只从已启用的章节问答、规划、正文写作中解析，不借此开放新 Operation。
-原显式 Operation 分支及选区输入保持不变。
+负责补固定 `workflow=long_serial`。当前 Core 使用内部 resolver v3，从本次冻结的十项无选区授权中解析：
+新建/修改设定、创建/修改大纲默认 novel scope；管理伏笔、章节问答、规划、正文、审阅、场景改写默认当前
+chapter scope。明确节点或其他不匹配范围必须澄清或走显式入口，不由模型猜 ID/scope；两种选区仍显式提交
+完整来源绑定。历史解析器和原三项/五项授权不扩大；CLI 不传提示词版本，原显式请求形状不变。
 
 当 `long.task.watch` 读到 V2 等待澄清时，输出与草案等待明确不同的 JSONL 行：
 

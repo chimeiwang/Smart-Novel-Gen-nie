@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "506dd4bf4388d6af998a88ab12c28c5a6f9573968729b2d79faa4f2a662bb7d6"
+        "a3fada474db01b8d2f8892a16febbe1b196a6bb341b134622be0cb4da11ba7e8"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -84,6 +84,15 @@ def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     )
     assert agent_updates.json_schema_value()["required"] == ["summary", "updates"]
     assert "updatesSha256" not in agent_updates.json_schema_value()["properties"]
+
+    for operation in (
+        "create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing",
+    ):
+        structured = registry.resolve("long_serial", operation)
+        assert structured.operation.v2_enabled is True
+        assert structured.output_schema.key == "output.agent_updates_step.v1"
+        assert structured.generator_profile.version == 3
+        assert len(structured.reviewer_profiles) == 1
 
     resolved = registry.resolve("long_serial", "rewrite_chapter_selection")
     answer = registry.resolve("long_serial", "answer_question")
@@ -207,8 +216,16 @@ def test_deployment_authorization_binds_transport_capability_and_environment() -
         )
 
 
-def test_loader_rejects_disabled_and_environment_forbidden_operations() -> None:
-    production = load_execution_registry(CONTRACT_ROOT, environment="production")
+def test_loader_rejects_disabled_and_environment_forbidden_operations(contract_copy: Path) -> None:
+    catalog_path = contract_copy / "operation-catalog.v1.json"
+    catalog = _read_json(catalog_path)
+    selected = next(item for item in catalog["operations"]
+                    if item["key"] == "long_serial.create_outline")
+    assert selected["v2Enabled"] is True
+    selected["v2Enabled"] = False
+    _write_json(catalog_path, catalog)
+    _refresh_manifest_hash(contract_copy, "catalog")
+    production = load_execution_registry(contract_copy, environment="production")
     with pytest.raises(ExecutionOperationDisabledError):
         production.resolve("long_serial", "create_outline")
     with pytest.raises(ExecutionOperationEnvironmentError):

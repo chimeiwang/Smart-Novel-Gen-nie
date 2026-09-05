@@ -105,11 +105,9 @@ def _evidence_request_output() -> dict[str, Any]:
 
 def _enabled_registry() -> ExecutionRegistry:
     registry = load_execution_registry(environment="test")
-    operations = dict(registry.operations)
-    for operation in _OPERATIONS:
-        key = f"long_serial.{operation}"
-        operations[key] = replace(operations[key], v2_enabled=True)
-    return replace(registry, operations=MappingProxyType(operations))
+    assert all(registry.operations[f"long_serial.{operation}"].v2_enabled
+               for operation in _OPERATIONS)
+    return registry
 
 
 def _json_item(
@@ -377,8 +375,14 @@ def _finding(request: ExecutionStepRequest) -> dict[str, Any]:
     }
 
 
-def test_five_operations_remain_catalog_disabled_and_make_no_provider_call() -> None:
-    registry = load_execution_registry(environment="test")
+def test_disabled_structured_operations_make_no_provider_call() -> None:
+    enabled = _enabled_registry()
+    keys = {f"long_serial.{operation}" for operation in _OPERATIONS}
+    # 关闭状态是显式隔离夹具，不再依赖真实目录恰好尚未启用。
+    registry = replace(enabled, operations=MappingProxyType({
+        key: replace(value, v2_enabled=False) if key in keys else value
+        for key, value in enabled.operations.items()
+    }))
     model = RecordingModel()
     executor = _executor(model)
 

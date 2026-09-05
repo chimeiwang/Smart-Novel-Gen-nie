@@ -47,7 +47,8 @@ public final class IntentSelectedRunTestFixture {
                     """, now, "a".repeat(64), json.writeValueAsString(Map.of("usageStatus", "unknown", "providerAttempts", 1, "protocolCorrections", 0, "wallTimeMillis", 1000)), started.stepId());
             var evidence = starts.appendEvidence(tx, started.runId(), 2, business.evidencePolicyVersion(), business.evidenceItems(), now);
             var selection = new WorkflowIntentSelection(started.runId(), business.executionPlan().operation().key(), business.executionPlan().sha256(),
-                    started.stepId(), "a".repeat(64), intentBundle, "chapter", business.chapterId(), "chapter");
+                    started.stepId(), "a".repeat(64), intentBundle, "chapter", business.chapterId(), "chapter",
+                    intent.supportsNovelScopes() ? WorkflowIntentSelection.SCHEMA_V2 : WorkflowIntentSelection.SCHEMA);
             String selectionId = ids.next();
             tx.execute("""
                     INSERT INTO public."WorkflowStep" (id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal, purpose, lane,

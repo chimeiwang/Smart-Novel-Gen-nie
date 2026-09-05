@@ -9,6 +9,7 @@ import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.platform.redis.CoreRedis;
 import cn.inkforge.core.references.application.ReferenceRepository;
 import cn.inkforge.core.reviews.application.ReviewRepository;
+import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import cn.inkforge.core.writing.application.EngineIdentityProbe;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
@@ -157,10 +158,11 @@ class WritingConfiguration {
             ObjectMapper objectMapper,
             ChapterPlanEvidenceReader chapterPlanningSources,
             ChapterWritingEvidenceReader chapterWritingSources,
-            WorkflowExecutionContextReader executionContexts) {
+            WorkflowExecutionContextReader executionContexts,
+            AgentUpdatesEvidenceReader agentUpdatesSources) {
         return new JooqLongSerialDurableRunStarter(
                 database, assembler, workflows, registry, ids, coreClock, objectMapper,
-                chapterPlanningSources, chapterWritingSources, executionContexts);
+                chapterPlanningSources, chapterWritingSources, executionContexts, agentUpdatesSources);
     }
 
     @Bean

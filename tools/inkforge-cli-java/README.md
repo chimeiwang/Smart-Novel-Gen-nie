@@ -165,3 +165,19 @@ Java CLI 的输入映射、watcher 与双环境 Operator 拒绝模式有定向 J
 本阶段没有更新本机固定 JAR 或活动 Skill。供后续 Skills 更新的字段、调用顺序和限制清单见
 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“整章审阅与改写”专节，
 验证进度见 `../../docs/specs/2026-09-05-durable-review-and-rewrites.md`。
+
+## 结构化资料显式启动的源码更新
+
+2026-09-05 本批补接 `create_lore`、`revise_lore`、`create_outline`、`revise_outline`、
+`manage_foreshadowing`，同时补回已实现但 CLI 白名单遗漏的 `rewrite_scene`。新增的是 6 个可选 operation 值，
+命令仍为 125 个，参数形状不变。五项任务使用既有 novel/outline_node/chapter scope，公共 target 始终为当前章；
+完整矩阵与 JSON 示例见 `../inkforge-cli/README.md` 的“结构化资料的显式启动”。
+
+Java 与 Python 对照 CLI 同步校验范围、原样发送指令和 scope，不猜测来源或直接访问 Agent。五项的运行、
+候选与采用均由 Core 组织；五项显式/自然入口与最多一次自动完整返工现已接通，仓内 Catalog 为 12/21，
+公共 HTTP 接线定向验证通过。本批全量门禁及实际跨进程/供应商验收见结构化资料规格，不能据此宣称生产已开放。
+新自然请求使用 resolver v3 的冻结十项授权：设定两项/大纲两项默认 novel，伏笔及原章节五项默认当前 chapter；
+明确节点等不匹配范围须澄清或走显式入口，模型不猜 ID/scope，CLI 不新增参数或传提示词版本。
+两份 Operator 仍只允许 plan_chapter/write_chapter/review_chapter，未开放这 6 项；本批不安装固定 JAR 或修改
+活动 Skills，也未部署服务器。公共 Core 152 个操作、普通 CLI 125 个命令与 Operator 45 个命令不变。
+后续说明更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。

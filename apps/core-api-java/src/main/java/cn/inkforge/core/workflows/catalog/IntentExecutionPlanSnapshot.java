@@ -27,9 +27,13 @@ public final class IntentExecutionPlanSnapshot {
     public static final String RUN_BUDGET_PROFILE = "budget.long_serial.natural.v1";
     public static final int MAX_CLARIFICATIONS = 2;
     public static final int MAX_RESOLVER_STEPS = MAX_CLARIFICATIONS + 1;
-    private static final Set<String> ALLOWED_OPERATIONS = Set.of(
+    private static final Set<String> CHAPTER_OPERATIONS = Set.of(
             "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.review_chapter",
             "long_serial.rewrite_scene", "long_serial.write_chapter");
+    private static final Map<String, String> STRUCTURED_TARGET_KINDS = Map.of(
+            "long_serial.create_lore", "lore", "long_serial.revise_lore", "lore",
+            "long_serial.create_outline", "outline", "long_serial.revise_outline", "outline",
+            "long_serial.manage_foreshadowing", "foreshadowing");
     private static final Set<String> ROOT_KEYS = Set.of("planVersion", "hashAlgorithm", "planSha256", "plan");
     private static final Set<String> PLAN_KEYS = Set.of(
             "workflow", "operationCatalogVersion", "executionManifestFingerprint", "resolver",
@@ -50,6 +54,12 @@ public final class IntentExecutionPlanSnapshot {
             "deployment.system.intent_resolver.v2",
             "prompt.system.intent_resolver.v2",
             "5f1b980a61c8c66f9e43b06824816cfbdff723eada0784b2e2f5d7c6796fb5bd");
+    private static final ResolverTuple RESOLVER_V3 = new ResolverTuple(
+            3,
+            "system.intent_resolver.v3",
+            "deployment.system.intent_resolver.v3",
+            "prompt.system.intent_resolver.v3",
+            "a0f495e7f011eb8f8f0741a3b4e643bfb4d821a7cf62f29e422ac038ff9217e4");
 
     private final String operationCatalogVersion;
     private final String executionManifestFingerprint;
@@ -101,7 +111,7 @@ public final class IntentExecutionPlanSnapshot {
     public static IntentExecutionPlanSnapshot freeze(
             ExecutionRegistry registry, List<String> authorizedOperationKeys) {
         Objects.requireNonNull(registry, "Registry 不能为空");
-        requireOperationKeys(authorizedOperationKeys);
+        requireOperationKeys(authorizedOperationKeys, true);
         ExecutionRegistry.ResolvedSystemPurpose resolved = registry.resolveSystemPurpose("resolve_intent");
         if (!resolved.purpose().workflows().contains(WORKFLOW)
                 || !resolved.purpose().parentOperations().isEmpty()) {
@@ -156,6 +166,24 @@ public final class IntentExecutionPlanSnapshot {
     public String sha256() { return sha256; }
     public Map<String, Object> stored() { return stored; }
 
+    public boolean supportsNovelScopes() { return RESOLVER_V3.matches(resolver.modelProfile()); }
+
+    /** 只能投影本次已冻结授权；历史解析器的范围绝不因当前目录扩展而变化。 */
+    public String scopeKindForOperation(String operationKey) {
+        requireOperationPlan(operationKey);
+        return supportsNovelScopes() ? defaultScopeKind(operationKey) : "chapter";
+    }
+
+    /** 新自然入口的固定范围，不接收模型参数，也不查询当前 Registry。 */
+    public static String defaultScopeKind(String operationKey) {
+        if (operationKey == null) throw invalid("自然操作不能为空");
+        if (CHAPTER_OPERATIONS.contains(operationKey) || "long_serial.manage_foreshadowing".equals(operationKey)) {
+            return "chapter";
+        }
+        if (STRUCTURED_TARGET_KINDS.containsKey(operationKey)) return "novel";
+        throw invalid("操作不在已接通的自然默认范围集合中");
+    }
+
     public ExecutionPlanSnapshot requireOperationPlan(String operationKey) {
         return operationPlans.stream().filter(plan -> plan.operation().key().equals(operationKey))
                 .findFirst().orElseThrow(() -> invalid("操作不在自然入口冻结的授权集合中"));
@@ -174,17 +202,23 @@ public final class IntentExecutionPlanSnapshot {
     }
 
     private void validateOperationPlans() {
-        requireOperationKeys(operationPlans.stream().map(plan -> plan.operation().key()).toList());
+        requireOperationKeys(operationPlans.stream().map(plan -> plan.operation().key()).toList(), supportsNovelScopes());
         for (ExecutionPlanSnapshot plan : operationPlans) {
             if (!operationCatalogVersion.equals(plan.operationCatalogVersion())
                     || !executionManifestFingerprint.equals(plan.executionManifestFingerprint())) {
                 throw invalid("自然入口和业务子计划必须绑定同一 Catalog 与 Manifest");
             }
+            String key = plan.operation().key();
+            List<String> scopes = switch (key) {
+                case "long_serial.revise_outline" -> List.of("novel", "outline_node");
+                case "long_serial.manage_foreshadowing" -> List.of("novel", "chapter");
+                default -> List.of(CHAPTER_OPERATIONS.contains(key) ? "chapter" : "novel");
+            };
+            String target = STRUCTURED_TARGET_KINDS.getOrDefault(key, "chapter");
             if (!WORKFLOW.equals(plan.operation().workflow())
-                    || !List.of("chapter").equals(plan.operation().targetKinds())
-                    || !List.of("chapter").equals(plan.operation().scopeKinds())
-                    || !plan.systemSteps().isEmpty()) {
-                throw invalid("自然入口子计划必须是当前章范围的既有业务计划");
+                    || !List.of(target).equals(plan.operation().targetKinds())
+                    || !scopes.equals(plan.operation().scopeKinds()) || !plan.systemSteps().isEmpty()) {
+                throw invalid("自然入口子计划的业务目标或范围不匹配已接通语义");
             }
             try {
                 plan.runBudget().toDomain();
@@ -194,11 +228,13 @@ public final class IntentExecutionPlanSnapshot {
         }
     }
 
-    private static void requireOperationKeys(List<String> keys) {
-        if (keys == null || keys.isEmpty() || keys.size() > ALLOWED_OPERATIONS.size()
+    private static void requireOperationKeys(List<String> keys, boolean structured) {
+        int maximum = CHAPTER_OPERATIONS.size() + (structured ? STRUCTURED_TARGET_KINDS.size() : 0);
+        if (keys == null || keys.isEmpty() || keys.size() > maximum
                 || new LinkedHashSet<>(keys).size() != keys.size()
-                || keys.stream().anyMatch(key -> key == null || !ALLOWED_OPERATIONS.contains(key))) {
-            throw invalid("自然入口授权操作必须非空、无重复且只含已接通的五项当前章操作");
+                || keys.stream().anyMatch(key -> key == null || !(CHAPTER_OPERATIONS.contains(key)
+                        || structured && STRUCTURED_TARGET_KINDS.containsKey(key)))) {
+            throw invalid("自然入口授权操作必须非空、无重复且匹配冻结解析器支持的集合");
         }
     }
 
@@ -215,15 +251,16 @@ public final class IntentExecutionPlanSnapshot {
             throw invalid("自然入口解析器的用途、Profile、Schema、Evidence 或预算不受支持");
         }
         if (!RESOLVER_V1.matches(step.modelProfile())
-                && !RESOLVER_V2.matches(step.modelProfile())) {
+                && !RESOLVER_V2.matches(step.modelProfile())
+                && !RESOLVER_V3.matches(step.modelProfile())) {
             throw invalid("自然入口解析器的 Profile、Prompt 与 Deployment 版本组合不受支持");
         }
     }
 
     private static void requireCurrentResolver(ExecutionPlanSnapshot.Step step) {
         requireResolver(step);
-        if (!RESOLVER_V2.matches(step.modelProfile())) {
-            throw invalid("新自然入口必须冻结当前 v2 意图解析器依赖");
+        if (!RESOLVER_V3.matches(step.modelProfile())) {
+            throw invalid("新自然入口必须冻结当前 v3 意图解析器依赖");
         }
     }
 

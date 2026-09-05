@@ -568,6 +568,36 @@ class IntentContext(_StrictModel):
         return self
 
 
+class IntentAvailableOperationV2(_StrictModel):
+    """新版解析器的冻结默认范围；操作与范围配对仍由 Core/Agent 校验。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: ProtocolCode
+    description: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+    targetType: Literal["chapter"]
+    scopeKind: Literal["chapter", "novel"]
+
+
+class IntentContextV2(_StrictModel):
+    """十项自然入口的最小上下文；独立版本不扩大旧解析器的五项章节契约。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    workflow: Literal["long_serial"]
+    novelId: ExecutionId
+    chapterId: ExecutionId
+    chapterTitle: str
+    availableOperations: list[IntentAvailableOperationV2] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_unique_operations(self) -> Self:
+        operations = [operation.operation for operation in self.availableOperations]
+        if len(operations) != len(set(operations)):
+            raise ValueError("意图上下文不能包含重复操作")
+        return self
+
+
 class ChapterDraftOutput(_StrictModel):
     """完整正文与说明是唯一模型语义输出，不截断、不复用旧标记协议。"""
 

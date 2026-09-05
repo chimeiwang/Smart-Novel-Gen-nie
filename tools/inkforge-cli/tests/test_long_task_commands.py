@@ -180,7 +180,7 @@ def test_task_mutation_specs_require_identity_and_stable_request_ids() -> None:
 
 @pytest.mark.parametrize(
     "operation",
-    ["answer_question", "plan_chapter", "write_chapter", "review_chapter"],
+    ["answer_question", "plan_chapter", "write_chapter", "review_chapter", "rewrite_scene"],
 )
 def test_agent_start_sends_exact_explicit_long_serial_contract(
     operation: str,
@@ -201,6 +201,50 @@ def test_agent_start_sends_exact_explicit_long_serial_contract(
     assert sent["target"] == payload["target"]
     assert sent["scope"] == payload["scope"]
     assert "selectedAgents" not in sent
+
+
+@pytest.mark.parametrize(("operation", "scope"), [
+    ("create_lore", {"kind": "novel"}),
+    ("revise_lore", {"kind": "novel"}),
+    ("create_outline", {"kind": "novel"}),
+    ("revise_outline", {"kind": "novel"}),
+    ("revise_outline", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ("manage_foreshadowing", {"kind": "novel"}),
+    ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-1"}),
+])
+def test_structured_agent_start_preserves_existing_scope_and_full_instruction(operation, scope):
+    api = RecordingApi()
+    payload = _start_payload(operation) | {
+        "scope": scope, "userInstruction": "  核对资料并形成建议。\r\n末尾😀  ",
+        "writingSessionId": None,
+    }
+    status, _ = _invoke_direct(payload, api)
+    assert status == 0
+    expected = {key: value for key, value in payload.items() if key != "profile"}
+    assert api.calls == [("POST", "/api/v1/writing/runs", {
+        "json": expected | {"workflow": "long_serial"},
+    })]
+
+
+@pytest.mark.parametrize(("operation", "scope"), [
+    ("create_lore", {"kind": "chapter", "chapterId": "chapter-1"}),
+    ("revise_lore", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ("create_outline", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ("revise_outline", {"kind": "outline_node"}),
+    ("revise_outline", {"kind": "outline_node", "outlineNodeId": ""}),
+    ("revise_outline", {"kind": "outline_node", "outlineNodeId": 3}),
+    ("revise_outline", {"kind": "chapter", "chapterId": "chapter-1"}),
+    ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-other"}),
+    ("manage_foreshadowing", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ("manage_foreshadowing", {"kind": "chapter_range", "chapterStartOrder": 1,
+                              "chapterEndOrder": 2}),
+])
+def test_structured_agent_start_rejects_invalid_scope_without_http(operation, scope):
+    api = RecordingApi()
+    status, frame = _invoke_direct(_start_payload(operation) | {"scope": scope}, api)
+    assert status == 2
+    assert frame["error"]["code"] == "INVALID_SCOPE"
+    assert not api.calls
 
 
 def test_answer_question_preserves_exact_business_body_and_instruction() -> None:
@@ -381,7 +425,7 @@ def test_agent_start_requires_selection_target_for_selection_operations(operatio
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("operation", "rewrite_scene"),
+        ("operation", "sync_lore"),
         ("target", {"type": "chapter", "id": "chapter-2"}),
         ("scope", {"kind": "chapter", "chapterId": "chapter-2"}),
         ("selectedAgents", ["写作"]),

@@ -37,6 +37,7 @@ from inkforge_contracts.execution import (
     ExecutionStepRequest,
     ExecutionStepResult,
     IntentContext,
+    IntentContextV2,
     IntentResolutionInput,
     IntentResolutionOutput,
     OutlineSelectionInput,
@@ -164,6 +165,14 @@ _AGENT_UPDATES_INDEX_RESOURCE_TYPES = frozenset(
 _INTENT_OPERATIONS = frozenset(
     {"answer_question", "plan_chapter", "write_chapter", "rewrite_scene", "review_chapter"}
 )
+_INTENT_V3_SCOPES = {
+    **dict.fromkeys(_INTENT_OPERATIONS, "chapter"),
+    "create_lore": "novel",
+    "revise_lore": "novel",
+    "create_outline": "novel",
+    "revise_outline": "novel",
+    "manage_foreshadowing": "chapter",
+}
 _INTENT_RESOLVER_PROFILE_TUPLES = {
     "system.intent_resolver.v1": (
         1,
@@ -181,8 +190,16 @@ _INTENT_RESOLVER_PROFILE_TUPLES = {
         "deployment.system.intent_resolver.v2",
         2,
     ),
+    "system.intent_resolver.v3": (
+        3,
+        "prompt.system.intent_resolver.v3",
+        3,
+        "a0f495e7f011eb8f8f0741a3b4e643bfb4d821a7cf62f29e422ac038ff9217e4",
+        "deployment.system.intent_resolver.v3",
+        3,
+    ),
 }
-_CURRENT_INTENT_RESOLVER_PROFILE = "system.intent_resolver.v2"
+_CURRENT_INTENT_RESOLVER_PROFILE = "system.intent_resolver.v3"
 _INTENT_OUTPUT_TUPLE = (
     "output.proposed_command.v1",
     1,
@@ -1157,7 +1174,7 @@ def _validate_intent_resolver_tuple(
     expected_profile = _INTENT_RESOLVER_PROFILE_TUPLES.get(profile.key)
     deployment = registry.deployment_profiles.get(profile.deployment_profile_key)
     if expected_profile is None or deployment is None:
-        raise ExecutionCapabilityError("意图解析冻结资产不是受支持的 v1/v2 组合")
+        raise ExecutionCapabilityError("意图解析冻结资产不是受支持的 v1/v2/v3 组合")
     actual_profile = (
         profile.version,
         profile.prompt_profile.key,
@@ -1200,7 +1217,7 @@ def _validate_intent_resolver_tuple(
         or canonical_execution_sha256(output_schema.json_schema_value()) != output_schema.sha256
         or not budget.supported
     ):
-        raise ExecutionCapabilityError("意图解析冻结资产不是受支持的 v1/v2 组合")
+        raise ExecutionCapabilityError("意图解析冻结资产不是受支持的 v1/v2/v3 组合")
 
 
 def _validate_prompt_profile_ref(
@@ -1329,7 +1346,7 @@ def _structured_output_name(value: str) -> str:
     return normalized[:128]
 
 
-def _validate_intent_input(request: ExecutionStepRequest) -> IntentContext:
+def _validate_intent_input(request: ExecutionStepRequest) -> IntentContext | IntentContextV2:
     try:
         IntentResolutionInput.model_validate(request.input)
         if request.novelId is None or len(request.evidenceBundle.items) != 1:
@@ -1343,13 +1360,22 @@ def _validate_intent_input(request: ExecutionStepRequest) -> IntentContext:
             or item.contentJson is None
         ):
             raise ValueError("意图 Evidence 必须是完整 JSON 上下文")
-        context = IntentContext.model_validate(item.contentJson)
+        # 新范围只随精确 v3 冻结引用生效，旧首次派发/恢复继续使用原 chapter-only 模型。
+        context: IntentContext | IntentContextV2
+        if request.modelProfile.profile == "system.intent_resolver.v3":
+            context = IntentContextV2.model_validate(item.contentJson)
+            allowed_scopes = _INTENT_V3_SCOPES
+        else:
+            context = IntentContext.model_validate(item.contentJson)
+            allowed_scopes = dict.fromkeys(_INTENT_OPERATIONS, "chapter")
         if (
             context.workflow != request.workflow
             or context.novelId != request.novelId
             or context.chapterId != item.resourceId
             or any(
-                option.operation not in _INTENT_OPERATIONS for option in context.availableOperations
+                option.operation not in allowed_scopes
+                or option.scopeKind != allowed_scopes[option.operation]
+                for option in context.availableOperations
             )
         ):
             raise ValueError("意图上下文身份或允许操作不一致")

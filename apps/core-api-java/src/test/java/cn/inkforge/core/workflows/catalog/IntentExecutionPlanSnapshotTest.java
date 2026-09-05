@@ -19,6 +19,8 @@ class IntentExecutionPlanSnapshotTest {
             "4ebf30f06de85e21db42275f10e88a9ce309ee037dfebfd0fc921bfc77796f63";
     private static final String RESOLVER_V2_PROMPT_SHA256 =
             "5f1b980a61c8c66f9e43b06824816cfbdff723eada0784b2e2f5d7c6796fb5bd";
+    private static final String RESOLVER_V3_PROMPT_SHA256 =
+            "a0f495e7f011eb8f8f0741a3b4e643bfb4d821a7cf62f29e422ac038ff9217e4";
     private static final List<String> OPERATIONS = List.of(
             "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter");
     private static final List<String> FIVE_OPERATIONS = List.of(
@@ -36,16 +38,16 @@ class IntentExecutionPlanSnapshotTest {
         assertThat(snapshot.executionManifestFingerprint()).isEqualTo(registry.manifestFingerprint());
         assertThat(snapshot.resolver().purpose()).isEqualTo("resolve_intent");
         assertThat(snapshot.resolver().lane()).isEqualTo("interactive");
-        assertThat(snapshot.resolver().modelProfile().profile()).isEqualTo("system.intent_resolver.v2");
-        assertThat(snapshot.resolver().modelProfile().version()).isEqualTo(2);
+        assertThat(snapshot.resolver().modelProfile().profile()).isEqualTo("system.intent_resolver.v3");
+        assertThat(snapshot.resolver().modelProfile().version()).isEqualTo(3);
         assertThat(snapshot.resolver().modelProfile().reasoningMode()).isEqualTo("disabled");
         assertThat(snapshot.resolver().modelProfile().deploymentProfileKey())
-                .isEqualTo("deployment.system.intent_resolver.v2");
+                .isEqualTo("deployment.system.intent_resolver.v3");
         assertThat(snapshot.resolver().modelProfile().promptProfile().name())
-                .isEqualTo("prompt.system.intent_resolver.v2");
-        assertThat(snapshot.resolver().modelProfile().promptProfile().version()).isEqualTo(2);
+                .isEqualTo("prompt.system.intent_resolver.v3");
+        assertThat(snapshot.resolver().modelProfile().promptProfile().version()).isEqualTo(3);
         assertThat(snapshot.resolver().modelProfile().promptProfile().sha256())
-                .isEqualTo(RESOLVER_V2_PROMPT_SHA256);
+                .isEqualTo(RESOLVER_V3_PROMPT_SHA256);
         assertThat(snapshot.resolver().outputSchema().name()).isEqualTo("output.proposed_command.v1");
         assertThat(snapshot.resolver().outputSchema().version()).isEqualTo(1);
         assertThat(snapshot.resolver().evidencePolicy()).isEqualTo("evidence.system.intent.v1");
@@ -228,7 +230,7 @@ class IntentExecutionPlanSnapshotTest {
     }
 
     @Test
-    void 历史恢复接受完整v1和v2而新冻结只使用v2() {
+    void 历史恢复接受完整v1和v2而新冻结只使用v3() {
         IntentExecutionPlanSnapshot current = snapshot();
         assertThat(IntentExecutionPlanSnapshot.fromStored(copy(current.stored())).stored())
                 .isEqualTo(current.stored());
@@ -244,11 +246,18 @@ class IntentExecutionPlanSnapshotTest {
                 .isEqualTo("prompt.system.intent_resolver.v1");
         assertThat(restored.resolver().stepBudget().budget()).isEqualTo(current.resolver().stepBudget().budget());
         assertThat(restored.runBudget()).isEqualTo(current.runBudget());
+        assertThat(restored.supportsNovelScopes()).isFalse();
+        assertThat(restored.scopeKindForOperation("long_serial.answer_question")).isEqualTo("chapter");
+        replaceResolverTuple(historical, 2, RESOLVER_V2_PROMPT_SHA256);
+        rehash(historical);
+        assertThat(copy(IntentExecutionPlanSnapshot.fromStored(historical).stored())).isEqualTo(historical);
+        assertThat(IntentExecutionPlanSnapshot.fromStored(historical).supportsNovelScopes()).isFalse();
+        assertThat(current.supportsNovelScopes()).isTrue();
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"modelProfile", "promptProfile", "deploymentProfile"})
-    void 解析器拒绝v1v2交叉混搭(String component) {
+    void 解析器拒绝v1v3交叉混搭(String component) {
         Map<String, Object> stored = copy(snapshot().stored());
         Map<String, Object> resolver = object(object(stored.get("plan")).get("resolver"));
         Map<String, Object> profile = object(resolver.get("modelProfile"));
@@ -282,9 +291,9 @@ class IntentExecutionPlanSnapshotTest {
     }
 
     @Test
-    void 解析器拒绝伪造完整v3以及v2Prompt挂载v1哈希() {
+    void 解析器拒绝伪造完整v4以及v3Prompt挂载v1哈希() {
         Map<String, Object> unsupported = copy(snapshot().stored());
-        replaceResolverTuple(unsupported, 3, snapshot().resolver().modelProfile().promptProfile().sha256());
+        replaceResolverTuple(unsupported, 4, snapshot().resolver().modelProfile().promptProfile().sha256());
         rehash(unsupported);
         assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(unsupported))
                 .isInstanceOf(IllegalStateException.class);
@@ -295,6 +304,31 @@ class IntentExecutionPlanSnapshotTest {
                 .put("sha256", RESOLVER_V1_PROMPT_SHA256);
         rehash(changedPrompt);
         assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(changedPrompt))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing"})
+    void 结构化自然子计划冻结唯一默认范围且旧解析器不能追认(String operation) {
+        String key = "long_serial." + operation;
+        ExecutionRegistry registry = ExecutionRegistryFixtures.structuredOperationEnabled(ExecutionRegistry.Environment.TEST, key);
+        IntentExecutionPlanSnapshot plan = IntentExecutionPlanSnapshot.freeze(registry, List.of("long_serial.answer_question", key));
+        String scope = "manage_foreshadowing".equals(operation) ? "chapter" : "novel";
+        assertThat(plan.scopeKindForOperation(key)).isEqualTo(scope);
+        assertThat(IntentExecutionPlanSnapshot.defaultScopeKind(key)).isEqualTo(scope);
+        assertThat(plan.requireOperationPlan(key).runBudget().maxModelCalls()).isEqualTo(4);
+        assertThat(plan.runBudget().maxModelCalls()).isEqualTo(7);
+        assertThat(IntentExecutionPlanSnapshot.fromStored(plan.stored()).stored()).isEqualTo(plan.stored());
+        assertThatThrownBy(() -> plan.scopeKindForOperation("long_serial.review_chapter"))
+                .isInstanceOf(IllegalStateException.class);
+        for (int version : List.of(1, 2)) {
+            Map<String, Object> historical = copy(plan.stored());
+            replaceResolverTuple(historical, version, version == 1 ? RESOLVER_V1_PROMPT_SHA256 : RESOLVER_V2_PROMPT_SHA256);
+            rehash(historical);
+            assertThatThrownBy(() -> IntentExecutionPlanSnapshot.fromStored(historical))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.defaultScopeKind("long_serial.rewrite_outline_selection"))
                 .isInstanceOf(IllegalStateException.class);
     }
 

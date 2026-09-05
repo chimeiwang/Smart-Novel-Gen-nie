@@ -6,10 +6,17 @@ import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.catalog.WorkflowIntentSelection;
 import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
 import cn.inkforge.core.workflows.domain.WorkflowIntentAnswer;
+import cn.inkforge.core.platform.text.TextLength;
+import cn.inkforge.core.platform.time.DatabaseTimestamp;
+import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import cn.inkforge.core.workflows.protocol.ExecutionProtocolDateTime;
+import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import tools.jackson.core.type.TypeReference;
@@ -50,7 +57,102 @@ public final class JooqWorkflowExecutionContextReader implements WorkflowExecuti
         requireEvidenceView(value, selection.intentEvidenceBundleId());
         requireResolver(transaction, identity.runId(), selection.resolverStepId(), selection.resolverResultHash(),
                 selection.intentEvidenceBundleId());
+        if (WorkflowIntentSelection.SCHEMA_V2.equals(selection.schema())) {
+            requireSelectionEvidence(transaction, context);
+        }
         return context;
+    }
+
+    /** 新范围只能来自产生该选择的原始授权快照；旧 v1 的历史读取契约不在此扩大。 */
+    private void requireSelectionEvidence(DSLContext transaction, WorkflowExecutionContext context) {
+        WorkflowIntentSelection selection = context.selection();
+        var identity = context.initialIdentity();
+        List<Record> values = transaction.fetch("""
+                SELECT item.id, item.ordinal, item."resourceType", item."resourceId", item.exists,
+                       item."resourceRevision", item."resourceUpdatedAt", item."contentType", item."contentText",
+                       item."contentJson", item."contentSha256", item."byteCount", item."rangeJson", item."metadataJson",
+                       bundle.version, bundle."policyVersion", bundle."manifestJson", bundle."manifestSha256", bundle."totalBytes",
+                       run."novelId", resolver."modelProfile", resolver."modelProfileVersion"
+                FROM public."WorkflowEvidenceBundle" AS bundle
+                JOIN public."WorkflowRun" AS run ON run.id = bundle."runId"
+                JOIN public."WorkflowStep" AS resolver ON resolver.id = ? AND resolver."runId" = run.id
+                JOIN public."WorkflowEvidenceItem" AS item ON item."bundleId" = bundle.id
+                WHERE bundle.id = ? AND bundle."runId" = ? ORDER BY item.ordinal LIMIT 2
+                """, selection.resolverStepId(), selection.intentEvidenceBundleId(), identity.runId());
+        if (values.size() != 1) throw invalid("自然选择必须绑定唯一完整的 intent_context");
+        Record item = values.getFirst();
+        var resolver = context.initialIntentPlan().resolver();
+        if (!resolver.modelProfile().profile().equals(item.get("modelProfile", String.class))
+                || !Integer.toString(resolver.modelProfile().version()).equals(item.get("modelProfileVersion", String.class))
+                || !resolver.evidencePolicy().equals(item.get("policyVersion", String.class))
+                || !Integer.valueOf(1).equals(item.get("ordinal", Integer.class))
+                || !"intent_context".equals(item.get("resourceType", String.class))
+                || !identity.chapterId().equals(item.get("resourceId", String.class))
+                || !Boolean.TRUE.equals(item.get("exists", Boolean.class))
+                || !"json".equals(item.get("contentType", String.class))
+                || item.get("contentText") != null || item.get("rangeJson") != null) {
+            throw invalid("自然选择的解析器或完整来源身份不一致");
+        }
+        Map<String, Object> content = read(item.get("contentJson", String.class));
+        long byteCount = ExecutionCanonicalJson.bytes(content).length;
+        String contentHash = ExecutionCanonicalJson.sha256(content);
+        if (!contentHash.equals(item.get("contentSha256", String.class))
+                || !Long.valueOf(byteCount).equals(item.get("byteCount", Long.class))
+                || !Long.valueOf(byteCount).equals(item.get("totalBytes", Long.class))) {
+            throw invalid("自然选择的完整授权内容哈希或长度不一致");
+        }
+        Map<String, Object> manifestItem = new LinkedHashMap<>();
+        manifestItem.put("itemId", item.get("id", String.class));
+        manifestItem.put("ordinal", 1);
+        manifestItem.put("resourceType", "intent_context");
+        manifestItem.put("resourceId", identity.chapterId());
+        manifestItem.put("exists", true);
+        Integer revision = item.get("resourceRevision", Integer.class);
+        if (revision != null) manifestItem.put("resourceRevision", revision);
+        LocalDateTime updatedAt = item.get("resourceUpdatedAt", LocalDateTime.class);
+        if (updatedAt != null) manifestItem.put("resourceUpdatedAt", ExecutionProtocolDateTime.format(DatabaseTimestamp.api(updatedAt)));
+        manifestItem.put("contentType", "json");
+        manifestItem.put("contentSha256", contentHash);
+        manifestItem.put("byteCount", byteCount);
+        manifestItem.put("metadata", read(item.get("metadataJson", String.class)));
+        Integer version = item.get("version", Integer.class);
+        if (version == null || version < 1) throw invalid("自然选择的授权来源版本无效");
+        Map<String, Object> manifest = Map.of("bundleId", selection.intentEvidenceBundleId(), "bundleVersion", version,
+                "itemCount", 1, "items", List.of(manifestItem));
+        String manifestHash = ExecutionCanonicalJson.sha256(manifest);
+        if (!manifestHash.equals(item.get("manifestSha256", String.class))
+                || !manifestHash.equals(ExecutionCanonicalJson.sha256(read(item.get("manifestJson", String.class))))) {
+            throw invalid("自然选择的授权清单与实际来源不一致");
+        }
+        if (!content.keySet().equals(Set.of("workflow", "novelId", "chapterId", "chapterTitle", "availableOperations"))
+                || !identity.workflow().equals(content.get("workflow"))
+                || item.get("novelId", String.class) == null
+                || !item.get("novelId", String.class).equals(content.get("novelId"))
+                || !identity.chapterId().equals(content.get("chapterId"))
+                || !(content.get("chapterTitle") instanceof String)
+                || !(content.get("availableOperations") instanceof List<?> available)
+                || available.isEmpty() || available.size() > 10) {
+            throw invalid("自然选择的冻结上下文身份或授权集合无效");
+        }
+        Set<String> keys = new HashSet<>();
+        for (Object raw : available) {
+            if (!(raw instanceof Map<?, ?> option)
+                    || !option.keySet().equals(Set.of("operation", "description", "targetType", "scopeKind"))
+                    || !(option.get("operation") instanceof String operation)
+                    || !(option.get("description") instanceof String description) || TextLength.count(description) == 0
+                    || !"chapter".equals(option.get("targetType"))) {
+                throw invalid("自然选择的冻结授权项字段无效");
+            }
+            String key = identity.workflow() + "." + operation;
+            if (!keys.add(key) || !context.initialIntentPlan().scopeKindForOperation(key).equals(option.get("scopeKind"))) {
+                throw invalid("自然选择的冻结授权项重复或范围不一致");
+            }
+        }
+        Set<String> expected = context.initialIntentPlan().operationPlans().stream().map(plan -> plan.operation().key())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (!keys.equals(expected) || !keys.contains(selection.operationKey())) {
+            throw invalid("自然选择必须属于完整冻结计划声明的授权集合");
+        }
     }
 
     @Override

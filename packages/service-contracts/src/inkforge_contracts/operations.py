@@ -56,4 +56,4 @@ class PublicOperationDefinition(BaseModel):
     mutating: bool
     principalAgent: CoreAgentId
     reviewers: tuple[CoreAgentId, ...]
-    artifactKind: Literal["beat_plan", "chapter_draft", "outline_draft"] | None
+    artifactKind: Literal["beat_plan", "chapter_draft", "outline_draft", "agent_updates"] | None

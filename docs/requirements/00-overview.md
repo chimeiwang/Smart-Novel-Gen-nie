@@ -27,12 +27,13 @@
 | --- | ---: | --- |
 | Web 路由页面 | 9 | Next.js `page.tsx`；另有 1 个根布局 |
 | Core 公共 API | 119 个路径、152 个操作 | 运行时 OpenAPI；含受配置门禁的 2 个手机号认证操作、有界审核摘要查询与耐久澄清回答 |
-| Core 内部操作 | 33 | 不进入公共 OpenAPI 的 `/internal/v1/**`；新增 3 个耐久 Workflow 回调 |
+| Core 内部操作 | 34 | 不进入公共 OpenAPI 的 `/internal/v1/**`；含 3 个耐久 Workflow 回调和受审计 V2 计费对账 |
 | CLI 命令 | 125 | CLI 注册表中的具体命令 |
 | 长篇核心 Agent | 5 | 设定、剧情、写作、校验、编辑 |
 | 长篇 CreativeOperation | 10 | 不含只为历史解析保留的 `sync_lore` |
 | 中短篇显式 Agent 操作 | 4 | 蓝图、正文、选区、全文检查 |
 | 章节影视化 Agent 工作流 | 2 | 拆镜方案、逐镜提示词 |
+| 仓内 Durable Agent V2 操作 | 12/21 | 2026-09-05 结构化五项接线后；自然入口可选其中 10 项，非生产开放数 |
 | 开发结构契约 | 85 张表、22 个枚举 | 当前 `schema-contract.json` |
 
 开发结构契约指纹为
@@ -378,6 +379,15 @@ Core 和 Agent 草案链支持伏笔列表、创建、更新和删除。当前 W
 
 ### 8.8 长篇 AI 会话与 Agent
 
+当前工作分支已启用 12 个 V2 操作：长篇十类 CreativeOperation 加两类选区改写。新建/修改设定、创建/修改大纲、
+管理伏笔五项已接通显式/自然启动、按需来源补齐、专用复审、最多一次完整自动返工及作者采用；Catalog 另九项
+尚未迁移。五项隔离公共 HTTP 接线及本批仓内门禁通过，实际 Python Agent/供应商和生产仍须分别验收，不能将
+仓内 12/21 解释为整体重构或上线完成。当前进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
+
+自然新请求使用 resolver v3，冻结十项无选区操作及默认 scope：设定两项/大纲两项为 novel，伏笔和原章节五项
+为当前 chapter；节点等不匹配范围须澄清或走显式入口，不让模型猜 ID。历史 resolver v1/v2、selection v1
+和原三项/五项授权保持不变。公共请求始终保留 chapter 锚点，不新增聚合 target。
+
 #### 五个核心 Agent
 
 | Agent | 职责 |
@@ -412,10 +422,10 @@ Core 和 Agent 草案链支持伏笔列表、创建、更新和删除。当前 W
 - 启动、查询、恢复和取消写作任务；
 - SSE 流式展示 Operation 分类、Agent 状态、工具摘要、文本块、草案和终态；
 - 按 `Last-Event-ID` 短期重放，断流后从 PostgreSQL 任务和草案状态恢复；
-- 任务先写入 PostgreSQL 持久命令，再投递 Redis；短暂队列异常不丢已受理命令；
+- V1 任务先写入 PostgreSQL 持久命令再投递 Redis；V2 以 WorkflowRun/Step 和冻结 Evidence 接续执行；
 - 同一 `clientRequestId` 返回同一命令，不重复创建任务；
-- 用户可以用 `@设定`、`@剧情`、`@写作`、`@校验`、`@编辑` 指定默认主责方向；
-- 无法稳定识别的请求回退为普通问答；
+- V1 兼容入口可用 `@设定`、`@剧情`、`@写作`、`@校验`、`@编辑` 指定默认主责方向；
+- V1 无法稳定识别时回退问答；V2 自然入口必须澄清或明确失败，不默认为问答；
 - 正文和大纲支持来源绑定的选区改写，请求不把 `selectedText` 当作权威来源。
 
 当前限制：
@@ -732,6 +742,13 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 `long.task.get/watch` 的 reviewReport 完整读取，显式调用无会话也可用；两类改写仍须确认候选后采用。
 自然入口新增审阅和场景改写，大纲选区必须显式冻结来源。仓内验证进度见
 `docs/specs/2026-09-05-durable-review-and-rewrites.md`；本阶段未更新本机固定包或部署服务器。
+
+同日结构化接线又使普通 Java/Python 对照 CLI 的 `long.agent.start` 接受 create_lore、revise_lore、
+create_outline、revise_outline、manage_foreshadowing，并补回此前遗漏的 rewrite_scene 显式白名单；新增的是
+六个可选 operation 值，不是命令或参数。设定两项/创建大纲显式 scope 为 novel，修改大纲另许 outline_node，
+伏笔另许当前 chapter；场景改写仍为当前 chapter。结构化候选保留 selectedUpdateRefs 部分采用，自动返工不
+替代作者确认。公共 API 仍为 152、普通 CLI 为 125、Operator 为 45 命令/三操作；本批未更新固定 JAR、
+活动 Skills 或服务器。范围、自然十项和后续 Skills 更新要求见结构化资料规格与 Operator Skill 更新契约。
 
 完整 125 命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
 `tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。

@@ -49,6 +49,11 @@ public final class WorkflowExecutionContext {
             throw invalid("intent_selection 与 Run 或当前章身份不一致");
         }
         ExecutionPlanSnapshot business = intent.requireOperationPlan(selection.operationKey(), selection.operationPlanSha256());
+        String expectedSchema = intent.supportsNovelScopes() ? WorkflowIntentSelection.SCHEMA_V2 : WorkflowIntentSelection.SCHEMA;
+        if (!expectedSchema.equals(selection.schema())
+                || !intent.scopeKindForOperation(selection.operationKey()).equals(selection.scopeKind())) {
+            throw invalid("intent_selection 版本或范围不匹配冻结解析器授权");
+        }
         return new WorkflowExecutionContext(identity, intent, business, selection);
     }
 
@@ -58,6 +63,13 @@ public final class WorkflowExecutionContext {
     public ExecutionPlanSnapshot businessPlan() { return businessPlan; }
     public String effectiveOperation() { return businessPlan == null ? null : businessPlan.operation().operation(); }
     public boolean conservativeMutating() { return businessPlan == null || businessPlan.operation().mutating(); }
+
+    /** 只用于已选择的自然任务，生成、复审和恢复共用相同的冻结范围投影。 */
+    public Map<String, Object> selectedScope() {
+        if (selection == null || initialIntentPlan == null) throw invalid("自然 Run 尚未选择有效范围");
+        return "novel".equals(selection.scopeKind()) ? Map.of("kind", "novel")
+                : Map.of("kind", "chapter", "chapterId", identity.chapterId());
+    }
 
     public Map<String, Object> modelPolicyStored() {
         return initialIntentPlan == null ? requireBusinessPlan().stored() : initialIntentPlan.stored();

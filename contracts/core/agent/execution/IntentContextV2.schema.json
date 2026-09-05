@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "IntentAvailableOperationV2": {
+      "additionalProperties": false,
+      "description": "新版解析器的冻结默认范围；操作与范围配对仍由 Core/Agent 校验。",
+      "properties": {
+        "description": {
+          "minLength": 1,
+          "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+          "title": "Description",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "scopeKind": {
+          "enum": [
+            "chapter",
+            "novel"
+          ],
+          "title": "Scopekind",
+          "type": "string"
+        },
+        "targetType": {
+          "const": "chapter",
+          "title": "Targettype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "description",
+        "targetType",
+        "scopeKind"
+      ],
+      "title": "IntentAvailableOperationV2",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/IntentContextV2/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "十项自然入口的最小上下文；独立版本不扩大旧解析器的五项章节契约。",
+  "properties": {
+    "availableOperations": {
+      "items": {
+        "$ref": "#/$defs/IntentAvailableOperationV2"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Availableoperations",
+      "type": "array"
+    },
+    "chapterId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Chapterid",
+      "type": "string"
+    },
+    "chapterTitle": {
+      "title": "Chaptertitle",
+      "type": "string"
+    },
+    "novelId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Novelid",
+      "type": "string"
+    },
+    "workflow": {
+      "const": "long_serial",
+      "title": "Workflow",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workflow",
+    "novelId",
+    "chapterId",
+    "chapterTitle",
+    "availableOperations"
+  ],
+  "title": "IntentContextV2",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.IntentContextV2"
+}

@@ -3,8 +3,10 @@ from __future__ import annotations
 import pytest
 from inkforge_contracts import (
     IntentAvailableOperation,
+    IntentAvailableOperationV2,
     IntentClarificationAnswer,
     IntentContext,
+    IntentContextV2,
     IntentResolutionInput,
     IntentResolutionOutput,
     ProposedCommand,
@@ -111,6 +113,45 @@ def test_intent_context_allows_five_frozen_operations() -> None:
         )
         == 5
     )
+
+
+def test_v2_intent_context_allows_ten_frozen_operations_without_changing_v1():
+    options = [
+        available_operation(f"operation_{index}")
+        | {"scopeKind": "novel" if index > 4 else "chapter"}
+        for index in range(10)
+    ]
+    value = context() | {"availableOperations": options}
+    assert IntentContextV2.model_validate(value).model_dump() == value
+    options_schema = IntentContextV2.model_json_schema()["properties"]["availableOperations"]
+    assert options_schema["maxItems"] == 10
+    assert IntentContext.model_json_schema()["properties"]["availableOperations"]["maxItems"] == 5
+    with pytest.raises(ValidationError):
+        IntentContext.model_validate(value)
+    with pytest.raises(ValidationError):
+        IntentContext.model_validate(context() | {"availableOperations": [options[-1]]})
+    assert IntentAvailableOperationV2.model_validate(options[-1]).scopeKind == "novel"
+
+
+@pytest.mark.parametrize("changed", [
+    {"availableOperations": []},
+    {"availableOperations": [available_operation()] * 2},
+    {"availableOperations": [available_operation(f"operation_{index}") for index in range(11)]},
+    {"content": "额外正文"}, {"workflow": "short_medium"}, {"chapterTitle": None},
+])
+def test_v2_intent_context_rejects_invalid_frozen_shape(changed):
+    with pytest.raises(ValidationError):
+        IntentContextV2.model_validate(context() | changed)
+
+
+@pytest.mark.parametrize("changed", [
+    {"targetType": "novel"}, {"targetId": "novel-1"}, {"scopeKind": "outline_node"},
+    {"scopeKind": "chapter_range"}, {"scopeId": "novel-1"}, {"arguments": {}},
+    {"description": " \ufeff"}, {"operation": "INVALID"},
+])
+def test_v2_intent_available_operation_keeps_public_chapter_anchor(changed):
+    with pytest.raises(ValidationError):
+        IntentAvailableOperationV2.model_validate(available_operation() | changed)
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,7 @@
     {
       "purpose": "resolve_intent",
       "supported": true,
-      "modelProfile": "system.intent_resolver.v2",
+      "modelProfile": "system.intent_resolver.v3",
       "outputSchema": "output.proposed_command.v1",
       "evidencePolicy": "evidence.system.intent.v1",
       "lane": "interactive",

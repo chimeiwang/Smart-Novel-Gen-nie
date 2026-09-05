@@ -20,10 +20,18 @@ final class LongTaskCommands {
             "plan_chapter",
             "write_chapter",
             "review_chapter",
+            "rewrite_scene",
+            "create_lore",
+            "revise_lore",
+            "create_outline",
+            "revise_outline",
+            "manage_foreshadowing",
             "rewrite_chapter_selection",
             "rewrite_outline_selection");
     private static final Set<String> SELECTION_OPERATIONS =
             Set.of("rewrite_chapter_selection", "rewrite_outline_selection");
+    private static final Set<String> STRUCTURED_OPERATIONS = Set.of(
+            "create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing");
     private static final Set<String> START_FIELDS = Set.of(
             "profile",
             "clientRequestId",
@@ -79,7 +87,8 @@ final class LongTaskCommands {
             throw new CliInputException(
                     "INVALID_OPERATION",
                     "operation 只能是 answer_question、plan_chapter、write_chapter、"
-                            + "review_chapter、rewrite_chapter_selection 或 rewrite_outline_selection");
+                            + "review_chapter、rewrite_scene、rewrite_chapter_selection、rewrite_outline_selection、"
+                            + "create_lore、revise_lore、create_outline、revise_outline 或 manage_foreshadowing");
         }
         ObjectNode target = requireObject(payload, "target", "INVALID_TARGET");
         if (!textEquals(target, "type", "chapter")
@@ -283,6 +292,16 @@ final class LongTaskCommands {
             String operation,
             String chapterId,
             ObjectNode selection) {
+        if (STRUCTURED_OPERATIONS.contains(operation)) {
+            if (textEquals(scope, "kind", "novel")) return;
+            if (operation.equals("revise_outline") && textEquals(scope, "kind", "outline_node")) {
+                JsonNode nodeId = scope.get("outlineNodeId");
+                if (nodeId != null && nodeId.isTextual() && !nodeId.textValue().isEmpty()) return;
+            }
+            if (operation.equals("manage_foreshadowing") && textEquals(scope, "kind", "chapter")
+                    && textEquals(scope, "chapterId", chapterId)) return;
+            throw new CliInputException("INVALID_SCOPE", "scope 不符合当前结构化操作的范围要求");
+        }
         if (!operation.equals("rewrite_outline_selection")) {
             if (!textEquals(scope, "kind", "chapter")
                     || !textEquals(scope, "chapterId", chapterId)) {

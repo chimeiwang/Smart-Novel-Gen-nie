@@ -26,8 +26,13 @@ class ExecutionRegistryTest {
         assertThat(registry.enabledOperationKeys("long_serial", false))
                 .containsExactly(
                         "long_serial.answer_question",
+                        "long_serial.create_lore",
+                        "long_serial.create_outline",
+                        "long_serial.manage_foreshadowing",
                         "long_serial.plan_chapter",
                         "long_serial.review_chapter",
+                        "long_serial.revise_lore",
+                        "long_serial.revise_outline",
                         "long_serial.rewrite_chapter_selection",
                         "long_serial.rewrite_outline_selection",
                         "long_serial.rewrite_scene",
@@ -92,9 +97,10 @@ class ExecutionRegistryTest {
 
     @Test
     void 未启用操作和系统用途不能借目录存在绕过门禁() {
-        ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        ExecutionRegistry registry = ExecutionRegistryFixtures.selectionOperationDownlined(
+                ExecutionRegistry.Environment.TEST);
 
-        assertThatThrownBy(() -> registry.resolve("long_serial.create_lore", false))
+        assertThatThrownBy(() -> registry.resolve("long_serial.rewrite_chapter_selection", false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
         assertThatThrownBy(() -> registry.resolve(

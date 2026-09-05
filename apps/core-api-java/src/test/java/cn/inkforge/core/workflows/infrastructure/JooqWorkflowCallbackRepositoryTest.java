@@ -260,13 +260,126 @@ class JooqWorkflowCallbackRepositoryTest {
         assertThat(eventTypes(cancelled.request().getRunId())).endsWith("step_finished", "cancelled");
     }
 
+    @Test
+    void 五项结构化局部问题只自动完整返工一次并保留旧候选与原始指令() {
+        for (String name : List.of("create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing")) {
+            ExpansionFlow flow = expansionFlow("structured-auto-" + name, name);
+            Map<String, Object> firstUpdates = Map.of("characters", List.of(Map.of("action", "create", "name", "完整候选人物", "background", "首轮完整资料😀\n")));
+            flow.callbacks().result(structuredResult(flow.request(), "首轮完整说明", firstUpdates));
+            ExecutionStepRequest review = nextExpansionStep(flow);
+            String artifact = review.getArtifactId();
+            String originalRevision = database.dsl().fetchOne("SELECT \"payloadJson\" FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ? AND revision = 1", artifact).get(0, String.class);
+            ExecutionStepResult findings = planReviewResult(review, "agent_updates.local", 0.8);
+            assertThat(flow.callbacks().result(findings).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(flow.callbacks().result(findings).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            ExecutionStepRequest revised = nextExpansionStep(flow);
+            assertThat(revised.getPurpose()).isEqualTo("generation");
+            assertThat(revised.getArtifactId()).isEqualTo(artifact);
+            assertThat(revised.getArtifactRevision()).isEqualTo(1);
+            assertThat(revised.getEvidenceBundle()).isEqualTo(flow.request().getEvidenceBundle());
+            assertThat(revised.getModelProfile()).isEqualTo(flow.request().getModelProfile());
+            assertThat(revised.getOutputSchema()).isEqualTo(flow.request().getOutputSchema());
+            assertThat(revised.getBudget()).isEqualTo(flow.request().getBudget());
+            assertThat(revised.getInput()).containsOnlyKeys("userInstruction", "originalUserInstruction", "previousCandidate")
+                    .containsEntry("originalUserInstruction", flow.request().getInput().get("userInstruction"))
+                    .containsEntry("previousCandidate", Map.of("artifactId", artifact, "artifactRevision", 1,
+                            "summary", "首轮完整说明", "updates", firstUpdates));
+            Map<String, Object> secondUpdates = Map.of("characters", List.of(Map.of("action", "create", "name", "完整候选人物", "background", "二轮完整资料😀\n")));
+            ExecutionStepResult generated = structuredResult(revised, "二轮完整说明", secondUpdates);
+            assertThat(flow.callbacks().result(generated).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(flow.callbacks().result(generated).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            ExecutionStepRequest secondReview = nextExpansionStep(flow);
+            assertThat(secondReview.getArtifactRevision()).isEqualTo(2);
+            assertThat(secondReview.getEvidenceBundle().getId()).isEqualTo(flow.request().getEvidenceBundle().getId());
+            assertThat(json.valueToTree(secondReview.getInput().get("task")).path("userInstruction").asText())
+                    .isEqualTo(revised.getInput().get("userInstruction"));
+            assertThat(json.valueToTree(secondReview.getInput().get("task")).path("originalUserInstruction").asText())
+                    .isEqualTo(flow.request().getInput().get("userInstruction"));
+            flow.callbacks().result(planReviewResult(secondReview, "agent_updates.local", 0.99));
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", review.getRunId())).isEqualTo(2);
+            assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", artifact)).isEqualTo(2);
+            assertThat(database.dsl().fetchOne("SELECT \"payloadJson\" FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ? AND revision = 1", artifact).get(0, String.class)).isEqualTo(originalRevision);
+            assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", review.getRunId()).get(0, String.class)).isEqualTo("waiting_user");
+            assertThat(count("SELECT count(*) FROM public.\"Character\" WHERE \"novelId\" = ?", flow.fixture().novelId())).isEqualTo(3);
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", review.getRunId())).isEqualTo(4);
+            var reviews = cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.repository(database, new CuidV1Generator(CLOCK), CLOCK, json, registry);
+            assertThat(reviews.getDetail(flow.fixture().userId(), artifact, 1, null).response().getSummary()).isEqualTo("首轮完整说明");
+            reviews.decide(flow.fixture().userId(), artifact, new cn.inkforge.contracts.api.ReviewArtifactDecisionRequest(
+                    "structured-auto-approve-" + name, cn.inkforge.contracts.api.ReviewArtifactDecisionRequest.DecisionEnum.APPROVE, 2)
+                    .engineVersion(cn.inkforge.contracts.api.ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2));
+            assertThat(database.dsl().fetchOne("SELECT background FROM public.\"Character\" WHERE \"novelId\" = ? AND name = '完整候选人物'", flow.fixture().novelId()).get(0, String.class)).isEqualTo("二轮完整资料😀\n");
+        }
+    }
+
+    @Test
+    void 结构化问题不明确或复审不可用时保留候选交作者() {
+        for (String mode : List.of("structural", "uncertain", "other-dimension", "unavailable", "cannot-assess")) {
+            ExpansionFlow flow = expansionFlow("structured-author-" + mode, "revise_lore");
+            flow.callbacks().result(structuredResult(flow.request(), "完整候选", Map.of("glossaries", List.of(Map.of("action", "create", "term", "独立术语", "definition", "完整解释")))));
+            ExecutionStepRequest review = nextExpansionStep(flow);
+            if ("unavailable".equals(mode)) flow.callbacks().failure(reviewFailure(review));
+            else if ("cannot-assess".equals(mode)) {
+                var result = reviewResult(review);
+                result.getEvaluation().setContentVerdict(EvidenceEvaluation.ContentVerdictEnum.CANNOT_ASSESS);
+                result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+                flow.callbacks().result(result);
+            } else {
+                flow.callbacks().result(planReviewResult(review, "structural".equals(mode) ? "agent_updates.structural"
+                        : "other-dimension".equals(mode) ? "editorial.preference" : "agent_updates.local", "uncertain".equals(mode) ? 0.5 : 0.95));
+            }
+            assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", review.getRunId()).get(0, String.class)).isEqualTo("waiting_user");
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", review.getRunId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", review.getArtifactId())).isEqualTo(1);
+            assertThat(eventTypes(review.getRunId())).endsWith("review_completed", "awaiting_user");
+        }
+    }
+
+    @Test
+    void 已消耗来源补齐额度时保留候选而不扩大四次模型预算() {
+        ExpansionFlow flow = expansionFlow("structured-expanded-no-revision", "revise_outline");
+        flow.callbacks().result(expansionResult(flow.request(), flow.characterIds().getFirst()));
+        ExecutionStepRequest generated = nextExpansionStep(flow);
+        flow.callbacks().result(structuredResult(generated, "依据原文修订", Map.of("characters", List.of(Map.of("action", "update",
+                "id", flow.characterIds().getFirst(), "background", "完整更新")))));
+        ExecutionStepRequest review = nextExpansionStep(flow);
+        flow.callbacks().result(planReviewResult(review, "agent_updates.local", 0.99));
+        assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", review.getRunId()).get(0, String.class)).isEqualTo("waiting_user");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", review.getRunId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' AND output::jsonb ->> 'artifactId' = ?", review.getRunId(), review.getArtifactId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", review.getArtifactId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", review.getRunId())).isEqualTo(3);
+    }
+
+    @Test
+    void 历史结构化复审策略升级后仍交作者而不新增自动返工() {
+        ExpansionFlow flow = expansionFlow("structured-retained-policy", "revise_lore", true);
+        flow.callbacks().result(structuredResult(flow.request(), "历史策略完整候选", Map.of("characters",
+                List.of(Map.of("action", "create", "name", "历史候选人物", "background", "保留历史审核授权")))));
+        ExecutionStepRequest review = nextExpansionStep(flow);
+        flow.callbacks().result(planReviewResult(review, "agent_updates.local", 0.99));
+        assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", review.getRunId()).get(0, String.class)).isEqualTo("waiting_user");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", review.getRunId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", review.getRunId())).isEqualTo(2);
+    }
+
+    private static ExecutionStepResult structuredResult(ExecutionStepRequest request, String summary, Map<String, Object> updates) {
+        var result = outputResult(request, "结构化完整候选").output(Map.of("summary", summary, "updates", updates,
+                "updatesSha256", ExecutionCanonicalJson.sha256(updates)));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
     private static ExpansionFlow expansionFlow(String prefix, String name) {
+        return expansionFlow(prefix, name, false);
+    }
+
+    private static ExpansionFlow expansionFlow(String prefix, String name, boolean legacyReviewPolicy) {
         Fixture f = fixture(prefix);
         List<String> characters = List.of(prefix + "-person-1", prefix + "-person-2", prefix + "-person-3");
         for (String id : characters) database.dsl().execute("INSERT INTO public.\"Character\" (id,\"novelId\",name,background,\"updatedAt\") VALUES (?, ?, ?, '完整旧人物原文', ?)", id, f.novelId(), id, NOW);
-        var enabled = ExecutionRegistryFixtures.structuredOperationEnabled(ExecutionRegistry.Environment.TEST, "long_serial." + name);
+        var enabled = ExecutionRegistryFixtures.structuredOperationEnabled(ExecutionRegistry.Environment.TEST, "long_serial." + name, legacyReviewPolicy);
         var resolved = enabled.resolve("long_serial." + name, false);
-        assertThat(registry.requireKnownOperation("long_serial." + name).v2Enabled()).isFalse();
+        assertThat(registry.requireKnownOperation("long_serial." + name).v2Enabled()).isTrue();
         assertThat(resolved.outputSchema().key()).isEqualTo("output.agent_updates_step.v1");
         var reader = new cn.inkforge.core.reviews.infrastructure.JooqAgentUpdatesEvidenceReader(json);
         var sources = database.transactionResult(tx -> List.of(reader.captureIndex(tx, f.novelId())));

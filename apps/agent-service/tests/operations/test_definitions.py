@@ -188,6 +188,29 @@ def test_all_creative_operations_have_exact_execution_contracts() -> None:
         assert definition.artifactKeyPolicy == expected["key_policy"], kind
 
 
+@pytest.mark.parametrize(("operation", "internal_target", "scopes"), [
+    ("create_lore", "lore", ("novel",)),
+    ("revise_lore", "lore", ("novel",)),
+    ("create_outline", "outline", ("novel",)),
+    ("revise_outline", "outline", ("novel", "outline_node")),
+    ("manage_foreshadowing", "foreshadowing", ("novel", "chapter")),
+])
+def test_structured_public_projection_does_not_change_legacy_operation(
+    operation, internal_target, scopes,
+):
+    definition = OPERATION_DEFINITIONS[operation]
+    public = definition.to_public_definition()
+    assert public == PUBLIC_LONG_SERIAL_OPERATIONS[operation]
+    assert public.targetKind == "chapter"
+    assert public.allowedScopeKinds == scopes
+    assert public.mutating is True
+    assert public.artifactKind == "agent_updates"
+    assert definition.targetType == internal_target
+    assert definition.allowedScopeKinds == ()
+    assert definition.mutating is False
+    assert definition.textArtifactKind is None
+
+
 @pytest.mark.parametrize("operation", tuple(PUBLIC_LONG_SERIAL_OPERATIONS))
 def test_public_long_serial_definition_matches_shared_contract(operation: str) -> None:
     expected = PUBLIC_LONG_SERIAL_OPERATIONS[operation]

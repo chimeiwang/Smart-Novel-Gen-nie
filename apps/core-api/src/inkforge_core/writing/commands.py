@@ -319,6 +319,7 @@ class WritingRunCommandRepository:
                     ),
                 )
                 await _require_long_serial_profile(session, request.novelId)
+                await _require_long_serial_scope_binding(session, request)
                 if request.writingSessionId is not None:
                     await _require_session_binding(
                         session,
@@ -1287,6 +1288,15 @@ def _long_serial_operation_definition(
                 isinstance(request.scope, OutlineNodeScope)
                 and request.scope.outlineNodeId == selection.resourceId
             )
+    elif request.operation in {
+        "create_lore", "revise_lore", "create_outline", "revise_outline",
+        "manage_foreshadowing",
+    }:
+        identity_supported = (
+            isinstance(request.scope, (NovelScope, OutlineNodeScope))
+            or isinstance(request.scope, ChapterScope)
+            and request.scope.chapterId == request.chapterId
+        )
     else:
         identity_supported = (
             isinstance(request.scope, ChapterScope)
@@ -1304,6 +1314,25 @@ def _long_serial_operation_definition(
             message="当前长篇操作、目标或范围尚不受支持",
         )
     return definition
+
+
+async def _require_long_serial_scope_binding(
+    session: AsyncSession, request: LongSerialStartWritingRunRequest,
+) -> None:
+    # 公共 target 始终锚定当前章；节点范围另在小说/章节锁内核对归属。
+    if request.operation != "revise_outline" or not isinstance(request.scope, OutlineNodeScope):
+        return
+    owner = await session.scalar(
+        select(OutlineNode.novelId)
+        .where(OutlineNode.id == request.scope.outlineNodeId)
+        .with_for_update()
+    )
+    if owner != request.novelId:
+        raise ApiError(
+            status_code=409,
+            code="LONG_SCOPE_NOT_SUPPORTED",
+            message="当前长篇操作、目标或范围尚不受支持",
+        )
 
 
 def _selection_preview(text: str, limit: int = 48) -> str:

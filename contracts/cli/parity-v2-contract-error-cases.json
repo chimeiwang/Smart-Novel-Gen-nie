@@ -121,7 +121,7 @@
         "clientRequestId": "agent-answer-invalid-0008",
         "novelId": "n1",
         "chapterId": "c1",
-        "operation": "rewrite_scene",
+        "operation": "unsupported_operation",
         "target": {"type": "chapter", "id": "c1"},
         "scope": {"kind": "chapter", "chapterId": "c1"},
         "writingSessionId": "s1",

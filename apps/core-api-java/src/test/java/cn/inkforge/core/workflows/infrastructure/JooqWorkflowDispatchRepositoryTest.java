@@ -17,6 +17,7 @@ import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistryFixtures;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
@@ -238,6 +239,85 @@ class JooqWorkflowDispatchRepositoryTest {
                 .pendingClarification(database.dsl(), fixture.runId(), "waiting_user")).isNull();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing"})
+    void 新选择Reader从真实完整授权来源恢复结构化默认范围(String operation) {
+        String key = "long_serial." + operation;
+        ExecutionRegistry structured = ExecutionRegistryFixtures.structuredOperationEnabled(ExecutionRegistry.Environment.TEST, key);
+        var intent = IntentExecutionPlanSnapshot.freeze(structured, List.of("long_serial.answer_question", key));
+        IntentFixture fixture = intentFixture("intent-reader-structured-" + operation, operation, "valid", intent);
+        WorkflowExecutionContext context = loadIntentContext(database.dsl(), fixture);
+        assertThat(context.selection().schema()).isEqualTo("durable.intent-selection.v2");
+        assertThat(context.selectedScope()).isEqualTo("manage_foreshadowing".equals(operation)
+                ? Map.of("kind", "chapter", "chapterId", "intent-reader-structured-" + operation + "-chapter")
+                : Map.of("kind", "novel"));
+        assertThat(context.requireBusinessPlan().runBudget().maxModelCalls()).isEqualTo(4);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"content", "manifest", "metadata"})
+    void 新选择Reader拒绝授权来源完整性漂移(String variant) {
+        IntentFixture fixture = intentFixture("intent-reader-integrity-" + variant, "answer_question", "valid");
+        assertThatThrownBy(() -> database.transactionResult(tx -> {
+            // 仅在隔离 PostgreSQL 事务模拟存储损坏；预期异常回滚原行，不更改不可变触发器。
+            tx.execute("SET LOCAL session_replication_role = replica");
+            if ("manifest".equals(variant)) {
+                tx.execute("UPDATE public.\"WorkflowEvidenceBundle\" SET \"manifestJson\" = '{}' WHERE id = ?", fixture.intentBundleId());
+            } else {
+                String column = "content".equals(variant) ? "contentJson" : "metadataJson";
+                tx.execute("UPDATE public.\"WorkflowEvidenceItem\" SET \"" + column + "\" = '{}' WHERE \"bundleId\" = ?", fixture.intentBundleId());
+            }
+            return loadIntentContext(tx, fixture);
+        })).isInstanceOf(IllegalStateException.class);
+        assertThat(loadIntentContext(database.dsl(), fixture).effectiveOperation()).isEqualTo("answer_question");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"scope", "omitted", "duplicate", "foreign_novel"})
+    void 授权内容即使自带正确哈希也不能扩大或遗漏冻结范围(String variant) {
+        IntentFixture fixture = intentFixture("intent-reader-authorized-" + variant, "answer_question", "valid");
+        assertThatThrownBy(() -> database.transactionResult(tx -> {
+            // 仅测试故障注入重新计算存储指纹，验证语义身份检查不是只检查哈希格式。
+            tx.execute("SET LOCAL session_replication_role = replica");
+            var evidence = tx.fetchOne("SELECT \"contentJson\" FROM public.\"WorkflowEvidenceItem\" WHERE \"bundleId\" = ?", fixture.intentBundleId());
+            Map<String, Object> content = json.readValue(evidence.get("contentJson", String.class), new TypeReference<>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> available = (List<Map<String, Object>>) content.get("availableOperations");
+            switch (variant) {
+                case "scope" -> available.getFirst().put("scopeKind", "novel");
+                case "omitted" -> available.removeFirst();
+                case "duplicate" -> available.add(new LinkedHashMap<>(available.getFirst()));
+                case "foreign_novel" -> content.put("novelId", "other-novel");
+                default -> throw new AssertionError(variant);
+            }
+            rewriteIntentContent(tx, fixture, content);
+            return loadIntentContext(tx, fixture);
+        })).isInstanceOf(IllegalStateException.class);
+    }
+
+    private static WorkflowExecutionContext loadIntentContext(org.jooq.DSLContext tx, IntentFixture fixture) {
+        Record run = tx.fetchOne("SELECT id, workflow, operation, \"operationCatalogVersion\", \"chapterId\", \"targetType\", \"targetId\", \"modelPolicyJson\" FROM public.\"WorkflowRun\" WHERE id = ?", fixture.runId());
+        return new JooqWorkflowExecutionContextReader(json).load(tx, new WorkflowExecutionContext.RunIdentity(
+                run.get("id", String.class), run.get("workflow", String.class), run.get("operation", String.class),
+                run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
+                run.get("targetType", String.class), run.get("targetId", String.class)),
+                json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<>() {}));
+    }
+
+    private static void rewriteIntentContent(org.jooq.DSLContext tx, IntentFixture fixture, Map<String, Object> content) {
+        String contentHash = ExecutionCanonicalJson.sha256(content);
+        long byteCount = ExecutionCanonicalJson.bytes(content).length;
+        Record bundle = tx.fetchOne("SELECT \"manifestJson\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ?", fixture.intentBundleId());
+        Map<String, Object> manifest = json.readValue(bundle.get("manifestJson", String.class), new TypeReference<>() {});
+        Map<String, Object> manifestItem = object(((List<?>) manifest.get("items")).getFirst());
+        manifestItem.put("contentSha256", contentHash);
+        manifestItem.put("byteCount", byteCount);
+        tx.execute("UPDATE public.\"WorkflowEvidenceItem\" SET \"contentJson\" = ?, \"contentSha256\" = ?, \"byteCount\" = ? WHERE \"bundleId\" = ?",
+                json.writeValueAsString(content), contentHash, byteCount, fixture.intentBundleId());
+        tx.execute("UPDATE public.\"WorkflowEvidenceBundle\" SET \"manifestJson\" = ?, \"manifestSha256\" = ?, \"totalBytes\" = ? WHERE id = ?",
+                json.writeValueAsString(manifest), ExecutionCanonicalJson.sha256(manifest), byteCount, fixture.intentBundleId());
+    }
+
     @Test
     void 自然解析Step派发空操作且租约恢复保留输入和请求身份() {
         IntentFixture fixture = intentFixture("intent-dispatch-resolver", null, "valid");
@@ -245,7 +325,7 @@ class JooqWorkflowDispatchRepositoryTest {
         assertThat(request.getRunId()).isEqualTo(fixture.runId());
         assertThat(request.getPurpose()).isEqualTo("resolve_intent");
         assertThat(request.getOperation()).isNull();
-        assertThat(request.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v2");
+        assertThat(request.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v3");
         assertThat(request.getBudget().getMaxInputTokens()).isEqualTo(8000);
         assertThat(request.getEvidenceBundle().getId()).isEqualTo(fixture.intentBundleId());
         assertRequestHashes(request);
@@ -921,10 +1001,9 @@ class JooqWorkflowDispatchRepositoryTest {
                 NOW, NOW, registry.catalogVersion(), owner.sessionId(), prefix + "-request", ExecutionCanonicalJson.sha256(original),
                 owner.chapterId(), json.writeValueAsString(plan.runBudgetStored()), json.writeValueAsString(plan.stored()));
         Map<String, Object> intentContext = Map.of("workflow", "long_serial", "novelId", owner.novelId(),
-                "chapterId", owner.chapterId(), "chapterTitle", "第一章", "availableOperations", List.of(
-                        Map.of("operation", "answer_question", "description", "章节问答", "targetType", "chapter", "scopeKind", "chapter"),
-                        Map.of("operation", "plan_chapter", "description", "章节规划", "targetType", "chapter", "scopeKind", "chapter"),
-                        Map.of("operation", "write_chapter", "description", "正文草案", "targetType", "chapter", "scopeKind", "chapter")));
+                "chapterId", owner.chapterId(), "chapterTitle", "第一章", "availableOperations", plan.operationPlans().stream()
+                        .map(child -> Map.of("operation", child.operation().operation(), "description", "当前授权创作操作",
+                                "targetType", "chapter", "scopeKind", plan.scopeKindForOperation(child.operation().key()))).toList());
         String intentManifestHash = insertIntentEvidence(runId, intentBundleId, 1, owner.chapterId(),
                 "intent_context", plan.resolver().evidencePolicy(), intentContext);
         insertIntentModelStep(runId, owner.novelId(), resolverId, 1, plan.resolver(),
@@ -934,7 +1013,7 @@ class JooqWorkflowDispatchRepositoryTest {
 
         ExecutionPlanSnapshot business = plan.requireOperationPlan("long_serial." + selectedOperation);
         Map<String, Object> selection = new LinkedHashMap<>();
-        selection.put("schema", "durable.intent-selection.v1");
+        selection.put("schema", plan.supportsNovelScopes() ? "durable.intent-selection.v2" : "durable.intent-selection.v1");
         selection.put("runId", runId);
         selection.put("operationKey", "long_serial." + selectedOperation);
         selection.put("operationPlanSha256", "wrong_plan".equals(variant) ? "0".repeat(64) : business.sha256());
@@ -943,7 +1022,7 @@ class JooqWorkflowDispatchRepositoryTest {
         selection.put("intentEvidenceBundleId", intentBundleId);
         selection.put("targetType", "chapter");
         selection.put("targetId", "wrong_target".equals(variant) ? "other-chapter" : owner.chapterId());
-        selection.put("scopeKind", "chapter");
+        selection.put("scopeKind", plan.scopeKindForOperation(business.operation().key()));
         int controls = "missing".equals(variant) ? 0 : "duplicate".equals(variant) ? 2 : 1;
         for (int index = 0; index < controls; index++) {
             String id = prefix + "-selection-" + index;

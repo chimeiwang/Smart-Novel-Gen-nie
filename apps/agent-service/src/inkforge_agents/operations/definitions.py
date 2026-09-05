@@ -124,16 +124,26 @@ class OperationDefinition:
     def to_public_definition(self) -> PublicOperationDefinition:
         if self.kind not in PUBLIC_LONG_SERIAL_OPERATIONS:
             raise ValueError(f"Operation {self.kind} 不是公开长篇操作")
+        # 旧图仍使用 lore/outline/foreshadowing 业务目标，公共入口则始终以当前章为锚点。
+        # 只投影公共身份，不改旧图的目标、默认范围、工具或草案策略。
+        structured_scopes: dict[str, tuple[LongSerialScopeKind, ...]] = {
+            "create_lore": ("novel",),
+            "revise_lore": ("novel",),
+            "create_outline": ("novel",),
+            "revise_outline": ("novel", "outline_node"),
+            "manage_foreshadowing": ("novel", "chapter"),
+        }
+        scopes = structured_scopes.get(self.kind)
         return PublicOperationDefinition.model_validate(
             {
                 "operation": self.kind,
                 "workflow": "long_serial",
-                "targetKind": self.targetType,
-                "allowedScopeKinds": self.allowedScopeKinds,
-                "mutating": self.mutating,
+                "targetKind": "chapter" if scopes is not None else self.targetType,
+                "allowedScopeKinds": scopes if scopes is not None else self.allowedScopeKinds,
+                "mutating": self.requiresUserApproval if scopes is not None else self.mutating,
                 "principalAgent": self.primaryAgent,
                 "reviewers": self.reviewers,
-                "artifactKind": self.textArtifactKind,
+                "artifactKind": self.artifactPolicy if scopes is not None else self.textArtifactKind,
             }
         )
 

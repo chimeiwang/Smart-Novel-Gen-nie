@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 274,
+  "modelCount": 276,
   "models": [
     {
       "model": "AgentUpdates",
@@ -471,6 +471,12 @@
       "sha256": "553eb08f97a9aeb0b61e4a7a3015e0828ba4f6f85f3a1ac7a303fbf9a085a7be"
     },
     {
+      "model": "IntentAvailableOperationV2",
+      "module": "execution",
+      "path": "execution/IntentAvailableOperationV2.schema.json",
+      "sha256": "3bb01356ef00640de8cc68a07a98d295e7f0d4ea27abb43da1f3b8dafe44d256"
+    },
+    {
       "model": "IntentClarificationAnswer",
       "module": "execution",
       "path": "execution/IntentClarificationAnswer.schema.json",
@@ -481,6 +487,12 @@
       "module": "execution",
       "path": "execution/IntentContext.schema.json",
       "sha256": "631187036d419c449b608a03a79c4756752c3a0eb14f433c4c065c6bfa9d89f6"
+    },
+    {
+      "model": "IntentContextV2",
+      "module": "execution",
+      "path": "execution/IntentContextV2.schema.json",
+      "sha256": "0ad299e48335c77c2f18fa5004d4ffdcceb9bb89dea6b2f45823a7ce6afae6ab"
     },
     {
       "model": "IntentResolutionInput",
@@ -678,7 +690,7 @@
       "model": "PublicOperationDefinition",
       "module": "operations",
       "path": "operations/PublicOperationDefinition.schema.json",
-      "sha256": "ad600fad2cac982c4cd14a725051e3543efba185e4e92ced83c9eca5738738b0"
+      "sha256": "da5ec27591cd5d4363915888df2e532077afd599ae3571fb5163de7bce786ae8"
     },
     {
       "model": "ConsistencyIssue",

@@ -11,6 +11,25 @@ def test_public_long_serial_operations_are_exact() -> None:
         key: value.model_dump()
         for key, value in PUBLIC_LONG_SERIAL_OPERATIONS.items()
     } == {
+        **{
+            operation: {
+                "operation": operation,
+                "workflow": "long_serial",
+                "targetKind": "chapter",
+                "allowedScopeKinds": scopes,
+                "mutating": True,
+                "principalAgent": agent,
+                "reviewers": (reviewer,),
+                "artifactKind": "agent_updates",
+            }
+            for operation, scopes, agent, reviewer in (
+                ("create_lore", ("novel",), "设定", "校验"),
+                ("revise_lore", ("novel",), "设定", "校验"),
+                ("create_outline", ("novel",), "剧情", "编辑"),
+                ("revise_outline", ("novel", "outline_node"), "剧情", "编辑"),
+                ("manage_foreshadowing", ("novel", "chapter"), "剧情", "校验"),
+            )
+        },
         "answer_question": {
             "operation": "answer_question",
             "workflow": "long_serial",

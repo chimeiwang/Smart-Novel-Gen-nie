@@ -1,8 +1,9 @@
 # Durable Agent V2 设定、大纲与伏笔迁移
 
-日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 来源读取、不可变候选、完整 Diff/写入物化、
-生成回调及审核详情/决定已通过本地隔离验证；Agent 单 Step 生成与专用复审已接入并通过定向验证。
-按需证据补齐与 Web 部分采用已接入并通过本地全量验证；自动返工策略与入口尚未全部接通，五项尚未启用。
+日期：2026-09-05。状态：五项生成、来源补齐、专用复审、最多一次完整自动返工、显式/自然入口及作者采用
+已接通并通过定向隔离验证，仓内 Catalog 已启用 12/21；新自然入口支持其中十项无选区操作。
+本批仓内门禁已完成，完整与分段续验结果见末节；未更新固定 JAR、活动 Skills 或服务器，不能表述为整体重构或生产完成。
+下文分步设计与检查点保留当时事实，历史 7/21、未接通/未启用描述不代表当前状态；最新状态见末节。
 
 ## 范围复核结论
 
@@ -18,7 +19,7 @@
 
 在当前 `codex/durable-agent-execution` 分支继续既定 Agent 内核迁移，接通
 `long_serial.create_lore`、`revise_lore`、`create_outline`、`revise_outline` 和 `manage_foreshadowing`。
-前序检查点为 `cb519ba`；当前仍为 7/21，不能因本规格或共享模型存在便改称 12/21。
+前序检查点为 `cb519ba`，当时为 7/21；只有入口与业务接线实证完成后才允许增加，当前证据见末节。
 
 本阶段不新增创作领域、数据库列或表，不重做发布流程，不修改固定安装 JAR、活动 Skill 或 Operator 白名单；
 不执行远程写、真实库迁移、生产部署或真实供应商调用。普通 CLI 的既有 start/get/watch/artifact 命令继续只访问
@@ -230,6 +231,8 @@ V2 agent_updates 的选择随决定提交，其他 Artifact 行为不变。不�
 CLI 调用保持兼容、真实写面冲突，以及旧 resolver v1/v2 与旧 selection v1 恢复。
 
 ## 本地验证记录（2026-09-05，仅共享模型）
+
+以下各阶段的“7/21”“尚未接通”及测试数量均是对应检查点的历史记录，保留原证据，不回写成最新进度。
 
 本切片实现十个数组分区、三个全文分区的 Provider 输出、结果哈希和返工输入模型，保留字段存在性及原文；
 没有实现或注册五项业务 planner、Evidence reader、Artifact 应用或模型执行资产。
@@ -543,3 +546,113 @@ Catalog 仍保持关闭，直到自动返工、显式/自然入口及五项端�
 还有其他九项未迁移，不能说总任务只剩这五项。没有推送、部署、真实库变更或供应商调用，也没有升级固定 JAR
 及活动 Skills。CLI 部分采用的更新说明继续见 `2026-09-01-durable-agent-v2-operator-skill-update.md`，
 本批内部来源补齐不增加 Skill 命令、参数或对 Agent 的直接调用。
+
+## 显式来源规划与结构化自动返工接线
+
+接续 d06a4f4。本批继续五项已有业务，不增加公共目标、CLI 参数、模型输出分区或采用限制；Catalog 暂不启用。
+
+- 五项注册到既有 LongSerialDurableRunStarter，保持公共 chapter 锚点及既有 scope 形状。Core 根据已核验的
+  novel/outline_node/chapter scope 冻结最小来源：唯一 agent_updates_index、已有操作必要的单例全文及显式
+  焦点目标；章节锚点仅提供元数据，不顺带读取所有章节正文。缺失的其他实际修改来源仍走已实现的同 Run
+  补齐流程，不为方便规划读取整个 workspace。显式与自然后续必须共用同一确定性 planner。
+- 新冻结计划使用 review.agent_updates_one_revision_else_author.v1；旧 merge_all_pass_else_author 计划保持
+  原来交作者的语义，不扩大历史自动操作。专用 Reviewer 既有提示词及合法问题维度不变。
+- 仅完整复审的 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，允许同候选
+  最多一次自动完整返工。结构性问题、无法判断、复审不可用及其他维度都交作者；不解析建议散文执行字典 patch，
+  不新增硬质量门禁。返工保留精确上一候选 summary/updates、原始指令、当前冻结 bundle 和同一生成资产，
+  新 revision 再按原专用 Reviewer 复审。
+- 自动返工次数以真实产出候选的生成记录为准，来源补齐的 generation Step 不得算作一次候选返工；但所有
+  真实模型 Step 都消费原四次调用及既有其他预算。额度不足时保留候选交作者，不能增加预算或无限重试。
+- 本批定向测试覆盖五项显式 scope/归属/幂等、最小来源与来源完整性；自动一次返工、二轮仍有问题、结构性
+  问题及 Reviewer 不可用交作者、剩余额度不足和来源补齐不伪装候选 revision。自然授权、完整业务 E2E 和
+  最终 Catalog 启用须后续实证完成，不能把 planner 注册或这些内部测试当成全部业务已经生效。
+
+初始来源的确定性矩阵：设定两项读 world_setting/story_background，大纲两项及伏笔读 outline_content；
+其他单例与实体按需补齐，不因未预读而禁止跨分区。全部附唯一名录、章节锚点元数据与原 V1 已提供的最小
+Novel 创作背景（id/name/summary/storyProgress），后者作为绑定小说版本及精确 scope 的 run_context JSON
+Evidence，不保存完整 Novel 行、不作为全小说 CAS。节点 scope 另冻结完整焦点节点及直接关系。
+
+入口核对发现原公共 Definition 表及两端普通 CLI 的显式操作白名单仍仅包含前序章节操作，因此本批必须同步
+现有五项 operation 值与上述 scope 矩阵，否则只注册 planner 仍无法启动。先同步 Python 权威业务契约与校验，
+再对齐 Java Core 和 Java/Python CLI；若 OpenAPI 发生变化，统一生成并复验客户端。沿用 long.agent.start 和
+原 JSON 请求形状，不新增命令、scope 参数或 Agent 直连。受限 Operator 三操作白名单不扩，固定 JAR 和活动
+Skills 不自动更新；普通 CLI 的新增可选 operation 与调用样例写入既有 Skills 更新契约及 CLI README。
+
+## 五项自然入口接线
+
+显式 planner、自动返工和 CLI 接线验证后，继续在同一范围内补自然入口，全部完成后才启用五项 Catalog。
+不加入两种选区操作（自然请求没有精确选区），不新增公开请求字段或让模型猜目标 ID。
+
+- 旧五项自然操作仍为 chapter scope；create_lore/revise_lore/create_outline/revise_outline 固定 novel scope；
+  manage_foreshadowing 默认当前 chapter scope。每项的范围与说明写入冻结 availableOperations。明确的节点
+  范围不能默默扩大为 novel，须澄清或使用既有显式节点入口；显式伏笔 novel scope 仍保留。
+- 新增 resolver v3 的 Prompt/Profile/Deployment，只解释冻结操作说明及默认范围；原 v1/v2 及其提示词哈希、
+  原三项/五项历史计划和预算不改。Provider 仍只返回 ProposedCommand，不输出 target、scope 或 arguments。
+  共享新增 IntentContextV2/IntentAvailableOperationV2，形状沿用原上下文但最多十项、范围允许 chapter/novel；
+  旧类型及旧 resolver 的 chapter-only 规则保留，按精确版本选用。
+- 新内部 durable.intent-selection.v2 沿用原十字段，targetType/targetId 仍是公共 chapter 锚点，scopeKind
+  来自冻结授权项。小说 ID 继续来自 Run，不重复保存 scopeId 或第二份业务状态。v1 字段和 chapter-only 语义
+  原样恢复；v2 必须绑定新版 resolver 和所选完整冻结计划，不能用当前 Registry 扩大历史授权。
+- Core 的准备、恢复、Review task 使用同一个有效 scope 投影；自然准备构造相同公共 target/scope 并复用
+  显式 assembler/planner，不创建第二个 Run。初始 Run operation=null、章节锚点和 intent_resolved 事件协议
+  不变，正式更新目标由候选逐项解析。外层沿既有“业务逐维最大值+最多三次解析”算法计算，所选结构化子计划
+  仍独立最多四次模型调用，不因自然外层余额较大而扩充。
+- 验收必须覆盖五项自然选择、同 Run 接续、Reviewer scope、澄清/重复/取消、旧计划和 v1 selection 原样恢复，
+  以及新旧 resolver 精确依赖和越出冻结范围的拒绝；不能用扩大常量列表代替完整业务回归。
+
+## 五项仓内启用与定向验收（2026-09-05）
+
+五项 Catalog 已改为 v2Enabled=true，仓内由 7/21 推进到 12/21；已启用部分为长篇十类 CreativeOperation
+及两类选区改写。其余九项尚未迁移，不能把本批收口解释为全部 Agent 重构完成。新自然授权为十项无选区
+操作，不包含要求精确来源的两种选区改写；服务器仍需自己的部署、配置和验收，仓内布尔值不代表生产可用。
+
+- 显式入口与自然准备复用同一 assembler/planner。显式 scope 保持设定两项/创建大纲 novel、修改大纲
+  novel 或 outline_node、伏笔 novel 或当前 chapter；公共 target 始终为原章节锚点，现有跨分区候选不变。
+- resolver v3 将可选操作的说明与默认范围冻结到 availableOperations：设定两项/大纲两项 novel，伏笔
+  及原章节五项 chapter；不匹配的明确节点等范围必须澄清或使用显式入口。新 selection v2 只追加控制事实，
+  准备、恢复和 Reviewer 读取同一 scope，原 Run operation=null 和 chapter target 不改写。
+- 旧 resolver v1/v2、原三项/五项 literal、selection v1 及其预算保持原样。新范围读回会复验实际
+  intent Evidence 的完整内容、字节数、清单哈希和授权项；旧任务不查询当前 Registry 来扩大历史授权。
+- 结构化新复审策略已接最多一次完整自动返工，精确携带原指令、上一候选和冻结来源；不支持正文 patch。
+  来源补齐计模型调用、不冒充候选 revision，所选结构化业务仍独立最多四次调用；额度不足保留候选交作者。
+- 普通 Java/Python 对照 CLI 的 long.agent.start 新接五项 operation，并补回 rewrite_scene 显式白名单漏项；
+  未新增命令或参数。公共 Core 152 个操作、内部 34 个、CLI 125 个、Operator 45 个命令及三操作允许集合不变。
+  具体 scope、部分采用及后续 Skills 更新说明已同步两份 CLI README 和既有 Operator Skill 更新契约。
+
+本批已取得的定向证据：
+
+- IntentExecutionPlanSnapshot、WorkflowExecutionContext、历史计划 literal 与 PostgreSQL Reader 回归通过；
+  包含新五项固定 scope、旧 v1 selection 恢复、旧解析器拒绝新 selection，以及来源/授权漂移拒绝。
+- StructuredAgentUpdatesHttpIntegrationTest 的五项显式及自然共 10 项通过：真实 Spring 公共 HTTP 启动、
+  幂等重放、同 Run 接续、需要时来源补齐、专用复审、精确详情、作者批准与 PostgreSQL 正式结果回读。
+  模型结果由测试确定性提供并进入真实 Core 回调事务，未运行 Python Agent 进程、真实供应商或生产账号。
+- LongWorkflowMutationsTest 共 18 项通过；显式/自然 planner、回调自动返工及历史策略也已完成定向验证。
+  以上不是本批完整 Maven verify、Python/Web 全量门禁或隔离跨进程验收的替代；最终结果须另行记录。
+
+本批没有部署、推送、真实开发库/正式库变更、真实供应商调用或固定安装包更新。活动 macOS Skills 继续由
+shell 启动此前固定 Java JAR，Python CLI 只作契约对照；不能把源码已支持这六个 operation 值写成活动 Skill
+已允许或已安装。生产验收及总目标继续推进，不由本节宣告完成。
+
+## 本批最终仓内门禁（2026-09-05）
+
+- 全仓 `./mvnw verify` 的服务身份 11 项、服务契约 5 项、Core 1068 项（3 skipped）通过；五项公共 HTTP
+  集成测试使用真实当前 Catalog，不再在测试中临时开启五项。全仓检查发现的旧自然列表 5 项断言已同步为
+  精确十项及各自 scope，历史三项/五项 literal 未改。
+- CLI 跨语言检查另发现旧负例把已接入的 rewrite_scene 当作非法操作；改用确实未知的 operation，保留
+  INVALID_OPERATION、退出码 2 和零 API 请求，并让架构检查读取真实 CLI 集合以防再次漂移。此后只变更
+  CLI 测试 fixture 与基线检查，`./mvnw -pl tools/inkforge-cli-java -am verify` 续验 132 项全部通过，
+  构建 JAR 成功。未将此前有失败的全仓命令伪记为一次通过，也未重复运行未变化且已通过的 Core 测试。
+  两段最终日志为 `/tmp/inkforge-agent-structured-enabled-maven-final-2.log` 和
+  `/tmp/inkforge-agent-structured-enabled-cli-final.log`。
+- 全仓 `uv run pytest -q` 为 5037 passed、3 skipped；CLI fixture 最后修正后，CLI 与 migration baseline
+  另有 665 passed。日志为 `/tmp/inkforge-agent-structured-enabled-python-final.log` 和
+  `/tmp/inkforge-cli-parity-unsupported-final.log`；保留既有 Starlette 弃用警告。
+- Web 340 项及 API client 3 项通过，typecheck、lint、build、api:check 均通过；日志分别为
+  `/tmp/inkforge-agent-structured-enabled-web-final.log`、`/tmp/inkforge-agent-structured-enabled-typecheck-final.log`、
+  `/tmp/inkforge-agent-structured-enabled-lint-final.log`、`/tmp/inkforge-agent-structured-enabled-build-final.log` 和
+  `/tmp/inkforge-agent-structured-enabled-api-final.log`。
+- 全仓 Ruff、最终改动 Ruff、Mypy（322 个服务/共享/CLI 源文件）、执行 manifest --check 与 git diff --check
+  通过。当前执行资产指纹为 `a3fada474db01b8d2f8892a16febbe1b196a6bb341b134622be0cb4da11ba7e8`。
+
+本次验收证明五项仓内接线及兼容回归，不替代这五项实际 Python Agent 进程、真实供应商或生产验收。
+仓内计数为 12/21，剩余九项仍未迁移；已安装 CLI、活动 Skills、部署、真实库和供应商均未改变。

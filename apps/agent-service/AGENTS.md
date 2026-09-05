@@ -181,8 +181,10 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   执行器只消费完整指令、有序澄清回答和唯一 intent_context，使用 disabled reasoning、interactive lane 和
   专用有限预算，输出严格 ProposedCommand，不生成正文或调用工具。资源身份、有效命令和同 Run 后续
   编排仍由 Core 决定；当前分支已接自然请求及澄清的 Core/Web/CLI，但执行器支持和代码接线均不代表真实
-  环境已经切换，完整验收状态见自然入口规格。新请求使用 `system.intent_resolver.v2`，其提示词以
-  冻结的 availableOperations 与 description 为唯一操作列表；历史 v1 首次派发及恢复仍使用原完整依赖。
+  环境已经切换，完整验收状态见自然入口与结构化资料规格。新请求使用 `system.intent_resolver.v3`，其提示词以
+  冻结的 availableOperations、description 和 scopeKind 为唯一授权：当前支持十项无选区操作，设定两项和
+  大纲两项固定 novel scope，伏笔及原五项固定当前 chapter scope。节点等不匹配范围须澄清或走显式入口，
+  模型不得输出目标 ID、scope 或参数；历史 v1/v2 首次派发及恢复仍使用原完整依赖与当前章授权。
   首次派发仍由当前系统用途约束 workflow、lane 和 Evidence；恢复按完整保留依赖复验，不因当前用途退役
   或切换引用而覆盖历史事实。不得以任意版本前缀放开未授权的 Profile/Prompt/Deployment 组合；缺 execution journal 的 running recovery
   仍以 MODEL_OUTCOME_UNKNOWN 收敛，不重复调用模型。
@@ -204,7 +206,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   生成提示、完整 ChapterDraft 结果与正文双 Reviewer；真实 operation 始终保留，不生成程序场景范围。
   `rewrite_outline_selection` 只消费总纲/节点的完整 text Evidence 和精确 range，返回 replacement 与
   程序派生哈希，单独大纲编辑 Reviewer 复审。Core 独占拼接、返工和最终采用。
-  自然解析支持新冻结的五项无选区操作；旧三项及五项快照仍按原授权集合和解析器版本恢复。具体本地验收状态见
+  上述审阅/改写阶段建立的三项及五项历史自然快照仍按原授权集合和解析器版本恢复；当前自然十项按下节接线。
+  具体本地验收状态见
   `docs/specs/2026-09-05-durable-review-and-rewrites.md`，代码支持不表示服务器已开放。
 - V2 设定、大纲与伏笔五项的单 Step 执行复用 StatelessExecutionStepExecutor，生成仅接收
   AgentUpdatesInput 和唯一绑定小说的 agent_updates_index；其余资料全部来自同一冻结 bundle，不读取
@@ -214,8 +217,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   保留旧来源；没有新增来源、来源冲突或额度不足时明确终止，不无限调用。旧 v2 仅按原依赖恢复，仍只接受
   summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
   不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
-  这些单 Step handler 和来源补齐不表示五项业务入口已开放；Catalog 仍为 7/21，自动返工与入口接线
-  进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
+  Core 已接显式与自然入口、最多一次自动完整返工和作者采用，仓内 Catalog 为 12/21；另外九项尚未迁移，
+  不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
+  其余问题或额度不足交作者，旧冻结策略不扩大。来源补齐计模型额度但不冒充候选 revision，结构化业务最多四次调用。
+  显式 scope：设定两项/创建大纲为 novel，修改大纲为 novel 或 outline_node，伏笔为 novel 或当前 chapter；
+  公共 target 始终是章节锚点，不限制既有跨分区候选。详细隔离验收及最终仓内门禁见
+  `docs/specs/2026-09-05-durable-structured-agent-updates.md`；本批未更新固定 CLI JAR、活动 Skills 或服务器。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

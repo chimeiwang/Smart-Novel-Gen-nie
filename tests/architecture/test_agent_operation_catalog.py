@@ -122,6 +122,7 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
     {
         "system.intent_resolver.v1",
+        "system.intent_resolver.v2",
         "lore.generator.v1",
         "lore.reviser.v1",
         "plot.outline_generator.v1",
@@ -281,6 +282,11 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
     enabled_keys = {operation["key"] for operation in operations if operation["v2Enabled"]}
     assert enabled_keys == {
         "long_serial.answer_question",
+        "long_serial.create_lore",
+        "long_serial.revise_lore",
+        "long_serial.create_outline",
+        "long_serial.revise_outline",
+        "long_serial.manage_foreshadowing",
         "long_serial.plan_chapter",
         "long_serial.write_chapter",
         "long_serial.rewrite_scene",
@@ -576,7 +582,7 @@ def test_agent_updates_step_schema_is_closed_and_requests_only_bounded_sources()
     ]
 
 
-def test_structured_updates_step_assets_are_complete_but_not_business_enabled() -> None:
+def test_structured_updates_business_enabled_assets_keep_complete_and_retained_contracts() -> None:
     operations = {operation["operation"]: operation for operation in _operations()}
     profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
     prompts = _keyed_items(PROMPT_PROFILE_REGISTRY_PATH, "prompts")
@@ -592,7 +598,7 @@ def test_structured_updates_step_assets_are_complete_but_not_business_enabled() 
     )
     for operation_name, generator_name, reviewer_name in cases:
         operation = operations[operation_name]
-        assert operation["v2Enabled"] is False
+        assert operation["v2Enabled"] is True
         assert operation["generatorProfile"] == generator_name + ".v3"
         assert operation["outputSchema"] == "output.agent_updates_step.v1"
         assert operation["applyHandler"] == "apply.agent_updates.v1"
@@ -754,12 +760,17 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
 
     assert [operation["key"] for operation in enabled] == [
         "long_serial.answer_question",
+        "long_serial.create_lore",
+        "long_serial.revise_lore",
+        "long_serial.create_outline",
+        "long_serial.revise_outline",
         "long_serial.plan_chapter",
         "long_serial.write_chapter",
         "long_serial.rewrite_scene",
         "long_serial.rewrite_chapter_selection",
         "long_serial.rewrite_outline_selection",
         "long_serial.review_chapter",
+        "long_serial.manage_foreshadowing",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
@@ -846,6 +857,21 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert "maxLength" not in output_schema["jsonSchema"]["properties"]["content"]
             assert "candidatePatch" not in finding_schema["required"]
             assert finding_schema["properties"]["candidatePatch"]["additionalProperties"] is False
+        elif operation["key"] in {
+            "long_serial.create_lore", "long_serial.revise_lore", "long_serial.create_outline",
+            "long_serial.revise_outline", "long_serial.manage_foreshadowing",
+        }:
+            schema = output_schema["jsonSchema"]
+            assert schema["required"] == []
+            assert set(schema["properties"]) == {"summary", "updates", "evidenceRequest"}
+            assert schema["anyOf"] == [
+                {"required": ["summary", "updates"], "maxProperties": 2},
+                {"required": ["evidenceRequest"], "maxProperties": 1},
+            ]
+            assert schema["additionalProperties"] is False
+            assert schema["properties"]["updates"]["additionalProperties"] is False
+            assert schema["properties"]["evidenceRequest"]["minItems"] == 1
+            assert schema["properties"]["evidenceRequest"]["maxItems"] == 100
         else:
             expected_output_field = (
                 "answer"

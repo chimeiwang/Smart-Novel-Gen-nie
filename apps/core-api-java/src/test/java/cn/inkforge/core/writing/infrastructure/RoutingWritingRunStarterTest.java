@@ -15,6 +15,7 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
+import cn.inkforge.core.reviews.infrastructure.JooqAgentUpdatesEvidenceReader;
 import cn.inkforge.core.reviews.infrastructure.JooqChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.infrastructure.JooqChapterWritingEvidenceReader;
 import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
@@ -122,7 +123,9 @@ class RoutingWritingRunStarterTest {
                 CLOCK,
                 json,
                 new JooqChapterPlanEvidenceReader(json),
-                new JooqChapterWritingEvidenceReader(json), new JooqWorkflowExecutionContextReader(json));
+                new JooqChapterWritingEvidenceReader(json),
+                new JooqWorkflowExecutionContextReader(json),
+                new JooqAgentUpdatesEvidenceReader(json));
     }
 
     @AfterAll
@@ -137,7 +140,7 @@ class RoutingWritingRunStarterTest {
         var response = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(), request);
         assertThat(response.getOperation()).isNull();
         assertThat(response.getCurrentStep().getPurpose()).isEqualTo("resolve_intent");
-        assertThat(response.getCurrentStep().getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v2");
+        assertThat(response.getCurrentStep().getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v3");
         Record run = database.dsl().fetchOne("SELECT operation, \"targetType\", \"targetId\", \"modelPolicyJson\", input FROM public.\"WorkflowRun\" WHERE id = ?", response.getRunId());
         assertThat(run.get("operation")).isNull();
         assertThat(run.get("targetType", String.class)).isEqualTo("chapter");
@@ -148,10 +151,25 @@ class RoutingWritingRunStarterTest {
         assertThat(item.get("resourceType", String.class)).isEqualTo("intent_context");
         var context = json.readTree(item.get("contentJson", String.class));
         assertThat(context.has("content")).isFalse();
-        assertThat(context.path("availableOperations").size()).isEqualTo(5);
+        assertThat(context.path("availableOperations").size()).isEqualTo(10);
         assertThat(context.path("availableOperations").findValues("operation").stream()
                         .map(tools.jackson.databind.JsonNode::asText))
-                .containsExactly("answer_question", "plan_chapter", "review_chapter", "rewrite_scene", "write_chapter");
+                .containsExactly(
+                        "answer_question",
+                        "create_lore",
+                        "create_outline",
+                        "manage_foreshadowing",
+                        "plan_chapter",
+                        "review_chapter",
+                        "revise_lore",
+                        "revise_outline",
+                        "rewrite_scene",
+                        "write_chapter");
+        assertThat(context.path("availableOperations").findValues("scopeKind").stream()
+                        .map(tools.jackson.databind.JsonNode::asText))
+                .containsExactly(
+                        "chapter", "novel", "novel", "chapter", "chapter",
+                        "chapter", "novel", "novel", "chapter", "chapter");
         var queries = queries();
         assertThat(((WritingRunV2Response) queries.getPublic(fixture.userId(), response.getRunId())).getCurrentStep().getPurpose())
                 .isEqualTo("resolve_intent");
@@ -1591,7 +1609,10 @@ class RoutingWritingRunStarterTest {
                 intentBundleId,
                 "chapter",
                 run.get("chapterId", String.class),
-                "chapter");
+                "chapter",
+                intent.supportsNovelScopes()
+                        ? WorkflowIntentSelection.SCHEMA_V2
+                        : WorkflowIntentSelection.SCHEMA);
         String selectionStepId = "selection-" + runId;
         database.dsl().execute(
                 """

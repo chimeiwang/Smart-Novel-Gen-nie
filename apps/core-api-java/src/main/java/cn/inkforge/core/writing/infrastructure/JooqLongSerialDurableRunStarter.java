@@ -1,7 +1,10 @@
 package cn.inkforge.core.writing.infrastructure;
 
+import cn.inkforge.contracts.api.ChapterScope;
+import cn.inkforge.contracts.api.ChapterTarget;
 import cn.inkforge.contracts.api.LongSerialStartWritingRunRequest;
 import cn.inkforge.contracts.api.NaturalStartWritingRunRequest;
+import cn.inkforge.contracts.api.NovelScope;
 import cn.inkforge.contracts.api.WorkflowCurrentStepSnapshot;
 import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.core.platform.db.CoreDatabase;
@@ -10,6 +13,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.text.TextLength;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
+import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
@@ -49,7 +53,9 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
 
     private static final Set<String> NATURAL_OPERATIONS = Set.of(
             "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.review_chapter",
-            "long_serial.rewrite_scene", "long_serial.write_chapter");
+            "long_serial.rewrite_scene", "long_serial.write_chapter",
+            "long_serial.create_lore", "long_serial.revise_lore", "long_serial.create_outline",
+            "long_serial.revise_outline", "long_serial.manage_foreshadowing");
 
     private final CoreDatabase database;
     private final LongSerialRunAssembler assembler;
@@ -62,6 +68,7 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
     private final Map<String, EvidencePlanner> planners;
     private final ChapterPlanEvidenceReader chapterPlanningSources;
     private final ChapterWritingEvidenceReader chapterWritingSources;
+    private final AgentUpdatesStartPlanner agentUpdatesPlanner;
     private final WorkflowExecutionContextReader executionContexts;
 
     JooqLongSerialDurableRunStarter(
@@ -81,6 +88,15 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
             DurableWorkflowService workflows, ExecutionRegistry registry, CuidV1Generator ids, Clock clock,
             ObjectMapper json, ChapterPlanEvidenceReader chapterPlanningSources,
             ChapterWritingEvidenceReader chapterWritingSources, WorkflowExecutionContextReader executionContexts) {
+        this(database, assembler, workflows, registry, ids, clock, json, chapterPlanningSources,
+                chapterWritingSources, executionContexts, null);
+    }
+
+    JooqLongSerialDurableRunStarter(CoreDatabase database, LongSerialRunAssembler assembler,
+            DurableWorkflowService workflows, ExecutionRegistry registry, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ChapterPlanEvidenceReader chapterPlanningSources,
+            ChapterWritingEvidenceReader chapterWritingSources, WorkflowExecutionContextReader executionContexts,
+            AgentUpdatesEvidenceReader agentUpdatesSources) {
         this.database = Objects.requireNonNull(database);
         this.assembler = Objects.requireNonNull(assembler);
         this.workflows = Objects.requireNonNull(workflows);
@@ -90,16 +106,22 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         this.json = Objects.requireNonNull(json);
         this.chapterPlanningSources = Objects.requireNonNull(chapterPlanningSources);
         this.chapterWritingSources = Objects.requireNonNull(chapterWritingSources);
+        this.agentUpdatesPlanner = agentUpdatesSources == null ? null : new AgentUpdatesStartPlanner(agentUpdatesSources);
         this.executionContexts = executionContexts;
         this.stepSnapshots = new WorkflowStepSnapshotFactory(json);
-        this.planners = Map.of(
-                "long_serial.answer_question", this::planAnswerQuestion,
-                "long_serial.plan_chapter", this::planChapter,
-                "long_serial.review_chapter", this::planChapterReview,
-                "long_serial.rewrite_scene", this::planSceneRewrite,
-                "long_serial.write_chapter", this::planChapterWriting,
-                "long_serial.rewrite_chapter_selection", this::planChapterSelectionRewrite,
-                "long_serial.rewrite_outline_selection", this::planOutlineSelectionRewrite);
+        Map<String, EvidencePlanner> configured = new LinkedHashMap<>();
+        configured.put("long_serial.answer_question", this::planAnswerQuestion);
+        configured.put("long_serial.plan_chapter", this::planChapter);
+        configured.put("long_serial.review_chapter", this::planChapterReview);
+        configured.put("long_serial.rewrite_scene", this::planSceneRewrite);
+        configured.put("long_serial.write_chapter", this::planChapterWriting);
+        configured.put("long_serial.rewrite_chapter_selection", this::planChapterSelectionRewrite);
+        configured.put("long_serial.rewrite_outline_selection", this::planOutlineSelectionRewrite);
+        if (agentUpdatesPlanner != null) {
+            AgentUpdatesStartPlanner.OPERATION_KEYS.forEach(
+                    key -> configured.put(key, this::planAgentUpdates));
+        }
+        this.planners = Map.copyOf(configured);
     }
 
     @Override
@@ -121,7 +143,17 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     .novelId(novelId).chapterId(chapterId).writingSessionId(writingSessionId)
                     .operation(LongSerialStartWritingRunRequest.OperationEnum.fromValue(operationPlan.operation().operation()))
                     .userInstruction(userInstruction).targetWordCount(targetWordCount);
-            PreparedStart prepared = planners.get(operationPlan.operation().key()).prepare(transaction, userId, request, null);
+            LongSerialRunAssembler.Normalized normalized = null;
+            if (AgentUpdatesStartPlanner.OPERATION_KEYS.contains(operationPlan.operation().key())) {
+                request.workflow("long_serial").target(new ChapterTarget(chapterId, "chapter"));
+                String scopeKind = IntentExecutionPlanSnapshot.defaultScopeKind(operationPlan.operation().key());
+                request.scope("novel".equals(scopeKind)
+                        ? new NovelScope("novel")
+                        : new ChapterScope(chapterId, "chapter"));
+                normalized = assembler.normalize(request);
+            }
+            PreparedStart prepared = planners.get(operationPlan.operation().key())
+                    .prepare(transaction, userId, request, normalized);
             return new Prepared(prepared.input(), prepared.evidenceItems(), operationPlan.generator());
         });
     }
@@ -153,16 +185,10 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     request.getChapterId(), request.getNovelId());
             List<Map<String, Object>> available = operationKeys.stream().map(key -> {
                 String operation = plan.requireOperationPlan(key).operation().operation();
-                String description = switch (operation) {
-                    case "answer_question" -> "回答当前章节的问题";
-                    case "plan_chapter" -> "生成当前章节的剧情规划";
-                    case "review_chapter" -> "审阅当前章节并生成完整报告";
-                    case "rewrite_scene" -> "按要求改写场景并形成完整章节候选";
-                    case "write_chapter" -> "生成当前章节的完整正文草案";
-                    default -> throw new IllegalStateException("自然入口包含未支持操作");
-                };
+                String scopeKind = plan.scopeKindForOperation(key);
+                String description = naturalDescription(operation, scopeKind);
                 return Map.<String, Object>of("operation", operation, "description", description,
-                        "targetType", "chapter", "scopeKind", "chapter");
+                        "targetType", "chapter", "scopeKind", scopeKind);
             }).toList();
             Map<String, Object> intentContext = Map.of("workflow", "long_serial", "novelId", request.getNovelId(),
                     "chapterId", request.getChapterId(), "chapterTitle", chapter.get("title", String.class), "availableOperations", available);
@@ -192,6 +218,29 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
     }
 
     private record NaturalInput(Map<String, Object> body, String fingerprint) {}
+
+    private static String naturalDescription(String operation, String scopeKind) {
+        String label = switch (operation) {
+            case "answer_question" -> "回答当前章节的问题";
+            case "plan_chapter" -> "生成当前章节的剧情规划";
+            case "review_chapter" -> "审阅当前章节并生成完整报告";
+            case "rewrite_scene" -> "按要求改写场景并形成完整章节候选";
+            case "write_chapter" -> "生成当前章节的完整正文草案";
+            case "create_lore" -> "新建设定";
+            case "revise_lore" -> "修改设定";
+            case "create_outline" -> "创建大纲";
+            case "revise_outline" -> "修改大纲";
+            case "manage_foreshadowing" -> "管理当前章节的伏笔";
+            default -> throw new IllegalStateException("自然入口包含未支持操作");
+        };
+        String range = switch (scopeKind) {
+            case "chapter" -> "当前章节";
+            case "novel" -> "整部小说";
+            default -> throw new IllegalStateException("自然入口包含未支持的默认范围");
+        };
+        String explicit = "revise_outline".equals(operation) ? "；指定节点请使用显式入口" : "";
+        return label + "（默认范围：" + range + explicit + "）";
+    }
 
     @Override
     public WritingRunV2Response replayExisting(
@@ -363,6 +412,24 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                         "chapter_writing_context", request.getChapterId(), true, null,
                         evidence.chapterUpdatedAt(), null, evidence.context(), null, null,
                         Map.of("role", "chapter_writing_context"))),
+                null);
+    }
+
+    private PreparedStart planAgentUpdates(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        if (agentUpdatesPlanner == null) {
+            throw new IllegalStateException("结构化资料 Evidence Planner 未装配");
+        }
+        AgentUpdatesStartPlanner.Plan plan = agentUpdatesPlanner.prepare(transaction, request);
+        return new PreparedStart(
+                "chapter_generation",
+                plan.targetType(),
+                plan.targetId(),
+                plan.input(),
+                plan.evidenceItems(),
                 null);
     }
 

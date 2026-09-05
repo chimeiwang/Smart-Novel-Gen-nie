@@ -504,7 +504,8 @@ def _create_explicit_long_serial_state(
         state["selectionSnapshot"] = payload.selectionSnapshot.model_dump(mode="json")
     state["currentOperation"] = CreativeOperation(
         kind=definition.kind,
-        targetType=definition.targetType,
+        # 显式入口使用公共章节锚点；旧自然图仍保留 Definition 的业务目标。
+        targetType=definition.to_public_definition().targetKind,
         targetId=payload.target.id,
         userGoal=payload.userInstruction,
         primaryAgent=definition.primaryAgent,

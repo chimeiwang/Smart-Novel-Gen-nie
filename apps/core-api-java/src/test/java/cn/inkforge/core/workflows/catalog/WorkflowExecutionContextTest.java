@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
 
 class WorkflowExecutionContextTest {
 
@@ -86,6 +89,75 @@ class WorkflowExecutionContextTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing"})
+    void 新选择按冻结操作恢复范围而保留公共章节锚点(String operation) {
+        ExecutionRegistry registry = ExecutionRegistryFixtures.structuredOperationEnabled(
+                ExecutionRegistry.Environment.TEST, "long_serial." + operation);
+        IntentExecutionPlanSnapshot intent = IntentExecutionPlanSnapshot.freeze(registry, List.of("long_serial." + operation));
+        String scope = "manage_foreshadowing".equals(operation) ? "chapter" : "novel";
+        var selection = new WorkflowIntentSelection("run-1", "long_serial." + operation,
+                intent.requireOperationPlan("long_serial." + operation).sha256(), "resolver-1", "a".repeat(64),
+                "intent-bundle-1", "chapter", "chapter-1", scope, WorkflowIntentSelection.SCHEMA_V2);
+        WorkflowExecutionContext context = WorkflowExecutionContext.fromStored(intent.stored(), selection.stored(),
+                selection.inputHash(), new WorkflowExecutionContext.RunIdentity("run-1", "long_serial", null,
+                        registry.catalogVersion(), "chapter-1", "chapter", "chapter-1"));
+        assertThat(context.selectedScope()).isEqualTo("novel".equals(scope)
+                ? Map.of("kind", "novel") : Map.of("kind", "chapter", "chapterId", "chapter-1"));
+        assertThat(context.initialIdentity().targetId()).isEqualTo("chapter-1");
+        assertThat(context.selection().stored()).isEqualTo(selection.stored());
+        assertThat(context.requireBusinessPlan().runBudget().maxModelCalls()).isEqualTo(4);
+
+        Map<String, Object> changed = new LinkedHashMap<>(selection.stored());
+        changed.put("scopeKind", "novel".equals(scope) ? "chapter" : "novel");
+        assertThatThrownBy(() -> WorkflowExecutionContext.fromStored(intent.stored(), changed,
+                ExecutionCanonicalJson.sha256(changed), context.initialIdentity())).isInstanceOf(IllegalStateException.class);
+        changed.put("schema", WorkflowIntentSelection.SCHEMA);
+        changed.put("scopeKind", "chapter");
+        assertThatThrownBy(() -> WorkflowExecutionContext.fromStored(intent.stored(), changed,
+                ExecutionCanonicalJson.sha256(changed), context.initialIdentity())).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 旧构造器仍只输出原v1且拒绝小说范围() {
+        var selection = new WorkflowIntentSelection("run-1", "long_serial.answer_question", "a".repeat(64),
+                "resolver-1", "b".repeat(64), "bundle-1", "chapter", "chapter-1", "chapter");
+        assertThat(selection.stored()).containsEntry("schema", "durable.intent-selection.v1").hasSize(10);
+        assertThat(WorkflowIntentSelection.fromStored(selection.stored(), selection.inputHash()).stored())
+                .isEqualTo(selection.stored());
+        assertThatThrownBy(() -> new WorkflowIntentSelection("run-1", "long_serial.answer_question", "a".repeat(64),
+                "resolver-1", "b".repeat(64), "bundle-1", "chapter", "chapter-1", "novel"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> unresolved().selectedScope()).isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"intent-execution-plan-94a5298.json", "intent-execution-plan-a150db0.json"})
+    void 历史literal的v1选择原样恢复且不能冒用新范围协议(String filename) throws IOException {
+        Map<String, Object> fixture;
+        try (InputStream stream = getClass().getResourceAsStream("/historical-fixtures/" + filename)) {
+            assertThat(stream).as("保留的历史计划 literal").isNotNull();
+            fixture = new ObjectMapper().readValue(stream, new TypeReference<>() {});
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stored = (Map<String, Object>) fixture.get("snapshot");
+        IntentExecutionPlanSnapshot intent = IntentExecutionPlanSnapshot.fromStored(stored);
+        var identity = new WorkflowExecutionContext.RunIdentity("historical-run", "long_serial", null,
+                intent.operationCatalogVersion(), "chapter-1", "chapter", "chapter-1");
+        var selection = new WorkflowIntentSelection(identity.runId(), "long_serial.answer_question",
+                intent.requireOperationPlan("long_serial.answer_question").sha256(), "historical-resolver",
+                "a".repeat(64), "historical-bundle", "chapter", "chapter-1", "chapter");
+        WorkflowExecutionContext context = WorkflowExecutionContext.fromStored(stored, selection.stored(), selection.inputHash(), identity);
+        assertThat(context.selection().stored()).isEqualTo(selection.stored());
+        assertThat(context.selectedScope()).isEqualTo(Map.of("kind", "chapter", "chapterId", "chapter-1"));
+        assertThat(context.outerRunBudget()).isEqualTo(intent.runBudget());
+        assertThat(ExecutionCanonicalJson.sha256(context.modelPolicyStored())).isEqualTo(ExecutionCanonicalJson.sha256(stored));
+        Map<String, Object> upgraded = new LinkedHashMap<>(selection.stored());
+        upgraded.put("schema", WorkflowIntentSelection.SCHEMA_V2);
+        assertThatThrownBy(() -> WorkflowExecutionContext.fromStored(stored, upgraded,
+                ExecutionCanonicalJson.sha256(upgraded), identity)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"schema", "runId", "operationKey", "operationPlanSha256", "resolverStepId",
             "resolverResultHash", "intentEvidenceBundleId", "targetType", "targetId", "scopeKind", "extra"})
     void 选择不允许缺字段或额外字段(String field) {
@@ -152,7 +224,7 @@ class WorkflowExecutionContextTest {
                 0, 0, null, INTENT.resolver().modelProfile().profile(),
                 INTENT.resolver().modelProfile().version(), null);
         assertThat(pending.getPurpose()).isEqualTo("resolve_intent");
-        assertThat(pending.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v2");
+        assertThat(pending.getModelProfile().getProfile()).isEqualTo("system.intent_resolver.v3");
         assertThatThrownBy(() -> snapshots.modelStep(context, "resolver-1", 1, "resolve_intent", "interactive", "running",
                 1, 1, null, INTENT.resolver().modelProfile().profile(),
                 INTENT.resolver().modelProfile().version(), null))
@@ -169,7 +241,7 @@ class WorkflowExecutionContextTest {
 
     private static Map<String, Object> selection(String operation) {
         Map<String, Object> value = new LinkedHashMap<>();
-        value.put("schema", "durable.intent-selection.v1");
+        value.put("schema", "durable.intent-selection.v2");
         value.put("runId", "run-1");
         value.put("operationKey", "long_serial." + operation);
         value.put("operationPlanSha256", INTENT.requireOperationPlan("long_serial." + operation).sha256());

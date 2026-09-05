@@ -363,6 +363,77 @@ def test_long_serial_start_derives_agents_from_public_definition() -> None:
 
 
 @pytest.mark.parametrize(
+    ("operation", "scope"),
+    [
+        ("create_lore", {"kind": "novel"}),
+        ("revise_lore", {"kind": "novel"}),
+        ("create_outline", {"kind": "novel"}),
+        ("revise_outline", {"kind": "novel"}),
+        ("revise_outline", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+        ("manage_foreshadowing", {"kind": "novel"}),
+        ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-1"}),
+    ],
+)
+def test_structured_operations_keep_public_chapter_anchor_and_explicit_scope(
+    operation: str, scope: dict[str, object],
+) -> None:
+    request = LongSerialStartWritingRunRequest.model_validate(
+        valid_request_values() | {"operation": operation, "scope": scope}
+    )
+    definition = _long_serial_operation_definition(request)
+    assert definition.operation == operation
+    assert definition.targetKind == "chapter"
+    assert definition.artifactKind == "agent_updates"
+    assert definition.mutating
+    assert request.scope.model_dump() == scope
+    assert request.userInstruction == valid_request_values()["userInstruction"]
+
+
+@pytest.mark.parametrize(
+    ("operation", "scope"),
+    [
+        (operation, {"kind": "chapter", "chapterId": "chapter-1"})
+        for operation in ("create_lore", "revise_lore", "create_outline", "revise_outline")
+    ] + [
+        ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-other"}),
+        ("manage_foreshadowing", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+        ("revise_outline", {"kind": "chapter_range", "chapterStartOrder": 1,
+                            "chapterEndOrder": 2}),
+    ],
+)
+def test_structured_operations_reject_wrong_scope_before_storage(
+    operation: str, scope: dict[str, object],
+) -> None:
+    request = LongSerialStartWritingRunRequest.model_validate(
+        valid_request_values() | {"operation": operation, "scope": scope}
+    )
+    with pytest.raises(ApiError) as error:
+        _long_serial_operation_definition(request)
+    assert error.value.code == "LONG_SCOPE_NOT_SUPPORTED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", ["novel-1", "novel-other", None])
+async def test_structured_outline_scope_checks_real_owner(owner: str | None) -> None:
+    request = LongSerialStartWritingRunRequest.model_validate(
+        valid_request_values() | {
+            "operation": "revise_outline",
+            "scope": {"kind": "outline_node", "outlineNodeId": "node-1"},
+        }
+    )
+    session = ScalarSession([owner])
+    if owner == "novel-1":
+        await commands_module._require_long_serial_scope_binding(session, request)
+    else:
+        with pytest.raises(ApiError) as error:
+            await commands_module._require_long_serial_scope_binding(session, request)
+        assert error.value.code == "LONG_SCOPE_NOT_SUPPORTED"
+    assert len(session.statements) == 1
+    assert '"OutlineNode"' in str(session.statements[0])
+    assert "FOR UPDATE" in str(session.statements[0])
+
+
+@pytest.mark.parametrize(
     ("resource_type", "resource_id", "scope"),
     [
         ("outline_content", "outline-1", {"kind": "novel"}),

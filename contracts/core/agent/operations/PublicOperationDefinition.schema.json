@@ -22,7 +22,8 @@
           "enum": [
             "beat_plan",
             "chapter_draft",
-            "outline_draft"
+            "outline_draft",
+            "agent_updates"
           ],
           "type": "string"
         },

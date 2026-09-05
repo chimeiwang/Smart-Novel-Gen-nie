@@ -1,0 +1,43 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/IntentAvailableOperationV2/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "新版解析器的冻结默认范围；操作与范围配对仍由 Core/Agent 校验。",
+  "properties": {
+    "description": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Description",
+      "type": "string"
+    },
+    "operation": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Operation",
+      "type": "string"
+    },
+    "scopeKind": {
+      "enum": [
+        "chapter",
+        "novel"
+      ],
+      "title": "Scopekind",
+      "type": "string"
+    },
+    "targetType": {
+      "const": "chapter",
+      "title": "Targettype",
+      "type": "string"
+    }
+  },
+  "required": [
+    "operation",
+    "description",
+    "targetType",
+    "scopeKind"
+  ],
+  "title": "IntentAvailableOperationV2",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.IntentAvailableOperationV2"
+}

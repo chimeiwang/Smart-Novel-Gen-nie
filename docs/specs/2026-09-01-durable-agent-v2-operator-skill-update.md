@@ -3,7 +3,7 @@
 ## 状态与适用边界
 
 - 日期：2026-09-01
-- 最近更新：2026-09-05；新增审阅/改写章节，本阶段验收状态见对应规格。
+- 最近更新：2026-09-05；补充结构化五项显式/自然接线与仓内 12/21 状态，本批全量门禁见对应规格最终记录。
 - 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
@@ -98,6 +98,38 @@ clientRequestId，网络结果不确定时重放原决定或回读同一 Run，�
 两份 Operator 仍拒绝任何 inputMode、rewrite_scene 和 rewrite_outline_selection；原三操作中的
 review_chapter 只有目标 Core 命中已验收 V2 路由时才返回上述新格式。更新 Skill 时应记录对应 Core 版本、
 固定 JAR 来源和离线验证结果，不能把本节存在解释为安装或生产已经完成。
+
+### 结构化资料显式启动与场景改写补漏（2026-09-05）
+
+普通 Java CLI 与 Python 对照 CLI 的 `long.agent.start` 本批新增 6 个可选 operation 值：五项既有结构化
+业务 create_lore/revise_lore/create_outline/revise_outline/manage_foreshadowing，以及此前已实现但显式
+CLI 白名单遗漏的 rewrite_scene。命令总数仍为 125，不新增参数，不直接暴露 Agent。
+
+- create_lore、revise_lore、create_outline 只用 `scope={"kind":"novel"}`；revise_outline 另允许
+  `{"kind":"outline_node","outlineNodeId":"node-id"}`；manage_foreshadowing 另允许
+  `{"kind":"chapter","chapterId":"chapter-id"}`。rewrite_scene 仍只用同章 chapter scope。
+- 公共 target 一律为 `{"type":"chapter","id":"chapter-id"}`，同请求 chapterId 必须匹配；不能新造
+  lore/outline/foreshadowing/novel target。节点归属由 Core 真实核对，CLI 不根据名称或指令猜 ID。
+- 五项 scope 只是任务焦点，不把 operation 名称变成候选分区或 create/update/delete 限制。五项不携带
+  selectionTarget；writingSessionId 可省略或 null，完整 userInstruction 原样传输。
+- 普通调用仍为 start → watch/get → waiting_user 时精确 artifact.get → 作者确认后 approve/revise/discard；
+  结构化部分采用继续遵循本文件专节，不能把受理、自动复审或来源补齐当作正式写入。
+
+普通 CLI 的完整输入示例见 `tools/inkforge-cli/README.md`“结构化资料的显式启动”。本批仅更新仓内源码及
+说明；五项已在仓内启用，Catalog 为 12/21，公共 HTTP 接线定向验证通过，全量门禁与实际跨进程/供应商状态以
+`2026-09-05-durable-structured-agent-updates.md` 为准；未安装固定 JAR，
+未修改活动 Skills，未部署服务器。两份 Operator 的 45 命令及三操作允许集合保持不变，这 6 项仍被拒绝；
+本节示例不得直接复制成受限 Skill 的可执行步骤，也不得改走裸 CLI 绕过 Operator。
+
+后续更新 `SKILL.md`、`references/cli-contract.md`、`references/long-serial-workflow.md` 时应明确记录这组
+“底层已接线、当前 Operator 未授权”的差异，并保留 Core 公共接口、精确 revision、完整 Diff 确认与同请求重放
+规则。安装包升级、Operator 允许集合变更和目标 Core 启用分别验收，不以文档或源码变化自动执行。
+
+同批通用自然入口改用内部 resolver v3，可选十项无选区操作：create_lore/revise_lore/create_outline/
+revise_outline 默认 novel scope，manage_foreshadowing 与原章节五项默认当前 chapter scope。说明和范围由
+Core 冻结，模型不提供 ID/scope/arguments；节点或其他不匹配范围须澄清或走显式入口。历史 v1/v2 解析器和
+原三项/五项冻结授权不扩大；CLI 不需要传提示词版本或新增参数。自动完整返工最多一次，仍等待作者确认，
+来源补齐不表示正式写入。两份 Operator 继续拒绝自然 inputMode，不能因底层自然集合增加而修改受限 Skill。
 
 2026-09-01 问答阶段的 CLI 命令名不变；当时只有 `long.agent.start` 的 Operation 集合增加了 `answer_question`。已有 Operation 的输入和结果
 语义、身份预检、固定 origin/profile、Keychain 与幂等边界保持不变。`long.task.watch` 的命令名和中断语义不变，
@@ -245,9 +277,9 @@ requestId；新修改要求或新 revision 不能复用旧请求内容，也不�
 
 ## 2026-09-05 结构化资料 V2 部分采用
 
-本节只记录当前分支的 CLI 消费者候选。Operation Catalog 仍为 7/21；`create_lore`、`revise_lore`、
-`create_outline`、`revise_outline`、`manage_foreshadowing` 五项仍为 `v2Enabled=false`，不能因 Core 已接通
-`agent_updates` 候选和决定事务便宣称五项已经可运行。普通 Java/Python CLI 仍为 125 个命令；两份 Operator
+本节最初记录部分采用接线检查点，当时 Catalog 为 7/21、五项结构化操作尚未启用。随后显式/自然入口、自动
+返工和作者采用完成定向验证，当前仓内已启用 12/21；最新门禁及未部署状态见结构化资料规格。
+普通 Java/Python CLI 仍为 125 个命令；两份 Operator
 仍为 45 个命令，`long.agent.start` 仍只允许 `plan_chapter`、`write_chapter`、`review_chapter` 三种 Operation。
 本节没有增加命令、启动参数或 Skill 白名单。
 
@@ -278,8 +310,8 @@ SHA-256 并完成两份入口回归，不能沿用上节旧 JAR 的验收结论�
 
 Agent 仍没有 CLI 直连入口。链路保持
 `Skill scripts/run.sh → Java Operator/CLI → Core /api/v1/** → Agent`，候选生成、来源复验、事务采用和最终状态均由
-Core 负责；CLI 透传选择不等于自行写资料。五项真正启用、固定 JAR/Skill 更新、服务器部署和生产验收继续留待各自
-后续门禁，不能由本节替代。
+Core 负责；CLI 透传选择不等于自行写资料。五项仓内启用不替代固定 JAR/Skill 更新、服务器部署及生产验收，
+后者仍须分别完成，不能由本节代替。
 
 ## 观察与结果恢复
 

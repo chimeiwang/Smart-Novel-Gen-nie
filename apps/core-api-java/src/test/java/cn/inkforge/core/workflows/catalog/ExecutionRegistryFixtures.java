@@ -37,11 +37,19 @@ public final class ExecutionRegistryFixtures {
 
     /** 只在内存打开指定结构化操作，完整复用当前真实 Profile/Prompt/Schema/预算。 */
     public static ExecutionRegistry structuredOperationEnabled(ExecutionRegistry.Environment environment, String key) {
+        return structuredOperationEnabled(environment, key, false);
+    }
+
+    public static ExecutionRegistry structuredOperationEnabled(ExecutionRegistry.Environment environment, String key,
+            boolean legacyReviewPolicy) {
         if (!java.util.Set.of("long_serial.create_lore", "long_serial.revise_lore", "long_serial.create_outline",
                 "long_serial.revise_outline", "long_serial.manage_foreshadowing").contains(key)) {
             throw new IllegalArgumentException("测试夹具只允许指定结构化操作");
         }
-        return modifiedOperation(environment, key, operation -> operation.put("v2Enabled", true));
+        return modifiedOperation(environment, key, operation -> {
+            operation.put("v2Enabled", true);
+            if (legacyReviewPolicy) object(operation.get("reviewPolicy")).put("mergePolicy", "review.merge_all_pass_else_author.v1");
+        });
     }
 
     private static ExecutionRegistry modifiedOperation(ExecutionRegistry.Environment environment, String key,
@@ -61,11 +69,10 @@ public final class ExecutionRegistryFixtures {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> operations =
                 (List<Map<String, Object>>) catalog.get("operations");
-        Map<String, Object> selectionOperation = operations.stream()
-                .filter(operation -> key.equals(operation.get("key")))
-                .findFirst()
-                .orElseThrow();
-        modification.accept(selectionOperation);
+        Map<String, Object> selected = operations.stream()
+                .filter(operation -> key.equals(operation.get("key"))).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("测试夹具引用未知操作"));
+        modification.accept(selected);
         byte[] changedCatalog = JSON.writeValueAsBytes(catalog);
         documents.put(catalogPath, changedCatalog);
         catalogEntry.put("sha256", sha256(changedCatalog));

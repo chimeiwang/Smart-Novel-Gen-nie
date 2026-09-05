@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jooq.DSLContext;
 import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.databind.ObjectMapper;
@@ -38,16 +39,25 @@ import tools.jackson.databind.ObjectMapper;
  */
 final class LongSerialRunAssembler {
 
-    private static final Map<String, Definition> DEFINITIONS = Map.of(
-            "answer_question", new Definition("编辑", List.of(), false, "chapter"),
-            "plan_chapter", new Definition("剧情", List.of("编辑"), true, "chapter"),
-            "rewrite_scene", new Definition("写作", List.of("校验", "编辑"), true, "chapter"),
-            "rewrite_chapter_selection",
-                    new Definition("写作", List.of("校验", "编辑"), true, "chapter"),
-            "rewrite_outline_selection",
-                    new Definition("剧情", List.of("编辑"), true, "outline"),
-            "write_chapter", new Definition("写作", List.of("校验", "编辑"), true, "chapter"),
-            "review_chapter", new Definition("编辑", List.of(), false, "chapter"));
+    private static final Map<String, Definition> DEFINITIONS = Map.ofEntries(
+            Map.entry("answer_question", new Definition("编辑", List.of(), false, "chapter")),
+            Map.entry("create_lore", new Definition("设定", List.of("校验"), true, "lore")),
+            Map.entry("revise_lore", new Definition("设定", List.of("校验"), true, "lore")),
+            Map.entry("create_outline", new Definition("剧情", List.of("编辑"), true, "outline")),
+            Map.entry("revise_outline", new Definition("剧情", List.of("编辑"), true, "outline")),
+            Map.entry("plan_chapter", new Definition("剧情", List.of("编辑"), true, "chapter")),
+            Map.entry("rewrite_scene", new Definition("写作", List.of("校验", "编辑"), true, "chapter")),
+            Map.entry(
+                    "rewrite_chapter_selection",
+                    new Definition("写作", List.of("校验", "编辑"), true, "chapter")),
+            Map.entry(
+                    "rewrite_outline_selection",
+                    new Definition("剧情", List.of("编辑"), true, "outline")),
+            Map.entry("write_chapter", new Definition("写作", List.of("校验", "编辑"), true, "chapter")),
+            Map.entry("review_chapter", new Definition("编辑", List.of(), false, "chapter")),
+            Map.entry(
+                    "manage_foreshadowing",
+                    new Definition("剧情", List.of("校验"), true, "foreshadowing")));
 
     private final ObjectMapper json;
     private final WritingSourceBindingCapture bindings;
@@ -93,6 +103,7 @@ final class LongSerialRunAssembler {
             Definition definition) {
         List<Map<String, Object>> sourceBindings =
                 new ArrayList<>(bindings.capture(transaction, request.getNovelId(), request.getChapterId()));
+        requireOwnedScopeFocus(transaction, request);
         Map<String, Object> selectionSnapshot = null;
         Map<String, Object> attachment = null;
         int targetWordCount = request.getTargetWordCount();
@@ -162,6 +173,15 @@ final class LongSerialRunAssembler {
             } else {
                 identitySupported = false;
             }
+        } else if (Set.of("create_lore", "revise_lore", "create_outline").contains(operation)) {
+            identitySupported = request.getScope() instanceof NovelScope;
+        } else if ("revise_outline".equals(operation)) {
+            identitySupported = request.getScope() instanceof NovelScope
+                    || request.getScope() instanceof OutlineNodeScope;
+        } else if ("manage_foreshadowing".equals(operation)) {
+            identitySupported = request.getScope() instanceof NovelScope
+                    || request.getScope() instanceof ChapterScope chapter
+                            && request.getChapterId().equals(chapter.getChapterId());
         } else {
             identitySupported = request.getScope() instanceof ChapterScope chapter
                     && request.getChapterId().equals(chapter.getChapterId());
@@ -170,6 +190,22 @@ final class LongSerialRunAssembler {
                 && request.getChapterId().equals(request.getTarget().getId());
         if (!identitySupported || !targetSupported) throw unsupported();
         return definition;
+    }
+
+    private static void requireOwnedScopeFocus(
+            DSLContext transaction, LongSerialStartWritingRunRequest request) {
+        if (!"revise_outline".equals(request.getOperation().getValue())
+                || !(request.getScope() instanceof OutlineNodeScope outline)) {
+            return;
+        }
+        String owned = transaction.select(OUTLINENODE.ID)
+                .from(OUTLINENODE)
+                .where(
+                        OUTLINENODE.ID.eq(outline.getOutlineNodeId()),
+                        OUTLINENODE.NOVELID.eq(request.getNovelId()))
+                .forUpdate()
+                .fetchOne(OUTLINENODE.ID);
+        if (!outline.getOutlineNodeId().equals(owned)) throw unsupported();
     }
 
     private Map<String, Object> captureSelection(

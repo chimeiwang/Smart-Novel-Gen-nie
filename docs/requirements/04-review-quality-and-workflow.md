@@ -134,7 +134,13 @@ stateDiagram-v2
 
 2026-09-05 工作分支已实现 agent_updates 的 Core 审核读取与决定适配。原始 summary/updates 保存到精确
 Artifact revision；展示的完整 Diff 和采用 payload 由 Core 从冻结来源派生，不信任模型自报旧值，也不从当前
-作品状态补回历史来源。五项业务入口仍未启用，具体端到端进度见结构化资料迁移规格。
+作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通，Catalog 为 12/21；隔离公共 HTTP
+接线已验证，实际 Agent/供应商、全量门禁和生产状态分别以结构化资料迁移规格记录为准。
+
+新冻结复审策略只在完整 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，
+允许最多一次完整自动返工；返工绑定原指令、上一精确 summary/updates 和同一冻结来源，再次专用复审。
+不支持正文 patch，不从建议散文修改字典；二轮剩余问题、结构性问题、复审不可用或额度不足保留候选交作者。
+来源补齐仍消耗原业务四次模型额度，但不计为一次候选返工；旧冻结复审策略保持原来的交作者语义。
 
 approve 保留 selectedUpdateRefs 的原分区/数组下标：省略或 null 全选，空数组不等于全选；不自动补选
 依赖项。Core 只复验实际采用目标及必要依赖，同一事务完成正式写入、Artifact 与 Run 状态；无关未选资料的

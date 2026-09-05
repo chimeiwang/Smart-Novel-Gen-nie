@@ -191,6 +191,15 @@
       "deploymentProfileKey": "deployment.system.intent_resolver.v2"
     },
     {
+      "key": "system.intent_resolver.v3",
+      "version": 3,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.system.intent_resolver.v3",
+      "deploymentProfileKey": "deployment.system.intent_resolver.v3"
+    },
+    {
       "key": "system.protocol_corrector.v1",
       "version": 1,
       "supported": false,

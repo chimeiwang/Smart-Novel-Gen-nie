@@ -126,8 +126,9 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
   不新增程序场景边界，不覆盖进展、计划或设定。
 - 大纲选区冻结总纲/节点真实行 ID、版本、全文/选区哈希和码点范围，单编辑复审；明确局部问题可完整
   返工一次，剩余问题交作者。正式采用只拼接原选区外文本与 replacement，不改变节点结构或章节。
-- 新自然请求可选择问答、规划、正文、审阅、场景改写五项，使用 v2 意图提示词读取本次冻结的可选列表。
-  已冻结的三项或五项计划保留原 v1 解析器及哈希，不在恢复时换用新提示词。大纲选区继续显式绑定来源，
+- 该审阅/改写切片最初将自然请求扩为问答、规划、正文、审阅、场景改写五项，使用 v2 意图提示词读取冻结列表；
+  后续结构化接线已改用 v3 的十项授权，见下节。
+  已冻结的三项或五项计划保留各自原解析器及哈希，不在恢复时换用新提示词。大纲选区继续显式绑定来源，
   不能由意图解析器猜测选区。
 
 ## V2 设定、大纲与伏笔迁移进度
@@ -139,8 +140,13 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 补齐新版本来源并接续生成，不覆盖旧快照，不扩大原模型调用额度。重复请求、无新增来源或来源冲突都有明确收敛。
 完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 
-五项仍为 v2Enabled=false；自动完整返工和显式/自然入口尚未全部完成，不能把底层实现解释为
-用户已经可以启动这些 V2 操作。现有 V1 业务、当前启用的七项 V2 操作和 Operator 三操作白名单不变。
+五项显式/自然入口、最多一次自动完整返工及作者采用已接通，仓内 Catalog 已启用 12/21，其中自然入口支持
+十项无选区操作；另九项尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
+启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
+显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
+manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节锚点，scope 不取消既有跨分区候选能力。
+生成及复审完整保存候选；高置信局部问题最多自动完整返工一次，其他问题和额度不足交作者；业务最多四次模型调用。
+现有 V1 业务、前序七项 V2 及 Operator 三操作白名单不变，本批没有更新固定 JAR、活动 Skills 或部署服务器。
 Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组织，正式写入只由作者确认后的 Core 执行。
 
 ## 目标
@@ -296,9 +302,13 @@ flowchart TD
 
 - 普通新消息向 `POST /api/v1/writing/runs` 提交 `inputMode=natural`、`workflow=long_serial`、
   clientRequestId、novelId、chapterId、writingSessionId、完整 userInstruction 和可选 targetWordCount。
-  不携带 selectedAgents、operation 或模型推测的目标；Core 固定当前章，先创建独立 resolve_intent Step。
-- 当前可选择已实现的章节问答、章节规划、整章正文写作、整章审阅与场景改写；选区仍走显式来源绑定请求。
+  不携带 selectedAgents、operation 或模型推测的目标；Core 保留当前章锚点，先创建独立 resolve_intent Step。
+- 新请求由 resolver v3 从冻结的十项授权中选择：原章节问答、规划、正文、审阅、场景改写与管理伏笔默认当前
+  chapter scope；新建/修改设定、创建/修改大纲默认 novel scope。范围及说明随 availableOperations 冻结，
+  明确节点或其他不匹配范围必须澄清或使用既有显式入口，不让模型猜 scope/ID。两类选区仍需显式绑定来源。
   解析完成后在同一个 Run 内冻结业务来源并接续执行，不改写 Run 初始请求或 operation 列。
+- 新 selection v2 沿用原字段并保留章节 target；准备、恢复和复审共用冻结 scope。历史 resolver v1/v2、
+  selection v1、原三项/五项授权及预算保持，不因当前目录增加操作而扩大旧 Run。
 - `waiting_user` 必须区分澄清与待审草案。澄清问题通过快照的 clarification 恢复，回答使用
   `POST /api/v1/writing/runs/{runId}/clarification`，绑定 clientRequestId、expectedRevision、
   decisionStepId 和完整 userMessage。同一回答幂等重放受理时的快照；最多两次回答后仍不能确定意图则失败。

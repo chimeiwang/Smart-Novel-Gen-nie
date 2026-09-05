@@ -29,6 +29,80 @@ class LongWorkflowMutationsTest {
     private final JsonMapper json = JsonMapper.builder().build();
 
     @Test
+    void 结构化五项与既有场景改写只透传公共章节锚点和既定范围() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        for (String operation : List.of("create_lore", "revise_lore", "create_outline",
+                "revise_outline", "manage_foreshadowing", "rewrite_scene")) {
+            List<String> scopes = switch (operation) {
+                case "revise_outline" -> List.of("{\"kind\":\"novel\"}",
+                        "{\"kind\":\"outline_node\",\"outlineNodeId\":\"node-1\"}");
+                case "manage_foreshadowing" -> List.of("{\"kind\":\"novel\"}",
+                        "{\"kind\":\"chapter\",\"chapterId\":\"c1\"}");
+                case "rewrite_scene" -> List.of("{\"kind\":\"chapter\",\"chapterId\":\"c1\"}");
+                default -> List.of("{\"kind\":\"novel\"}");
+            };
+            for (String scope : scopes) {
+                ObjectNode payload = structuredStartPayload(operation, scope);
+                ObjectNode expected = payload.deepCopy();
+                expected.put("workflow", "long_serial");
+                assertJsonRequest(application, api, "long.agent.start", payload.toString(),
+                        "POST", "/api/v1/writing/runs", expected.toString());
+            }
+        }
+    }
+
+    @Test
+    void 结构化非法范围在发送网络前拒绝() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        Map<String, List<String>> invalidScopes = Map.of(
+                "create_lore", List.of("{\"kind\":\"chapter\",\"chapterId\":\"c1\"}"),
+                "revise_lore", List.of("{\"kind\":\"outline_node\",\"outlineNodeId\":\"node-1\"}"),
+                "create_outline", List.of("{\"kind\":\"outline_node\",\"outlineNodeId\":\"node-1\"}"),
+                "revise_outline", List.of("{\"kind\":\"chapter\",\"chapterId\":\"c1\"}",
+                        "{\"kind\":\"outline_node\"}", "{\"kind\":\"outline_node\",\"outlineNodeId\":\"\"}",
+                        "{\"kind\":\"outline_node\",\"outlineNodeId\":3}"),
+                "manage_foreshadowing", List.of("{\"kind\":\"chapter\",\"chapterId\":\"other\"}",
+                        "{\"kind\":\"outline_node\",\"outlineNodeId\":\"node-1\"}",
+                        "{\"kind\":\"chapter_range\",\"chapterStartOrder\":1,\"chapterEndOrder\":2}"));
+        invalidScopes.forEach((operation, scopes) -> scopes.forEach(scope -> {
+            Result rejected = run(application, "long.agent.start", structuredStartPayload(operation, scope).toString());
+            assertThat(rejected.exit()).isEqualTo(2);
+            assertThat(rejected.stdout()).contains("INVALID_SCOPE");
+        }));
+        assertThat(api.calls).isEmpty();
+    }
+
+    @Test
+    void 结构化操作不接受新公共目标或伪造选区() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        ObjectNode target = structuredStartPayload("create_lore", "{\"kind\":\"novel\"}");
+        target.set("target", json.readTree("{\"type\":\"novel\",\"id\":\"n1\"}"));
+        Result invalidTarget = run(application, "long.agent.start", target.toString());
+        assertThat(invalidTarget.exit()).isEqualTo(2);
+        assertThat(invalidTarget.stdout()).contains("INVALID_TARGET");
+        ObjectNode selection = structuredStartPayload("create_lore", "{\"kind\":\"novel\"}");
+        selection.set("selectionTarget", json.createObjectNode());
+        Result invalidSelection = run(application, "long.agent.start", selection.toString());
+        assertThat(invalidSelection.exit()).isEqualTo(2);
+        assertThat(invalidSelection.stdout()).contains("SELECTION_TARGET_FORBIDDEN");
+        assertThat(api.calls).isEmpty();
+    }
+
+    private ObjectNode structuredStartPayload(String operation, String scope) {
+        ObjectNode payload = (ObjectNode) json.readTree("""
+                {"clientRequestId":"structured-start-0001","novelId":"n1","chapterId":"c1",
+                 "target":{"type":"chapter","id":"c1"},"writingSessionId":null,
+                 "userInstruction":"  核对资料并形成建议。\\r\\n末尾😀  "}
+                """);
+        payload.put("operation", operation);
+        payload.set("scope", json.readTree(scope));
+        return payload;
+    }
+
+    @Test
     void 自然新消息与澄清回答使用独立请求形状并保留原文() {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);

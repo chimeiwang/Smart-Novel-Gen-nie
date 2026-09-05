@@ -84,6 +84,8 @@ def test_agent_contract_schema_baseline_is_complete_and_reproducible(tmp_path: P
         "execution/ExecutionStepFailure.schema.json",
         "execution/ExecutionStepRequest.schema.json",
         "execution/ExecutionStepResult.schema.json",
+        "execution/IntentAvailableOperationV2.schema.json",
+        "execution/IntentContextV2.schema.json",
         "execution/PromptProfileRef.schema.json",
         "jobs/AgentJobRequest.schema.json",
         "jwt_claims/ServiceJwtClaims.schema.json",
