@@ -211,7 +211,8 @@ def test_rollback_restores_current_stack_when_verification_fails() -> None:
     assert "restore_current" in source
     assert "trap" in source
     assert "sh scripts/compose_smoke.sh" in source
-    assert "/usr/local/bin/inkforge-schema-guard" in source
+    assert "verify-running-core-schema.sh" in source
+    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in source
     assert "--compatibility-fingerprint-v1" in source
     assert "inkforge_core.db.schema_guard" in source
     assert "compose.python-core-rollback.yaml" in source

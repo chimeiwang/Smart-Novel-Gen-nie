@@ -29,8 +29,9 @@ GitHub Actions 先运行 CI，再构建并上传三张提交哈希镜像。服�
    的根目录所有权；
 4. 只通过已审核 helper 处理既有具名 `TokenUsage` 生产迁移门禁；
 5. 以 `--no-build` 原位替换同名服务，不创建第二个 Core；
-6. 调用镜像内 `/usr/local/bin/inkforge-schema-guard`，再执行上传卷/日志卷真实写入、HTTP、内部路由和
-   Agent 稳定就绪冒烟；
+6. 使用 `scripts/verify-running-core-schema.sh <完整Core容器ID>`，以运行实例的不可变镜像及实际数据库
+   配置，在独立受限的一次性容器中运行结构守卫；禁止在活动 Core 容器内额外启动 JVM。随后执行
+   上传卷/日志卷真实写入、HTTP、内部路由和 Agent 稳定就绪冒烟；
 7. 任一步失败时保持原始失败码，并按上一 Core 类型恢复第 2 步冻结的精确三服务快照。
 
 回滚标签只是指向三个既有镜像 ID 的本地别名，不会复制镜像层，也不能据此把三个来源不同的历史版本重新

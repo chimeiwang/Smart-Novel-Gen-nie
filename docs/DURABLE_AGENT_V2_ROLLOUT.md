@@ -66,6 +66,11 @@ scripts/durable-agent-v2-rollout-gate.sh \
 门禁同时验证结构状态、`.env` 路由组合、双 contract/V2-aware 镜像、Java 精确 schema guard、Core/Agent
 readiness、execution Redis AOF、quarantine 和 eviction。任何一项失败都不得手工跳过。
 
+Java 结构检查统一通过 `scripts/verify-running-core-schema.sh <完整Core容器ID>`，在独立受限的一次性容器
+中运行现场不可变镜像内的守卫，并核对业务 Core 前后没有换实例或重启。不要手工向活动 Core 执行
+`docker exec ... inkforge-schema-guard`：即使 SQL 只读，第二个 JVM 仍会争用业务容器的 448 MiB 内存。
+该命令只属于维护者的运维工具，不是产品 CLI 或 Operator Skill 命令。
+
 ### 2.1 已退役控制面与替代入口
 
 个人项目不再提供独立的 Durable Agent release/development-evidence Workflow，也不再提供

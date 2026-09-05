@@ -80,7 +80,7 @@ compose_for_runtime() {
 
 # 指纹统一投影到 v1 兼容面，允许比较历史 Python guard 与 Java guard，而不掩盖真实表结构差异。
 java_schema_fingerprint() {
-  compose_java exec -T core-api /usr/local/bin/inkforge-schema-guard \
+  sh scripts/verify-running-core-schema.sh "$(compose_java ps -q core-api)" \
     --compatibility-fingerprint-v1
 }
 
@@ -115,7 +115,7 @@ run_smoke() {
 restore_current() {
   export INKFORGE_IMAGE_TAG="$CURRENT_IMAGE_TAG"
   compose_java up -d --no-build --wait &&
-  compose_java exec -T core-api /usr/local/bin/inkforge-schema-guard >/dev/null &&
+  sh scripts/verify-running-core-schema.sh "$(compose_java ps -q core-api)" >/dev/null &&
   run_smoke java
 }
 

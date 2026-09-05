@@ -117,4 +117,6 @@
 - execution journal 容量与恢复演练：`docs/audits/2026-09-01-execution-journal-capacity.md`
 - 生产部署：`infra/compose.yaml`
 - 生产发布入口：`.github/workflows/build.yml`、`scripts/deploy-production.sh`
+- 运行中 Core 的结构探针进程隔离：`docs/specs/2026-09-06-schema-probe-memory-isolation.md`
+- Durable Agent 发布前现场检查：`docs/audits/2026-09-06-durable-agent-release-preflight.md`
 - Durable Agent V2 人工迁移与 canary：`docs/DURABLE_AGENT_V2_ROLLOUT.md`

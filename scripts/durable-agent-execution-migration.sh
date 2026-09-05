@@ -1236,7 +1236,7 @@ require_compatible_core_and_exact_contract() {
     "grep -aFq 'pre-durable-agent-v2/schema-contract.json' /app/inkforge-core-api.jar && \
      grep -aFq 'post-durable-agent-v2/schema-contract.json' /app/inkforge-core-api.jar && \
      grep -aFq 'DurableAgentSchemaGate.class' /app/inkforge-core-api.jar" >/dev/null
-  compose exec -T core-api /usr/local/bin/inkforge-schema-guard >/dev/null
+  sh "$app_dir/scripts/verify-running-core-schema.sh" "$(compose ps -q core-api)" >/dev/null
 }
 
 read_core_schema_profile() {
@@ -1273,7 +1273,7 @@ read_core_schema_profile() {
 }
 
 read_live_guard_fingerprint() {
-  fingerprint="$(compose exec -T core-api /usr/local/bin/inkforge-schema-guard | tr -d '\r')" || {
+  fingerprint="$(sh "$app_dir/scripts/verify-running-core-schema.sh" "$(compose ps -q core-api)" | tr -d '\r')" || {
     echo "实时 Java schema guard 无法生成 fingerprint" >&2
     exit 1
   }

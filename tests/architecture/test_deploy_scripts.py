@@ -531,6 +531,13 @@ def _run_deploy(
     shutil.copy2(ROOT / "scripts" / "compose_smoke.sh", app_dir / "scripts")
     (app_dir / "scripts" / "compose_smoke.sh").chmod(0o755)
     shutil.copy2(ROOT / "scripts" / "agent_readiness_probe.py", app_dir / "scripts")
+    _write_executable(
+        app_dir / "scripts" / "verify-running-core-schema.sh",
+        "#!/bin/sh\n"
+        '[ "$1" = container-core-api ] || exit 2\n'
+        'printf \'schema-probe %s\\n\' "$1" >> "$FAKE_DOCKER_LOG"\n'
+        'exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}"\n',
+    )
     source_manifest = ROOT / "contracts" / "agent-execution" / "manifest.json"
     fixture_manifest = app_dir / "contracts" / "agent-execution" / "manifest.json"
     shutil.copy2(source_manifest, fixture_manifest)
@@ -822,7 +829,8 @@ def test_successful_deployment_refreshes_nginx_with_new_tag(tmp_path: Path) -> N
         ("tag=new-tag", "全栈"),
         ("tag=new-tag", "Nginx"),
     ]
-    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" in log
+    assert "schema-probe container-core-api" in log
+    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in log
     assert "exec -T core-api python -c" not in log
 
 
@@ -886,7 +894,7 @@ def test_deployment_requires_java_core_label_and_uses_java_schema_guard() -> Non
 
     assert "cn.inkforge.core.runtime" in source
     assert "新 Core 镜像不是 Java runtime" in source
-    assert "/usr/local/bin/inkforge-schema-guard" in source
+    assert "verify-running-core-schema.sh" in source
     assert "compose_python_rollback" in source
     assert "compose.python-core-rollback.yaml" in source
 
@@ -972,7 +980,8 @@ def test_failed_new_version_restores_previous_java_with_java_guard(
         "tag=rollback-new-tag",
     ]
     assert "compose.python-core-rollback.yaml" not in up_lines[1]
-    assert log.count("exec -T core-api /usr/local/bin/inkforge-schema-guard") == 1
+    assert log.count("schema-probe container-core-api") == 1
+    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in log
     assert "exec -T core-api python -c" not in log
     assert "新版本部署失败，旧版本已恢复" in result.stdout
 

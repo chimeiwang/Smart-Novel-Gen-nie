@@ -233,6 +233,11 @@ fingerprint 不同时，生产部署必须先从当前运行 Core 容器的实�
 `engineVersion=2` `WorkflowRun` 均为终态、非终态数量为 0；查询失败、结果非法或仍有任一非终态 Run 都必须停止。
 allowlist 仍要求目标、回滚与发布预期三方 fingerprint 完全相同。
 
+Java 实时结构检查通过 `scripts/verify-running-core-schema.sh` 使用运行中 Core 的完整容器 ID、不可变
+镜像与最小数据库配置，在独立受限的一次性容器中执行；检查前后必须确认业务 Core 未换实例或重启。
+禁止为只读结构校验在活动 Core 的 448 MiB 容器内额外启动 JVM；不得用缓存 readiness 替代实时指纹。
+该维护脚本不是产品 CLI，不加入 Operator Skill 允许命令。
+
 网络边界：
 
 - `public_net`：Nginx、Web、Core、Agent；Agent 不发布宿主机端口，仅使用该网络访问模型供应商；

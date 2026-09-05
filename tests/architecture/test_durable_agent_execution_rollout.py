@@ -65,6 +65,18 @@ def _posix_path(path: Path) -> str:
     return f"/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}"
 
 
+def _write_schema_probe_stub(app_dir: Path) -> None:
+    # 门禁测试替换外部探针；真实探针的资源、凭据和实例校验由其独立测试覆盖。
+    _write_executable(
+        app_dir / "scripts" / "verify-running-core-schema.sh",
+        "#!/bin/sh\n"
+        '[ "$1" = "$(printf \'%064d\' 1)" ] || exit 2\n'
+        '[ "${FAKE_CONTRACT_GUARD_STATUS:-0}" = 0 ] '
+        '|| exit "$FAKE_CONTRACT_GUARD_STATUS"\n'
+        'printf \'%s\\n\' "${FAKE_SCHEMA_GUARD_FINGERPRINT:-}"\n',
+    )
+
+
 def _execution_manifest_fingerprint(path: Path) -> str:
     document = json.loads(path.read_text(encoding="utf-8"))
     canonical = json.dumps(
@@ -315,6 +327,7 @@ class MigrationFixture:
         shutil.copy2(PRE_CONTRACT, pre_dir / PRE_CONTRACT.name)
         shutil.copy2(POST_CONTRACT, post_dir / POST_CONTRACT.name)
         shutil.copy2(ROOT / "scripts" / "backup.sh", self.app_dir / "scripts")
+        _write_schema_probe_stub(self.app_dir)
         shutil.copy2(
             ROOT / "scripts" / "durable_agent_contract_evidence.py",
             self.app_dir / "scripts",
@@ -496,9 +509,6 @@ case " $* " in
   *' compose '*' exec -T execution-redis redis-cli --raw EVAL '*)
     printf '%s\n' "${FAKE_V2_DRAIN_INITIALIZE_RESULT:-initialized}" ;;
   *' compose '*' exec -T agent-service python -c '*) exit 0 ;;
-  *' compose '*' exec -T core-api /usr/local/bin/inkforge-schema-guard '*)
-    [ "${FAKE_CONTRACT_GUARD_STATUS:-0}" = 0 ] || exit "$FAKE_CONTRACT_GUARD_STATUS"
-    printf '%s\n' "$FAKE_SCHEMA_GUARD_FINGERPRINT" ;;
   *'INKFORGE_EXPECTED_DATABASE='*)
     [ "${FAKE_CORE_DATABASE_MATCH:-true}" = true ] || exit 31
     printf '%s\n' "${FAKE_SCHEMA_PROFILE:-full}" ;;
@@ -1482,6 +1492,7 @@ def _run_rollout_gate(
         ROOT / "contracts" / "agent-execution" / "manifest.json",
         app_dir / "contracts" / "agent-execution" / "manifest.json",
     )
+    _write_schema_probe_stub(app_dir)
     _write_executable(
         app_dir / "scripts" / "durable-agent-execution-migration.sh",
         "#!/bin/sh\n"
@@ -1506,6 +1517,7 @@ def _run_rollout_gate(
         'case " $* " in\n'
         "  *' compose version '*) exit 0 ;;\n"
         "  *' compose '*' ps -q agent-service '*) printf 'agent-container\\n' ;;\n"
+        "  *' compose '*' ps -q core-api '*) printf '%064d\\n' 1 ;;\n"
         '  *" exec -T core-api /bin/sh -ec "*"V1FreshAgentStartGate.class"*)\n'
         '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "off" ] '
         '&& [ "$FAKE_RUNNING_CORE_V1_FRESH_STARTS" = "false" ] ;;\n'
@@ -1660,7 +1672,8 @@ def test_rollout_gate_freezes_the_staged_route_matrix() -> None:
     assert "DURABLE_AGENT_EXECUTION_SCHEMA_READY" in source
     assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE" in source
     assert "V1_FRESH_AGENT_STARTS_ENABLED" in source
-    assert "inkforge-schema-guard" in source
+    assert "verify-running-core-schema.sh" in source
+    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in source
     assert "restore:quarantine" in source
     assert "evicted_keys" in source
     assert "verify-durable-agent-v2-image.sh" in source
@@ -2102,8 +2115,7 @@ def test_status_query_recognizes_real_postgres14_pre_post_and_partial_shapes(
         "printf 'docker %s\\n' \"$*\" >> \"$MIGRATION_LOG\"\n"
         "case \" $* \" in\n"
         "  *' compose version '*) exit 0 ;;\n"
-        "  *' /usr/local/bin/inkforge-schema-guard '*) "
-        f"printf '%s\\n' '{expected_fingerprint}' ;;\n"
+        "  *' compose '*' ps -q core-api '*) printf '%064d\\n' 1 ;;\n"
         "  *'INKFORGE_EXPECTED_DATABASE='*) printf '%s\\n' full ;;\n"
         "  *' compose '*' exec -T core-api '*) exit 0 ;;\n"
         "  *) exit 0 ;;\n"

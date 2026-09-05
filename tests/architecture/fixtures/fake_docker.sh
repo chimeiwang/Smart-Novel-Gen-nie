@@ -33,6 +33,7 @@ if [ "${1:-}" = "compose" ]; then
       fi
       exit "${FAKE_ROLLBACK_UP_STATUS:-0}"
       ;;
+    *" ps -q core-api "*) printf '%s\n' container-core-api; exit 0 ;;
     *" ps "*) exit 0 ;;
     *" port nginx 8080 "*) printf '%s\n' "${FAKE_NGINX_BINDING:-0.0.0.0:80}"; exit 0 ;;
     *" exec -T core-api /usr/local/bin/inkforge-schema-guard "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;

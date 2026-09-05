@@ -317,7 +317,7 @@ require_route_off_execution_manifest() {
 }
 
 require_exact_contract() {
-  compose exec -T core-api /usr/local/bin/inkforge-schema-guard >/dev/null || {
+  sh "$app_dir/scripts/verify-running-core-schema.sh" "$(compose ps -q core-api)" >/dev/null || {
     echo "实时 PostgreSQL 未精确命中兼容镜像内任一冻结 contract" >&2
     exit 1
   }

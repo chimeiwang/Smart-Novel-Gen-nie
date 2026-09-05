@@ -98,7 +98,7 @@ refresh_nginx() {
 
 find_service_container() {
   service="$1"
-  docker ps -q \
+  docker ps --no-trunc -q \
     --filter "label=com.docker.compose.project=inkforge" \
     --filter "label=com.docker.compose.service=$service" \
     | head -n 1
@@ -160,7 +160,7 @@ PY
 
 verify_java_stack() {
   compose ps &&
-  compose exec -T core-api /usr/local/bin/inkforge-schema-guard &&
+  sh scripts/verify-running-core-schema.sh "$(compose ps -q core-api)" &&
   COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
 }
 
@@ -603,7 +603,7 @@ else
         route_off_manifest_mismatch="1"
       fi
     fi
-    docker exec "$core_container" /usr/local/bin/inkforge-schema-guard >/dev/null || {
+    sh scripts/verify-running-core-schema.sh "$core_container" >/dev/null || {
       echo "迁移后实时 PostgreSQL 未精确命中冻结 contract，停止部署" >&2
       exit 1
     }
