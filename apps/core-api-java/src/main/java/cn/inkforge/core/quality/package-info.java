@@ -4,6 +4,9 @@
             "db",
             "generated",
             "identity::authentication",
-            "platform"
+            "platform",
+            "workflows::catalog",
+            "workflows::execution",
+            "workflows::protocol"
         })
 package cn.inkforge.core.quality;

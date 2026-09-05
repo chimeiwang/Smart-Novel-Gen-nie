@@ -184,6 +184,31 @@ def test_short_medium_phase_extends_same_harness_and_keeps_production_provider_u
         assert forbidden not in scenarios
 
 
+def test_quality_phase_reuses_original_public_api_and_failure_journal_restart_without_ddl() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    scenarios = (ROOT / "tests/durable_agent_v2_e2e/quality.py").read_text(encoding="utf-8")
+    fixture = (ROOT / "tests/durable_agent_v2_e2e/quality_fixture.py").read_text(encoding="utf-8")
+    provider = PROVIDER.read_text(encoding="utf-8")
+    assert 'phase == "quality"' in runner
+    assert "quality_turn_result(request)" in provider
+    assert 'f"/api/v1/quality-checks/{check_id}/run"' in scenarios
+    assert 'f"/api/v1/quality-checks/{check_id}"' in scenarios
+    assert 'restart_and_wait("agent-service")' in scenarios
+    assert '"hold_before_forward"' in scenarios
+    assert "minimum_reached=2" in scenarios
+    assert 'expected_state="failure" if failed else "result"' in scenarios
+    assert '"matchedBillingCount"' in scenarios
+    assert '"terminalEventCount": 1' in scenarios
+    assert '"MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED"' in fixture
+    assert 'invalidToolCallCodes=["json_decode_error"] if invalid else []' in fixture
+    assert 'finishReason="tool_calls"' in fixture
+    for forbidden in (
+        "INSERT INTO", "UPDATE public.", "DELETE FROM",
+        "compose.yaml", "api.deepseek.com", "inkforge.cn",
+    ):
+        assert forbidden not in scenarios + fixture
+
+
 def test_callback_proxy_records_complete_identity_and_can_drop_only_after_forward() -> None:
     source = CONTROL.read_text(encoding="utf-8")
     for field in (

@@ -113,6 +113,181 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 质量坏报告独立纠正且重复回调不重复调用或结算() {
+        QualityFlow flow = qualityFlow("quality-correction");
+        var first = flow.request();
+        var failure = qualityFailure(first, "MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED", answerUsage());
+        assertThat(flow.callbacks().failure(failure).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(flow.callbacks().failure(failure).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(runStatus(first.getRunId())).isEqualTo("running");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(2);
+        var correction = flow.dispatches().claimNext().orElseThrow();
+        assertThat(correction.getPurpose()).isEqualTo("protocol_correction");
+        assertThat(correction.getEvidenceBundle()).isEqualTo(first.getEvidenceBundle());
+        assertThat(correction.getInput()).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "userInstruction", "检查本章一致性", "failedStepId", first.getStepId(),
+                "failedResultHash", failure.getResultHash(), "failureCode", "MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED"));
+        assertThat(correction.getModelProfile().getProfile()).isEqualTo("system.quality_protocol_corrector.v2");
+        assertThat(correction.getBudget().getMaxModelCalls()).isEqualTo(1);
+        prepareQuality(flow, correction);
+        var result = qualityResult(correction);
+        assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(runStatus(first.getRunId())).isEqualTo("completed");
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND status = 'settled'", first.getRunId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvent\" WHERE \"runId\" = ? AND \"eventType\" = 'completed'", first.getRunId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvaluation\" WHERE \"runId\" = ?", first.getRunId())).isZero();
+    }
+
+    @Test
+    void 质量未知用量来源失效或二次失败都不会追加第三次模型() {
+        QualityFlow unknown = qualityFlow("quality-unknown");
+        unknown.callbacks().failure(qualityFailure(unknown.request(), "MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED",
+                new StepUsage(0, 1, StepUsage.UsageStatusEnum.UNKNOWN, 1000)));
+        assertThat(runStatus(unknown.request().getRunId())).isEqualTo("failed");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", unknown.request().getRunId())).isEqualTo(1);
+
+        QualityFlow invalid = qualityFlow("quality-invalid");
+        org.mockito.Mockito.when(invalid.projection().isInvalidated(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        org.mockito.Mockito.when(invalid.projection().finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("failed"))).thenReturn("cancelled");
+        invalid.callbacks().failure(qualityFailure(invalid.request(), "MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED", answerUsage()));
+        assertThat(runStatus(invalid.request().getRunId())).isEqualTo("cancelled");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", invalid.request().getRunId())).isEqualTo(1);
+
+        QualityFlow twice = qualityFlow("quality-twice");
+        twice.callbacks().failure(qualityFailure(twice.request(), "MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED", answerUsage()));
+        var correction = twice.dispatches().claimNext().orElseThrow();
+        prepareQuality(twice, correction);
+        twice.callbacks().failure(qualityFailure(correction, "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED", answerUsage()));
+        assertThat(runStatus(correction.getRunId())).isEqualTo("failed");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", correction.getRunId())).isEqualTo(2);
+        org.mockito.Mockito.verify(twice.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(correction.getRunId()), org.mockito.ArgumentMatchers.eq("failed"));
+    }
+
+    @Test
+    void 质量提交拒绝取消和取消过期均调用业务终态投影() {
+        QualityFlow rejected = qualityFlow("quality-rejected", false);
+        rejected.dispatches().recordRejected(rejected.request(), "EXECUTION_SUBMIT_REJECTED_409");
+        assertThat(runStatus(rejected.request().getRunId())).isEqualTo("failed");
+        org.mockito.Mockito.verify(rejected.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(rejected.request().getRunId()), org.mockito.ArgumentMatchers.eq("failed"));
+
+        QualityFlow cancelled = qualityFlow("quality-cancelled");
+        cancelled.cancellations().request(cancelled.fixture().userId(), cancelled.request().getRunId(), "quality-user-cancel-request");
+        cancelled.callbacks().result(qualityResult(cancelled.request()));
+        assertThat(runStatus(cancelled.request().getRunId())).isEqualTo("cancelled");
+        org.mockito.Mockito.verify(cancelled.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(cancelled.request().getRunId()), org.mockito.ArgumentMatchers.eq("cancelled"));
+        org.mockito.Mockito.verify(cancelled.projection(), org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap());
+
+        QualityFlow expired = qualityFlow("quality-expired");
+        expired.cancellations().request(expired.fixture().userId(), expired.request().getRunId(), "quality-expire-cancel-request");
+        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"leaseExpiresAt\" = ? WHERE id = ?", NOW.minusSeconds(1), expired.request().getStepId());
+        assertThat(expired.cancellations().settleExpired(20)).isEqualTo(1);
+        assertThat(runStatus(expired.request().getRunId())).isEqualTo("cancelled");
+        org.mockito.Mockito.verify(expired.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(expired.request().getRunId()), org.mockito.ArgumentMatchers.eq("cancelled"));
+    }
+
+    @Test
+    void 质量失效扫描取消必须在事务内重新确认且成功迟到也不能投影() {
+        QualityFlow flow = qualityFlow("quality-cancel-recheck");
+        var identity = new cn.inkforge.core.workflows.application.WorkflowQualityCompletion.InvalidatedRun(flow.fixture().userId(), flow.request().getRunId());
+        flow.cancellations().requestInvalidatedQuality(identity.userId(), identity.runId(), identity.cancelRequestId());
+        assertThat(database.dsl().fetchOne("SELECT \"cancelRequestId\" FROM public.\"WorkflowRun\" WHERE id = ?", identity.runId()).get(0, String.class)).isNull();
+        org.mockito.Mockito.when(flow.projection().isInvalidated(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(identity.runId()))).thenReturn(true);
+        flow.cancellations().requestInvalidatedQuality(identity.userId(), identity.runId(), identity.cancelRequestId());
+        flow.callbacks().result(qualityResult(flow.request()));
+        assertThat(runStatus(identity.runId())).isEqualTo("cancelled");
+        org.mockito.Mockito.verify(flow.projection(), org.mockito.Mockito.never()).complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    private static QualityFlow qualityFlow(String prefix) {
+        return qualityFlow(prefix, true);
+    }
+
+    private static QualityFlow qualityFlow(String prefix, boolean prepare) {
+        Fixture fixture = fixture(prefix);
+        ExecutionRegistry qualityRegistry = ExecutionRegistryFixtures.qualityOperationEnabled(ExecutionRegistry.Environment.TEST);
+        var resolved = qualityRegistry.resolve("quality.consistency", false);
+        var plan = qualityRegistry.freezePlan("quality.consistency", false);
+        var ids = new CuidV1Generator(CLOCK);
+        var projection = org.mockito.Mockito.mock(cn.inkforge.core.workflows.application.WorkflowQualityCompletion.class);
+        org.mockito.Mockito.when(projection.complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap())).thenReturn("completed");
+        org.mockito.Mockito.when(projection.finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("failed"))).thenReturn("failed");
+        org.mockito.Mockito.when(projection.finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq("cancelled"))).thenReturn("cancelled");
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("checkId", prefix + "-check");
+        context.put("novelId", fixture.novelId());
+        context.put("chapterId", fixture.chapterId());
+        context.put("chapterContent", "甲😀乙");
+        context.put("chapterContentSha256", sha256("甲😀乙"));
+        context.put("sourceUpdatedAt", API_NOW.toString());
+        context.put("message", null);
+        context.put("sourceTaskId", null);
+        var evidence = new WorkflowEvidenceItemPlan("quality_context", prefix + "-check", true, null, API_NOW,
+                null, context, null, null, Map.of());
+        Map<String, Object> input = Map.of("userInstruction", "检查本章一致性");
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request-0001", sha256(prefix),
+                "quality", "consistency", registry.catalogVersion(), "quality_check", fixture.novelId(), fixture.chapterId(), null,
+                "chapter", fixture.chapterId(), input, resolved.operation().evidencePolicy(), List.of(evidence),
+                resolved.operation().runBudget(), plan, new WorkflowInitialStepPlan("generation", "interactive", input,
+                resolved.generatorProfile(), resolved.generatorStepBudget(), resolved.outputSchema())));
+        var dispatch = new JooqWorkflowDispatchRepository(database, ids, CLOCK, json, qualityRegistry, Duration.ofSeconds(30), 3,
+                new JooqWorkflowExecutionContextReader(json), () -> projection);
+        var callback = new JooqWorkflowCallbackRepository(database, ids, CLOCK, json, qualityRegistry, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> projection);
+        var cancel = new JooqWorkflowRunCancellationRepository(database, ids, CLOCK, json, qualityRegistry, () -> projection);
+        var request = dispatch.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        var flow = new QualityFlow(fixture, request, dispatch, callback, cancel, projection);
+        if (prepare) prepareQuality(flow, request);
+        return flow;
+    }
+
+    private static void prepareQuality(QualityFlow flow, ExecutionStepRequest request) {
+        flow.dispatches().recordAccepted(request, accepted(request, qualityAgentResolved(request)));
+        flow.callbacks().progress(progress(request, unknownUsage()).resolvedModel(qualityApiResolved(request)));
+    }
+
+    private static cn.inkforge.contracts.agent.ResolvedModelRef qualityAgentResolved(ExecutionStepRequest request) {
+        var resolved = fakeAgentResolved(request);
+        resolved.setStructuredOutputRoute(cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.fromValue("quality_strict_tool_v1"));
+        resolved.setDeploymentFingerprint(WorkflowResolvedModel.fingerprint(resolved.getDeploymentProfileKey(), "fake", "fake",
+                "transport.fake.v1", "endpoint.local-fake.v1", "quality_strict_tool_v1", "capability.fake.structured-output.v1", "disabled", true));
+        return resolved;
+    }
+
+    private static ResolvedModelRef qualityApiResolved(ExecutionStepRequest request) {
+        var resolved = qualityAgentResolved(request);
+        return new ResolvedModelRef(resolved.getCapabilityVersion(), resolved.getDeploymentFingerprint(), resolved.getDeploymentProfileKey(),
+                resolved.getEndpointProfile(), resolved.getModel(), resolved.getProvider(), ResolvedModelRef.ReasoningModeEnum.DISABLED,
+                ResolvedModelRef.StructuredOutputRouteEnum.fromValue("quality_strict_tool_v1"), true, resolved.getTransportProfile());
+    }
+
+    private static ExecutionStepFailure qualityFailure(ExecutionStepRequest request, String code, StepUsage usage) {
+        var result = reviewFailure(request).errorCategory(ExecutionStepFailure.ErrorCategoryEnum.PROTOCOL)
+                .errorCode(code).resolvedModel(qualityApiResolved(request)).usage(usage);
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.failureHashMaterial(result)));
+        return result;
+    }
+
+    private static ExecutionStepResult qualityResult(ExecutionStepRequest request) {
+        Map<String, Object> scores = Map.of("characterConsistency", 81.5, "worldRuleConsistency", 90,
+                "timelineConsistency", 80, "causalityConsistency", 70, "foreshadowingConsistency", 90);
+        var result = outputResult(request, "占位").resolvedModel(qualityApiResolved(request)).usage(answerUsage())
+                .output(Map.of("scores", scores, "qualityGate", "revise", "issues", List.of(), "report", "完整终检报告😀\n尾部"));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private static String runStatus(String runId) {
+        return database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", runId).get(0, String.class);
+    }
+
+    private record QualityFlow(Fixture fixture, ExecutionStepRequest request, JooqWorkflowDispatchRepository dispatches,
+            JooqWorkflowCallbackRepository callbacks, JooqWorkflowRunCancellationRepository cancellations,
+            cn.inkforge.core.workflows.application.WorkflowQualityCompletion projection) {}
+
+    @Test
     void 结构化生成回调到真实复审详情与采用链路保存唯一原始候选() {
         Fixture f = fixture("structured-live-callback");
         var resolved = cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.operation(registry, json, "create_lore");

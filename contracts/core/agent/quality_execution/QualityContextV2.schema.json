@@ -1,0 +1,80 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/quality_execution/QualityContextV2/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chapterContent": {
+      "title": "Chaptercontent",
+      "type": "string"
+    },
+    "chapterContentSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Chaptercontentsha256",
+      "type": "string"
+    },
+    "chapterId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Chapterid",
+      "type": "string"
+    },
+    "checkId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Checkid",
+      "type": "string"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "novelId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Novelid",
+      "type": "string"
+    },
+    "sourceTaskId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Sourcetaskid"
+    },
+    "sourceUpdatedAt": {
+      "minLength": 1,
+      "title": "Sourceupdatedat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "checkId",
+    "novelId",
+    "chapterId",
+    "chapterContent",
+    "chapterContentSha256",
+    "sourceUpdatedAt",
+    "message",
+    "sourceTaskId"
+  ],
+  "title": "QualityContextV2",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.quality_execution.QualityContextV2"
+}

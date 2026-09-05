@@ -3,6 +3,146 @@
   "hashAlgorithm": "inkforge-canonical-json/1",
   "schemas": [
     {
+      "key": "output.consistency_quality_report.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "89d7814226aeb93bc76026cf5d132a75f16d16d9ae85a022f86def30dc758920",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "scores": {
+            "additionalProperties": false,
+            "properties": {
+              "characterConsistency": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "number"
+              },
+              "worldRuleConsistency": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "number"
+              },
+              "timelineConsistency": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "number"
+              },
+              "causalityConsistency": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "number"
+              },
+              "foreshadowingConsistency": {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "characterConsistency",
+              "worldRuleConsistency",
+              "timelineConsistency",
+              "causalityConsistency",
+              "foreshadowingConsistency"
+            ],
+            "type": "object"
+          },
+          "qualityGate": {
+            "enum": [
+              "pass",
+              "revise"
+            ],
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "dimension": {
+                  "enum": [
+                    "character",
+                    "world_rule",
+                    "timeline",
+                    "causality",
+                    "foreshadowing"
+                  ],
+                  "type": "string"
+                },
+                "severity": {
+                  "enum": [
+                    "warning",
+                    "error"
+                  ],
+                  "type": "string"
+                },
+                "message": {
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "evidence": {
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "location": {
+                  "anyOf": [
+                    {
+                      "maxLength": 200,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "suggestion": {
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "dimension",
+                "severity",
+                "message",
+                "evidence",
+                "suggestion"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "report": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rewriteBrief": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "scores",
+          "qualityGate",
+          "issues",
+          "report"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "key": "output.agent_updates.v1",
       "version": 1,
       "supported": false,

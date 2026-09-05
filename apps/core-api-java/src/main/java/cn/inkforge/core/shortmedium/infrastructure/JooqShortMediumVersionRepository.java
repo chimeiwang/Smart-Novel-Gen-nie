@@ -589,6 +589,7 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
                     .set(WORKFLOWRUN.UPDATEDAT, now)
                     .where(
                             WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                            WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
                             WORKFLOWRUN.SOURCEID.eq(check.getId()),
                             WORKFLOWRUN.STATUS.in(
                                     Workflowrunstatus.pending,

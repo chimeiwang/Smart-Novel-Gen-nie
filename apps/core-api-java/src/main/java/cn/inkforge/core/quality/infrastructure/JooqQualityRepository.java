@@ -48,6 +48,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.openapitools.jackson.nullable.JsonNullable;
@@ -77,17 +78,24 @@ final class JooqQualityRepository implements QualityRepository {
     private final Clock clock;
     private final ObjectMapper json;
     private final CommandIdempotencyStore idempotency;
+    private final JooqWorkflowQualityCompletion durableCompletion;
 
     JooqQualityRepository(
             CoreDatabase database,
             CuidV1Generator ids,
             Clock clock,
             ObjectMapper json) {
+        this(database, ids, clock, json, false);
+    }
+
+    JooqQualityRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, boolean durableSchemaReady) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
-        this.idempotency = new CommandIdempotencyStore(json);
+        this.idempotency = new CommandIdempotencyStore(json, durableSchemaReady);
+        this.durableCompletion = durableSchemaReady ? new JooqWorkflowQualityCompletion(database, clock, json) : null;
     }
 
     @Override
@@ -436,7 +444,7 @@ final class JooqQualityRepository implements QualityRepository {
         });
     }
 
-    private LockedScope lockScope(
+    LockedScope lockScope(
             DSLContext transaction, String userId, String checkId) {
         LockedChapter locked = lockChapterOwner(transaction, userId, checkId, true);
         ChapterqualitycheckRecord check = lockCheck(
@@ -492,13 +500,29 @@ final class JooqQualityRepository implements QualityRepository {
         return check;
     }
 
-    private void validateTaskBinding(
+    void validateTaskBinding(
             DSLContext transaction,
             String taskId,
             String userId,
             String novelId,
             String chapterId) {
         if (taskId == null) return;
+        if (durableCompletion != null) {
+            // 同一标识的 V2 身份优先；不属于该章节的 Run 不得借同 ID 的旧 Task 绕过校验。
+            Record durable = transaction.fetchOne("""
+                    SELECT "userId", "novelId", "chapterId", workflow
+                    FROM public."WorkflowRun" WHERE id = ? AND "engineVersion" = 2
+                    """, taskId);
+            if (durable != null) {
+                if (!Set.of("long_serial", "short_medium").contains(durable.get("workflow", String.class))
+                        || !userId.equals(durable.get("userId", String.class))
+                        || !novelId.equals(durable.get("novelId", String.class))
+                        || !chapterId.equals(durable.get("chapterId", String.class))) {
+                    throw taskMismatch();
+                }
+                return;
+            }
+        }
         Record row = transaction.select(WRITINGTASK.fields())
                 .select(NOVEL.USERID)
                 .from(WRITINGTASK)
@@ -515,8 +539,8 @@ final class JooqQualityRepository implements QualityRepository {
         }
     }
 
-    private WorkflowrunRecord activeRun(DSLContext transaction, String checkId) {
-        return transaction.selectFrom(WORKFLOWRUN)
+    WorkflowrunRecord activeRun(DSLContext transaction, String checkId) {
+        WorkflowrunRecord legacy = transaction.selectFrom(WORKFLOWRUN)
                 .where(
                         WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
                         WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
@@ -525,6 +549,15 @@ final class JooqQualityRepository implements QualityRepository {
                 .orderBy(WORKFLOWRUN.CREATEDAT.asc(), WORKFLOWRUN.ID.asc())
                 .limit(1)
                 .fetchOne();
+        if (legacy != null || durableCompletion == null) return legacy;
+        // Chapter/Check 已被调用方锁定；失效旧 Run 的取消尾项不再阻止重新送审和原人工状态操作。
+        List<WorkflowrunRecord> durable = transaction.selectFrom(WORKFLOWRUN)
+                .where(WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                        WORKFLOWRUN.SOURCETYPE.eq(JooqWorkflowQualityCompletion.SOURCE_TYPE),
+                        WORKFLOWRUN.SOURCEID.eq(checkId), WORKFLOWRUN.STATUS.in(ACTIVE_RUN_STATUSES))
+                .orderBy(WORKFLOWRUN.CREATEDAT.asc(), WORKFLOWRUN.ID.asc()).fetch();
+        return durable.stream().filter(run -> !durableCompletion.isInvalidatedWithoutLocks(transaction, run.getId()))
+                .findFirst().orElse(null);
     }
 
     private WorkflowrunRecord lockRun(DSLContext transaction, String runId) {
@@ -568,7 +601,7 @@ final class JooqQualityRepository implements QualityRepository {
                 .from(WORKFLOWRUN)
                 .where(
                         WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
-                        WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
+                        WORKFLOWRUN.SOURCETYPE.in("quality_check", JooqWorkflowQualityCompletion.SOURCE_TYPE),
                         WORKFLOWRUN.SOURCEID.eq(run.getSourceid()))
                 .orderBy(WORKFLOWRUN.CREATEDAT.desc(), WORKFLOWRUN.ID.desc())
                 .limit(1)
@@ -814,7 +847,7 @@ final class JooqQualityRepository implements QualityRepository {
         return result;
     }
 
-    private static String sourceUpdatedAt(LocalDateTime value) {
+    static String sourceUpdatedAt(LocalDateTime value) {
         if (value == null) throw new IllegalStateException("章节更新时间缺失");
         StringBuilder result = new StringBuilder(SOURCE_TIME.format(value));
         if (value.getNano() != 0) {
@@ -823,7 +856,7 @@ final class JooqQualityRepository implements QualityRepository {
         return result.append("+00:00").toString();
     }
 
-    private static String sha256(String value) {
+    static String sha256(String value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8)));
@@ -848,7 +881,7 @@ final class JooqQualityRepository implements QualityRepository {
         return new ApiException(403, "QUALITY_TASK_MISMATCH", "任务与检查项不匹配");
     }
 
-    private record LockedScope(
+    record LockedScope(
             String novelId,
             ChapterRecord chapter,
             ChapterqualitycheckRecord check) {}

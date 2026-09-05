@@ -81,6 +81,14 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
             Duration leaseDuration,
             int maxActiveLeases,
             WorkflowExecutionContextReader executionContexts) {
+        this(database, ids, clock, json, registry, leaseDuration, maxActiveLeases,
+                executionContexts, () -> null);
+    }
+
+    JooqWorkflowDispatchRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration, int maxActiveLeases,
+            WorkflowExecutionContextReader executionContexts,
+            java.util.function.Supplier<cn.inkforge.core.workflows.application.WorkflowQualityCompletion> qualityCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -100,7 +108,8 @@ final class JooqWorkflowDispatchRepository implements WorkflowDispatchRepository
         this.maxBatchMediaLeases = maxActiveLeases == 1 ? 0 : 1;
         this.maxReviewLeases = Math.min(2, maxActiveLeases);
         this.rejectionConvergence = new JooqWorkflowCallbackRepository(
-                database, ids, clock, json, registry, leaseDuration);
+                database, ids, clock, json, registry, leaseDuration, executionContexts,
+                () -> null, () -> null, () -> null, qualityCompletion);
     }
 
     @Override

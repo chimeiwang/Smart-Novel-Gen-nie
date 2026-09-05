@@ -29,7 +29,9 @@ ReasoningMode = Literal["disabled", "bounded"]
 ProfilePurpose = Literal["generation", "review", "evaluation", "embedding", "media"]
 OutputPurpose = Literal["generation", "evaluation", "embedding", "media"]
 Lane = Literal["interactive", "creative", "batch_media"]
-StructuredOutputRoute = Literal["responses_json_schema_v1", "chat_json_output_v1"]
+StructuredOutputRoute = Literal[
+    "responses_json_schema_v1", "chat_json_output_v1", "quality_strict_tool_v1"
+]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 _DEFAULT_CONTRACT_DIR = Path("/app/contracts/agent-execution")

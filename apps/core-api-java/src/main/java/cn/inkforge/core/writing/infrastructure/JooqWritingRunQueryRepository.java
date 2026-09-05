@@ -313,6 +313,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                           SELECT run.id, 2 AS engine_version, run."createdAt" AS created_at
                           FROM public."WorkflowRun" AS run
                           WHERE run."engineVersion" = 2
+                            AND run.workflow IN ('long_serial', 'short_medium')
                             AND run."userId" = ? AND run."novelId" = ?
                             AND (CAST(? AS text) IS NULL OR run."chapterId" = ?)
                             AND (CAST(? AS text) IS NULL OR run."writingSessionId" = ?)
@@ -408,6 +409,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                        "cancelRequestedAt", "lastEventSequence", revision, "errorCode"
                 FROM public."WorkflowRun"
                 WHERE id = ? AND "engineVersion" = 2
+                  AND workflow IN ('long_serial', 'short_medium')
                 """,
                 runId);
         return value == null ? null : v2Run(value);
@@ -426,6 +428,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                                "lastEventSequence", revision, "errorCode"
                         FROM public."WorkflowRun"
                         WHERE "engineVersion" = 2 AND id IN (%s)
+                          AND workflow IN ('long_serial', 'short_medium')
                         """.formatted(placeholders(runIds.size())),
                         runIds.toArray())
                 .forEach(value -> {

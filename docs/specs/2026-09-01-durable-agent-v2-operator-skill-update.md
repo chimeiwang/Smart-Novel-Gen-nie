@@ -3,8 +3,9 @@
 ## 状态与适用边界
 
 - 日期：2026-09-01
-- 最近更新：2026-09-05；结构化五项与中短篇四项均已仓内接通，Catalog 当前为 16/21。中短篇完成本地
-  独立 Core/Agent、受控 Fake Provider 验收及全仓门禁；真实供应商、固定包/活动 Skills 与生产另行验收。
+- 最近更新：2026-09-05；结构化五项、中短篇四项与一致性终检均已仓内接通，Catalog 当前为 17/21。
+  中短篇和一致性终检完成本地独立 Core/Agent、受控 Fake Provider 验收及全仓门禁；
+  真实供应商、固定包/活动 Skills 与生产另行验收。
 - 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
@@ -117,7 +118,7 @@ CLI 白名单遗漏的 rewrite_scene。命令总数仍为 125，不新增参数�
   结构化部分采用继续遵循本文件专节，不能把受理、自动复审或来源补齐当作正式写入。
 
 普通 CLI 的完整输入示例见 `tools/inkforge-cli/README.md`“结构化资料的显式启动”。本批仅更新仓内源码及
-说明；五项使仓内 Catalog 达到阶段性的 12/21，当前加上中短篇四项为 16/21。结构化五项公共 HTTP 接线
+说明；五项使仓内 Catalog 达到阶段性的 12/21，当前加上中短篇四项与一致性终检为 17/21。结构化五项公共 HTTP 接线
 定向验证通过，全量门禁与实际跨进程/供应商状态以
 `2026-09-05-durable-structured-agent-updates.md` 为准；未安装固定 JAR，
 未修改活动 Skills，未部署服务器。两份 Operator 的 45 命令及三操作允许集合保持不变，这 6 项仍被拒绝；
@@ -280,7 +281,7 @@ requestId；新修改要求或新 revision 不能复用旧请求内容，也不�
 ## 2026-09-05 结构化资料 V2 部分采用
 
 本节最初记录部分采用接线检查点，当时 Catalog 为 7/21、五项结构化操作尚未启用。随后显式/自然入口、自动
-返工和作者采用完成定向验证，该阶段仓内已启用 12/21；当前加上中短篇四项为 16/21。结构化五项的门禁及
+返工和作者采用完成定向验证，该阶段仓内已启用 12/21；当前加上中短篇四项与一致性终检为 17/21。结构化五项的门禁及
 未部署状态见结构化资料规格，历史阶段数字不代表当前总数。
 普通 Java/Python CLI 仍为 125 个命令；两份 Operator
 仍为 45 个命令，`long.agent.start` 仍只允许 `plan_chapter`、`write_chapter`、`review_chapter` 三种 Operation。
@@ -319,7 +320,7 @@ Core 负责；CLI 透传选择不等于自行写资料。五项仓内启用不�
 ## 2026-09-05 中短篇四操作观察
 
 本节是后续两份 Skill 的更新契约，不直接编辑活动 `SKILL.md`、脚本或固定 JAR。中短篇四项已仓内启用，
-Catalog 当前为 16/21；一致性终检、文风画像、RAG 索引和两个开发视频操作仍未迁移。四项已完成本地独立
+当时 Catalog 为 16/21；后续一致性终检使当前仓内达到 17/21，文风画像、RAG 索引和两个开发视频操作仍未迁移。四项已完成本地独立
 Java Core/Python Agent、受控 Fake Provider 验收与全仓门禁，包含双段正文的 Agent 重启、每段仅一次实际
 Fake 调用、三类候选幂等采用和全文检查零候选；不是实际供应商或生产验收。
 完整证据以 `2026-09-05-durable-short-medium-workflows.md` 为准。
@@ -346,6 +347,26 @@ Fake 调用、三类候选幂等采用和全文检查零候选；不是实际供
    watcher 只停止观察，服务端任务未取消，恢复时观察同一个 Run。
 
 发布构建、固定安装包与活动说明更新分别核对，不能把本节或源码测试当成已安装/生产开放；本批不安装 Skill。
+
+## 2026-09-05 一致性终检迁移说明（仓内验收完成）
+
+本项改的是原质量检查的服务端执行内核，不给 CLI 直接暴露 Agent，也不新增命令或参数。
+完整实现、全仓门禁和本地独立进程正常/纠正重启验收均已通过，见 `2026-09-05-durable-consistency-quality.md`；
+本节不代表固定 JAR、活动 Skills 或生产已更新。
+
+- 继续使用 `long.quality.run`，传原 `checkId`、稳定 `clientRequestId` 与可选原字段；受理响应里的 `taskId`
+  是本次质量 `WorkflowRun.id`，仅表示受理，不表示检查通过或完成。
+- 继续用 `long.quality.get` 和原 `checkId` 回读检查项；质量运行不转成 `long.agent.start`、
+  `long.task.watch` 或短篇 watch，也不混入写作运行历史。CLI 不传模型 Profile、预算、纠正次数或内部 Step ID；
+  原有用于选择连接配置的 CLI `profile` 字段不变。
+- 完成时保留完整 `result`、`scoreOverall`、`qualityGate` 和 `rewriteBrief`。`qualityGate=revise`
+  仍是执行完成的报告，不能当作命令失败、自动返工或新的写作硬限制。
+- 原 `long.quality.skip` / `long.quality.reset` 与 `expectedUpdatedAt` 并发检查不变；有有效运行时仍按原规则
+  拒绝更改检查状态。正文修改或重新送审后的旧结果不能覆盖新的检查项，不用重新启动同一请求来“催进度”。
+- 一次报告格式纠正由 Core 在同一个质量 Run 内安排独立 Step；Skill 不手动追加第二个 run，不回放坏参数，
+  不根据模型调用次数推断业务是否完成。断线后先回读原检查项，必要时以原 clientRequestId 重取受理身份。
+
+两份活动 Skill 无需新增允许命令；后续安装更新时只同步以上语义说明。Python CLI 仍是契约对照，不是活动入口。
 
 ## 观察与结果恢复
 

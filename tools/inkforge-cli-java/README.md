@@ -175,7 +175,7 @@ Java CLI 的输入映射、watcher 与双环境 Operator 拒绝模式有定向 J
 
 Java 与 Python 对照 CLI 同步校验范围、原样发送指令和 scope，不猜测来源或直接访问 Agent。五项的运行、
 候选与采用均由 Core 组织；五项显式/自然入口与最多一次自动完整返工现已接通，该阶段使仓内 Catalog 达到 12/21，
-当前加上中短篇四项为 16/21。
+当前加上中短篇四项与一致性终检为 17/21。
 公共 HTTP 接线定向验证通过。本批全量门禁及实际跨进程/供应商验收见结构化资料规格，不能据此宣称生产已开放。
 新自然请求使用 resolver v3 的冻结十项授权：设定两项/大纲两项默认 novel，伏笔及原章节五项默认当前 chapter；
 明确节点等不匹配范围须澄清或走显式入口，模型不猜 ID/scope，CLI 不新增参数或传提示词版本。
@@ -196,8 +196,18 @@ CORE_RESPONSE_CONTRACT_ERROR/5 停止，不能从事件或版本列表猜测。�
 和 confirmationHash，生成 completed 不表示已采用；停止观察不取消任务，不新增 short.agent.cancel。
 原版本下载、outputFile 和完整文件读取语义不变。
 
-中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，Catalog 当前为 16/21；
-其余一致性终检、文风画像、RAG 索引和两个开发视频操作尚未迁移。这不是实际供应商或生产验收，本批没有
+中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，当时 Catalog 为 16/21；
+当前加上一致性终检为 17/21，其余文风画像、RAG 索引和两个开发视频操作尚未迁移。这不是实际供应商或生产验收，本批没有
 更新固定安装 JAR、活动 Skills 或服务器。普通 CLI 125 与 Operator 45 命令及三种长篇操作范围不变。后续说明更新依据
 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“中短篇四操作观察”专节；
 完整验收见 `../../docs/specs/2026-09-05-durable-short-medium-workflows.md`。
+
+## 一致性终检
+
+V2 继续使用原 `long.quality.run/get/skip/reset`，命令、参数和允许集合不变，不直接访问 Agent。
+run 的原可选 `taskId` 可引用同归属 V1 写作任务或 V2 写作 Run；返回的 `taskId` 是新建质量 Run，受理不等于完成。
+结果始终按原 `checkId` 用 `long.quality.get` 回读，不改用写作 watcher；`qualityGate=revise` 也是完成报告，
+不自动返工或改正文。一次格式纠正由 Core 在同 Run 内安排，CLI 不重复发起任务。
+固定安装 JAR 与活动 Skills 未随本批替换。后续维护依据
+`../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“一致性终检迁移说明”，
+实现和验证证据见 `../../docs/specs/2026-09-05-durable-consistency-quality.md`。

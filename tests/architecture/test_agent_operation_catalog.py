@@ -121,6 +121,8 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
 )
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
     {
+        "quality.consistency.v1",
+        "system.protocol_corrector.v1",
         "system.intent_resolver.v1",
         "system.intent_resolver.v2",
         "lore.generator.v1",
@@ -141,6 +143,7 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
     {
+        "output.consistency_quality_report.v1", "output.protocol_correction.v1",
         "output.agent_updates.v1", "output.agent_updates.v2",
         "output.short_medium_outline.v1", "output.short_medium_segment_manifest.v1",
         "output.short_medium_replacement.v1", "output.short_medium_check_report.v1",
@@ -305,6 +308,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         "short_medium.generate_manuscript",
         "short_medium.replace_selection",
         "short_medium.full_check",
+        "quality.consistency",
     }
     answer = next(
         operation
@@ -372,7 +376,9 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
 
     assert set(profiles) == referenced_profiles
     assert set(output_schemas) == referenced_output_schemas
-    assert set(step_budgets) == referenced_step_budgets
+    assert set(step_budgets) == referenced_step_budgets | {
+        "step_budget.system.protocol_correction.v1"
+    }
     for profile in profiles.values():
         _assert_key_version(profile)
         assert set(profile) == {
@@ -448,9 +454,17 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
             if allowed["provider"] == "fake":
                 assert "production" not in allowed["allowedEnvironments"]
             if "production" in allowed["allowedEnvironments"]:
-                assert allowed["endpointProfile"] == "endpoint.deepseek-official.v1"
+                assert allowed["endpointProfile"] == (
+                    "endpoint.deepseek-strict-official.v1"
+                    if deployment["key"] == "deployment.quality.consistency.v2"
+                    else "endpoint.deepseek-official.v1"
+                )
             if allowed["transportProfile"] == "transport.deepseek-v4.v1":
-                assert allowed["structuredOutputRoute"] == "chat_json_output_v1"
+                assert allowed["structuredOutputRoute"] == (
+                    "quality_strict_tool_v1"
+                    if deployment["key"] == "deployment.quality.consistency.v2"
+                    else "chat_json_output_v1"
+                )
 
 
 def test_every_registered_output_schema_is_strict_hash_bound_and_honest() -> None:
@@ -599,7 +613,8 @@ def test_short_medium_v2_assets_are_enabled_and_keep_placeholders() -> None:
     short_operations = {key for key in EXPECTED_OPERATION_KEYS if key.startswith("short_medium.")}
     assert short_operations <= set(purposes["summarize_evidence"]["parentOperations"])
     assert not short_operations & set(purposes["protocol_correction"]["parentOperations"])
-    assert purposes["protocol_correction"]["supported"] is False
+    assert purposes["protocol_correction"]["supported"] is True
+    assert purposes["protocol_correction"]["parentOperations"] == ["quality.consistency"]
     operations = {operation["key"]: operation for operation in _operations()}
     profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
     outputs = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
@@ -835,6 +850,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "short_medium.generate_manuscript",
         "short_medium.replace_selection",
         "short_medium.full_check",
+        "quality.consistency",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
@@ -848,6 +864,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 "long_serial.answer_question",
                 "long_serial.review_chapter",
                 "short_medium.full_check",
+                "quality.consistency",
             }
             else "bounded"
         )
@@ -940,6 +957,15 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert schema["properties"]["updates"]["additionalProperties"] is False
             assert schema["properties"]["evidenceRequest"]["minItems"] == 1
             assert schema["properties"]["evidenceRequest"]["maxItems"] == 100
+        elif operation["key"] == "quality.consistency":
+            schema = output_schema["jsonSchema"]
+            assert schema["required"] == ["scores", "qualityGate", "issues", "report"]
+            assert set(schema["properties"]) == {
+                "scores", "qualityGate", "issues", "report", "rewriteBrief",
+            }
+            assert schema["properties"]["qualityGate"]["enum"] == ["pass", "revise"]
+            assert schema["properties"]["issues"]["maxItems"] == 100
+            assert schema["properties"]["report"] == {"minLength": 1, "type": "string"}
         elif operation["workflow"] == "short_medium":
             expected_field = {
                 "generate_outline": "content",

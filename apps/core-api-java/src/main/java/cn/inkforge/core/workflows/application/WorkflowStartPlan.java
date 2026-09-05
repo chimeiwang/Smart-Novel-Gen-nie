@@ -26,7 +26,21 @@ public record WorkflowStartPlan(
         ExecutionRegistry.RunBudget runBudget,
         ExecutionPlanSnapshot executionPlan,
         WorkflowInitialStepPlan initialStep,
-        IntentExecutionPlanSnapshot intentPlan) {
+        IntentExecutionPlanSnapshot intentPlan,
+        SourceBinding sourceBinding) {
+
+    public WorkflowStartPlan(String userId, String clientRequestId, String requestHash,
+            String workflow, String operation, String operationCatalogVersion, String runKind,
+            String novelId, String chapterId, String writingSessionId, String targetType, String targetId,
+            Map<String, Object> normalizedInput, String evidencePolicyVersion,
+            List<WorkflowEvidenceItemPlan> evidenceItems, ExecutionRegistry.RunBudget runBudget,
+            ExecutionPlanSnapshot executionPlan, WorkflowInitialStepPlan initialStep,
+            IntentExecutionPlanSnapshot intentPlan) {
+        this(userId, clientRequestId, requestHash, workflow, operation, operationCatalogVersion, runKind,
+                novelId, chapterId, writingSessionId, targetType, targetId, normalizedInput,
+                evidencePolicyVersion, evidenceItems, runBudget, executionPlan, initialStep, intentPlan,
+                new SourceBinding(targetType, targetId));
+    }
 
     public WorkflowStartPlan(String userId, String clientRequestId, String requestHash,
             String workflow, String operation, String operationCatalogVersion, String runKind,
@@ -55,6 +69,7 @@ public record WorkflowStartPlan(
         if ((targetType == null) != (targetId == null)) {
             throw new IllegalArgumentException("Run target 类型与 ID 必须成对提供");
         }
+        java.util.Objects.requireNonNull(sourceBinding, "Run 来源身份不能为空");
         normalizedInput = WorkflowJsonValues.freezeMap(normalizedInput);
         evidencePolicyVersion = nonBlank(evidencePolicyVersion, "Evidence policy 版本");
         evidenceItems = List.copyOf(evidenceItems);
@@ -99,6 +114,16 @@ public record WorkflowStartPlan(
 
     public Map<String, Object> storedExecutionPlan() {
         return intentPlan == null ? executionPlan.stored() : intentPlan.stored();
+    }
+
+    /** 业务来源与执行目标可不同，但必须在 INSERT 时一次冻结，不能事后改写。 */
+    public record SourceBinding(String type, String id) {
+        public SourceBinding {
+            if ((type == null) != (id == null)
+                    || (type != null && (type.isBlank() || id.isBlank()))) {
+                throw new IllegalArgumentException("Run 来源类型与 ID 必须同时为空或同时为非空字符串");
+            }
+        }
     }
 
     private static String nonBlank(String value, String label) {

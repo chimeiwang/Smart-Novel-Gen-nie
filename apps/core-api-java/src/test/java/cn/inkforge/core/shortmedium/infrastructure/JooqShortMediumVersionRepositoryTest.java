@@ -650,6 +650,7 @@ class JooqShortMediumVersionRepositoryTest {
                 .set(WORKFLOWRUN.CHAPTERID, chapterId)
                 .set(WORKFLOWRUN.KIND, Workflowrunkind.quality_check)
                 .set(WORKFLOWRUN.STATUS, Workflowrunstatus.running)
+                .set(WORKFLOWRUN.SOURCETYPE, "quality_check")
                 .set(WORKFLOWRUN.SOURCEID, "short-quality-check-3")
                 .set(WORKFLOWRUN.CREATEDAT, INITIAL)
                 .set(WORKFLOWRUN.UPDATEDAT, INITIAL)

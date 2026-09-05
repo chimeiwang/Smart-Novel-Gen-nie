@@ -23,6 +23,7 @@ ModelThinkingMode = Literal["provider_default", "disabled"]
 ModelStructuredOutputRoute = Literal[
     "responses_json_schema_v1",
     "chat_json_output_v1",
+    "quality_strict_tool_v1",
 ]
 ModelStructuredOutputDiagnosticCode = Literal[
     "json_decode_error",

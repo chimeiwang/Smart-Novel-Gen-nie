@@ -74,8 +74,8 @@ short.version.get/preview/adopt 查看完整版本和 Diff、确认 confirmation
 版本列表最后一项或从 SSE resultId 拼造结果。停止 watcher 不取消服务端任务，未新增 short.agent.cancel；
 既有版本下载和 outputFile 的完整 UTF-8 文件语义不变。
 
-中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，Catalog 当前为 16/21；
-其余一致性终检、文风画像、RAG 索引和两个开发视频操作尚未迁移。真实供应商和生产尚未验收，固定 JAR、活动
+中短篇四项已完成仓内接线、全仓门禁与本地独立 Core/Agent、受控 Fake Provider 验收，当时 Catalog 为 16/21；
+当前加上一致性终检为 17/21，其余文风画像、RAG 索引和两个开发视频操作尚未迁移。真实供应商和生产尚未验收，固定 JAR、活动
 Skills 和服务器未随源码更新。后续 Skill 说明更新见 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
 的“中短篇四操作观察”专节，完整验收见中短篇迁移规格。普通 CLI 125、Operator 45 命令及三种长篇操作范围不变。
 
@@ -101,9 +101,16 @@ revise/discard 保持既有拒绝规则。这组 kind/updates 条件只决定结
 拒绝且不 POST；省略选择字段或其他 V2 候选沿既有语义忽略显式 null 时，不会因此新增 Artifact 类型门禁。
 Core 按精确 revision 和冻结来源在同一事务采用，冲突后必须重新读取并确认。
 这没有增加 125 个普通 CLI 命令，也没有扩大 45 命令/三 Operation 的 Operator 范围。五项结构化资料入口、
-自动返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21，当前加上中短篇四项为 16/21；结构化资料定向验证
+自动返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21，当前加上中短篇四项与一致性终检为 17/21；结构化资料定向验证
 与全量门禁见对应规格最终记录。
 源码、构建产物与固定包分别验收，本批没有更新固定 JAR、活动 Skills 或部署服务器。
+
+一致性终检继续使用原 `long.quality.run/get/skip/reset`，不新增命令或直接访问 Agent。原可选 `taskId` 兼容
+同归属 V1 写作任务与 V2 写作 Run；受理响应的 `taskId` 是质量 Run，结果按原 `checkId` 回读，不改用写作 watcher。
+`qualityGate=revise` 是完成报告，不触发自动返工；一次格式纠正由 Core 安排，CLI 不重复启动。
+本 Python 实现仅作契约对照，活动入口仍为 Java。Skills 更新说明见
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“一致性终检迁移说明”，
+具体实现和验收见 `docs/specs/2026-09-05-durable-consistency-quality.md`。
 
 ### 结构化资料的显式启动（当前源码）
 

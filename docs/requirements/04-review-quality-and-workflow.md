@@ -143,8 +143,8 @@ stateDiagram-v2
 
 2026-09-05 工作分支已实现 agent_updates 的 Core 审核读取与决定适配。原始 summary/updates 保存到精确
 Artifact revision；展示的完整 Diff 和采用 payload 由 Core 从冻结来源派生，不信任模型自报旧值，也不从当前
-作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通；加上中短篇四项后 Catalog 为 16/21，
-一致性终检、文风画像、RAG 索引和两个开发视频操作尚未迁移。结构化五项的隔离公共 HTTP
+作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通；加上中短篇四项及一致性终检后 Catalog 为 17/21，
+文风画像、RAG 索引和两个开发视频操作尚未迁移。结构化五项的隔离公共 HTTP
 接线已验证，实际 Agent/供应商、全量门禁和生产状态分别以结构化资料迁移规格记录为准。
 
 新冻结复审策略只在完整 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，
@@ -301,11 +301,24 @@ flowchart TD
 
 只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling。Provider 为该工具生成专用 wire 契约：递归内联本地 `$defs`，不发送 `$defs`、`$def`、`$ref` 或 `type:null`；可选的 `location` 与 `rewriteBrief` 在 wire 中以必填字符串传输，无值时返回空字符串，并只在这两个精确路径归一化为 `None`。非质量 strict 工具必须在 HTTP 前拒绝。报告仍须通过原始 `QualityReportArgs`/Pydantic 完整复验，Provider 不截断或猜测修复业务字段；参数失败最多记录 10 条脱敏 `loc/type`，不得记录字段值、异常正文、`input`、`ctx` 或工具参数。无效工具 JSON 或 Pydantic 参数可以在任何工具副作用前触发整个 Agent 运行最多一次显式协议纠正；纠正调用不得回放坏参数，必须独立授权和结算 usage，仍失败时以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。该行为不是同一请求的 SDK 自动重发或队列盲重试。视频既有路由与能力门禁不变。
 
-Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值经现有 Python `round()` 取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
+Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值按既有 HALF_EVEN 规则取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
 
 ## 一致性终检运行流程
 
-Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403；只有 review 章节允许创建质量运行，drafting/completed 调用返回 409。Core 先把本次检查的完整正文快照、正文 SHA-256、章节更新时间、检查项和可选任务绑定保存到独立的 `WorkflowRun(kind=quality_check)`，并立即把公共检查置为 running，再使用该运行 ID 作为稳定队列标识投递；同一检查项已有 `pending/running` 运行时返回 409，只有前一次运行终态后才能创建新运行。Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 只分析 WorkflowRun 中的正文快照并异步生成报告，通过签名内部回调结算对应运行终态；回调时当前正文哈希必须仍与来源一致，且只有该检查项的最新运行可以更新公共检查结果。旧正文或旧运行的延迟回调收敛为 cancelled/failed，不能覆盖新结果或满足完成门禁。
+Core API 负责浏览器认证、检查项归属和原可选 `taskId` 校验；来源可以是旧 WritingTask 或 V2 写作 Run，必须
+与检查项属于同一用户、小说和章节，否则返回 403。只有 review 章节允许创建质量运行，drafting/completed
+返回 409。Core 在受理时冻结完整正文、SHA-256、章节更新时间、检查项与原指令，并将检查项置为 running。
+同一检查项有仍有效的活动运行时返回 409；正文修改或重新送审使旧检查失效后，取消尾项不阻止新的检查。
+
+V1 继续用原质量队列与签名回调。V2 使用 `quality.consistency`，创建时固定 `sourceType=quality_check_v2`、
+`sourceId=checkId` 与章节 target，首个 Step 消费唯一完整 `quality_context`。合法报告直接完成；首个 JSON/参数
+错误只有在真实用量可结算时才由 Core 追加一次独立 `protocol_correction` Step，不能在同一 Step 内重调模型。
+两次调用各自计费与 journal 重放，不产生草案或 Reviewer；`qualityGate=revise` 仍表示检查执行完成。
+
+成功、失败、提交拒绝和取消都在 Core 事务中投影检查项。回调同时复验正文、当前检查状态与最新运行，旧报告
+不能覆盖新的 pending、skipped 或较新结果。正文事务只重置检查项，不反向锁定 V2 Run；原取消协调器有界发现
+已持久失效来源并复用原取消/账务收敛。CLI 仍使用原 `long.quality.*`，不改用写作 watcher 或直接访问 Agent。
+仓内接线与验收状态见 `docs/specs/2026-09-05-durable-consistency-quality.md`，不代表生产已经切换。
 
 ~~~mermaid
 sequenceDiagram
@@ -318,7 +331,7 @@ sequenceDiagram
     U->>UI: 点击运行一致性终检
     UI->>API: POST checkId
     API->>DB: 校验登录、检查项归属、章节归属
-    API->>DB: 校验可选 WritingTask 与检查项绑定
+    API->>DB: 校验可选写作来源与检查项绑定
     API->>V: 提交异步质量检查任务
     API-->>UI: 返回 202、checkId、taskId
     V->>DB: 通过核心接口服务回写运行状态和报告
@@ -331,8 +344,9 @@ sequenceDiagram
 - 未登录返回 401。
 - 越权返回 403。
 - 检查项不存在返回 404。
-- Agent 无报告或保存失败时，检查项标记 failed，任务标记 error。
-- 模型授权、供应商传输或用量回报明确声明可重试时，不得提前把检查项标记 failed；队列必须使用同一
+- Agent 无合法报告时，检查项标记 failed；V1 队列任务标记 error，V2 Run 标记 failed。
+  临时保存错误仍重放同一终态，不能误报完成。
+- V1 模型授权、供应商传输或用量回报明确声明可重试时，不得提前把检查项标记 failed；队列必须使用同一
   WorkflowRun/jobId 重试。明确不可重试错误在失败回调成功后收敛单条任务，不得因此重启整个消费者；未知
   程序异常仍由消费者监督器暴露为不健康。
 - 模型返回长度截断、内容过滤、矛盾完成原因或无合法工具调用的 unknown 响应时，Agent Service 在接受报告或执行回调前失败；日志可以保留原始完成原因字符串。

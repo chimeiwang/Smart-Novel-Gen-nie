@@ -46,31 +46,14 @@
     },
     {
       "purpose": "protocol_correction",
-      "supported": false,
-      "modelProfile": "system.protocol_corrector.v1",
-      "outputSchema": "output.protocol_correction.v1",
-      "evidencePolicy": "evidence.system.protocol_correction.v1",
+      "supported": true,
+      "modelProfile": "system.quality_protocol_corrector.v2",
+      "outputSchema": "output.consistency_quality_report.v2",
+      "evidencePolicy": "evidence.quality.consistency.v1",
       "lane": "interactive",
-      "stepBudgetProfile": "step_budget.system.protocol_correction.v1",
-      "workflows": ["long_serial", "quality", "short_medium", "style", "video"],
-      "parentOperations": [
-        "long_serial.answer_question",
-        "long_serial.create_lore",
-        "long_serial.revise_lore",
-        "long_serial.create_outline",
-        "long_serial.revise_outline",
-        "long_serial.plan_chapter",
-        "long_serial.write_chapter",
-        "long_serial.rewrite_scene",
-        "long_serial.rewrite_chapter_selection",
-        "long_serial.rewrite_outline_selection",
-        "long_serial.review_chapter",
-        "long_serial.manage_foreshadowing",
-        "quality.consistency",
-        "style.portrait",
-        "video.chapter_cinematic_adaptation_v2",
-        "video.chapter_shot_prompt_v2"
-      ]
+      "stepBudgetProfile": "step_budget.system.quality_protocol_correction.v2",
+      "workflows": ["quality"],
+      "parentOperations": ["quality.consistency"]
     }
   ]
 }

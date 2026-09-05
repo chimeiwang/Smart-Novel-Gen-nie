@@ -20,6 +20,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion;
+import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
@@ -70,6 +71,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private static final String GENERATION = "generation";
     private static final String REVIEW = "review";
     private static final String RESOLVE_INTENT = "resolve_intent";
+    private static final String PROTOCOL_CORRECTION = "protocol_correction";
+    private static final String QUALITY_CORRECTION_REQUIRED = "MODEL_TOOL_PROTOCOL_CORRECTION_REQUIRED";
 
     private final CoreDatabase database;
     private final CuidV1Generator ids;
@@ -81,6 +84,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation;
     private final java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates;
     private final java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion;
+    private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -114,6 +118,17 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
             java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
             java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion) {
+        this(database, ids, clock, json, registry, leaseDuration, contexts, businessPreparation,
+                structuredCandidates, shortMediumCompletion, () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
+            java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
+            java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -123,6 +138,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 requiredRegistry.enabledOperationKeys("long_serial", false));
         WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
                 requiredRegistry.enabledOperationKeys("short_medium", false));
+        WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
+                requiredRegistry.enabledOperationKeys("quality", false));
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow callback lease 必须为正数");
         }
@@ -132,6 +149,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.businessPreparation = Objects.requireNonNull(businessPreparation);
         this.structuredCandidates = Objects.requireNonNull(structuredCandidates);
         this.shortMediumCompletion = Objects.requireNonNull(shortMediumCompletion);
+        this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
     }
 
     @Override
@@ -226,7 +244,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 transaction, locked, "failed", errorCode,
                 locked.run().get("lastEventSequence", Long.class), now);
         String purpose = locked.step().get("purpose", String.class);
-        if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)) {
+        if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)
+                || PROTOCOL_CORRECTION.equals(purpose) && isQualityRun(locked.run())) {
             failRun(transaction, locked, errorCode, false, sequence, now);
         } else if (REVIEW.equals(purpose)) {
             // Reviewer 不可用只产生 failed Evaluation；已有 candidate 仍由其余 Reviewer 按
@@ -436,7 +455,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 usage,
                 now);
         String purpose = locked.step().get("purpose", String.class);
-        if (GENERATION.equals(purpose)) {
+        if (GENERATION.equals(purpose)
+                || PROTOCOL_CORRECTION.equals(purpose) && isQualityRun(locked.run())) {
             completeGeneration(transaction, locked, body, usage, now);
         } else if (REVIEW.equals(purpose)) {
             completeReview(transaction, locked, body, usage, now);
@@ -510,11 +530,17 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 body.getErrorCode(),
                 locked.run().get("lastEventSequence", Long.class),
                 now);
-        if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)) {
+        if (tryQualityProtocolCorrection(transaction, locked, body, usage, sequence, now)) {
+            return receipt(body, ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        }
+        if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)
+                || PROTOCOL_CORRECTION.equals(purpose) && isQualityRun(locked.run())) {
+            String terminalCode = isQualityRun(locked.run()) && QUALITY_CORRECTION_REQUIRED.equals(body.getErrorCode())
+                    ? "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED" : body.getErrorCode();
             failRun(
                     transaction,
                     locked,
-                    body.getErrorCode(),
+                    terminalCode,
                     body.getOutcomeUnknown(),
                     sequence,
                     now);
@@ -657,7 +683,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Map<String, Object> request = new LinkedHashMap<>(stepRequestMaterial(locked.run(), id, idempotencyKey,
                 inputHash, bundle, generator.evidencePolicy(), generator.lane(), generator.modelProfile().toMap(),
                 generator.outputSchema().toMap(), generator.stepBudget().budgetMap(), previous));
-        request.put("purpose", GENERATION);
+        request.put("purpose", generator.purpose());
         int ordinal = tx.fetchOne("SELECT max(ordinal) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId)
                 .get(0, Integer.class) + 1;
         tx.execute("""
@@ -665,9 +691,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                   purpose, lane, "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey", "requestHash", "inputHash",
                   "evidenceBundleId", "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt", "artifactId", "artifactRevision")
                 VALUES (?, ?, ?, CAST('agent' AS "WorkflowStepType"), CAST('pending' AS "WorkflowStepStatus"), ?, ?, ?,
-                  'generation', ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, id, runId, generator.modelProfile().profile(), canonicalJson(input), now, ordinal,
-                generator.lane(), now, idempotencyKey, ExecutionCanonicalJson.sha256(request), inputHash, bundleId,
+                generator.purpose(), generator.lane(), now, idempotencyKey, ExecutionCanonicalJson.sha256(request), inputHash, bundleId,
                 generator.modelProfile().profile(), Integer.toString(generator.modelProfile().version()),
                 generator.outputSchema().name(), Integer.toString(generator.outputSchema().version()),
                 json.writeValueAsString(generator.stepBudget().stored()), now, now,
@@ -715,6 +741,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid(exception.getMessage());
         }
         switch (materializer) {
+            case CONSISTENCY_QUALITY -> completeQuality(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case SHORT_MEDIUM -> completeShortMedium(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CHAT_ANSWER -> completeChatAnswer(
@@ -732,6 +760,100 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             case AGENT_UPDATES_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
+    }
+
+    private void completeQuality(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+            ExecutionPlanSnapshot.Step step, ExecutionStepResult body, WorkflowStepUsage usage,
+            Map<String, Object> output, LocalDateTime now) {
+        if (!isQualityRun(locked.run()) || !plan.reviewers().isEmpty()
+                || locked.step().get("artifactId") != null) {
+            throw invalid("一致性终检必须是无 Artifact、无 Reviewer 的质量运行");
+        }
+        try {
+            WorkflowOutputValidator.validate(step.outputSchema().jsonSchema(), output);
+        } catch (IllegalArgumentException exception) {
+            throw invalid("一致性终检报告不符合冻结 Schema");
+        }
+        String runId = body.getRunId();
+        String status = qualityCompletion().complete(tx, runId, output);
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null,
+                locked.run().get("lastEventSequence", Long.class), now);
+        if ("cancelled".equals(status)) {
+            cancelInvalidatedQuality(tx, locked, sequence, now);
+            return;
+        }
+        if (!"completed".equals(status)) throw invalid("质量物化端口返回非法完成状态");
+        sequence = appendEvent(tx, runId, sequence, "completed",
+                Map.of("outcomeType", "consistency_quality_report", "resultId", body.getStepId()),
+                "run:completed", now);
+        updateRun(tx, runId, "completed", sequence, null, now, now);
+    }
+
+    /** 已结算的坏报告只授权一个新 Step，不回放坏 arguments，也不在当前 Step 隐式重调模型。 */
+    private boolean tryQualityProtocolCorrection(DSLContext tx, Locked locked, ExecutionStepFailure body,
+            WorkflowStepUsage usage, long sequence, LocalDateTime now) {
+        if (!isQualityRun(locked.run()) || !GENERATION.equals(locked.step().get("purpose", String.class))
+                || !QUALITY_CORRECTION_REQUIRED.equals(body.getErrorCode())
+                || body.getErrorCategory() != ExecutionStepFailure.ErrorCategoryEnum.PROTOCOL
+                || !Boolean.FALSE.equals(body.getRetryable()) || !Boolean.FALSE.equals(body.getOutcomeUnknown())
+                || usage.usageStatus() == cn.inkforge.core.workflows.domain.WorkflowUsageStatus.UNKNOWN
+                || usage.providerAttempts() == 0 || usage.inputTokens() == null || usage.cachedTokens() == null
+                || usage.promptCacheMissTokens() == null || usage.completionTokens() == null
+                || usage.reasoningTokens() == null || usage.visibleOutputTokens() == null) {
+            return false;
+        }
+        String runId = body.getRunId();
+        Record reservation = tx.fetchOne("SELECT status FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND \"stepId\" = ?",
+                runId, body.getStepId());
+        if (reservation == null || !"settled".equals(reservation.get("status", String.class))) return false;
+        if (qualityCompletion().isInvalidated(tx, runId)) return false;
+        if (tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'protocol_correction'", runId)
+                .get(0, Integer.class) != 0) return false;
+        var plan = executionPlan(locked.run());
+        var corrections = plan.systemSteps().stream().filter(step -> PROTOCOL_CORRECTION.equals(step.purpose())).toList();
+        if (corrections.size() != 1) return false;
+        var correction = corrections.getFirst();
+        if (!correction.outputSchema().equals(plan.generator().outputSchema())
+                || !correction.evidencePolicy().equals(plan.generator().evidencePolicy())) return false;
+        try {
+            plan.runBudget().toDomain().requireWithin(List.of(
+                    cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge.terminal(
+                            plan.generator().stepBudget().budget(), usage, false),
+                    cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge.active(correction.stepBudget().budget(), true)));
+        } catch (WorkflowBudgetExceededException exception) {
+            return false;
+        }
+        Map<String, Object> previous = readObject(locked.step().get("input", String.class));
+        if (!previous.keySet().equals(Set.of("userInstruction"))) throw invalid("质量首步 input 不完整");
+        Map<String, Object> nextInput = Map.of("userInstruction", string(previous, "userInstruction"),
+                "failedStepId", body.getStepId(), "failedResultHash", body.getResultHash(),
+                "failureCode", QUALITY_CORRECTION_REQUIRED);
+        appendGenerationStep(tx, locked, correction, nextInput,
+                locked.step().get("evidenceBundleId", String.class), null, now);
+        updateRun(tx, runId, "running", sequence, null, null, now);
+        return true;
+    }
+
+    private static boolean isQualityRun(Record run) {
+        return "quality".equals(run.get("workflow", String.class))
+                && "consistency".equals(run.get("operation", String.class));
+    }
+
+    private WorkflowQualityCompletion qualityCompletion() {
+        WorkflowQualityCompletion completion = qualityCompletion.get();
+        if (completion == null) throw new IllegalStateException("一致性终检耐久结果投影端口未装配");
+        return completion;
+    }
+
+    private void cancelInvalidatedQuality(DSLContext tx, Locked locked, long sequence, LocalDateTime now) {
+        String runId = locked.run().get("id", String.class);
+        String cancelRequestId = "quality-invalidated." + runId;
+        tx.execute("UPDATE public.\"WorkflowRun\" SET \"cancelRequestId\" = ?, \"cancelRequestedAt\" = ? WHERE id = ?",
+                cancelRequestId, now, runId);
+        sequence = appendEvent(tx, runId, sequence, "cancelled", Map.of("cancelRequestId", cancelRequestId),
+                "run:cancelled", now);
+        updateRun(tx, runId, "cancelled", sequence, "RUN_CANCELLED", now, now);
     }
 
     private void completeShortMedium(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
@@ -2207,6 +2329,14 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             Boolean outcomeUnknown,
             long previousSequence,
             LocalDateTime now) {
+        if (isQualityRun(locked.run())) {
+            String terminal = qualityCompletion().finish(transaction, locked.run().get("id", String.class), "failed");
+            if ("cancelled".equals(terminal)) {
+                cancelInvalidatedQuality(transaction, locked, previousSequence, now);
+                return;
+            }
+            if (!"failed".equals(terminal)) throw invalid("质量物化端口返回非法失败状态");
+        }
         long sequence = appendEvent(
                 transaction,
                 locked.run().get("id", String.class),
@@ -2282,6 +2412,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         String cancelRequestId = locked.run().get("cancelRequestId", String.class);
         if (cancelRequestId == null) {
             throw new IllegalStateException("正在取消的 Run 缺少 cancelRequestId");
+        }
+        if (isQualityRun(locked.run())) {
+            qualityCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled");
         }
         sequence = appendEvent(
                 transaction,

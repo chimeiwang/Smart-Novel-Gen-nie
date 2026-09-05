@@ -141,7 +141,7 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 
 五项显式/自然入口、最多一次自动完整返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21；随后中短篇
-四项接线与本地验收使当前总数达到 16/21，自然入口仍支持十项无选区操作。其余一致性终检、文风画像、RAG
+四项接线与本地验收达到 16/21，本轮接入一致性终检后当前 Catalog 为 17/21，自然入口仍支持十项无选区操作。其余文风画像、RAG
 索引和两个开发视频操作尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
 启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
 显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
@@ -149,6 +149,12 @@ manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节
 生成及复审完整保存候选；高置信局部问题最多自动完整返工一次，其他问题和额度不足交作者；业务最多四次模型调用。
 现有 V1 业务、前序七项 V2 及 Operator 三操作白名单不变，本批没有更新固定 JAR、活动 Skills 或部署服务器。
 Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组织，正式写入只由作者确认后的 Core 执行。
+
+一致性终检保留原质量 API、五维报告与一次格式纠正，V2 只消费完整冻结的 `quality_context`。正常调用和纠正
+分别为独立 Step，共用原来源且各自授权、结算、重放；纠正不回放坏参数。Core 更新原检查项，`revise` 仍为
+已完成报告，不新增 Reviewer、候选或写作限制。原可选 taskId 兼容同归属 V1 Task 与 V2 写作 Run，
+CLI 继续 `long.quality.*`，不新增参数或直接访问 Agent。实现及验收见
+`docs/specs/2026-09-05-durable-consistency-quality.md`，固定安装与生产状态分别核对。
 
 ## 目标
 

@@ -2,6 +2,40 @@
   "registryVersion": "1",
   "budgets": [
     {
+      "key": "step_budget.quality.consistency.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 60000,
+        "maxPromptCacheMissTokens": 50000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 8000,
+        "maxCostMicros": 250000,
+        "maxWallClockSeconds": 150,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.system.quality_protocol_correction.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 60000,
+        "maxPromptCacheMissTokens": 50000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 8000,
+        "maxCostMicros": 250000,
+        "maxWallClockSeconds": 150,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.long_serial.answer_question.generator.v1",
       "version": 1,
       "supported": true,

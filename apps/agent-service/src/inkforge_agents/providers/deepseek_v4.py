@@ -88,6 +88,11 @@ class DeepSeekV4Provider:
         self._strict_endpoint = (
             _completion_endpoint(strict_base_url) if strict_base_url is not None else None
         )
+        self._strict_endpoint_profile = (
+            "endpoint.deepseek-strict-official.v1"
+            if self._strict_endpoint == "https://api.deepseek.com/beta/chat/completions"
+            else "endpoint.deepseek-strict-custom.v1"
+        )
         self._api_key = settings.openai_api_key.get_secret_value()
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10, read=300, write=60, pool=60)
@@ -99,7 +104,17 @@ class DeepSeekV4Provider:
             await self._client.aclose()
 
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
-        return route == "chat_json_output_v1"
+        return route == "chat_json_output_v1" or (
+            route == "quality_strict_tool_v1" and self._strict_endpoint is not None
+        )
+
+    def execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
+        """质量调用依据真实 strict 端点授权，不借普通 base URL 冒充官方端点。"""
+        if route == "quality_strict_tool_v1":
+            if self._strict_endpoint is None:
+                raise ValueError("质量 strict 路由未配置")
+            return self._strict_endpoint_profile, "capability.deepseek-v4.quality-strict.v1"
+        return self.endpoint_profile, self.capability_version
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         structured_output = request.structuredOutput
@@ -251,9 +266,11 @@ class DeepSeekV4Provider:
 def _project_deepseek_quality_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     """把质量报告 Schema 收敛为无引用、无 null 的 DeepSeek strict 方言。"""
 
-    definitions = schema.get("$defs")
+    # V1 使用 Pydantic 本地定义，V2 冻结 Schema 已由共享生成器完整内联。
+    # 缺失引用仍由下面的递归解析拒绝，不能把未解析引用当作空约束。
+    definitions = schema.get("$defs", {})
     if not isinstance(definitions, Mapping):
-        raise ValueError("质量报告 Schema 缺少 $defs")
+        raise ValueError("质量报告 Schema 的 $defs 必须是对象")
     inlined = _inline_quality_schema_node(schema, definitions, stack=())
     normalized, optional_paths = _replace_quality_nullable_strings(inlined, path=())
     if optional_paths != _QUALITY_OPTIONAL_STRING_PATHS:

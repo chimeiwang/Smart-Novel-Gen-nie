@@ -2,6 +2,24 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "quality.consistency.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.quality.consistency.v2",
+      "deploymentProfileKey": "deployment.quality.consistency.v2"
+    },
+    {
+      "key": "system.quality_protocol_corrector.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.system.quality_protocol_corrector.v2",
+      "deploymentProfileKey": "deployment.quality.consistency.v2"
+    },
+    {
       "key": "editor.answer.v1",
       "version": 1,
       "supported": true,

@@ -1,6 +1,7 @@
 package cn.inkforge.core.workflows.catalog;
 
 import cn.inkforge.core.workflows.domain.WorkflowModelProfile;
+import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
 import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.util.ArrayList;
@@ -83,10 +84,19 @@ public final class ExecutionPlanSnapshot {
         this.stored = immutableMap(wrapper);
     }
 
+    /** 旧调用入口保持空 systemSteps，不因当前目录新增用途而改变已有调用方语义。 */
     public static ExecutionPlanSnapshot freeze(
             String operationCatalogVersion,
             String executionManifestFingerprint,
             ExecutionRegistry.ResolvedOperation resolved) {
+        return freeze(operationCatalogVersion, executionManifestFingerprint, resolved, List.of());
+    }
+
+    public static ExecutionPlanSnapshot freeze(
+            String operationCatalogVersion,
+            String executionManifestFingerprint,
+            ExecutionRegistry.ResolvedOperation resolved,
+            List<Step> systemSteps) {
         Objects.requireNonNull(resolved, "解析 Operation 不能为空");
         ExecutionRegistry.Operation source = resolved.operation();
         Operation operation = new Operation(
@@ -122,7 +132,7 @@ public final class ExecutionPlanSnapshot {
                 operation,
                 generator,
                 reviewers,
-                List.of(),
+                systemSteps,
                 new ReviewPolicy(
                         review.profile(),
                         review.mode(),
@@ -299,6 +309,23 @@ public final class ExecutionPlanSnapshot {
                 throw invalid("执行计划逻辑 Profile 不能重复");
             }
         }
+        Set<String> systemPurposes = new LinkedHashSet<>();
+        int protocolCorrections = 0;
+        for (Step systemStep : systemSteps) {
+            if (Set.of("generation", "review").contains(systemStep.purpose())) {
+                throw invalid("执行计划 System Step purpose 不能是 generation 或 review");
+            }
+            if (!systemPurposes.add(systemStep.purpose())) {
+                throw invalid("执行计划 System Step purpose 不能重复");
+            }
+            if (!profiles.add(systemStep.modelProfile().profile())) {
+                throw invalid("执行计划逻辑 Profile 不能重复");
+            }
+            if ("protocol_correction".equals(systemStep.purpose())) protocolCorrections++;
+        }
+        if (protocolCorrections > 1 || protocolCorrections > runBudget.maxProtocolCorrectionSteps()) {
+            throw invalid("执行计划 protocol_correction 必须受 Run 的一次纠正预算约束");
+        }
         int expectedReviewers = switch (reviewPolicy.mode()) {
             case "none" -> 0;
             case "single" -> 1;
@@ -321,6 +348,21 @@ public final class ExecutionPlanSnapshot {
         runBudget.toDomain().requireStepFits(generator.stepBudget().budget());
         for (Step reviewer : reviewers) {
             runBudget.toDomain().requireStepFits(reviewer.stepBudget().budget());
+        }
+        if (!systemSteps.isEmpty()) {
+            var budget = runBudget.toDomain();
+            List<WorkflowRunBudgetCharge> initialCharges = new ArrayList<>();
+            initialCharges.add(WorkflowRunBudgetCharge.active(generator.stepBudget().budget()));
+            for (Step reviewer : reviewers) {
+                initialCharges.add(WorkflowRunBudgetCharge.active(reviewer.stepBudget().budget()));
+            }
+            for (Step systemStep : systemSteps) {
+                budget.requireStepFits(systemStep.stepBudget().budget());
+                // 显式纠正是另一次模型调用；与单 Step 的确定性协议闭合次数分开核算。
+                initialCharges.add(WorkflowRunBudgetCharge.active(systemStep.stepBudget().budget(),
+                        "protocol_correction".equals(systemStep.purpose())));
+            }
+            budget.requireWithin(initialCharges);
         }
     }
 

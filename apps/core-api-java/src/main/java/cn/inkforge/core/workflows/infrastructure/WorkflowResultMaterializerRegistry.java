@@ -36,6 +36,7 @@ final class WorkflowResultMaterializerRegistry {
         result.put("short_medium.generate_manuscript", new Binding("apply.short_medium_manuscript.v1", Materializer.SHORT_MEDIUM));
         result.put("short_medium.replace_selection", new Binding("apply.short_medium_selection.v1", Materializer.SHORT_MEDIUM));
         result.put("short_medium.full_check", new Binding("apply.short_medium_check_report.v1", Materializer.SHORT_MEDIUM));
+        result.put("quality.consistency", new Binding("apply.consistency_quality_report.v1", Materializer.CONSISTENCY_QUALITY));
         return Map.copyOf(result);
     }
 
@@ -75,7 +76,8 @@ final class WorkflowResultMaterializerRegistry {
         CHAPTER_SELECTION_REVIEW_ARTIFACT,
         OUTLINE_SELECTION_REVIEW_ARTIFACT,
         AGENT_UPDATES_REVIEW_ARTIFACT,
-        SHORT_MEDIUM
+        SHORT_MEDIUM,
+        CONSISTENCY_QUALITY
     }
 
     private record Binding(String applyHandler, Materializer materializer) {}

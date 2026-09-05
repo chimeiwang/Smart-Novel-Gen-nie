@@ -411,6 +411,7 @@ class ResolvedModelRef(_StrictModel):
     structuredOutputRoute: Literal[
         "responses_json_schema_v1",
         "chat_json_output_v1",
+        "quality_strict_tool_v1",
     ]
     capabilityVersion: ProtocolCode
     reasoningMode: Literal["disabled", "bounded"]

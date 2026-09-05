@@ -295,6 +295,7 @@ public final class JooqChapterRepository implements ChapterRepository {
                 .set(WORKFLOWRUN.UPDATEDAT, now)
                 .where(
                         WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                        WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
                         WORKFLOWRUN.SOURCEID.eq(check.getId()),
                         WORKFLOWRUN.STATUS.in(
                                 Workflowrunstatus.pending, Workflowrunstatus.running))

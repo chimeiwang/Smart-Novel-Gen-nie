@@ -9,6 +9,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import org.junit.jupiter.api.Test;
@@ -107,9 +108,79 @@ class ExecutionRegistryTest {
                         "video.chapter_cinematic_adaptation_v2", false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
-        assertThatThrownBy(() -> registry.resolveSystemPurpose("protocol_correction"))
+        assertThatThrownBy(() -> registry.resolveSystemPurpose("summarize_evidence"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
+    }
+
+    @Test
+    void 质量计划只冻结自身获准的一次独立协议纠正() {
+        ExecutionRegistry registry = ExecutionRegistryFixtures.qualityOperationEnabled(ExecutionRegistry.Environment.TEST);
+        ExecutionPlanSnapshot plan = registry.freezePlan("quality.consistency", false);
+
+        assertThat(plan.generator().modelProfile().profile()).isEqualTo("quality.consistency.v2");
+        assertThat(plan.systemSteps()).hasSize(1);
+        ExecutionPlanSnapshot.Step correction = plan.systemSteps().getFirst();
+        assertThat(correction.purpose()).isEqualTo("protocol_correction");
+        assertThat(correction.modelProfile().profile()).isEqualTo("system.quality_protocol_corrector.v2");
+        assertThat(correction.outputSchema().name()).isEqualTo("output.consistency_quality_report.v2");
+        assertThat(correction.stepBudget().profile()).isEqualTo("step_budget.system.quality_protocol_correction.v2");
+        assertThat(correction.stepBudget().budget().maxModelCalls()).isEqualTo(1);
+        assertThat(correction.stepBudget().budget().maxProtocolCorrections()).isEqualTo(1);
+        assertThat(plan.runBudget().maxModelCalls()).isEqualTo(2);
+        assertThat(plan.runBudget().maxProtocolCorrectionSteps()).isEqualTo(1);
+        assertThat(plan.reviewers()).isEmpty();
+        assertThat(ExecutionPlanSnapshot.fromStored(plan.stored()).systemSteps()).containsExactly(correction);
+        for (String workflow : List.of("long_serial", "short_medium")) {
+            for (String key : registry.enabledOperationKeys(workflow, false)) {
+                assertThat(registry.freezePlan(key, false).systemSteps()).as(key).isEmpty();
+            }
+        }
+    }
+
+    @Test
+    void 未支持或没有精确父操作绑定的系统用途不会进入业务计划() {
+        for (boolean supported : List.of(false, true)) {
+            Map<String, byte[]> documents = qualityEnabledDocuments();
+            JsonNode purposes = JSON.readTree(documents.get("system-purpose-registry.v1.json"));
+            JsonNode correction = findByPurpose(purposes.get("purposes"), "protocol_correction");
+            correction.asObject().put("supported", supported);
+            if (supported) correction.asObject().putArray("parentOperations");
+            replaceDocumentAndHash(documents, "systemPurposeRegistry", "system-purpose-registry.v1.json",
+                    JSON.writeValueAsBytes(purposes));
+
+            ExecutionRegistry registry = ExecutionRegistry.load(documents::get);
+            assertThat(registry.freezePlan("quality.consistency", false).systemSteps()).isEmpty();
+        }
+    }
+
+    @Test
+    void 质量Strict路由只接受其完整部署授权元组且不能替换成普通JSON路由() {
+        Map<String, byte[]> documents = classpathDocuments();
+        ExecutionRegistry registry = ExecutionRegistryFixtures.qualityOperationEnabled(ExecutionRegistry.Environment.PRODUCTION);
+        ExecutionPlanSnapshot plan = registry.freezePlan("quality.consistency", false);
+        JsonNode profiles = JSON.readTree(documents.get("deployment-profile-registry.v1.json")).get("profiles");
+        for (ExecutionPlanSnapshot.Step step : List.of(plan.generator(), plan.systemSteps().getFirst())) {
+            String deployment = step.modelProfile().deploymentProfileKey();
+            JsonNode profile = findByKey(profiles, deployment);
+            boolean found = false;
+            for (JsonNode model : profile.get("allowedModels")) {
+                if (!"quality_strict_tool_v1".equals(model.get("structuredOutputRoute").asString())) continue;
+                boolean production = false;
+                for (JsonNode environment : model.get("allowedEnvironments")) {
+                    if ("production".equals(environment.asString())) production = true;
+                }
+                if (!production) continue;
+                found = true;
+                WorkflowResolvedModel resolved = resolved(deployment, model, "quality_strict_tool_v1");
+                assertThat(registry.requireAuthorizedDeployment(resolved).structuredOutputRoute())
+                        .isEqualTo("quality_strict_tool_v1");
+                assertThatThrownBy(() -> registry.requireAuthorizedDeployment(
+                        resolved(deployment, model, "chat_json_output_v1")))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("未被");
+            }
+            assertThat(found).as(deployment).isTrue();
+        }
     }
 
     @Test
@@ -300,6 +371,35 @@ class ExecutionRegistryTest {
                 JSON.writeValueAsBytes(catalog));
         assertThatThrownBy(() -> ExecutionRegistry.load(incomplete::get))
                 .hasMessageContaining("Reviewer 策略缺少精确");
+    }
+
+    private static Map<String, byte[]> qualityEnabledDocuments() {
+        Map<String, byte[]> documents = classpathDocuments();
+        JsonNode catalog = JSON.readTree(documents.get("operation-catalog.v1.json"));
+        findByKey(catalog.get("operations"), "quality.consistency").asObject().put("v2Enabled", true);
+        replaceDocumentAndHash(documents, "catalog", "operation-catalog.v1.json", JSON.writeValueAsBytes(catalog));
+        return documents;
+    }
+
+    private static WorkflowResolvedModel resolved(String deployment, JsonNode model, String route) {
+        String provider = model.get("provider").asString();
+        String modelName = model.get("model").asString();
+        String transport = model.get("transportProfile").asString();
+        String endpoint = model.get("endpointProfile").asString();
+        String capability = model.get("capabilityVersion").asString();
+        String reasoning = model.get("reasoningMode").asString();
+        boolean idempotent = model.get("supportsRequestIdempotency").asBoolean();
+        String fingerprint = WorkflowResolvedModel.fingerprint(deployment, provider, modelName, transport,
+                endpoint, route, capability, reasoning, idempotent);
+        return new WorkflowResolvedModel(deployment, fingerprint, provider, modelName, transport, endpoint,
+                route, capability, reasoning, idempotent);
+    }
+
+    private static JsonNode findByPurpose(JsonNode values, String purpose) {
+        for (JsonNode value : values) {
+            if (purpose.equals(value.get("purpose").asString())) return value;
+        }
+        throw new IllegalStateException("测试夹具缺少 purpose：" + purpose);
     }
 
     private static Map<String, byte[]> classpathDocuments() {

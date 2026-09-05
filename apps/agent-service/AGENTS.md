@@ -25,7 +25,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   独立模型 Step，下一段携带全部已完成正文前缀，最多六段，重启不得重调已经完成的段。
 - 选区操作只能返回 replacement；Agent Service 不负责拼接选区全文。V1 文档运行回传一个最终候选结果，
   V2 逐 Step 回传完整段，由 Core 汇总成唯一候选；全文检查只回传报告。
-- 四项 V2 已完成仓内接线和本地真实 Core/Agent 独立进程、受控 Fake Provider 验收，Catalog 当前为
+- 四项 V2 已完成仓内接线和本地真实 Core/Agent 独立进程、受控 Fake Provider 验收，中短篇验收时 Catalog 为
   16/21。V2 原始段结果、计费与最终唯一候选/报告由 Core 持久化，零模型汇总 Step 固定结果引用；不创建
   V1 影子任务或命令，不新增 Reviewer。生成 Run 为 `completed`、候选独立为 `awaiting_user`；全文检查
   只生成完整文本报告。真实供应商、固定 CLI 包、活动 Skills 与生产未随本批更新，详见
@@ -223,13 +223,21 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   保留旧来源；没有新增来源、来源冲突或额度不足时明确终止，不无限调用。旧 v2 仅按原依赖恢复，仍只接受
   summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
   不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
-  Core 已接显式与自然入口、最多一次自动完整返工和作者采用；加上中短篇四项后仓内 Catalog 为 16/21，
-  一致性终检、文风画像、RAG 索引和两个开发视频操作共五项尚未迁移，
+  Core 已接显式与自然入口、最多一次自动完整返工和作者采用；加上中短篇四项及一致性终检后仓内 Catalog 为 17/21，
+  文风画像、RAG 索引和两个开发视频操作共四项尚未迁移，
   不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
   其余问题或额度不足交作者，旧冻结策略不扩大。来源补齐计模型额度但不冒充候选 revision，结构化业务最多四次调用。
   显式 scope：设定两项/创建大纲为 novel，修改大纲为 novel 或 outline_node，伏笔为 novel 或当前 chapter；
   公共 target 始终是章节锚点，不限制既有跨分区候选。详细隔离验收及最终仓内门禁见
   `docs/specs/2026-09-05-durable-structured-agent-updates.md`；本批未更新固定 CLI JAR、活动 Skills 或服务器。
+- V2 `quality.consistency` 使用 `quality.consistency.v2` 与完整 `quality_context`，保留原五维报告、
+  `submit_quality_report` 和 DeepSeek Beta strict 传输；明确路由为 `quality_strict_tool_v1`，不能记成普通 JSON。
+  每 Step 只调用一次模型。可靠用量下的首个 JSON/参数失败用稳定 Failure 交给 Core，Core 结算后才可按冻结
+  计划新建唯一 `protocol_correction` Step，使用 `system.quality_protocol_corrector.v2`；不保存或回放坏参数。
+  两 Step 共用原完整来源，独立授权、计费与 journal；未知用量、不完整输出、超预算或再次失败不得继续纠正。
+  Core 只投影原质量检查项，不创建草案或 Reviewer，`revise` 也是完成。旧正文失效通过原 durable cancel 收敛，
+  迟到报告不得覆盖新的检查项。实现和验收状态见 `docs/specs/2026-09-05-durable-consistency-quality.md`，
+  仓内启用数不是生产开放数；本批不更新固定 CLI、活动 Skills 或服务器。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

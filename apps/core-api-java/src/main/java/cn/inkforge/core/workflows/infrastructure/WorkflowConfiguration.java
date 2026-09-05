@@ -19,6 +19,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionSubmitter;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
+import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -65,7 +66,9 @@ class WorkflowConfiguration {
             Clock coreClock,
             ObjectMapper objectMapper,
             ExecutionRegistry workflowExecutionRegistry,
-            CoreSettings settings) {
+            CoreSettings settings,
+            WorkflowExecutionContextReader contexts,
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
         return new JooqWorkflowDispatchRepository(
                 database,
                 ids,
@@ -73,7 +76,7 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30),
-                settings.agentMaxConcurrency());
+                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable);
     }
 
     @Bean
@@ -86,7 +89,8 @@ class WorkflowConfiguration {
             WorkflowExecutionContextReader contexts,
             ObjectProvider<WorkflowIntentBusinessPreparation> preparations,
             ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates,
-            ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion) {
+            ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion,
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
@@ -94,7 +98,7 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
-                shortMediumCompletion::getIfAvailable);
+                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable);
     }
 
     @Bean
@@ -120,9 +124,10 @@ class WorkflowConfiguration {
             CuidV1Generator ids,
             Clock coreClock,
             ObjectMapper objectMapper,
-            ExecutionRegistry workflowExecutionRegistry) {
+            ExecutionRegistry workflowExecutionRegistry,
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
         return new JooqWorkflowRunCancellationRepository(
-                database, ids, coreClock, objectMapper, workflowExecutionRegistry);
+                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable);
     }
 
     @Bean
@@ -135,8 +140,9 @@ class WorkflowConfiguration {
 
     @Bean
     WorkflowCancellationReconciler workflowCancellationReconciler(
-            WorkflowRunCancellationService cancellations) {
-        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1));
+            WorkflowRunCancellationService cancellations,
+            ObjectProvider<WorkflowQualityCompletion> qualityCompletion) {
+        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1), qualityCompletion::getIfAvailable);
     }
 
     @Bean

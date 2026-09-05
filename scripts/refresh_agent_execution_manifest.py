@@ -19,6 +19,7 @@ from inkforge_contracts.execution import (
     OutlineSelectionOutput,
     canonical_execution_sha256,
 )
+from inkforge_contracts.quality import ConsistencyQualityReport
 from inkforge_contracts.short_medium_execution import (
     ShortMediumCheckOutput,
     ShortMediumContentOutput,
@@ -127,6 +128,8 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
+        if output["key"] == "output.consistency_quality_report.v2":
+            output["jsonSchema"] = model_output_schema(ConsistencyQualityReport)
         short_medium_models = {
             "output.short_medium_outline.v2": ShortMediumContentOutput,
             "output.short_medium_segment.v2": ShortMediumContentOutput,

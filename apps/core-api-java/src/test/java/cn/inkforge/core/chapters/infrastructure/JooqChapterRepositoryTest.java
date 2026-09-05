@@ -333,6 +333,7 @@ class JooqChapterRepositoryTest {
                 .set(WORKFLOWRUN.USERID, userId)
                 .set(WORKFLOWRUN.KIND, Workflowrunkind.quality_check)
                 .set(WORKFLOWRUN.STATUS, Workflowrunstatus.running)
+                .set(WORKFLOWRUN.SOURCETYPE, "quality_check")
                 .set(WORKFLOWRUN.SOURCEID, checkId)
                 .set(WORKFLOWRUN.CREATEDAT, INITIAL)
                 .set(WORKFLOWRUN.UPDATEDAT, INITIAL)

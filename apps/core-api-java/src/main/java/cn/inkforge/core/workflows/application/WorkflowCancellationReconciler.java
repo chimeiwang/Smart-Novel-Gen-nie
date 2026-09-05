@@ -10,10 +10,17 @@ public final class WorkflowCancellationReconciler {
     private final WorkflowRunCancellationService cancellations;
     private final Duration interval;
     private final AtomicBoolean stop = new AtomicBoolean();
+    private final java.util.function.Supplier<WorkflowQualityCompletion> quality;
 
     public WorkflowCancellationReconciler(
             WorkflowRunCancellationService cancellations, Duration interval) {
+        this(cancellations, interval, () -> null);
+    }
+
+    public WorkflowCancellationReconciler(WorkflowRunCancellationService cancellations, Duration interval,
+            java.util.function.Supplier<WorkflowQualityCompletion> quality) {
         this.cancellations = Objects.requireNonNull(cancellations);
+        this.quality = Objects.requireNonNull(quality);
         if (interval == null || interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("Workflow 取消对账间隔必须为正数");
         }
@@ -21,7 +28,15 @@ public final class WorkflowCancellationReconciler {
     }
 
     public int runOnce() {
-        return cancellations.runOnce();
+        WorkflowQualityCompletion projection = quality.get();
+        int invalidated = 0;
+        if (projection != null) {
+            for (var run : projection.findInvalidatedRuns(20)) {
+                cancellations.cancelInvalidatedQuality(run);
+                invalidated++;
+            }
+        }
+        return Math.addExact(invalidated, cancellations.runOnce());
     }
 
     public void run() throws InterruptedException {

@@ -28,7 +28,11 @@ class FakeModelProvider:
     supports_request_idempotency = True
 
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
-        return route in {"responses_json_schema_v1", "chat_json_output_v1"}
+        return route in {
+            "responses_json_schema_v1",
+            "chat_json_output_v1",
+            "quality_strict_tool_v1",
+        }
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         if request.structuredOutput is not None:

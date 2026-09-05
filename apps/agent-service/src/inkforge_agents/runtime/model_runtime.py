@@ -294,6 +294,14 @@ class ModelRuntime:
         checker = getattr(self._provider, "supports_structured_output", None)
         return bool(checker(route)) if callable(checker) else False
 
+    def execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
+        """仅路由特有的真实 Provider 覆写部署分类，其余沿用历史身份。"""
+        resolver = getattr(self._provider, "execution_identity", None)
+        if callable(resolver):
+            endpoint, capability = resolver(route)
+            return str(endpoint), str(capability)
+        return self.endpoint_profile, self.capability_version
+
     async def run_turn(
         self,
         request: ModelTurnRequest,

@@ -22,6 +22,7 @@ CONTRACT_MODULES = (
     "long_serial",
     "operations",
     "quality",
+    "quality_execution",
     "read_tools",
     "runs",
     "short_medium",
@@ -49,6 +50,7 @@ MODULE_SCHEMA_VERSIONS = {
     "execution": "2.0",
     "workflow_events": "2.0",
     "short_medium_execution": "2.0",
+    "quality_execution": "2.0",
 }
 
 

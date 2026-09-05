@@ -32,6 +32,11 @@ public final class WorkflowRunCancellationService {
         result.executorRequests().forEach(this::deliver);
     }
 
+    public void cancelInvalidatedQuality(WorkflowQualityCompletion.InvalidatedRun run) {
+        repository.requestInvalidatedQuality(run.userId(), run.runId(), run.cancelRequestId())
+                .executorRequests().forEach(this::deliver);
+    }
+
     /** 每轮先结算取消中的过期租约，再限量重投仍运行的精确取消。 */
     public int runOnce() {
         int settled = repository.settleExpired(batchSize);

@@ -177,10 +177,19 @@ public final class ExecutionRegistry {
 
     public ExecutionPlanSnapshot freezePlan(
             String key, boolean allowDevelopmentOperations) {
+        ResolvedOperation operation = resolve(key, allowDevelopmentOperations);
+        List<ExecutionPlanSnapshot.Step> systemSteps = systemPurposes.values().stream()
+                .filter(SystemPurpose::supported)
+                .filter(purpose -> purpose.parentOperations().contains(operation.operation().key()))
+                .sorted(java.util.Comparator.comparing(SystemPurpose::purpose))
+                .map(purpose -> resolveSystemPurpose(purpose.purpose()))
+                .map(ExecutionPlanSnapshot::freezeSystemPurpose)
+                .toList();
         return ExecutionPlanSnapshot.freeze(
                 catalogVersion,
                 manifestFingerprint,
-                resolve(key, allowDevelopmentOperations));
+                operation,
+                systemSteps);
     }
 
     public ResolvedOperation resolve(String key, boolean allowDevelopmentOperations) {
@@ -381,7 +390,7 @@ public final class ExecutionRegistry {
                         enumText(
                                 model,
                                 "structuredOutputRoute",
-                                Set.of("responses_json_schema_v1", "chat_json_output_v1")),
+                                Set.of("responses_json_schema_v1", "chat_json_output_v1", "quality_strict_tool_v1")),
                         capabilityVersion,
                         enumText(model, "reasoningMode", Set.of("disabled", "bounded")),
                         bool(model, "supportsRequestIdempotency"),

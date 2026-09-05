@@ -62,10 +62,17 @@ from ..providers.base import (
     ModelProvider,
     ModelStructuredOutputRequest,
     ModelStructuredOutputRoute,
+    ModelTool,
     ModelTurnRequest,
     ModelTurnResult,
     ProviderProtocolError,
     ProviderTransportError,
+)
+from .quality import (
+    QUALITY_CORRECTION_REQUIRED,
+    QUALITY_TOOL,
+    quality_response,
+    validate_quality_request,
 )
 from .registry import (
     ExecutionRegistry,
@@ -78,7 +85,7 @@ from .registry import (
 )
 from .short_medium import SHORT_MEDIUM_HANDLERS, validate_short_medium_request
 
-ExecutionPurpose = Literal["generation", "review", "resolve_intent"]
+ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]
 FailureCategory = Literal[
     "provider_transient",
     "provider_terminal",
@@ -92,6 +99,7 @@ BeginAttempt = Callable[[], Awaitable[int]]
 _SUPPORTED_OPERATION_HANDLERS = frozenset(
     {
         *(("short_medium", operation) for operation in SHORT_MEDIUM_HANDLERS),
+        ("quality", "consistency"),
         ("long_serial", "answer_question"),
         ("long_serial", "create_lore"),
         ("long_serial", "create_outline"),
@@ -312,14 +320,15 @@ class StatelessExecutionStepExecutor:
         if not self._model.supports_structured_output(resolved.structuredOutputRoute):
             return False
         try:
+            endpoint, capability = self._execution_identity(resolved.structuredOutputRoute)
             current = _resolved_model(
                 profile,
                 provider=self._model.provider_name,
                 model=self._model.model_name,
                 transport_profile=self._model.transport_profile,
-                endpoint_profile=self._model.endpoint_profile,
+                endpoint_profile=endpoint,
                 structured_output_route=resolved.structuredOutputRoute,
-                capability_version=self._model.capability_version,
+                capability_version=capability,
                 supports_request_idempotency=self._model.supports_request_idempotency,
             )
         except ExecutionCapabilityError:
@@ -333,6 +342,8 @@ class StatelessExecutionStepExecutor:
     ) -> ResolvedExecutionStep:
         if request.purpose == "resolve_intent":
             return self._resolve_intent(request, registry)
+        if request.workflow == "quality":
+            return self._resolve_quality(request, registry)
         operation_key = (request.workflow, request.operation)
         if operation_key not in _SUPPORTED_OPERATION_HANDLERS:
             raise ExecutionCapabilityError("当前执行器尚未实现该 Operation handler")
@@ -439,6 +450,40 @@ class StatelessExecutionStepExecutor:
             resolved_model=resolved_model,
         )
 
+    def _resolve_quality(
+        self, request: ExecutionStepRequest, registry: ExecutionRegistry
+    ) -> ResolvedExecutionStep:
+        try:
+            validate_quality_request(request)
+            if request.dispatchMode == "initial":
+                operation = registry.resolve("quality", "consistency")
+                if request.purpose == "protocol_correction":
+                    system = registry.resolve_system_purpose("protocol_correction", "quality")
+                    if system.definition.parent_operations != ("quality.consistency",):
+                        raise ValueError("质量纠正系统用途父操作必须精确限定")
+                    if (
+                        system.definition.evidence_policy != request.evidenceBundle.policyVersion
+                        or system.definition.lane != request.lane
+                    ):
+                        raise ValueError("质量纠正 Evidence 或 lane 不一致")
+                    profile, schema, budget = (
+                        system.model_profile,
+                        system.output_schema,
+                        system.step_budget,
+                    )
+                else:
+                    profile, schema, budget = (
+                        operation.generator_profile,
+                        operation.output_schema,
+                        operation.generator_step_budget,
+                    )
+                _validate_profile_ref(request, profile)
+                _validate_output_schema_ref(request, schema)
+                _validate_step_budget(request, budget)
+        except (ValueError, ExecutionRegistryError) as exc:
+            raise ExecutionCapabilityError("质量 Step 未被精确冻结契约授权") from exc
+        return self._resolve_retained_request(request, registry)
+
     def _resolve_intent(
         self, request: ExecutionStepRequest, registry: ExecutionRegistry
     ) -> ResolvedExecutionStep:
@@ -506,6 +551,15 @@ class StatelessExecutionStepExecutor:
                 request.purpose != "resolve_intent"
                 or budget.key == "step_budget.system.resolve_intent.v1"
             )
+            and (
+                request.workflow != "quality"
+                or budget.key
+                == (
+                    "step_budget.system.quality_protocol_correction.v2"
+                    if request.purpose == "protocol_correction"
+                    else "step_budget.quality.consistency.generator.v2"
+                )
+            )
         )
         if not matching_budgets:
             raise ExecutionCapabilityError("Execution Step Budget 未保留在 Registry")
@@ -524,10 +578,7 @@ class StatelessExecutionStepExecutor:
             rubric_version = _frozen_rubric_version(request)
         elif request.purpose == "resolve_intent":
             purpose = "resolve_intent"
-            if (
-                profile.purpose != "generation"
-                or output_schema.purpose != "generation"
-            ):
+            if profile.purpose != "generation" or output_schema.purpose != "generation":
                 raise ExecutionCapabilityError("意图解析 Profile/Output 用途不一致")
             _validate_intent_resolver_tuple(
                 registry,
@@ -536,6 +587,11 @@ class StatelessExecutionStepExecutor:
                 budget,
                 current=False,
             )
+            rubric_version = None
+        elif request.purpose == "protocol_correction" and request.workflow == "quality":
+            purpose = "protocol_correction"
+            if profile.purpose != "generation" or output_schema.purpose != "generation":
+                raise ExecutionCapabilityError("质量纠正 Profile/Output 用途不一致")
             rubric_version = None
         else:
             raise ExecutionCapabilityError("当前执行器只支持 generation/review Step")
@@ -551,16 +607,17 @@ class StatelessExecutionStepExecutor:
             raise ExecutionCapabilityError("模型 Step 必须具有正 completion 预算")
         if request.budget.maxCompletionTokens > self._max_output_tokens:
             raise ExecutionCapabilityError("Step completion 预算超过当前部署模型能力")
-        structured_output_route = self._structured_output_route()
+        structured_output_route = self._structured_output_route(request)
+        endpoint, capability = self._execution_identity(structured_output_route)
         try:
             registry.require_authorized_deployment(
                 deployment_profile_key=profile.deployment_profile_key,
                 provider=self._model.provider_name,
                 model=self._model.model_name,
                 transport_profile=self._model.transport_profile,
-                endpoint_profile=self._model.endpoint_profile,
+                endpoint_profile=endpoint,
                 structured_output_route=structured_output_route,
-                capability_version=self._model.capability_version,
+                capability_version=capability,
                 reasoning_mode=profile.reasoning_mode,
                 supports_request_idempotency=self._model.supports_request_idempotency,
             )
@@ -571,9 +628,9 @@ class StatelessExecutionStepExecutor:
             provider=self._model.provider_name,
             model=self._model.model_name,
             transport_profile=self._model.transport_profile,
-            endpoint_profile=self._model.endpoint_profile,
+            endpoint_profile=endpoint,
             structured_output_route=structured_output_route,
-            capability_version=self._model.capability_version,
+            capability_version=capability,
             supports_request_idempotency=self._model.supports_request_idempotency,
         )
         return ResolvedExecutionStep(
@@ -611,13 +668,18 @@ class StatelessExecutionStepExecutor:
             ),
         }
         user_content = canonical_execution_json_bytes(input_envelope).decode("utf-8")
-        structured = ModelStructuredOutputRequest(
-            route=route,
-            name=_structured_output_name(request.outputSchema.name),
-            jsonSchema=request.outputSchema.jsonSchema,
+        structured = (
+            None
+            if route == "quality_strict_tool_v1"
+            else ModelStructuredOutputRequest(
+                route=route,
+                name=_structured_output_name(request.outputSchema.name),
+                jsonSchema=request.outputSchema.jsonSchema,
+            )
         )
         policy = ModelExecutionPolicy(
             policyId=request.modelProfile.profile,
+            requiredToolName=QUALITY_TOOL if route == "quality_strict_tool_v1" else None,
             thinkingMode=(
                 "enabled" if request.modelProfile.reasoningMode == "bounded" else "disabled"
             ),
@@ -628,7 +690,19 @@ class StatelessExecutionStepExecutor:
                 ModelMessage(role="system", content=system_prompt),
                 ModelMessage(role="user", content=user_content),
             ],
-            tools=[],
+            tools=(
+                [
+                    ModelTool(
+                        name=QUALITY_TOOL,
+                        description="提交完整一致性终检报告",
+                        parameters=request.outputSchema.jsonSchema,
+                        strict=True,
+                    )
+                ]
+                if route == "quality_strict_tool_v1"
+                else []
+            ),
+            requiredToolName=QUALITY_TOOL if route == "quality_strict_tool_v1" else None,
             maxOutputTokens=request.budget.maxCompletionTokens,
             policy=policy,
             thinkingMode=(
@@ -641,7 +715,11 @@ class StatelessExecutionStepExecutor:
             requestIdempotencyKey=request.idempotencyKey,
         )
         estimated_input = sum(len(message.content) for message in model_request.messages)
-        estimated_input += len(structured.model_dump_json())
+        estimated_input += (
+            len(structured.model_dump_json())
+            if structured is not None
+            else sum(len(tool.model_dump_json()) for tool in model_request.tools)
+        )
         if estimated_input > request.budget.maxInputTokens:
             raise ExecutionCapabilityError("完整模型输入超过 Step maxInputTokens")
         return model_request
@@ -843,6 +921,7 @@ class StatelessExecutionStepExecutor:
                 provider_attempts=outcome.provider_attempts,
                 wall_time_millis=outcome.elapsed_millis,
                 reasoning_mode=request.modelProfile.reasoningMode,
+                quality_tool_response=request.workflow == "quality",
             )
             error_code = (
                 "STEP_BUDGET_EXCEEDED" if _step_budget_exceeded(request, usage) else "RUN_CANCELLED"
@@ -895,7 +974,29 @@ class StatelessExecutionStepExecutor:
             provider_attempts=outcome.provider_attempts,
             wall_time_millis=outcome.elapsed_millis,
             reasoning_mode=request.modelProfile.reasoningMode,
+            quality_tool_response=request.workflow == "quality",
         )
+        if request.workflow == "quality":
+            failure = _validate_quality_provider_result(request, result, usage)
+            if failure is not None:
+                return _failure(
+                    request,
+                    resolved.resolved_model,
+                    usage=usage,
+                    category=failure[0],
+                    code=failure[1],
+                    outcome_unknown=False,
+                    failed_at=now,
+                )
+            output, _ = quality_response(result)
+            result = result.model_copy(
+                update={
+                    "content": "",
+                    "toolCalls": [],
+                    "structuredOutput": output,
+                    "finishReason": "stop",
+                }
+            )
         failure = _validate_provider_result(request, result, usage)
         if failure is not None:
             return _failure(
@@ -919,10 +1020,7 @@ class StatelessExecutionStepExecutor:
                 failed_at=now,
             )
         value: (
-            dict[str, JsonValue]
-            | EvidenceEvaluation
-            | EvidenceExpansionRequest
-            | ProposedCommand
+            dict[str, JsonValue] | EvidenceEvaluation | EvidenceExpansionRequest | ProposedCommand
         )
         if (
             resolved.purpose == "generation"
@@ -938,7 +1036,7 @@ class StatelessExecutionStepExecutor:
                 max_input_tokens=request.budget.maxInputTokens,
             )
             result_kind = "evidence_expansion"
-        elif resolved.purpose == "generation":
+        elif resolved.purpose in {"generation", "protocol_correction"}:
             value = _derive_generation_output(request, structured_output)
             result_kind = "output"
         elif resolved.purpose == "resolve_intent":
@@ -1040,7 +1138,20 @@ class StatelessExecutionStepExecutor:
             completedAt=now,
         )
 
-    def _structured_output_route(self) -> ModelStructuredOutputRoute:
+    def _execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
+        resolver = getattr(self._model, "execution_identity", None)
+        if callable(resolver):
+            endpoint, capability = resolver(route)
+            return str(endpoint), str(capability)
+        return self._model.endpoint_profile, self._model.capability_version
+
+    def _structured_output_route(
+        self, request: ExecutionStepRequest | None = None
+    ) -> ModelStructuredOutputRoute:
+        if request is not None and request.workflow == "quality":
+            if self._model.supports_structured_output("quality_strict_tool_v1"):
+                return "quality_strict_tool_v1"
+            raise ExecutionCapabilityError("当前 Provider 不支持质量 strict 工具路由")
         for route in ("responses_json_schema_v1", "chat_json_output_v1"):
             if self._model.supports_structured_output(route):
                 return route
@@ -1080,6 +1191,13 @@ class ProviderModelRuntimeAdapter:
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
         checker = getattr(self._provider, "supports_structured_output", None)
         return bool(checker(route)) if callable(checker) else False
+
+    def execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
+        resolver = getattr(self._provider, "execution_identity", None)
+        if callable(resolver):
+            endpoint, capability = resolver(route)
+            return str(endpoint), str(capability)
+        return self.endpoint_profile, self.capability_version
 
     async def run_execution_turn(
         self,
@@ -1400,6 +1518,12 @@ def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCo
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if request.workflow == "quality":
+        try:
+            validate_quality_request(request)
+        except (ValueError, ValidationError) as exc:
+            raise ExecutionCapabilityError("质量输入与冻结来源不一致") from exc
+        return
     if request.workflow == "short_medium":
         try:
             validate_short_medium_request(request)
@@ -1918,6 +2042,7 @@ def _usage(
     provider_attempts: int,
     wall_time_millis: int,
     reasoning_mode: Literal["disabled", "bounded"],
+    quality_tool_response: bool = False,
 ) -> StepUsage:
     if result is None:
         return _unknown_usage(
@@ -1927,6 +2052,9 @@ def _usage(
     input_tokens = result.usage.promptTokens
     cached_tokens = result.usage.cachedTokens
     protocol_corrections = result.structuredOutputCorrectionCount
+    if quality_tool_response:
+        # 一次响应的确定性闭合恢复与另一独立模型 Step 分开计数。
+        protocol_corrections = int(result.recoveredToolCallCount > 0)
     if cached_tokens > input_tokens:
         return _unknown_usage(
             provider_attempts=provider_attempts,
@@ -2059,6 +2187,45 @@ def _validate_provider_result(
             _intent_command(request, result.structuredOutput)
         except (ValueError, ValidationError, ExecutionCapabilityError):
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    return None
+
+
+def _validate_quality_provider_result(
+    request: ExecutionStepRequest,
+    result: ModelTurnResult,
+    usage: StepUsage,
+) -> tuple[Literal["provider_terminal", "protocol", "validation"], str] | None:
+    if _step_budget_exceeded(request, usage):
+        return "validation", "STEP_BUDGET_EXCEEDED"
+    if (
+        usage.usageStatus == "unknown"
+        or any(
+            value is None
+            for value in (
+                usage.inputTokens,
+                usage.cachedTokens,
+                usage.promptCacheMissTokens,
+                usage.completionTokens,
+                usage.reasoningTokens,
+                usage.visibleOutputTokens,
+            )
+        )
+        or result.usage.totalTokens != result.usage.promptTokens + result.usage.completionTokens
+    ):
+        return "protocol", "MODEL_USAGE_INVALID"
+    if result.finishReason in {"length", "content_filter", "insufficient_system_resource"}:
+        return "provider_terminal", {
+            "length": "MODEL_OUTPUT_TRUNCATED",
+            "content_filter": "MODEL_OUTPUT_FILTERED",
+            "insufficient_system_resource": "MODEL_INSUFFICIENT_SYSTEM_RESOURCE",
+        }[result.finishReason]
+    if result.finishReason != "tool_calls" or result.structuredOutput is not None:
+        return "protocol", "MODEL_FINISH_REASON_INVALID"
+    output, correctable = quality_response(result)
+    if output is None:
+        if correctable and request.purpose == "generation":
+            return "protocol", QUALITY_CORRECTION_REQUIRED
+        return "protocol", "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED"
     return None
 
 

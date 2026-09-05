@@ -238,6 +238,44 @@ async def test_quality_strict_request_uses_beta_endpoint_and_strict_wire() -> No
     assert "parallel_tool_calls" not in payload
 
 
+@pytest.mark.parametrize(
+    ("base", "strict", "expected"),
+    [
+        ("https://api.deepseek.com", None, "endpoint.deepseek-strict-official.v1"),
+        (
+            "https://api.deepseek.com",
+            "https://proxy.example/beta",
+            "endpoint.deepseek-strict-custom.v1",
+        ),
+        (
+            "https://proxy.example/v1",
+            "https://api.deepseek.com/beta/",
+            "endpoint.deepseek-strict-official.v1",
+        ),
+        (
+            "https://api.deepseek.com",
+            "https://api.deepseek.com",
+            "endpoint.deepseek-strict-custom.v1",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_quality_execution_identity_uses_actual_strict_endpoint(base, strict, expected):
+    provider, _, client = _provider(base, strict_base_url=strict)
+    try:
+        assert provider.supports_structured_output("quality_strict_tool_v1")
+        assert provider.execution_identity("quality_strict_tool_v1") == (
+            expected,
+            "capability.deepseek-v4.quality-strict.v1",
+        )
+        assert provider.execution_identity("chat_json_output_v1") == (
+            provider.endpoint_profile,
+            provider.capability_version,
+        )
+    finally:
+        await client.aclose()
+
+
 def _valid_quality_arguments() -> dict[str, Any]:
     return {
         "scores": {
@@ -556,9 +594,7 @@ def test_deepseek_strict_schema_projection_restricts_empty_root_object() -> None
 
 
 def test_deepseek_strict_schema_projection_restricts_empty_object_in_items() -> None:
-    projected = _project_deepseek_strict_schema(
-        {"type": "array", "items": {"type": "object"}}
-    )
+    projected = _project_deepseek_strict_schema({"type": "array", "items": {"type": "object"}})
 
     assert projected["items"]["required"] == []
     assert projected["items"]["additionalProperties"] is False
@@ -942,9 +978,7 @@ async def test_deepseek_recovers_only_missing_container_closers_after_schema_val
     }
     provider, _, client = _provider(response=response)
     try:
-        result = await provider.complete_turn(
-            _request(policy=CREATIVE_HIGH, parameters=parameters)
-        )
+        result = await provider.complete_turn(_request(policy=CREATIVE_HIGH, parameters=parameters))
     finally:
         await client.aclose()
 

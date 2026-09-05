@@ -7,6 +7,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowCancellationRequestResult;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
+import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
@@ -36,6 +37,7 @@ final class JooqWorkflowRunCancellationRepository
     private final Clock clock;
     private final ObjectMapper json;
     private final WorkflowBillingCoordinator billing;
+    private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
 
     JooqWorkflowRunCancellationRepository(
             CoreDatabase database,
@@ -43,11 +45,18 @@ final class JooqWorkflowRunCancellationRepository
             Clock clock,
             ObjectMapper json,
             ExecutionRegistry registry) {
+        this(database, ids, clock, json, registry, () -> null);
+    }
+
+    JooqWorkflowRunCancellationRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.billing = new WorkflowBillingCoordinator(ids, json, registry);
+        this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
     }
 
     @Override
@@ -58,6 +67,28 @@ final class JooqWorkflowRunCancellationRepository
         requireNonBlank(clientRequestId, "clientRequestId");
         return database.transactionResult(
                 transaction -> request(transaction, userId, runId, clientRequestId));
+    }
+
+    @Override
+    public WorkflowCancellationRequestResult requestInvalidatedQuality(
+            String userId, String runId, String clientRequestId) {
+        requireNonBlank(userId, "userId");
+        requireNonBlank(runId, "runId");
+        requireNonBlank(clientRequestId, "clientRequestId");
+        return database.transactionResult(tx -> {
+            Record run = lockRun(tx, runId, userId);
+            if (TERMINAL_RUNS.contains(run.get("status", String.class))
+                    || run.get("cancelRequestedAt", LocalDateTime.class) != null) {
+                return new WorkflowCancellationRequestResult(List.of());
+            }
+            if (!isQualityRun(run)) throw new IllegalArgumentException("失效来源取消只能引用一致性终检");
+            // 后续取消可能释放预留。先锁计费用户，再核验 Chapter/Check，避免 Chapter→User 反序。
+            tx.fetchOne("SELECT id FROM public.\"User\" WHERE id = ? FOR UPDATE", userId);
+            if (!qualityCompletion().isInvalidated(tx, runId)) {
+                return new WorkflowCancellationRequestResult(List.of());
+            }
+            return request(tx, userId, runId, clientRequestId);
+        });
     }
 
     @Override
@@ -226,7 +257,7 @@ final class JooqWorkflowRunCancellationRepository
         LocalDateTime now = DatabaseTimestamp.now(clock);
         List<Record> runs = transaction.fetch(
                 """
-                SELECT run.id, run."userId", run."novelId", run.status::text AS status,
+                SELECT run.id, run."userId", run."novelId", run.workflow, run.operation, run.status::text AS status,
                        run."cancelRequestId", run."cancelRequestedAt",
                        run."lastEventSequence", run.revision
                 FROM public."WorkflowRun" AS run
@@ -244,6 +275,7 @@ final class JooqWorkflowRunCancellationRepository
                 now,
                 limit);
         int settled = 0;
+        Map<Record, Long> completedRuns = new LinkedHashMap<>();
         for (Record run : runs) {
             long sequence = run.get("lastEventSequence", Long.class);
             List<Record> expired = transaction.fetch(
@@ -307,13 +339,7 @@ final class JooqWorkflowRunCancellationRepository
                             run.get("id", String.class))
                     .get("count", Integer.class);
             if (remaining == 0) {
-                finalizeCancelled(
-                        transaction,
-                        run,
-                        run.get("cancelRequestId", String.class),
-                        run.get("cancelRequestedAt", LocalDateTime.class),
-                        sequence,
-                        now);
+                completedRuns.put(run, sequence);
             } else if (!expired.isEmpty()) {
                 transaction.execute(
                         """
@@ -326,13 +352,17 @@ final class JooqWorkflowRunCancellationRepository
                         run.get("id", String.class));
             }
         }
+        // 先完成本批全部计费，再投影业务 Chapter/Check，避免持有章节锁后取得下一个用户计费锁。
+        completedRuns.forEach((run, sequence) -> finalizeCancelled(transaction, run,
+                run.get("cancelRequestId", String.class), run.get("cancelRequestedAt", LocalDateTime.class),
+                sequence, now));
         return settled;
     }
 
     private Record lockRun(DSLContext transaction, String runId, String userId) {
         Record run = transaction.fetchOne(
                 """
-                SELECT id, "userId", "novelId", status::text AS status,
+                SELECT id, "userId", "novelId", workflow, operation, status::text AS status,
                        "cancelRequestId", "cancelRequestedAt", "lastEventSequence", revision
                 FROM public."WorkflowRun"
                 WHERE id = ? AND "engineVersion" = 2 AND "userId" = ?
@@ -355,6 +385,9 @@ final class JooqWorkflowRunCancellationRepository
             LocalDateTime now) {
         if (cancelRequestId == null || requestedAt == null) {
             throw new IllegalStateException("Workflow Run 取消终态缺少身份或时间");
+        }
+        if (isQualityRun(run)) {
+            qualityCompletion().finish(transaction, run.get("id", String.class), "cancelled");
         }
         long sequence = Math.addExact(previousSequence, 1L);
         transaction.execute(
@@ -384,6 +417,17 @@ final class JooqWorkflowRunCancellationRepository
                 sequence,
                 now,
                 run.get("id", String.class));
+    }
+
+    private static boolean isQualityRun(Record run) {
+        return "quality".equals(run.get("workflow", String.class))
+                && "consistency".equals(run.get("operation", String.class));
+    }
+
+    private WorkflowQualityCompletion qualityCompletion() {
+        WorkflowQualityCompletion completion = qualityCompletion.get();
+        if (completion == null) throw new IllegalStateException("质量取消投影端口未装配");
+        return completion;
     }
 
     private long appendStepFinished(

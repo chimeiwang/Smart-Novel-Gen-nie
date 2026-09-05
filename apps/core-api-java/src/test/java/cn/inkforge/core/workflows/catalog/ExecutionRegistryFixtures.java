@@ -29,6 +29,11 @@ public final class ExecutionRegistryFixtures {
         return modifiedSelectionOperation(environment, operation -> operation.put("lane", lane));
     }
 
+    /** 只在内存启用一致性终检，仍要求当前真实执行资产及一次纠正依赖完整。 */
+    public static ExecutionRegistry qualityOperationEnabled(ExecutionRegistry.Environment environment) {
+        return modifiedOperation(environment, "quality.consistency", operation -> operation.put("v2Enabled", true));
+    }
+
     private static ExecutionRegistry modifiedSelectionOperation(
             ExecutionRegistry.Environment environment,
             Consumer<Map<String, Object>> modification) {

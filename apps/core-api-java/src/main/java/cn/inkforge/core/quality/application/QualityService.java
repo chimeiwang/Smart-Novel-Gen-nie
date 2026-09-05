@@ -18,10 +18,17 @@ public final class QualityService {
 
     private final QualityRepository repository;
     private final QualityRunDispatcher dispatcher;
+    private final QualityRunStarter starter;
 
     public QualityService(QualityRepository repository, QualityRunDispatcher dispatcher) {
+        this(repository, dispatcher, null);
+    }
+
+    public QualityService(QualityRepository repository, QualityRunDispatcher dispatcher,
+            QualityRunStarter starter) {
         this.repository = Objects.requireNonNull(repository);
         this.dispatcher = dispatcher;
+        this.starter = starter;
     }
 
     public QualityCheckDto get(String userId, String checkId) {
@@ -35,6 +42,7 @@ public final class QualityService {
 
     public RunQualityCheckResponse run(
             String userId, String checkId, RunQualityCheckRequest request) {
+        if (starter != null) return starter.start(userId, checkId, request);
         if (dispatcher == null) {
             throw new ApiException(
                     503,
