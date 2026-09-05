@@ -15,7 +15,10 @@ from inkforge_agents.execution.executor import (
 )
 from inkforge_agents.execution.registry import ExecutionRegistry, load_execution_registry
 from inkforge_agents.providers.base import ModelTurnResult, ModelUsage, ModelUsageDiagnostics
-from inkforge_contracts import materialize_agent_updates_output
+from inkforge_contracts import (
+    materialize_agent_updates_evidence_request,
+    materialize_agent_updates_output,
+)
 from inkforge_contracts.execution import (
     EvidenceItem,
     EvidenceManifest,
@@ -40,6 +43,13 @@ _OPERATIONS = (
     "manage_foreshadowing",
 )
 _GENERATOR_PROFILES = {
+    "create_lore": "lore.generator.v3",
+    "revise_lore": "lore.reviser.v3",
+    "create_outline": "plot.outline_generator.v3",
+    "revise_outline": "plot.outline_reviser.v3",
+    "manage_foreshadowing": "plot.foreshadowing.v3",
+}
+_RETAINED_GENERATOR_PROFILES = {
     "create_lore": "lore.generator.v2",
     "revise_lore": "lore.reviser.v2",
     "create_outline": "plot.outline_generator.v2",
@@ -68,6 +78,28 @@ def _provider_output() -> dict[str, Any]:
             ],
             "worldSetting": "",
         },
+    }
+
+
+def _evidence_request_output() -> dict[str, Any]:
+    return {
+        "evidenceRequest": [
+            {
+                "resourceType": "character",
+                "resourceId": "character-1",
+                "purposeCode": "target",
+            },
+            {
+                "resourceType": "world_setting",
+                "resourceId": "novel-1",
+                "purposeCode": "target",
+            },
+            {
+                "resourceType": "outline_tree",
+                "resourceId": "novel-1",
+                "purposeCode": "replace_tree",
+            },
+        ]
     }
 
 
@@ -185,12 +217,20 @@ def _request(
     *,
     reviewer: bool = False,
     revision: bool = False,
+    retained_v2: bool = False,
     dispatch_mode: Literal["initial", "pending_recovery", "running_recovery"] = "initial",
 ) -> ExecutionStepRequest:
     registry = _enabled_registry()
     operation = registry.resolve("long_serial", operation_name)
-    profile = operation.reviewer_profiles[0] if reviewer else operation.generator_profile
-    schema = operation.reviewer_output_schema if reviewer else operation.output_schema
+    if reviewer:
+        profile = operation.reviewer_profiles[0]
+        schema = operation.reviewer_output_schema
+    elif retained_v2:
+        profile = registry.profiles[_RETAINED_GENERATOR_PROFILES[operation_name]]
+        schema = registry.output_schemas["output.agent_updates.v2"]
+    else:
+        profile = operation.generator_profile
+        schema = operation.output_schema
     if schema is None:
         raise AssertionError("测试 Operation 缺少 Reviewer output")
     budget = (
@@ -612,3 +652,254 @@ def test_retained_request_rejects_cross_operation_profile_tuple() -> None:
 
     with pytest.raises(ExecutionCapabilityError, match="handler 身份"):
         _executor(RecordingModel()).resolve(request, registry)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_name", _OPERATIONS)
+@pytest.mark.parametrize("retained_v2", [False, True], ids=("v3", "retained-v2"))
+async def test_current_v3_and_retained_v2_generation_tuples_remain_compatible(
+    operation_name: str,
+    retained_v2: bool,
+) -> None:
+    request = _request(
+        operation_name,
+        retained_v2=retained_v2,
+        dispatch_mode="running_recovery",
+    )
+    model = RecordingModel(result=_outcome(_provider_output()).result)
+    executor = _executor(model)
+    resolved = executor.resolve(request, _enabled_registry())
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    profiles = _RETAINED_GENERATOR_PROFILES if retained_v2 else _GENERATOR_PROFILES
+    assert resolved.profile.key == profiles[operation_name]
+    assert resolved.output_schema.key == (
+        "output.agent_updates.v2" if retained_v2 else "output.agent_updates_step.v1"
+    )
+    assert terminal.resultKind == "output"
+    assert terminal.output == materialize_agent_updates_output(_provider_output())
+    assert len(model.requests) == 1
+
+
+def test_generation_rejects_initial_v2_and_crossed_profile_output_tuples() -> None:
+    registry = _enabled_registry()
+    executor = _executor(RecordingModel())
+
+    initial_v2 = _request("create_lore", retained_v2=True)
+    with pytest.raises(ExecutionCapabilityError, match="handler 身份"):
+        executor.resolve(initial_v2, registry)
+
+    current = _request("create_lore", dispatch_mode="running_recovery")
+    legacy_schema = registry.output_schemas["output.agent_updates.v2"]
+    current_with_legacy_schema = rehash_request(
+        current.model_copy(
+            update={
+                "outputSchema": OutputSchemaRef(
+                    name=legacy_schema.key,
+                    version=legacy_schema.version,
+                    sha256=legacy_schema.sha256,
+                    jsonSchema=legacy_schema.json_schema_value(),
+                )
+            }
+        )
+    )
+    with pytest.raises(ExecutionCapabilityError, match="handler 身份"):
+        executor.resolve(current_with_legacy_schema, registry)
+
+    legacy = _request(
+        "create_lore",
+        retained_v2=True,
+        dispatch_mode="running_recovery",
+    )
+    current_schema = registry.output_schemas["output.agent_updates_step.v1"]
+    legacy_with_current_schema = rehash_request(
+        legacy.model_copy(
+            update={
+                "outputSchema": OutputSchemaRef(
+                    name=current_schema.key,
+                    version=current_schema.version,
+                    sha256=current_schema.sha256,
+                    jsonSchema=current_schema.json_schema_value(),
+                )
+            }
+        )
+    )
+    with pytest.raises(ExecutionCapabilityError, match="handler 身份"):
+        executor.resolve(legacy_with_current_schema, registry)
+
+
+@pytest.mark.asyncio
+async def test_v3_generation_returns_bound_evidence_expansion_with_actual_usage() -> None:
+    request = _request("revise_outline")
+    provider_output = _evidence_request_output()
+    model = RecordingModel(result=_outcome(provider_output).result)
+    executor = _executor(model)
+    resolved = executor.resolve(request, _enabled_registry())
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+    expected = materialize_agent_updates_evidence_request(
+        provider_output,
+        step_id=request.stepId,
+        request_hash=request.requestHash,
+        bundle_id=request.evidenceBundle.id,
+        bundle_version=request.evidenceBundle.version,
+        max_input_tokens=request.budget.maxInputTokens,
+    )
+
+    assert terminal.resultKind == "evidence_expansion"
+    assert terminal.output is None
+    assert terminal.evidenceExpansion == expected
+    assert terminal.evidenceExpansion.requestId == (
+        "evidence-"
+        + canonical_execution_sha256(
+            {
+                "stepId": request.stepId,
+                "requestHash": request.requestHash,
+                "items": provider_output["evidenceRequest"],
+            }
+        )[:32]
+    )
+    assert terminal.evidenceExpansion.sourceBundleId == request.evidenceBundle.id
+    assert terminal.evidenceExpansion.sourceBundleVersion == request.evidenceBundle.version
+    assert terminal.evidenceExpansion.reasonCode == "agent_updates_sources_required"
+    assert terminal.evidenceExpansion.maxAdditionalBytes == 320_000
+    assert [
+        (item.resourceType, item.resourceId, item.purposeCode)
+        for item in terminal.evidenceExpansion.items
+    ] == [
+        ("character", "character-1", "target"),
+        ("world_setting", "novel-1", "target"),
+        ("outline_tree", "novel-1", "replace_tree"),
+    ]
+    assert terminal.usage.providerAttempts == 1
+    assert terminal.usage.inputTokens == 123
+    assert terminal.usage.cachedTokens == 23
+    assert terminal.usage.promptCacheMissTokens == 100
+    assert terminal.usage.completionTokens == 40
+    assert terminal.resultHash == canonical_execution_sha256(
+        {
+            "resultKind": "evidence_expansion",
+            "resolvedModel": resolved.resolved_model.model_dump(
+                mode="json", exclude_none=True
+            ),
+            "usage": terminal.usage.model_dump(mode="json", exclude_none=True),
+            "value": expected.model_dump(mode="json", exclude_none=True),
+        }
+    )
+    assert len(model.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("provider_output", "expected_code"),
+    [
+        (
+            _provider_output() | _evidence_request_output(),
+            "MODEL_OUTPUT_SCHEMA_INVALID",
+        ),
+        (
+            {
+                "evidenceRequest": [
+                    {
+                        "resourceType": "character",
+                        "resourceId": "character-not-in-index",
+                        "purposeCode": "target",
+                    }
+                ]
+            },
+            "MODEL_OUTPUT_PROTOCOL_INVALID",
+        ),
+        (
+            {
+                "evidenceRequest": [
+                    {
+                        "resourceType": "world_setting",
+                        "resourceId": "another-novel",
+                        "purposeCode": "target",
+                    }
+                ]
+            },
+            "MODEL_OUTPUT_PROTOCOL_INVALID",
+        ),
+        (
+            {
+                "evidenceRequest": [
+                    {
+                        "resourceType": "outline_tree",
+                        "resourceId": "another-novel",
+                        "purposeCode": "replace_tree",
+                    }
+                ]
+            },
+            "MODEL_OUTPUT_PROTOCOL_INVALID",
+        ),
+        (
+            {
+                "evidenceRequest": [
+                    {
+                        "resourceType": "character",
+                        "resourceId": "character-1",
+                        "purposeCode": "target",
+                    },
+                    {
+                        "resourceType": "character",
+                        "resourceId": "character-1",
+                        "purposeCode": "delete_impact",
+                    },
+                ]
+            },
+            "MODEL_OUTPUT_PROTOCOL_INVALID",
+        ),
+    ],
+    ids=("mixed-output", "unknown-index-id", "wrong-singleton-id", "wrong-tree-id", "duplicate"),
+)
+def test_v3_evidence_request_rejects_invalid_branch_and_keeps_actual_usage(
+    provider_output: dict[str, Any],
+    expected_code: str,
+) -> None:
+    request = _request("create_lore")
+    executor = _executor(RecordingModel())
+    resolved = executor.resolve(request, _enabled_registry())
+
+    terminal = executor.terminal_from_outcome(
+        request,
+        resolved,
+        _outcome(provider_output),
+    )
+
+    assert terminal.errorCode == expected_code
+    assert terminal.usage.providerAttempts == 1
+    assert terminal.usage.inputTokens == 123
+    assert terminal.usage.cachedTokens == 23
+    assert terminal.usage.promptCacheMissTokens == 100
+    assert terminal.usage.completionTokens == 40
+
+
+def test_retained_v2_schema_rejects_evidence_request_branch() -> None:
+    request = _request(
+        "manage_foreshadowing",
+        retained_v2=True,
+        dispatch_mode="pending_recovery",
+    )
+    executor = _executor(RecordingModel())
+    resolved = executor.resolve(request, _enabled_registry())
+
+    terminal = executor.terminal_from_outcome(
+        request,
+        resolved,
+        _outcome(_evidence_request_output()),
+    )
+
+    assert terminal.errorCode == "MODEL_OUTPUT_SCHEMA_INVALID"
+    assert terminal.usage.inputTokens == 123
+    assert terminal.usage.completionTokens == 40

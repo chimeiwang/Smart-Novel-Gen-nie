@@ -1,0 +1,101 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/agent_updates/AgentUpdatesEvidenceNeed/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "purposeCode": {
+            "enum": [
+              "target",
+              "delete_impact"
+            ]
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "resourceType": {
+            "const": "outline_tree"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "purposeCode": {
+            "const": "replace_tree"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "purposeCode": {
+            "const": "delete_impact"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "resourceType": {
+            "enum": [
+              "character",
+              "location",
+              "faction",
+              "outline_node"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "description": "模型只声明缺失的完整来源，不控制读取 SQL、正文范围或 bundle 身份。",
+  "properties": {
+    "purposeCode": {
+      "enum": [
+        "target",
+        "delete_impact",
+        "replace_tree"
+      ],
+      "title": "Purposecode",
+      "type": "string"
+    },
+    "resourceId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Resourceid",
+      "type": "string"
+    },
+    "resourceType": {
+      "enum": [
+        "character",
+        "location",
+        "item",
+        "faction",
+        "glossary",
+        "character_experience",
+        "outline_node",
+        "foreshadowing",
+        "reference",
+        "outline_content",
+        "world_setting",
+        "story_background",
+        "chapter_reference",
+        "outline_tree"
+      ],
+      "title": "Resourcetype",
+      "type": "string"
+    }
+  },
+  "required": [
+    "resourceType",
+    "resourceId",
+    "purposeCode"
+  ],
+  "title": "AgentUpdatesEvidenceNeed",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.agent_updates.AgentUpdatesEvidenceNeed"
+}

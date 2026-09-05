@@ -28,8 +28,17 @@ test("V2 草案决定显式声明引擎并继续观察同一个 Run", async () =
   assert.match(source, /processStream\(next\.runId,\s*streamScope\)/);
   assert.match(
     source,
-    /selectedUpdateRefs:\s*!isV2Artifact\s*&&\s*decision\s*===\s*"approve"/,
+    /selectedUpdateRefs:\s*resolveSelectedUpdateRefsForDecision\(/,
   );
+  assert.match(source, /sourceBindingStatus\?:\s*"verified"\s*\|\s*"legacy_missing"\s*\|\s*"not_yet_supported"/);
+});
+
+test("结构化候选说明大纲 replace 的部分采用后果", async () => {
+  const source = await readFile(new URL("../writing-conversation.tsx", import.meta.url), "utf8");
+  assert.match(source, /updates\.outlineTreeMode\s*===\s*"replace"/);
+  assert.match(source, /用所选节点替换整棵现有树/);
+  assert.match(source, /不自动补选父节点/);
+  assert.match(source, /依赖不完整会整单失败/);
 });
 
 test("草案列表只承载摘要且详情按精确 revision 去重缓存", async () => {

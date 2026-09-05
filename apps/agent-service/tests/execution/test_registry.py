@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "5d064243ca735459786aa604c1051a31dda29d5a8244da073655ed9befea3c48"
+        "506dd4bf4388d6af998a88ab12c28c5a6f9573968729b2d79faa4f2a662bb7d6"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]

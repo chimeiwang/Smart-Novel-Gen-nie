@@ -3,6 +3,7 @@ package cn.inkforge.core.workflows.infrastructure;
 import cn.inkforge.contracts.api.EvaluationEvidenceReference;
 import cn.inkforge.contracts.api.EvaluationFinding;
 import cn.inkforge.contracts.api.EvidenceEvaluation;
+import cn.inkforge.contracts.api.EvidenceExpansionRequest;
 import cn.inkforge.contracts.api.EvidenceRange;
 import cn.inkforge.contracts.api.ExecutionStepFailure;
 import cn.inkforge.contracts.api.ExecutionStepResult;
@@ -152,8 +153,8 @@ final class WorkflowCallbackValues {
                     result.getEvaluation(), "evaluation 结果分支不能为空"));
             case PROPOSED_COMMAND -> selected = proposedCommandMap(Objects.requireNonNull(
                     result.getProposedCommand(), "proposed_command 结果分支不能为空"));
-            case EVIDENCE_EXPANSION -> throw new IllegalArgumentException(
-                    "当前 V2 尚不接受证据扩展结果分支");
+            case EVIDENCE_EXPANSION -> selected = evidenceExpansionMap(Objects.requireNonNull(
+                    result.getEvidenceExpansion(), "evidence_expansion 结果分支不能为空"));
             default -> throw new IllegalArgumentException("未知 Execution resultKind");
         }
         int branchCount = (present(result.getOutput()) ? 1 : 0)
@@ -167,6 +168,35 @@ final class WorkflowCallbackValues {
         material.put("usage", usageMap(usage(result.getUsage())));
         material.put("value", selected);
         return Collections.unmodifiableMap(material);
+    }
+
+    /** 仅做既有传输契约的 canonical 投影，资料授权仍由对应 Operation 及来源读取器负责。 */
+    static Map<String, Object> evidenceExpansionMap(EvidenceExpansionRequest value) {
+        Objects.requireNonNull(value);
+        if (value.getItems() == null || value.getItems().isEmpty() || value.getItems().size() > 100
+                || value.getMaxAdditionalBytes() == null || value.getMaxAdditionalBytes() < 1
+                || value.getSourceBundleVersion() == null || value.getSourceBundleVersion() < 1) {
+            throw new IllegalArgumentException("证据扩展缺少合法资源清单或边界");
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        java.util.Set<String> identities = new java.util.HashSet<>();
+        for (var item : value.getItems()) {
+            Map<String, Object> material = new LinkedHashMap<>();
+            material.put("resourceType", Objects.requireNonNull(item.getResourceType()));
+            material.put("resourceId", Objects.requireNonNull(item.getResourceId()));
+            Map<String, Object> range = rangeMap(item.getRange());
+            if (range != null) material.put("range", range);
+            if (!identities.add(ExecutionCanonicalJson.sha256(material))) {
+                throw new IllegalArgumentException("证据扩展不能重复同一资源范围");
+            }
+            material.put("purposeCode", Objects.requireNonNull(item.getPurposeCode()));
+            items.add(Collections.unmodifiableMap(material));
+        }
+        return Map.of("requestId", Objects.requireNonNull(value.getRequestId()),
+                "sourceBundleId", Objects.requireNonNull(value.getSourceBundleId()),
+                "sourceBundleVersion", value.getSourceBundleVersion(),
+                "reasonCode", Objects.requireNonNull(value.getReasonCode()),
+                "maxAdditionalBytes", value.getMaxAdditionalBytes(), "items", List.copyOf(items));
     }
 
     /** 与 Pydantic exclude_none 投影一致；命令授权仍由冻结执行计划和 Core 意图裁决负责。 */

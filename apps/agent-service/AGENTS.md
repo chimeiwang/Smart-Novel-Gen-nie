@@ -208,10 +208,13 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   `docs/specs/2026-09-05-durable-review-and-rewrites.md`，代码支持不表示服务器已开放。
 - V2 设定、大纲与伏笔五项的单 Step 执行复用 StatelessExecutionStepExecutor，生成仅接收
   AgentUpdatesInput 和唯一绑定小说的 agent_updates_index；其余资料全部来自同一冻结 bundle，不读取
-  工作区或工具。生成器只输出 summary/updates，程序按字段存在性派生 updatesSha256，保留原数组、
-  空串和 null。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
+  工作区或工具。正常候选输出 summary/updates，程序按字段存在性派生 updatesSha256，保留原数组、
+  空串和 null。新 v3 生成器也可单独请求冻结名录内的必要来源，不能夹带候选；程序绑定本次 Step、bundle、
+  有序需求与固定字节额度，使用原 evidence_expansion 终态及用量回调。Core 在同 Run 新建 bundle/Step，
+  保留旧来源；没有新增来源、来源冲突或额度不足时明确终止，不无限调用。旧 v2 仅按原依赖恢复，仍只接受
+  summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
   不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
-  这些单 Step handler 不表示五项业务入口已开放；Catalog 仍为 7/21，证据扩展、自动返工与入口接线
+  这些单 Step handler 和来源补齐不表示五项业务入口已开放；Catalog 仍为 7/21，自动返工与入口接线
   进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并

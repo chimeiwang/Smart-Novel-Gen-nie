@@ -127,9 +127,43 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
         "plot.outline_generator.v1",
         "plot.outline_reviser.v1",
         "plot.foreshadowing.v1",
+        "lore.generator.v2",
+        "lore.reviser.v2",
+        "plot.outline_generator.v2",
+        "plot.outline_reviser.v2",
+        "plot.foreshadowing.v2",
     }
 )
-RETAINED_OUTPUT_SCHEMA_KEYS = frozenset({"output.agent_updates.v1"})
+RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
+    {"output.agent_updates.v1", "output.agent_updates.v2"}
+)
+AGENT_UPDATES_V2_ASSET_SHA256 = {
+    "lore.generator": (
+        "68ec2714b1f2f34f79ebabbe62aea2b6d867e6dbfa36c04611a8126422cddcbe",
+        "c8cbb44cbd24fcd23e3038e73b98e6cc8be95966e214b6a5b3328764d41e2843",
+        "9d633777c10e75609da406955b497cca0e9a0e937b3fa10adf842ef600f535b6",
+    ),
+    "lore.reviser": (
+        "8cb29b3b1a375a62167cd4565f079fd4a44d616480d875bd4179c428d88e1b24",
+        "4bfdcb9fb62bde46d11b0a0b84a69e7ed6ae12f1967b4905f292275d5d25064b",
+        "75be6cdf5a19be5abc9b1618b416f700d9a4e23044bb9b19c448fcce11fd7bb0",
+    ),
+    "plot.outline_generator": (
+        "c768d4265a8334be14ef359b787944a1854cf8f01ad1113f64dfd8c611c1523f",
+        "bf40786822a3541555343c0a3e64fc1f17a06ec13ada1f9d23e49e89ed64be04",
+        "89ae1fd13d7ca6237e4b072c24f3b22268a958c3a24611f77996cfaf743ee203",
+    ),
+    "plot.outline_reviser": (
+        "ad0596bcfa9ba6508b8671aaed4631742b7cefc4042f44d62a607fdd24ad23bc",
+        "50161c211c891bf12e674fced31459eb350b078767605331344c004bc9314bd9",
+        "098344537db7236f2b6352ed488161445efdc58a81e5d45df2161f4dce949c1c",
+    ),
+    "plot.foreshadowing": (
+        "b6c1c7660db55745ed452a42ee6d158a1dc45529c504caf54fd2def3ed7f9794",
+        "cf3c0ae62d7fa7822f004cbb6c16890c3e50287adc075a564eaf31f8fdab5526",
+        "9343fa42b202a75b78cd9825bb1e75f63ac344e74f20e51615ab414d52d742c6",
+    ),
+}
 NO_THINKING_OPERATION_KEYS = frozenset(
     {
         "long_serial.answer_question",
@@ -477,10 +511,76 @@ def test_agent_updates_v2_schema_is_generated_without_changing_v1_placeholder() 
     assert_no_generator_annotations(schema)
 
 
+def test_agent_updates_step_schema_is_closed_and_requests_only_bounded_sources() -> None:
+    step = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")[
+        "output.agent_updates_step.v1"
+    ]
+    assert step["version"] == 1
+    assert step["supported"] is True
+    assert step["purpose"] == "generation"
+
+    schema = step["jsonSchema"]
+    assert schema["required"] == []
+    assert set(schema["properties"]) == {"summary", "updates", "evidenceRequest"}
+    assert schema["anyOf"] == [
+        {"required": ["summary", "updates"], "maxProperties": 2},
+        {"required": ["evidenceRequest"], "maxProperties": 1},
+    ]
+    request = schema["properties"]["evidenceRequest"]
+    assert request["minItems"] == 1
+    assert request["maxItems"] == 100
+    need = request["items"]
+    assert need["additionalProperties"] is False
+    assert need["required"] == ["resourceType", "resourceId", "purposeCode"]
+    assert set(need["properties"]["resourceType"]["enum"]) == {
+        "character",
+        "location",
+        "item",
+        "faction",
+        "glossary",
+        "character_experience",
+        "outline_node",
+        "foreshadowing",
+        "reference",
+        "outline_content",
+        "world_setting",
+        "story_background",
+        "chapter_reference",
+        "outline_tree",
+    }
+    assert need["properties"]["purposeCode"]["enum"] == [
+        "target",
+        "delete_impact",
+        "replace_tree",
+    ]
+    assert need["allOf"] == [
+        {
+            "if": {"properties": {"resourceType": {"const": "outline_tree"}}},
+            "then": {"properties": {"purposeCode": {"const": "replace_tree"}}},
+            "else": {
+                "properties": {
+                    "purposeCode": {"enum": ["target", "delete_impact"]}
+                }
+            },
+        },
+        {
+            "if": {"properties": {"purposeCode": {"const": "delete_impact"}}},
+            "then": {
+                "properties": {
+                    "resourceType": {
+                        "enum": ["character", "location", "faction", "outline_node"]
+                    }
+                }
+            },
+        },
+    ]
+
+
 def test_structured_updates_step_assets_are_complete_but_not_business_enabled() -> None:
     operations = {operation["operation"]: operation for operation in _operations()}
     profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
     prompts = _keyed_items(PROMPT_PROFILE_REGISTRY_PATH, "prompts")
+    deployments = _keyed_items(DEPLOYMENT_PROFILE_REGISTRY_PATH, "profiles")
     outputs = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
     budgets = _keyed_items(STEP_BUDGET_REGISTRY_PATH, "budgets")
     cases = (
@@ -493,13 +593,13 @@ def test_structured_updates_step_assets_are_complete_but_not_business_enabled() 
     for operation_name, generator_name, reviewer_name in cases:
         operation = operations[operation_name]
         assert operation["v2Enabled"] is False
-        assert operation["generatorProfile"] == generator_name + ".v2"
-        assert operation["outputSchema"] == "output.agent_updates.v2"
+        assert operation["generatorProfile"] == generator_name + ".v3"
+        assert operation["outputSchema"] == "output.agent_updates_step.v1"
         assert operation["applyHandler"] == "apply.agent_updates.v1"
         generator = profiles[operation["generatorProfile"]]
         assert generator["supported"] is True
         assert generator["reasoningMode"] == "bounded"
-        assert generator["version"] == 2
+        assert generator["version"] == 3
         assert profiles[generator_name + ".v1"] == {
             "key": generator_name + ".v1",
             "version": 1,
@@ -508,6 +608,42 @@ def test_structured_updates_step_assets_are_complete_but_not_business_enabled() 
             "purpose": "generation",
             "promptProfile": "prompt.unavailable.generation.v1",
             "deploymentProfileKey": "deployment.unavailable.generation.v1",
+        }
+        v2_profile = profiles[generator_name + ".v2"]
+        v2_prompt = prompts["prompt." + generator_name + ".v2"]
+        v2_deployment = deployments["deployment." + generator_name + ".v2"]
+        assert (
+            _canonical_sha256(v2_profile),
+            _canonical_sha256(v2_prompt),
+            _canonical_sha256(v2_deployment),
+        ) == AGENT_UPDATES_V2_ASSET_SHA256[generator_name]
+        assert generator == v2_profile | {
+            "key": generator_name + ".v3",
+            "version": 3,
+            "promptProfile": "prompt." + generator_name + ".v3",
+            "deploymentProfileKey": "deployment." + generator_name + ".v3",
+        }
+        prompt = prompts[generator["promptProfile"]]
+        assert prompt["version"] == 3
+        assert prompt["supported"] is True
+        assert prompt["purpose"] == "generation"
+        assert "两种互斥对象之一" in prompt["systemPrompt"]
+        assert "不得同时返回 summary、updates 或半份候选" in prompt["systemPrompt"]
+        assert "agent_updates_index 冻结名录中已有的真实 ID" in prompt["systemPrompt"]
+        assert "三种单例的 resourceId 只能是当前 evidenceBundle 绑定的 novelId" in prompt[
+            "systemPrompt"
+        ]
+        assert "resourceType=outline_tree、resourceId=该 novelId、purposeCode=replace_tree" in (
+            prompt["systemPrompt"]
+        )
+        assert "purposeCode 仅可为 target、delete_impact、replace_tree" in prompt[
+            "systemPrompt"
+        ]
+        assert "不得请求 SQL、路径、正文范围、全 workspace" in prompt["systemPrompt"]
+        deployment = deployments[generator["deploymentProfileKey"]]
+        assert deployment == v2_deployment | {
+            "key": "deployment." + generator_name + ".v3",
+            "version": 3,
         }
         review = operation["reviewPolicy"]
         reviewer_key = f"reviewer.agent_updates_{reviewer_name}.v1"

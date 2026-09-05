@@ -2,10 +2,13 @@
 
 from .agent_updates import (
     AgentUpdates,
+    AgentUpdatesEvidenceNeed,
+    AgentUpdatesEvidenceRequestOutput,
     AgentUpdatesInput,
     AgentUpdatesOutput,
     AgentUpdatesPreviousCandidate,
     AgentUpdatesResult,
+    materialize_agent_updates_evidence_request,
     materialize_agent_updates_output,
 )
 from .events import (
@@ -307,11 +310,14 @@ __all__ = [
     "EXECUTION_SERVICE_SCOPES",
     "WORKFLOW_EVENT_PROTOCOL_VERSION",
     "AgentUpdates",
+    "AgentUpdatesEvidenceNeed",
+    "AgentUpdatesEvidenceRequestOutput",
     "AgentUpdatesInput",
     "AgentUpdatesOutput",
     "AgentUpdatesPreviousCandidate",
     "AgentUpdatesResult",
     "materialize_agent_updates_output",
+    "materialize_agent_updates_evidence_request",
     "AgentEvent",
     "BillingReconciliationReceipt",
     "BillingReconciliationRequest",

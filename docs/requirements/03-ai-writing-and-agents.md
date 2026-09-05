@@ -135,9 +135,11 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 2026-09-05 工作分支已接通结构化候选的 Core 生成回调、完整差异展示、精确修订读取及作者决定事务。
 涉及既有 create_lore、revise_lore、create_outline、revise_outline、manage_foreshadowing 五项，不新增业务操作。
 生成及专用 Reviewer 的单 Step 已接入现有执行器并通过定向验证；仅消费完整冻结来源，返回严格原始候选
-与程序派生哈希，不运行工具循环。完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
+与程序派生哈希，不运行工具循环。缺少完整来源时，新生成器可请求本次冻结名录中的必要资料；Core 在同 Run
+补齐新版本来源并接续生成，不覆盖旧快照，不扩大原模型调用额度。重复请求、无新增来源或来源冲突都有明确收敛。
+完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 
-五项仍为 v2Enabled=false；证据扩展、自动完整返工和显式/自然入口尚未全部完成，不能把底层实现解释为
+五项仍为 v2Enabled=false；自动完整返工和显式/自然入口尚未全部完成，不能把底层实现解释为
 用户已经可以启动这些 V2 操作。现有 V1 业务、当前启用的七项 V2 操作和 Operator 三操作白名单不变。
 Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组织，正式写入只由作者确认后的 Core 执行。
 

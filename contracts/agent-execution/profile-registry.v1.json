@@ -335,6 +335,51 @@
       "deploymentProfileKey": "deployment.plot.foreshadowing.v2"
     },
     {
+      "key": "lore.generator.v3",
+      "version": 3,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.lore.generator.v3",
+      "deploymentProfileKey": "deployment.lore.generator.v3"
+    },
+    {
+      "key": "lore.reviser.v3",
+      "version": 3,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.lore.reviser.v3",
+      "deploymentProfileKey": "deployment.lore.reviser.v3"
+    },
+    {
+      "key": "plot.outline_generator.v3",
+      "version": 3,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.outline_generator.v3",
+      "deploymentProfileKey": "deployment.plot.outline_generator.v3"
+    },
+    {
+      "key": "plot.outline_reviser.v3",
+      "version": 3,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.outline_reviser.v3",
+      "deploymentProfileKey": "deployment.plot.outline_reviser.v3"
+    },
+    {
+      "key": "plot.foreshadowing.v3",
+      "version": 3,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.foreshadowing.v3",
+      "deploymentProfileKey": "deployment.plot.foreshadowing.v3"
+    },
+    {
       "key": "reviewer.agent_updates_consistency.v1",
       "version": 1,
       "supported": true,

@@ -13,6 +13,8 @@ AGENT_UPDATES_SCHEMA_PATHS = {
     for model in (
         "AgentUpdates",
         "AgentUpdatesInput",
+        "AgentUpdatesEvidenceNeed",
+        "AgentUpdatesEvidenceRequestOutput",
         "AgentUpdatesOutput",
         "AgentUpdatesPreviousCandidate",
         "AgentUpdatesResult",

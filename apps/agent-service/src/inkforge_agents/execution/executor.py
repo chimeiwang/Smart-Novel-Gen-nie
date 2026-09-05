@@ -13,9 +13,11 @@ from typing import Literal, Protocol
 
 import jsonschema_rs
 from inkforge_contracts import (
+    AgentUpdatesEvidenceRequestOutput,
     AgentUpdatesInput,
     AgentUpdatesOutput,
     AgentUpdatesResult,
+    materialize_agent_updates_evidence_request,
     materialize_agent_updates_output,
 )
 from inkforge_contracts.execution import (
@@ -30,6 +32,7 @@ from inkforge_contracts.execution import (
     ChatAnswerInput,
     ChatAnswerOutput,
     EvidenceEvaluation,
+    EvidenceExpansionRequest,
     ExecutionStepFailure,
     ExecutionStepRequest,
     ExecutionStepResult,
@@ -109,6 +112,13 @@ _AGENT_UPDATES_OPERATIONS = frozenset(
     }
 )
 _AGENT_UPDATES_GENERATOR_PROFILES = {
+    "create_lore": "lore.generator.v3",
+    "revise_lore": "lore.reviser.v3",
+    "create_outline": "plot.outline_generator.v3",
+    "revise_outline": "plot.outline_reviser.v3",
+    "manage_foreshadowing": "plot.foreshadowing.v3",
+}
+_AGENT_UPDATES_RETAINED_GENERATOR_PROFILES = {
     "create_lore": "lore.generator.v2",
     "revise_lore": "lore.reviser.v2",
     "create_outline": "plot.outline_generator.v2",
@@ -129,10 +139,28 @@ _AGENT_UPDATES_EVIDENCE_POLICIES = {
     "revise_outline": "evidence.long_serial.outline_revision.v1",
     "manage_foreshadowing": "evidence.long_serial.foreshadowing.v1",
 }
-_AGENT_UPDATES_OUTPUT_SCHEMA = "output.agent_updates.v2"
+_AGENT_UPDATES_OUTPUT_SCHEMA = "output.agent_updates_step.v1"
+_AGENT_UPDATES_RETAINED_OUTPUT_SCHEMA = "output.agent_updates.v2"
 _AGENT_UPDATES_REVIEW_OUTPUT_SCHEMA = "output.chapter_review_report.v1"
 _AGENT_UPDATES_REVIEW_EVIDENCE_POLICY = "evidence.review.same_bundle_artifact_revision.v1"
 _AGENT_UPDATES_RUBRIC = "rubric.agent_updates.review.v1"
+_AGENT_UPDATES_SINGLETON_RESOURCE_TYPES = frozenset(
+    {"outline_content", "world_setting", "story_background"}
+)
+_AGENT_UPDATES_INDEX_RESOURCE_TYPES = frozenset(
+    {
+        "character",
+        "location",
+        "item",
+        "faction",
+        "glossary",
+        "character_experience",
+        "outline_node",
+        "foreshadowing",
+        "reference",
+        "chapter_reference",
+    }
+)
 _INTENT_OPERATIONS = frozenset(
     {"answer_question", "plan_chapter", "write_chapter", "rewrite_scene", "review_chapter"}
 )
@@ -870,10 +898,29 @@ class StatelessExecutionStepExecutor:
                 outcome_unknown=False,
                 failed_at=now,
             )
-        if resolved.purpose == "generation":
-            output = _derive_generation_output(request, structured_output)
+        value: (
+            dict[str, JsonValue]
+            | EvidenceEvaluation
+            | EvidenceExpansionRequest
+            | ProposedCommand
+        )
+        if (
+            resolved.purpose == "generation"
+            and _uses_agent_updates_evidence_request_schema(request)
+            and "evidenceRequest" in structured_output
+        ):
+            value = materialize_agent_updates_evidence_request(
+                structured_output,
+                step_id=request.stepId,
+                request_hash=request.requestHash,
+                bundle_id=request.evidenceBundle.id,
+                bundle_version=request.evidenceBundle.version,
+                max_input_tokens=request.budget.maxInputTokens,
+            )
+            result_kind = "evidence_expansion"
+        elif resolved.purpose == "generation":
+            value = _derive_generation_output(request, structured_output)
             result_kind = "output"
-            value: dict[str, JsonValue] | EvidenceEvaluation | ProposedCommand = output
         elif resolved.purpose == "resolve_intent":
             value = _intent_command(request, structured_output)
             result_kind = "proposed_command"
@@ -894,7 +941,7 @@ class StatelessExecutionStepExecutor:
             value = evaluation
         hash_value: object = (
             value.model_dump(mode="json", exclude_none=True)
-            if isinstance(value, (EvidenceEvaluation, ProposedCommand))
+            if isinstance(value, (EvidenceEvaluation, EvidenceExpansionRequest, ProposedCommand))
             else value
         )
         result_hash = canonical_execution_sha256(
@@ -935,6 +982,23 @@ class StatelessExecutionStepExecutor:
                 resolvedModel=resolved.resolved_model,
                 resultKind="proposed_command",
                 proposedCommand=value,
+                resultHash=result_hash,
+                usage=usage,
+                completedAt=now,
+            )
+        if isinstance(value, EvidenceExpansionRequest):
+            return ExecutionStepResult(
+                protocolVersion="2.0",
+                jobId=request.jobId,
+                runId=request.runId,
+                novelId=request.novelId,
+                stepId=request.stepId,
+                fencingToken=request.fencingToken,
+                requestHash=request.requestHash,
+                inputHash=request.inputHash,
+                resolvedModel=resolved.resolved_model,
+                resultKind="evidence_expansion",
+                evidenceExpansion=value,
                 resultHash=result_hash,
                 usage=usage,
                 completedAt=now,
@@ -1395,13 +1459,30 @@ def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
     ):
         raise ExecutionCapabilityError("结构化资料 agent_updates_index 不完整或小说身份不一致")
 
+    actual = (
+        request.purpose,
+        request.lane,
+        request.modelProfile.profile,
+        request.outputSchema.name,
+        request.evidenceBundle.policyVersion,
+    )
     if request.purpose == "generation":
-        expected = (
+        current_expected = (
             "generation",
             "creative",
             _AGENT_UPDATES_GENERATOR_PROFILES[operation],
             _AGENT_UPDATES_OUTPUT_SCHEMA,
             _AGENT_UPDATES_EVIDENCE_POLICIES[operation],
+        )
+        retained_expected = (
+            "generation",
+            "creative",
+            _AGENT_UPDATES_RETAINED_GENERATOR_PROFILES[operation],
+            _AGENT_UPDATES_RETAINED_OUTPUT_SCHEMA,
+            _AGENT_UPDATES_EVIDENCE_POLICIES[operation],
+        )
+        allowed = actual == current_expected or (
+            request.dispatchMode != "initial" and actual == retained_expected
         )
     elif request.purpose == "review":
         expected = (
@@ -1411,16 +1492,10 @@ def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
             _AGENT_UPDATES_REVIEW_OUTPUT_SCHEMA,
             _AGENT_UPDATES_REVIEW_EVIDENCE_POLICY,
         )
+        allowed = actual == expected
     else:
         raise ExecutionCapabilityError("结构化资料 Step 只支持 generation/review")
-    actual = (
-        request.purpose,
-        request.lane,
-        request.modelProfile.profile,
-        request.outputSchema.name,
-        request.evidenceBundle.policyVersion,
-    )
-    if actual != expected:
+    if not allowed:
         raise ExecutionCapabilityError("结构化资料 Step 与冻结 handler 身份不一致")
 
     try:
@@ -1476,6 +1551,58 @@ def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
             raise ValueError("结构化资料返工与精确上一候选身份不一致")
     except (TypeError, ValueError, ValidationError) as exc:
         raise ExecutionCapabilityError("结构化资料输入或完整候选不符合冻结契约") from exc
+
+
+def _uses_agent_updates_evidence_request_schema(request: ExecutionStepRequest) -> bool:
+    operation = request.operation
+    return (
+        request.workflow == "long_serial"
+        and request.purpose == "generation"
+        and operation in _AGENT_UPDATES_OPERATIONS
+        and request.modelProfile.profile == _AGENT_UPDATES_GENERATOR_PROFILES[operation]
+        and request.outputSchema.name == _AGENT_UPDATES_OUTPUT_SCHEMA
+    )
+
+
+def _agent_updates_evidence_request(
+    request: ExecutionStepRequest,
+    value: object,
+) -> AgentUpdatesEvidenceRequestOutput:
+    output = AgentUpdatesEvidenceRequestOutput.model_validate(value)
+    index = next(
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType == "agent_updates_index"
+    )
+    content = index.contentJson
+    items = content.get("items") if isinstance(content, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("结构化资料名录缺少 items")
+    identities: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("结构化资料名录项必须是对象")
+        resource_type = item.get("resourceType")
+        resource_id = item.get("id")
+        if (
+            not isinstance(resource_type, str)
+            or resource_type not in _AGENT_UPDATES_INDEX_RESOURCE_TYPES
+            or not isinstance(resource_id, str)
+            or not resource_id.strip()
+            or (resource_type, resource_id) in identities
+        ):
+            raise ValueError("结构化资料名录身份无效或重复")
+        identities.add((resource_type, resource_id))
+    for need in output.evidenceRequest:
+        if need.resourceType in _AGENT_UPDATES_SINGLETON_RESOURCE_TYPES:
+            if need.resourceId != request.novelId:
+                raise ValueError("结构化资料单例来源必须绑定当前小说")
+        elif need.resourceType == "outline_tree":
+            if need.resourceId != request.novelId:
+                raise ValueError("结构化大纲树来源必须绑定当前小说")
+        elif (need.resourceType, need.resourceId) not in identities:
+            raise ValueError("结构化资料来源不在冻结名录中")
+    return output
 
 
 def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
@@ -1876,8 +2003,14 @@ def _validate_provider_result(
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation in _AGENT_UPDATES_OPERATIONS:
         try:
-            AgentUpdatesOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+            if (
+                _uses_agent_updates_evidence_request_schema(request)
+                and "evidenceRequest" in result.structuredOutput
+            ):
+                _agent_updates_evidence_request(request, result.structuredOutput)
+            else:
+                AgentUpdatesOutput.model_validate(result.structuredOutput)
+        except (TypeError, ValueError, ValidationError):
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "resolve_intent":
         try:

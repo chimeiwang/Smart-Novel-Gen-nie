@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from inkforge_contracts.agent_updates import AgentUpdatesOutput
+from inkforge_contracts.agent_updates import AgentUpdatesEvidenceRequestOutput, AgentUpdatesOutput
 from inkforge_contracts.execution import (
     CandidateTextPatch,
     ChapterDraftOutput,
@@ -61,6 +61,21 @@ def chapter_plan_schema() -> dict[str, Any]:
     return model_output_schema(ChapterPlanOutput)
 
 
+def agent_updates_step_schema() -> dict[str, Any]:
+    """候选与来源需求互斥，复用 Core 已支持的 anyOf/maxProperties，不改变旧候选 Schema。"""
+
+    candidate = model_output_schema(AgentUpdatesOutput)
+    expansion = model_output_schema(AgentUpdatesEvidenceRequestOutput)
+    return candidate | {
+        "required": [],
+        "properties": candidate["properties"] | expansion["properties"],
+        "anyOf": [
+            {"required": candidate["required"], "maxProperties": 2},
+            {"required": expansion["required"], "maxProperties": 1},
+        ],
+    }
+
+
 def refresh(root: Path, *, check: bool) -> list[str]:
     changes: dict[Path, bytes] = {}
     prompt_path = root / "prompt-profile-registry.v1.json"
@@ -72,9 +87,7 @@ def refresh(root: Path, *, check: bool) -> list[str]:
     output_path = root / "output-schema-registry.v1.json"
     outputs = json.loads(output_path.read_bytes())
     agent_updates_schema = model_output_schema(AgentUpdatesOutput)
-    if not any(
-        output["key"] == "output.agent_updates.v2" for output in outputs["schemas"]
-    ):
+    if not any(output["key"] == "output.agent_updates.v2" for output in outputs["schemas"]):
         legacy_index = next(
             index
             for index, output in enumerate(outputs["schemas"])
@@ -91,13 +104,27 @@ def refresh(root: Path, *, check: bool) -> list[str]:
                 "jsonSchema": agent_updates_schema,
             },
         )
+    step_schema = agent_updates_step_schema()
+    if not any(output["key"] == "output.agent_updates_step.v1" for output in outputs["schemas"]):
+        outputs["schemas"].append(
+            {
+                "key": "output.agent_updates_step.v1",
+                "version": 1,
+                "supported": True,
+                "purpose": "generation",
+                "sha256": canonical_execution_sha256(step_schema),
+                "jsonSchema": step_schema,
+            }
+        )
     original_review_schema = next(
         schema["jsonSchema"]
         for schema in outputs["schemas"]
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
-        if output["key"] == "output.agent_updates.v2":
+        if output["key"] == "output.agent_updates_step.v1":
+            output["jsonSchema"] = step_schema
+        elif output["key"] == "output.agent_updates.v2":
             output["supported"] = True
             output["jsonSchema"] = agent_updates_schema
         elif output["key"] == "output.beat_plan.v1":

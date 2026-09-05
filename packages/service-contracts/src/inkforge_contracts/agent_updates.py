@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from .execution import (
+    EvidenceExpansionRequest,
     ExecutionId,
     Sha256,
     StrictPositiveInt,
@@ -679,6 +680,107 @@ class AgentUpdatesOutput(_StrictModel):
 
     summary: str = Field(min_length=1, max_length=1000)
     updates: AgentUpdates
+
+
+class AgentUpdatesEvidenceNeed(_StrictModel):
+    """模型只声明缺失的完整来源，不控制读取 SQL、正文范围或 bundle 身份。"""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        json_schema_extra={
+            "allOf": [
+                {
+                    "if": {"properties": {"resourceType": {"const": "outline_tree"}}},
+                    "then": {"properties": {"purposeCode": {"const": "replace_tree"}}},
+                    "else": {"properties": {"purposeCode": {"enum": ["target", "delete_impact"]}}},
+                },
+                {
+                    "if": {"properties": {"purposeCode": {"const": "delete_impact"}}},
+                    "then": {
+                        "properties": {
+                            "resourceType": {
+                                "enum": ["character", "location", "faction", "outline_node"]
+                            }
+                        }
+                    },
+                },
+            ]
+        },
+    )
+
+    resourceType: Literal[
+        "character",
+        "location",
+        "item",
+        "faction",
+        "glossary",
+        "character_experience",
+        "outline_node",
+        "foreshadowing",
+        "reference",
+        "outline_content",
+        "world_setting",
+        "story_background",
+        "chapter_reference",
+        "outline_tree",
+    ]
+    resourceId: ExecutionId
+    purposeCode: Literal["target", "delete_impact", "replace_tree"]
+
+    @model_validator(mode="after")
+    def validate_purpose(self) -> Self:
+        if (self.resourceType == "outline_tree") != (self.purposeCode == "replace_tree"):
+            raise ValueError("整树来源只能使用 replace_tree 用途")
+        if self.purposeCode == "delete_impact" and self.resourceType not in {
+            "character",
+            "location",
+            "faction",
+            "outline_node",
+        }:
+            raise ValueError("该资料没有独立删除影响读取器")
+        return self
+
+
+class AgentUpdatesEvidenceRequestOutput(_StrictModel):
+    """与 summary/updates 候选互斥的 Provider 来源请求。"""
+
+    evidenceRequest: list[AgentUpdatesEvidenceNeed] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_unique_sources(self) -> Self:
+        identities = [(item.resourceType, item.resourceId) for item in self.evidenceRequest]
+        if len(set(identities)) != len(identities):
+            raise ValueError("证据需求不能重复同一资源身份")
+        return self
+
+
+def materialize_agent_updates_evidence_request(
+    value: object,
+    *,
+    step_id: str,
+    request_hash: str,
+    bundle_id: str,
+    bundle_version: int,
+    max_input_tokens: int,
+) -> EvidenceExpansionRequest:
+    """绑定本次 Step 的完整需求；模型不能替换 bundle、请求身份或追加字节额度。"""
+
+    output = AgentUpdatesEvidenceRequestOutput.model_validate(value)
+    items = [item.model_dump(mode="json") for item in output.evidenceRequest]
+    identity = canonical_execution_sha256(
+        {"stepId": step_id, "requestHash": request_hash, "items": items}
+    )
+    return EvidenceExpansionRequest.model_validate(
+        {
+            "requestId": "evidence-" + identity[:32],
+            "sourceBundleId": bundle_id,
+            "sourceBundleVersion": bundle_version,
+            "reasonCode": "agent_updates_sources_required",
+            "maxAdditionalBytes": max_input_tokens * 4,
+            "items": items,
+        }
+    )
 
 
 class AgentUpdatesResult(AgentUpdatesOutput):

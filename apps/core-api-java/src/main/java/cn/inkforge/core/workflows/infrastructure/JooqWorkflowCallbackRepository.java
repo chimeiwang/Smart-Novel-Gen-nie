@@ -19,6 +19,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
+import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
@@ -625,6 +626,11 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
 
     private void appendIntentBusinessStep(DSLContext tx, Locked locked, ExecutionPlanSnapshot.Step generator,
             Map<String, Object> input, String bundleId, LocalDateTime now) {
+        appendGenerationStep(tx, locked, generator, input, bundleId, null, now);
+    }
+
+    private String appendGenerationStep(DSLContext tx, Locked locked, ExecutionPlanSnapshot.Step generator,
+            Map<String, Object> input, String bundleId, Artifact previous, LocalDateTime now) {
         String runId = locked.run().get("id", String.class);
         String id = ids.next();
         String idempotencyKey = runId + "." + id;
@@ -632,21 +638,23 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Record bundle = tx.fetchOne("SELECT id, version, \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?", bundleId, runId);
         Map<String, Object> request = new LinkedHashMap<>(stepRequestMaterial(locked.run(), id, idempotencyKey,
                 inputHash, bundle, generator.evidencePolicy(), generator.lane(), generator.modelProfile().toMap(),
-                generator.outputSchema().toMap(), generator.stepBudget().budgetMap(), null));
+                generator.outputSchema().toMap(), generator.stepBudget().budgetMap(), previous));
         request.put("purpose", GENERATION);
         int ordinal = tx.fetchOne("SELECT max(ordinal) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId)
                 .get(0, Integer.class) + 1;
         tx.execute("""
                 INSERT INTO public."WorkflowStep" (id, "runId", "agentId", "stepType", status, input, "createdAt", ordinal,
                   purpose, lane, "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey", "requestHash", "inputHash",
-                  "evidenceBundleId", "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt")
+                  "evidenceBundleId", "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt", "artifactId", "artifactRevision")
                 VALUES (?, ?, ?, CAST('agent' AS "WorkflowStepType"), CAST('pending' AS "WorkflowStepStatus"), ?, ?, ?,
-                  'generation', ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  'generation', ?, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, id, runId, generator.modelProfile().profile(), canonicalJson(input), now, ordinal,
                 generator.lane(), now, idempotencyKey, ExecutionCanonicalJson.sha256(request), inputHash, bundleId,
                 generator.modelProfile().profile(), Integer.toString(generator.modelProfile().version()),
                 generator.outputSchema().name(), Integer.toString(generator.outputSchema().version()),
-                json.writeValueAsString(generator.stepBudget().stored()), now, now);
+                json.writeValueAsString(generator.stepBudget().stored()), now, now,
+                previous == null ? null : previous.id(), previous == null ? null : previous.revision());
+        return id;
     }
 
     private void persistIntentQuestion(DSLContext tx, Locked locked, String questionId, WorkflowIntentQuestion question, LocalDateTime now) {
@@ -671,6 +679,10 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             ExecutionStepResult body,
             WorkflowStepUsage usage,
             LocalDateTime now) {
+        if (body.getResultKind() == ExecutionStepResult.ResultKindEnum.EVIDENCE_EXPANSION) {
+            completeEvidenceExpansion(transaction, locked, body, usage, now);
+            return;
+        }
         if (body.getResultKind() != ExecutionStepResult.ResultKindEnum.OUTPUT) {
             throw invalid("generation Step 只接受 output 结果");
         }
@@ -700,6 +712,67 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             case AGENT_UPDATES_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
+    }
+
+    private void completeEvidenceExpansion(DSLContext tx, Locked locked, ExecutionStepResult body,
+            WorkflowStepUsage usage, LocalDateTime now) {
+        ExecutionPlanSnapshot plan = executionPlan(locked.run());
+        ExecutionPlanSnapshot.Step generator = frozenStep(locked, plan);
+        if (!isAgentUpdates(plan) || !"output.agent_updates_step.v1".equals(generator.outputSchema().name())) {
+            throw invalid("当前生成器未授权证据扩展输出");
+        }
+        var expansion = body.getEvidenceExpansion();
+        Map<String, Object> material = WorkflowCallbackValues.evidenceExpansionMap(expansion);
+        String runId = locked.run().get("id", String.class);
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        Record bundle = tx.fetchOne("SELECT version FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?", bundleId, runId);
+        if (bundle == null || !Objects.equals(bundleId, locked.run().get("currentEvidenceBundleId", String.class))
+                || !Objects.equals(bundleId, expansion.getSourceBundleId())
+                || !Objects.equals(bundle.get("version", Integer.class), expansion.getSourceBundleVersion())
+                || !"agent_updates_sources_required".equals(expansion.getReasonCode())
+                || expansion.getMaxAdditionalBytes().longValue() != generator.stepBudget().budget().maxInputTokens() * 4L) {
+            throw invalid("证据扩展的来源身份或字节额度与当前 Step 不一致");
+        }
+        String expectedRequestId = "evidence-" + ExecutionCanonicalJson.sha256(Map.of(
+                "stepId", body.getStepId(), "requestHash", body.getRequestHash(), "items", material.get("items"))).substring(0, 32);
+        if (!expectedRequestId.equals(expansion.getRequestId())) throw invalid("证据扩展请求身份与完整需求不一致");
+
+        String artifactId = locked.step().get("artifactId", String.class);
+        Integer artifactRevision = locked.step().get("artifactRevision", Integer.class);
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(Map.of("evidenceExpansion", material)),
+                artifactId, artifactRevision, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null, locked.run().get("lastEventSequence", Long.class), now);
+        List<WorkflowEvidenceItemPlan> items;
+        try {
+            WorkflowOutputValidator.validate(generator.outputSchema().jsonSchema(), Map.of("evidenceRequest", material.get("items")));
+            long modelSteps = tx.fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND \"stepType\" = 'agent' AND purpose <> 'resolve_intent'", runId).get(0, Long.class);
+            if (modelSteps + 1 + plan.reviewers().size() > plan.runBudget().maxModelCalls()) {
+                failRun(tx, locked, "WORKFLOW_RUN_BUDGET_EXCEEDED", false, sequence, now);
+                return;
+            }
+            WorkflowStructuredCandidatePreparation preparation = structuredCandidates.get();
+            if (preparation == null) throw new IllegalStateException("结构化资料证据补齐尚未装配");
+            items = preparation.expand(tx, locked.run().get("userId", String.class), locked.run().get("novelId", String.class), runId, bundleId, expansion);
+        } catch (ApiException error) {
+            // 已发生的模型用量必须收口；确定性资料错误成为可见 Run 失败，不反复拒绝同一已付费结果。
+            if (error.statusCode() >= 500 || error.statusCode() == 408 || error.statusCode() == 429) throw error;
+            failRun(tx, locked, error.code(), false, sequence, now);
+            return;
+        } catch (IllegalArgumentException error) {
+            failRun(tx, locked, "AGENT_UPDATES_EVIDENCE_REQUEST_INVALID", false, sequence, now);
+            return;
+        }
+        var next = new JooqWorkflowStartRepository(database, ids, clock, json).appendEvidence(tx, runId,
+                expansion.getSourceBundleVersion() + 1, plan.generator().evidencePolicy(), items, now);
+        Map<String, Object> input = readObject(locked.step().get("input", String.class));
+        requireHash(locked.step().get("inputHash", String.class), input, "evidence expansion generation input");
+        appendGenerationStep(tx, locked, generator, input, next.id(),
+                artifactId == null ? null : new Artifact(artifactId, artifactRevision), now);
+        tx.execute("UPDATE public.\"WorkflowRun\" SET \"currentEvidenceBundleId\" = ? WHERE id = ?", next.id(), runId);
+        sequence = appendEvent(tx, runId, sequence, "evidence_ready", Map.of("bundleId", next.id(),
+                "bundleVersion", next.version(), "manifestSha256", next.manifestSha256(), "totalBytes", next.totalBytes()),
+                "evidence:" + next.version(), now);
+        updateRun(tx, runId, "running", sequence, null, null, now);
     }
 
     private void completeSelectionGeneration(
@@ -2081,7 +2154,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Record run = transaction.fetchOne(
                 """
                 SELECT id, "userId", "novelId", "chapterId", "writingSessionId", input, workflow, operation,
-                       "targetType", "targetId",
+                       "targetType", "targetId", "currentEvidenceBundleId",
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "cancelRequestId", "cancelRequestedAt",
                        "lastEventSequence", revision

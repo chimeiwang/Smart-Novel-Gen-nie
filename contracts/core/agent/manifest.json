@@ -1,12 +1,24 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 272,
+  "modelCount": 274,
   "models": [
     {
       "model": "AgentUpdates",
       "module": "agent_updates",
       "path": "agent_updates/AgentUpdates.schema.json",
       "sha256": "673d74bacd5384035d735fb19a3af3e1cf9c8096e65f7079b3a81411350c2c9e"
+    },
+    {
+      "model": "AgentUpdatesEvidenceNeed",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdatesEvidenceNeed.schema.json",
+      "sha256": "1a288b56245247e9ccdec96742b380d573df2b76aad6d947501367803039ce42"
+    },
+    {
+      "model": "AgentUpdatesEvidenceRequestOutput",
+      "module": "agent_updates",
+      "path": "agent_updates/AgentUpdatesEvidenceRequestOutput.schema.json",
+      "sha256": "51fd05257d587696899f6e6bd2d681c566041c23635e4fe6c374c3b7de280077"
     },
     {
       "model": "AgentUpdatesInput",

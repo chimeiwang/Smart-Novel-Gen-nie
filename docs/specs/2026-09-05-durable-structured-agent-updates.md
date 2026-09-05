@@ -2,7 +2,7 @@
 
 日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 来源读取、不可变候选、完整 Diff/写入物化、
 生成回调及审核详情/决定已通过本地隔离验证；Agent 单 Step 生成与专用复审已接入并通过定向验证。
-证据扩展、自动返工策略与入口尚未全部接通，五项尚未启用。
+按需证据补齐与 Web 部分采用已接入并通过本地全量验证；自动返工策略与入口尚未全部接通，五项尚未启用。
 
 ## 范围复核结论
 
@@ -475,3 +475,71 @@ cost 800000 微单位、600 秒；不能把 Run 总额复制给每个 Step。超
 下一步是把上述单 Step 与既有 Core 审核链接成五项可启动业务：完成缺失来源的 EvidenceExpansionRequest、
 同 Run 新 bundle/Step、最多一次自动完整返工、显式/自然 planner 及消费者端到端验收。
 当前仍为 7/21；没有推送、部署、真实库变更、真实模型调用或固定安装包更新。
+
+## 按需证据补齐与消费者闭环
+
+接续 db48031。只提供名录不足以完成已有资料修改，不能让模型猜旧值，也不能为省去补齐流程而读取全作品。
+五项生成新增版本化 output.agent_updates_step.v1：正常结果仍是原 summary/updates；需要完整来源时只返回
+`{evidenceRequest:[{resourceType,resourceId,purposeCode}]}`，两种输出互斥，不能夹带半份候选。
+新增五个 generator v3 及对应 Prompt/Deployment，保留刚建立的 v2、旧 v1 及其冻结依赖；Reviewer 与现有
+候选/采用协议不变。新请求使用新输出资产，旧 v2 生成仍只接受原 summary/updates，不静默扩大历史授权。
+
+证据需求只能引用冻结名录中的真实 ID、绑定小说的单例全文，或明确的整树替换来源。purposeCode 固定为
+target、delete_impact、replace_tree；最后一种只能与 outline_tree/novelId 搭配。其余资源类型复用现有
+Reader 的十三类，不接受 SQL、路径或正文范围，不允许扩成全 workspace；最多 100 项且资源身份不重复。
+Agent 复验结构后派生既有 EvidenceExpansionRequest：requestId 绑定 Step/请求/完整需求哈希，sourceBundle
+身份来自当前 Step，reasonCode 固定为 agent_updates_sources_required；maxAdditionalBytes 为该 Step
+maxInputTokens 的四倍，不由模型扩大。调用仍计入本次实际用量并使用原终态 journal，不增加隐式模型调用。
+
+Core 只在对应生成 Step、fence 与当前 source bundle 完全匹配时接受补齐。审核域通过既有 Reader 核验
+小说归属、冻结名录身份、合法用途及新增字节数，复用原 Novel/advisory 锁顺序。新 bundle 保留所有既有
+快照，只新增必要来源；重读到同一既有目标的不同内容时明确冲突，不能用新 Head 覆盖旧事实。相同快照去重，
+同一关系的用途可合并；没有新增来源的请求不能循环重派。原 bundle、已生成候选及历史 Step 均不改写。
+
+Core 在同一事务完成已付费扩展 Step、保存新 bundle revision、更新 Run 当前 bundle、排队新 generation Step
+并记录 evidence_ready；新 Step 保留原完整 input、Artifact/上一候选身份、Profile/Schema/预算。
+沿用既有初始排队方式：新 Step 的 attemptCount/fence 为零，不伪造一次实际领取；后续领取/重派再产生
+既有 step_started/step_queued 事件，不为补齐流程修改事件协议。
+补齐消费原 Run 的四次模型调用额度，必须为后续生成和复审预留调用次数；不足时明确预算失败，不能扩充额度
+或无限选择资料。重复/取消/迟到回调继续复用现有收据及 fence 语义，不生成第二份费用或 bundle。
+
+Web 仅补 V2 agent_updates 的真实消费者漏接：verified 精确候选的 approve 原样提交选择，不满足条件的
+部分选择明确拒绝而非静默全选；Diff 区分未设置、空串和纯空白文本，保留原值；整树 replace 提示所选节点
+将替换整棵旧树且不会自动补选父项。不重做布局、限制合法子集或改变原全文空串的选择行为。
+
+本轮验收需覆盖扩展请求结构及用量、新旧生成资产兼容、同小说与非法范围/用途、原来源不覆盖、同 Run
+新 bundle/Step、重复回调、取消及预算耗尽，并覆盖 Web 原下标提交和完整差异显示。
+Catalog 仍保持关闭，直到自动返工、显式/自然入口及五项端到端测试一并完成。
+
+本批复核记录：
+
+- 补齐请求的 canonical 哈希与共享 Python 派生值对齐，原 bundle 全部内容与元数据保持不变；后继 Step
+  使用相同输入及冻结生成资产。来源变化、没有新增资料和剩余调用次数不足均保留已发生用量并明确终止，
+  重复结果不增加费用或 bundle；取消后的迟到结果不再补读或排队。
+- 五项冻结计划共用的“补齐 → 生成 → 复审 → 详情 → 采用”接线已在隔离 PostgreSQL 验证。这是内部
+  回调与审核链测试，不是五项真实指令、业务入口或供应商端到端验收，不据此翻转 Catalog。
+- 修复回调读取遗漏的 currentEvidenceBundleId；损坏快照测试只在隔离事务内模拟存储损坏，事务回滚恢复
+  原数据，未修改生产不可变触发器。调用次数测试明确提供完整低成本用量，避免先触发未知成本保守占用门禁。
+- 新 readPlans 的数据库读取异常保持 DataAccessException，交调用方回滚重试，不能归为永久来源损坏；
+  为该故障分类增加 JDBC 故障注入回归。旧审核读取行为不在本批顺带重写。
+- 新增两个共享 Schema，语言中立清单由 272 增至 274；五组 v3 与新输出资产追加版本，旧 v1/v2 内容保留。
+  本批没有公共 API、CLI 命令或参数、Operator 允许范围、DDL、固定 JAR、活动 Skills 和服务器变化。
+
+本批最终验证：
+
+- 最终 `./mvnw verify` 五个 reactor 成功：服务身份 11、服务契约 5、Core 1004（3 skipped）、CLI 129。
+  日志 `/tmp/inkforge-agent-evidence-expansion-maven-final-2.log`；此轮包含最后的数据库异常分类修复及故障回归，
+  不把较早运行成功的 Maven 日志当作最终代码证据。
+- 全量 `uv run pytest -q`：4865 passed、3 skipped，仅既有 Starlette 弃用警告；日志
+  `/tmp/inkforge-agent-evidence-expansion-python-final.log`。共享请求模型及导出基线定向 13 项通过。
+- `npm run test:web`：Web 340、生成客户端 3，全部通过；typecheck、lint、Web build 通过，日志依次为
+  `/tmp/inkforge-agent-evidence-expansion-web-final.log`、`/tmp/inkforge-agent-evidence-expansion-typecheck-final.log`、
+  `/tmp/inkforge-agent-evidence-expansion-lint-final.log`、`/tmp/inkforge-agent-evidence-expansion-web-build-final.log`。
+- 全仓 Ruff、四个服务/共享目录与 CLI/本次架构测试的 Mypy（324 文件）、api:check、执行 manifest --check
+  及 git diff --check 通过。执行资产指纹为
+  `506dd4bf4388d6af998a88ab12c28c5a6f9573968729b2d79faa4f2a662bb7d6`。
+
+本批后仍为 7/21，五项尚未启用；尚待自动完整返工、显式/自然入口与五项业务端到端验证，此外 Catalog
+还有其他九项未迁移，不能说总任务只剩这五项。没有推送、部署、真实库变更或供应商调用，也没有升级固定 JAR
+及活动 Skills。CLI 部分采用的更新说明继续见 `2026-09-01-durable-agent-v2-operator-skill-update.md`，
+本批内部来源补齐不增加 Skill 命令、参数或对 Agent 的直接调用。

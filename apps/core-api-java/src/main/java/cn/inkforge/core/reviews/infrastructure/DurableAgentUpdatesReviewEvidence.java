@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.jooq.DSLContext;
 import org.jooq.Record;
+import org.jooq.exception.DataAccessException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -29,10 +30,26 @@ import tools.jackson.databind.ObjectMapper;
 record DurableAgentUpdatesReviewEvidence(String userId, AgentUpdatesFrozenSources sources,
         Map<String, Object> output, List<SourceBinding> sourceBindings) {
     static AgentUpdatesFrozenSources readSources(DSLContext tx, ObjectMapper json, String runId, String bundleId, String novelId) {
-        Record bundle = tx.fetchOne("SELECT version, \"manifestJson\", \"manifestSha256\", \"totalBytes\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?", bundleId, runId);
-        if (bundle == null) throw invalid();
-        return new AgentUpdatesFrozenSources(novelId, readItems(tx, json, bundleId, bundle));
+        return new AgentUpdatesFrozenSources(novelId, readPlans(tx, json, runId, bundleId).items());
     }
+
+    /** 补齐只追加事实；完整复验旧 bundle 后交还原始计划，不能以当前 Head 修补历史来源。 */
+    static VerifiedBundle readPlans(DSLContext tx, ObjectMapper json, String runId, String bundleId) {
+        try {
+            Record bundle = tx.fetchOne("SELECT version, \"manifestJson\", \"manifestSha256\", \"totalBytes\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?", bundleId, runId);
+            if (bundle == null) throw invalid();
+            return new VerifiedBundle(bundle.get("version", Integer.class), readItems(tx, json, bundleId, bundle));
+        } catch (DataAccessException error) {
+            // 临时数据库故障仍交由调用方回滚重试，不能被确认为不可变来源已损坏。
+            throw error;
+        } catch (ApiException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw invalid();
+        }
+    }
+
+    record VerifiedBundle(int version, List<WorkflowEvidenceItemPlan> items) {}
 
     static DurableAgentUpdatesReviewEvidence read(DSLContext tx, ObjectMapper json, String runId,
             String novelId, String artifactId, int revision, String operation, Map<String, Object> payload,
@@ -105,6 +122,9 @@ record DurableAgentUpdatesReviewEvidence(String userId, AgentUpdatesFrozenSource
             String type = row.get("contentType", String.class);
             String text = row.get("contentText", String.class);
             String rawJson = row.get("contentJson", String.class);
+            if (exists ? !("text".equals(type) && text != null && rawJson == null
+                    || "json".equals(type) && rawJson != null && text == null)
+                    : type != null || text != null || rawJson != null) throw invalid();
             Object content = rawJson == null ? null : json.readValue(rawJson, Object.class);
             byte[] body = !exists ? new byte[0] : "text".equals(type)
                     ? Objects.requireNonNull(text).getBytes(StandardCharsets.UTF_8) : ExecutionCanonicalJson.bytes(content);

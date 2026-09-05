@@ -140,6 +140,46 @@ export function resolveReviewArtifactActionTaskId(
   return resolveReviewArtifactExecutionRunId(artifact);
 }
 
+type ReviewArtifactForUpdateSelection = {
+  engineVersion: 1 | 2;
+  kind: string;
+  sourceBindingStatus?: string;
+  detailLoaded?: boolean;
+  payload?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isVerifiedV2AgentUpdatesArtifact(
+  artifact: ReviewArtifactForUpdateSelection,
+): boolean {
+  if (
+    artifact.engineVersion !== 2
+    || artifact.detailLoaded !== true
+    || artifact.sourceBindingStatus !== "verified"
+    || artifact.kind !== "agent_updates"
+    || !isRecord(artifact.payload)
+    || artifact.payload.kind !== "agent_updates"
+  ) {
+    return false;
+  }
+  return isRecord(artifact.payload.updates);
+}
+
+export function resolveSelectedUpdateRefsForDecision<T>(
+  artifact: ReviewArtifactForUpdateSelection,
+  decision: ReviewArtifactOptimisticDecision,
+  selectedUpdateRefs: T[] | undefined,
+): T[] | null {
+  if (decision !== "approve" || selectedUpdateRefs === undefined) return null;
+  if (artifact.engineVersion === 1 || isVerifiedV2AgentUpdatesArtifact(artifact)) {
+    return selectedUpdateRefs;
+  }
+  throw new Error("当前 V2 草案身份或来源未完整验证，不能提交部分选择。请刷新详情后重试。");
+}
+
 export function applyOptimisticReviewArtifactDecision<
   TArtifact extends { id: string; status?: string }
 >(

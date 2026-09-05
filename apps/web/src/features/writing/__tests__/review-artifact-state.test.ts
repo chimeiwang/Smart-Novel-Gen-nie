@@ -10,6 +10,7 @@ import {
   resolveReviewArtifactExecutionRunId,
   resolveReviewArtifactActionTaskId,
   resolveReviewArtifactTaskId,
+  resolveSelectedUpdateRefsForDecision,
   resolveVisibleReviewArtifact,
 } from "../review-artifact-state";
 
@@ -163,6 +164,78 @@ describe("review artifact state", () => {
       taskId: "task-v1",
       workflowRunId: null,
     }), null);
+  });
+
+  it("仅为 verified 的精确 V2 agent_updates 批准原样保留部分选择", () => {
+    const refs = [
+      { section: "characters", index: 3 },
+      { section: "outlineContent" },
+    ];
+    const artifact = {
+      engineVersion: 2 as const,
+      kind: "agent_updates",
+      sourceBindingStatus: "verified",
+      detailLoaded: true,
+      payload: { kind: "agent_updates", updates: { characters: [] } },
+    };
+
+    assert.equal(
+      resolveSelectedUpdateRefsForDecision(artifact, "approve", refs),
+      refs,
+    );
+    assert.deepEqual(
+      resolveSelectedUpdateRefsForDecision(artifact, "approve", []),
+      [],
+    );
+    assert.equal(
+      resolveSelectedUpdateRefsForDecision(artifact, "approve", undefined),
+      null,
+    );
+    assert.equal(
+      resolveSelectedUpdateRefsForDecision(artifact, "revise", refs),
+      null,
+    );
+  });
+
+  it("V2 部分选择身份不完整时明确拒绝，不能静默改成全选", () => {
+    const refs = [{ section: "characters", index: 0 }];
+    const base = {
+      engineVersion: 2 as const,
+      kind: "agent_updates",
+      sourceBindingStatus: "verified",
+      detailLoaded: true,
+      payload: { kind: "agent_updates", updates: { characters: [] } },
+    };
+    const invalidArtifacts = [
+      { ...base, detailLoaded: false },
+      { ...base, sourceBindingStatus: "not_yet_supported" },
+      { ...base, kind: "chapter_draft" },
+      { ...base, payload: { ...base.payload, kind: "chapter_draft" } },
+      { ...base, payload: { kind: "agent_updates", updates: null } },
+    ];
+
+    for (const artifact of invalidArtifacts) {
+      assert.throws(
+        () => resolveSelectedUpdateRefsForDecision(artifact, "approve", refs),
+        /不能提交部分选择/,
+      );
+    }
+  });
+
+  it("V1 部分选择保持原行为且不增加来源状态门禁", () => {
+    const refs = [{ section: "characters", index: 1 }];
+    assert.equal(
+      resolveSelectedUpdateRefsForDecision(
+        {
+          engineVersion: 1,
+          kind: "agent_updates",
+          payload: { kind: "agent_updates", updates: {} },
+        },
+        "approve",
+        refs,
+      ),
+      refs,
+    );
   });
 
   it("can display an inspected artifact without attaching it to messages", () => {

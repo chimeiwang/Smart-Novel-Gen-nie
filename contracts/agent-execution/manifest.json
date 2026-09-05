@@ -3,7 +3,7 @@
   "catalogVersion": "1",
   "catalog": {
     "path": "operation-catalog.v1.json",
-    "sha256": "6ed6be65f0915d7849a29807d7e2797dcb0ac7ac5b56cfb5e06359b2ef2be70b"
+    "sha256": "fc2feed0aa9f0beb47bc5af1640b16088d70046ffff5a66e41a3897359b8074e"
   },
   "schema": {
     "path": "operation-catalog.schema.json",
@@ -11,7 +11,7 @@
   },
   "profileRegistry": {
     "path": "profile-registry.v1.json",
-    "sha256": "9799b2636a69600fec94e43db3d04cee63db9548c2e2c0f39524bba9b0489ed6"
+    "sha256": "5da4e2726a351b1fc557291a0d8cc3da2aa6c8d79a1cb66ef07c8d266dd00acb"
   },
   "profileRegistrySchema": {
     "path": "profile-registry.schema.json",
@@ -19,7 +19,7 @@
   },
   "deploymentProfileRegistry": {
     "path": "deployment-profile-registry.v1.json",
-    "sha256": "5ad85887892b2461f62af5337b93ca3f6f81e8024c67aa9a536b02644f84f2c4"
+    "sha256": "3dc68a08518c7af6f292e958a3be69fcb60dc56362e766b5a910410648a1a573"
   },
   "deploymentProfileRegistrySchema": {
     "path": "deployment-profile-registry.schema.json",
@@ -27,7 +27,7 @@
   },
   "promptProfileRegistry": {
     "path": "prompt-profile-registry.v1.json",
-    "sha256": "5f357f6d935c7f9a39eda1f1c0bb0aca827ad64dc1dcb53c0388fd10374b485d"
+    "sha256": "df721496e716234f875fb6ddd9733b590b54a78f7054817ef85686ddb2d87cc6"
   },
   "promptProfileRegistrySchema": {
     "path": "prompt-profile-registry.schema.json",
@@ -35,7 +35,7 @@
   },
   "outputSchemaRegistry": {
     "path": "output-schema-registry.v1.json",
-    "sha256": "cd9a30713495726e86bab5abb0f7367e6cba0ed350ad3ddc3ae3811cf8375e50"
+    "sha256": "bf8071212cba39967cb7508788c1843dfe464a86c82a6058fe3fcf5866d6fd74"
   },
   "outputSchemaRegistrySchema": {
     "path": "output-schema-registry.schema.json",

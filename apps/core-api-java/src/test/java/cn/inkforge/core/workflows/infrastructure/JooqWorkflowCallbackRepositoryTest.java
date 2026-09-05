@@ -164,6 +164,160 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 五项真实资产按需补齐后在同Run完成生成复审与正式采用() {
+        for (String name : List.of("create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing")) {
+            ExpansionFlow flow = expansionFlow("expand-" + name, name);
+            ExecutionStepRequest first = flow.request();
+            String originalBundle = first.getEvidenceBundle().getId();
+            String originalRows = evidenceRows(originalBundle);
+            ExecutionStepResult requested = expansionResult(first, flow.characterIds().getFirst());
+            assertThat(flow.callbacks().result(requested).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(flow.callbacks().result(requested).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(2);
+            assertThat(evidenceRows(originalBundle)).isEqualTo(originalRows);
+            assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", first.getRunId())).isZero();
+
+            ExecutionStepRequest next = nextExpansionStep(flow);
+            assertThat(next.getInput()).isEqualTo(first.getInput());
+            assertThat(next.getInputHash()).isEqualTo(first.getInputHash());
+            assertThat(next.getRequestHash()).isNotEqualTo(first.getRequestHash());
+            assertThat(next.getModelProfile()).isEqualTo(first.getModelProfile());
+            assertThat(next.getOutputSchema()).isEqualTo(first.getOutputSchema());
+            assertThat(next.getBudget()).isEqualTo(first.getBudget());
+            assertThat(next.getEvidenceBundle().getId()).isNotEqualTo(originalBundle);
+            assertThat(next.getEvidenceBundle().getVersion()).isEqualTo(2);
+            assertThat(next.getEvidenceBundle().getItems()).anySatisfy(item -> {
+                assertThat(item.getResourceType()).isEqualTo("character");
+                assertThat(json.writeValueAsString(item.getContentJson())).contains("完整旧人物原文");
+            });
+            Map<String, Object> updates = Map.of("characters", List.of(Map.of("action", "update", "id", flow.characterIds().getFirst(), "background", "补齐后生成的新资料")));
+            Map<String, Object> output = Map.of("summary", "依据完整旧来源更新", "updates", updates, "updatesSha256", ExecutionCanonicalJson.sha256(updates));
+            ExecutionStepResult generated = outputResult(next, "占位").output(output);
+            generated.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(generated)));
+            flow.callbacks().result(generated);
+            String artifact = database.dsl().fetchOne("SELECT id FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", first.getRunId()).get(0, String.class);
+            ExecutionStepRequest reviewer = nextExpansionStep(flow);
+            assertThat(reviewer.getPurpose()).isEqualTo("review");
+            assertThat(reviewer.getEvidenceBundle().getId()).isEqualTo(next.getEvidenceBundle().getId());
+            assertThat(reviewer.getInput().get("candidate")).isEqualTo(output);
+            flow.callbacks().result(reviewResult(reviewer));
+            var reviews = cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.repository(database, new CuidV1Generator(CLOCK), CLOCK, json, registry);
+            var detail = reviews.getDetail(flow.fixture().userId(), artifact, 1, null).response();
+            assertThat(json.writeValueAsString(detail.getDiff().orElse(null))).contains("完整旧人物原文", "补齐后生成的新资料");
+            reviews.decide(flow.fixture().userId(), artifact, new cn.inkforge.contracts.api.ReviewArtifactDecisionRequest(
+                    "approve-" + name + "-after-expansion", cn.inkforge.contracts.api.ReviewArtifactDecisionRequest.DecisionEnum.APPROVE, 1)
+                    .engineVersion(cn.inkforge.contracts.api.ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2));
+            assertThat(database.dsl().fetchOne("SELECT status::text FROM public.\"WorkflowRun\" WHERE id = ?", first.getRunId()).get(0, String.class)).isEqualTo("completed");
+            assertThat(database.dsl().fetchOne("SELECT background FROM public.\"Character\" WHERE id = ?", flow.characterIds().getFirst()).get(0, String.class)).isEqualTo("补齐后生成的新资料");
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", first.getRunId())).isEqualTo(3);
+        }
+    }
+
+    @Test
+    void 证据补齐无进展或实际来源冲突明确终止且保留已付费用量和旧Bundle() {
+        for (boolean changed : List.of(false, true)) {
+            ExpansionFlow flow = expansionFlow("expand-conflict-" + changed, "revise_lore");
+            flow.callbacks().result(expansionResult(flow.request(), flow.characterIds().getFirst()));
+            ExecutionStepRequest second = nextExpansionStep(flow);
+            String bundle = second.getEvidenceBundle().getId();
+            String original = evidenceRows(bundle);
+            if (changed) database.dsl().execute("UPDATE public.\"Character\" SET background = '作者在外部修改' WHERE id = ?", flow.characterIds().getFirst());
+            ExecutionStepResult repeated = expansionResult(second, flow.characterIds().getFirst());
+            assertThat(flow.callbacks().result(repeated).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(flow.callbacks().result(repeated).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            Record run = database.dsl().fetchOne("SELECT status::text, \"errorCode\" FROM public.\"WorkflowRun\" WHERE id = ?", second.getRunId());
+            assertThat(run.get("status", String.class)).isEqualTo("failed");
+            assertThat(run.get("errorCode", String.class)).isEqualTo(changed ? "AGENT_UPDATES_SOURCE_CHANGED" : "AGENT_UPDATES_EVIDENCE_NO_PROGRESS");
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", second.getRunId())).isEqualTo(2);
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", second.getRunId())).isEqualTo(2);
+            assertThat(evidenceRows(bundle)).isEqualTo(original);
+        }
+    }
+
+    @Test
+    void 证据扩展必须为后续生成复审保留预算且取消后不补齐() {
+        ExpansionFlow budget = expansionFlow("expand-budget", "create_outline");
+        ExecutionStepRequest step = budget.request();
+        for (int index = 0; index < 3; index++) {
+            var result = expansionResult(step, budget.characterIds().get(index));
+            // 本例只验证剩余调用次数；提供已知成本，避免先触发未知成本按预留上限核算的独立门禁。
+            result.getUsage().costMicros(1).usageStatus(StepUsage.UsageStatusEnum.COMPLETE);
+            result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+            assertThat(budget.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            if (index < 2) step = nextExpansionStep(budget);
+        }
+        assertThat(database.dsl().fetchOne("SELECT \"errorCode\" FROM public.\"WorkflowRun\" WHERE id = ?", step.getRunId()).get(0, String.class)).isEqualTo("WORKFLOW_RUN_BUDGET_EXCEEDED");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", step.getRunId())).isEqualTo(3);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", step.getRunId())).isEqualTo(3);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", step.getRunId())).isEqualTo(3);
+
+        ExpansionFlow cancelled = expansionFlow("expand-cancel", "manage_foreshadowing");
+        cancellations.request(cancelled.fixture().userId(), cancelled.request().getRunId(), "expand-cancel-request-0001");
+        cancelled.callbacks().result(expansionResult(cancelled.request(), cancelled.characterIds().getFirst()));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceBundle\" WHERE \"runId\" = ?", cancelled.request().getRunId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", cancelled.request().getRunId())).isEqualTo(1);
+        assertThat(eventTypes(cancelled.request().getRunId())).endsWith("step_finished", "cancelled");
+    }
+
+    private static ExpansionFlow expansionFlow(String prefix, String name) {
+        Fixture f = fixture(prefix);
+        List<String> characters = List.of(prefix + "-person-1", prefix + "-person-2", prefix + "-person-3");
+        for (String id : characters) database.dsl().execute("INSERT INTO public.\"Character\" (id,\"novelId\",name,background,\"updatedAt\") VALUES (?, ?, ?, '完整旧人物原文', ?)", id, f.novelId(), id, NOW);
+        var enabled = ExecutionRegistryFixtures.structuredOperationEnabled(ExecutionRegistry.Environment.TEST, "long_serial." + name);
+        var resolved = enabled.resolve("long_serial." + name, false);
+        assertThat(registry.requireKnownOperation("long_serial." + name).v2Enabled()).isFalse();
+        assertThat(resolved.outputSchema().key()).isEqualTo("output.agent_updates_step.v1");
+        var reader = new cn.inkforge.core.reviews.infrastructure.JooqAgentUpdatesEvidenceReader(json);
+        var sources = database.transactionResult(tx -> List.of(reader.captureIndex(tx, f.novelId())));
+        Map<String, Object> input = Map.of("userInstruction", "根据完整来源修改资料，不裁剪原文");
+        Map<String, Object> normalized = new LinkedHashMap<>(input);
+        normalized.put("target", Map.of("type", "novel", "id", f.novelId()));
+        normalized.put("scope", Map.of("kind", "novel"));
+        var started = starts.start(new WorkflowStartPlan(f.userId(), prefix + "-request-0001", sha256(prefix),
+                "long_serial", name, enabled.catalogVersion(), "chapter_generation", f.novelId(), f.chapterId(), f.sessionId(),
+                "novel", f.novelId(), normalized, resolved.operation().evidencePolicy(), sources, resolved.operation().runBudget(),
+                ExecutionPlanSnapshot.freeze(enabled.catalogVersion(), enabled.manifestFingerprint(), resolved),
+                new WorkflowInitialStepPlan("generation", resolved.operation().lane(), input, resolved.generatorProfile(), resolved.generatorStepBudget(), resolved.outputSchema())));
+        var handler = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, registry, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> null,
+                () -> cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.preparation(json));
+        var request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        accept(request);
+        handler.progress(progress(request, unknownUsage()));
+        return new ExpansionFlow(f, characters, request, handler);
+    }
+
+    private static ExecutionStepRequest nextExpansionStep(ExpansionFlow flow) {
+        var request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(flow.request().getRunId());
+        accept(request);
+        assertThat(flow.callbacks().progress(progress(request, unknownUsage())).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        return request;
+    }
+
+    private static ExecutionStepResult expansionResult(ExecutionStepRequest request, String character) {
+        var need = new cn.inkforge.contracts.api.EvidenceExpansionItem().resourceType("character").resourceId(character).purposeCode("target");
+        var expansion = new cn.inkforge.contracts.api.EvidenceExpansionRequest().items(List.of(need))
+                .sourceBundleId(request.getEvidenceBundle().getId()).sourceBundleVersion(request.getEvidenceBundle().getVersion())
+                .reasonCode("agent_updates_sources_required").maxAdditionalBytes(request.getBudget().getMaxInputTokens() * 4).requestId("temporary");
+        var items = WorkflowCallbackValues.evidenceExpansionMap(expansion).get("items");
+        expansion.setRequestId("evidence-" + ExecutionCanonicalJson.sha256(Map.of("stepId", request.getStepId(), "requestHash", request.getRequestHash(), "items", items)).substring(0, 32));
+        var result = new ExecutionStepResult(API_NOW, request.getFencingToken(), request.getInputHash(), request.getJobId(), request.getNovelId(),
+                "2.0", request.getRequestHash(), apiResolved(request), "0".repeat(64), ExecutionStepResult.ResultKindEnum.EVIDENCE_EXPANSION,
+                request.getRunId(), request.getStepId(), partialUsage(false)).evidenceExpansion(expansion);
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private static String evidenceRows(String bundle) {
+        return database.dsl().fetch("SELECT row_to_json(item)::text FROM public.\"WorkflowEvidenceItem\" item WHERE \"bundleId\" = ? ORDER BY ordinal", bundle).formatJSON();
+    }
+
+    private record ExpansionFlow(Fixture fixture, List<String> characterIds, ExecutionStepRequest request, JooqWorkflowCallbackRepository callbacks) {}
+
+    @Test
     void 审阅完整报告有无会话均只完成一次且不写正式数据或草案() {
         for (boolean withSession : List.of(true, false)) {
             Flow flow = runningChapterReviewFlow("chapter-report-" + withSession, withSession);

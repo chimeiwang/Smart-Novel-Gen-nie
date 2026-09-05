@@ -1,8 +1,8 @@
 export type UpdateDiffField = {
   field: string;
   label: string;
-  oldValue?: string;
-  newValue?: string;
+  oldValue?: string | null;
+  newValue?: string | null;
 };
 
 export type UpdateDiffItem = {
@@ -27,6 +27,33 @@ export type SelectionDiff = {
   prefix?: string;
   suffix?: string;
 };
+
+export type UpdateDiffValueDescription = {
+  text: string;
+  isPlaceholder: boolean;
+};
+
+export function describeUpdateDiffValue(
+  value: string | null | undefined,
+  missingText: string,
+): UpdateDiffValueDescription {
+  if (value === null) {
+    return { text: "未设置（null）", isPlaceholder: true };
+  }
+  if (value === undefined) {
+    return { text: missingText, isPlaceholder: true };
+  }
+  if (value.length === 0) {
+    return { text: "空字符串", isPlaceholder: true };
+  }
+  if (value.trim().length === 0) {
+    return {
+      text: `仅空白文本：${JSON.stringify(value)}`,
+      isPlaceholder: true,
+    };
+  }
+  return { text: value, isPlaceholder: false };
+}
 
 export function isSelectionDiff(value: unknown): value is SelectionDiff {
   if (!value || typeof value !== "object") return false;

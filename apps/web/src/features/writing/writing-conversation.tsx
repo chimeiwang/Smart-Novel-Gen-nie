@@ -24,6 +24,7 @@ import { countTextLength } from "@/shared/lib/word-count";
 import type { SelectionBridge, SelectionAttachment } from "@/features/editor/selection-identity";
 import { buildSelectionRunRequest, selectionPreview } from "@/features/editor/selection-identity";
 import {
+  describeUpdateDiffValue,
   normalizeReviewArtifactDiff,
   type SelectionDiff,
   type UpdateDiffItem,
@@ -55,6 +56,7 @@ import {
   resolveReviewArtifactExecutionRunId,
   resolveReviewArtifactActionTaskId,
   resolveReviewArtifactTaskId,
+  resolveSelectedUpdateRefsForDecision,
   resolveVisibleReviewArtifact,
 } from "./review-artifact-state";
 import { mergeActionableReviewArtifacts } from "./review-artifact-collection";
@@ -285,6 +287,7 @@ function getSelectionMessageSource(metadata: unknown): {
 }
 
 type PendingUpdatesData = {
+  outlineTreeMode?: "patch" | "replace";
   characters?: Record<string, unknown>[];
   locations?: Record<string, unknown>[];
   items?: Record<string, unknown>[];
@@ -313,6 +316,7 @@ type ReviewArtifactData = {
   revision: number;
   actionable?: boolean;
   detailLoaded?: boolean;
+  sourceBindingStatus?: "verified" | "legacy_missing" | "not_yet_supported";
   diff?: UpdateDiffItem[] | SelectionDiff | null;
   payload?: {
     kind?: string;
@@ -2708,13 +2712,14 @@ export function WritingConversation({
 
     const getName = (item: Record<string, unknown>): string => getUpdateItemName(item);
 
-    const isEmptyValue = (value: string | undefined) => value === undefined || value.trim() === "";
-
-    const renderValue = (value: string | undefined, emptyText: string) => (
-      <div className={isEmptyValue(value) ? "diff-value diff-empty" : "diff-value"}>
-        {isEmptyValue(value) ? emptyText : value}
-      </div>
-    );
+    const renderValue = (value: string | null | undefined, missingText: string) => {
+      const description = describeUpdateDiffValue(value, missingText);
+      return (
+        <div className={description.isPlaceholder ? "diff-value diff-empty" : "diff-value"}>
+          {description.text}
+        </div>
+      );
+    };
 
     const renderDiffItem = (item: UpdateDiffItem, idx: number) => (
       <details
@@ -2743,11 +2748,14 @@ export function WritingConversation({
                 <div className="diff-columns">
                   <div className="diff-column diff-old">
                     <div className="diff-column-title">当前</div>
-                    {renderValue(field.oldValue, "空")}
+                    {renderValue(field.oldValue, "未设置（null）")}
                   </div>
                   <div className="diff-column diff-new">
                     <div className="diff-column-title">待保存</div>
-                    {renderValue(field.newValue, item.action === "delete" ? "将删除" : "空")}
+                    {renderValue(
+                      field.newValue,
+                      item.action === "delete" ? "将删除" : "未设置（null）",
+                    )}
                   </div>
                 </div>
               </div>
@@ -2974,6 +2982,11 @@ export function WritingConversation({
             </button>
           </div>
         </div>
+        {updates.outlineTreeMode === "replace" ? (
+          <div className="review-dialog-note">
+            大纲整树替换会用所选节点替换整棵现有树；不自动补选父节点，依赖不完整会整单失败。
+          </div>
+        ) : null}
         <div className="review-update-select-list">
           {SELECTABLE_TEXT_UPDATE_SECTIONS.map(({ section, label }) => renderSection(section, label))}
           {SELECTABLE_ARRAY_UPDATE_SECTIONS.map(({ section, label }) => renderSection(section, label))}
@@ -3327,9 +3340,11 @@ export function WritingConversation({
                 ? editedContent ?? null
                 : null,
               editedReplacement: decision === "approve" && selectionArtifact ? editedContent ?? null : null,
-              selectedUpdateRefs: !isV2Artifact && decision === "approve"
-                ? selectedUpdateRefs ?? null
-                : null,
+              selectedUpdateRefs: resolveSelectedUpdateRefsForDecision(
+                artifact,
+                decision,
+                selectedUpdateRefs,
+              ),
               userMessage: userMessage ?? (decision === "revise" ? "继续修改待确认变更" : null),
             },
           },

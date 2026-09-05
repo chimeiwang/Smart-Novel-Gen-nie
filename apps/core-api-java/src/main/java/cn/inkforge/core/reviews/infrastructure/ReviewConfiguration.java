@@ -10,6 +10,8 @@ import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
 import cn.inkforge.core.reviews.application.AgentUpdatesMaterializer;
 import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
+import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
+import cn.inkforge.contracts.api.EvidenceExpansionRequest;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
@@ -17,6 +19,9 @@ import cn.inkforge.core.reviews.application.ReviewRepository;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import java.time.Clock;
+import java.util.List;
+import java.util.Map;
+import org.jooq.DSLContext;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
@@ -34,8 +39,21 @@ class ReviewConfiguration {
 
     @Bean
     WorkflowStructuredCandidatePreparation structuredCandidatePreparation(ObjectMapper json) {
-        return (tx, user, novel, run, bundle, artifact, revision, output) -> AgentUpdatesMaterializer.materialize(
-                user, novel, artifact, revision, output, DurableAgentUpdatesReviewEvidence.readSources(tx, json, run, bundle, novel));
+        var expansion = new JooqAgentUpdatesEvidenceExpansion(json, new JooqAgentUpdatesEvidenceReader(json));
+        return new WorkflowStructuredCandidatePreparation() {
+            @Override
+            public void validate(DSLContext tx, String user, String novel, String run, String bundle,
+                    String artifact, int revision, Map<String, Object> output) {
+                AgentUpdatesMaterializer.materialize(user, novel, artifact, revision, output,
+                        DurableAgentUpdatesReviewEvidence.readSources(tx, json, run, bundle, novel));
+            }
+
+            @Override
+            public List<WorkflowEvidenceItemPlan> expand(DSLContext tx, String user, String novel, String run,
+                    String bundle, EvidenceExpansionRequest request) {
+                return expansion.expand(tx, user, novel, run, bundle, request);
+            }
+        };
     }
 
     @Bean
