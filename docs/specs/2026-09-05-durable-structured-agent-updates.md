@@ -1,7 +1,8 @@
 # Durable Agent V2 设定、大纲与伏笔迁移
 
 日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 来源读取、不可变候选、完整 Diff/写入物化、
-生成回调及审核详情/决定已通过本地隔离验证；Agent 执行、证据扩展、自动返工策略与入口尚未全部接通，五项尚未启用。
+生成回调及审核详情/决定已通过本地隔离验证；Agent 单 Step 生成与专用复审已接入并通过定向验证。
+证据扩展、自动返工策略与入口尚未全部接通，五项尚未启用。
 
 ## 范围复核结论
 
@@ -395,7 +396,7 @@ Artifact/revision、结果哈希与完整输出；期望身份来自权威 Step�
 本地回归已真实贯通生成回调 → Reviewer 回调 → 精确详情 → 作者采用 → Run completed；另以五种 operation
 的内存冻结计划覆盖部分采用、冲突时决定/状态回滚、幂等重放、原始候选返工和结果摘要不匹配拒绝。
 这些计划复用已注册测试模型/预算，仅证明 Core 接线，不是五项真实 Profile、Agent 执行或生产开放证明。
-尚须完成正式 Profile/Prompt/StepBudget、Agent 生成和专用复审、EvidenceExpansionRequest 新 bundle/Step、
+在 ca30add 检查点，尚须完成正式 Profile/Prompt/StepBudget、Agent 生成和专用复审、EvidenceExpansionRequest 新 bundle/Step、
 最多一次自动完整返工、显式/自然 planner 及对应 Web/CLI 业务 E2E；Catalog 继续保持 7/21。
 
 本次接线后的最终验证记录：
@@ -417,3 +418,60 @@ Artifact/revision、结果哈希与完整输出；期望身份来自权威 Step�
 Java/Python 共享成功 fixture 31 例、V2 错误 fixture 19 例均已验证；Python CLI 全目录另有 641 项通过。
 源码候选 JAR 已构建，但没有安装到固定入口或改动活动 Skills。更新要求见
 `2026-09-01-durable-agent-v2-operator-skill-update.md` 的“结构化资料 V2 部分采用”。
+
+## 五项单 Step 执行接入
+
+接续 ca30add 的 Core 审核链，下一步在既有 StatelessExecutionStepExecutor 接入五项生成和两种专用复审，
+复用已有 AgentUpdatesInput/Output/Result，不新增工具循环、工作流状态或公共请求字段。
+生成 Profile 分别使用 lore.generator.v2、lore.reviser.v2、plot.outline_generator.v2、
+plot.outline_reviser.v2、plot.foreshadowing.v2；原 v1 占位 Profile/Prompt/Deployment 原样保留。
+Reviewer 使用 reviewer.agent_updates_consistency.v1 或 reviewer.agent_updates_editorial.v1，
+复用现有严格 contentVerdict/findings 输出契约和独立 rubric.agent_updates.review.v1，不接受正文 patch。
+
+生成及复审只消费同一冻结 bundle。必须存在绑定 novelId 的唯一 agent_updates_index 完整 JSON；该名录
+只帮助定位，不冒充修改前的完整实体。初次生成不绑定旧 Artifact，返工必须以共享输入模型绑定精确上一
+候选和原指令；复审必须绑定当前 Artifact/revision，task 中的 operation、指令与 rubric 均复验。
+Provider 只输出 summary/updates，程序按字段存在性派生 updatesSha256，不改写空串/null/原数组顺序。
+模型授权、预留、用量、失败、取消和 journal 继续走现有执行器；禁止另开未记账模型调用。
+
+独立 Step 预算按“生成 + 复审，最多再生成 + 复审”冻结：生成一次 input/cache-miss 各 80000，
+completion 14000（reasoning 6000、visible 8000），cost 300000 微单位、180 秒；复审一次
+input/cache-miss 各 80000，completion/visible 各 2000、reasoning 0，cost 100000 微单位、60 秒。
+Run 累计为 4 次、input/cache-miss 各 320000、completion 32000、reasoning 12000、visible 20000、
+cost 800000 微单位、600 秒；不能把 Run 总额复制给每个 Step。超过预算须明确失败而非裁剪文本。
+这些是单次执行资源预算，不是新增作品字数、资料数量或部分采用限制。
+输入额度依据完整请求校核：结构化输出 Schema 本身约 14190 字符，现有执行器会把信封与供应商结构参数
+一并按字符上界估算，二者已占约 28000，不能直接沿用章节规划的 30000 输入额度。首次草案的 30000
+在资产提交前修为 80000，为完整来源、原指令及返工候选保留空间，没有裁剪 Schema 或正文。
+
+本步不将 Catalog 翻为可用，不扩自然入口或 Operator 白名单。EvidenceExpansionRequest、新 bundle/Step、
+一次自动完整返工及显式/自然 planner 仍须接齐后做五项业务端到端验收，不能用单 Step 测试代替。
+
+单 Step 实现与定向验证：
+
+- 直接接入现有 executor 的 resolve、完整消息构造、单次模型调用和终态处理；生成语义复验及哈希派生
+  复用共享模型，没有新增工具循环或 Agent 业务写入。Reviewer 必须使用专用 Profile/rubric，并绑定
+  当前精确候选；正文定位/patch 明确拒绝，其余合法问题维度不额外收紧成硬枚举。
+- 五项专属测试 28 passed，覆盖关闭状态零模型、五项各一次生成/复审、跨分区与反向 action、空串/null、
+  完整长来源、唯一同小说名录、初次/返工身份、不匹配的旧请求 Profile、非法候选与实际用量保留。
+  全 execution 目录 303 passed。测试只在内存中打开五项布尔值，完整使用真实注册依赖，未改部署 Catalog。
+- 执行资产闭合和 Registry 定向测试 29 passed；新输入预算按完整 Schema/消息校核。旧五个 v1 占位 Profile
+  及已启用七项的配置内容保留，输出 v1/v2 Schema 内容均未变化；新增版本不回写历史计划。
+- 本批没有新增或改变 CLI 命令/参数、公共 API 或数据库结构，也没有更新固定 JAR、活动 Skills 或服务器。
+
+本批最终门禁：
+
+- `./mvnw verify` 五个 reactor 全部成功：服务身份 11、服务契约 5、Core 987（3 skipped）、CLI 129；
+  日志 `/tmp/inkforge-agent-updates-executor-maven-final.log`。此结果已包含最终输入预算和资产指纹，
+  不采用预算调整前的 Maven 日志作为最终证据。
+- `uv run pytest -q`：4834 passed、3 skipped，仅既有 Starlette 弃用警告，日志
+  `/tmp/inkforge-agent-updates-executor-python-final.log`。
+- 全仓 Ruff 通过；四个服务/共享目录、CLI 与本次修改的架构测试 Mypy 共 323 文件通过，日志
+  `/tmp/inkforge-agent-updates-executor-mypy-final.log`；api:check、执行 manifest --check、git diff --check 通过。
+  本批未修改 Web 或生成客户端，复用 ca30add 已完成的 Web 测试、类型检查、lint 与构建记录。
+- 最终执行资产指纹为 `5d064243ca735459786aa604c1051a31dda29d5a8244da073655ed9befea3c48`；
+  独立逐对象复核确认新增资产之外的旧 Profile/Prompt/Deployment/StepBudget 和其他 Operation 均未改变。
+
+下一步是把上述单 Step 与既有 Core 审核链接成五项可启动业务：完成缺失来源的 EvidenceExpansionRequest、
+同 Run 新 bundle/Step、最多一次自动完整返工、显式/自然 planner 及消费者端到端验收。
+当前仍为 7/21；没有推送、部署、真实库变更、真实模型调用或固定安装包更新。

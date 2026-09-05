@@ -259,7 +259,7 @@ def test_unknown_operation_and_budget_drift_fail_before_provider() -> None:
 
     with pytest.raises(ExecutionCapabilityError, match="Operation handler"):
         executor.resolve(
-            request.model_copy(update={"operation": "create_outline"}),
+            request.model_copy(update={"operation": "unimplemented_operation"}),
             registry,
         )
 

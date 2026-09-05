@@ -288,6 +288,69 @@
       "purpose": "review",
       "promptProfile": "prompt.reviewer.outline_selection_editorial.v1",
       "deploymentProfileKey": "deployment.reviewer.outline_selection_editorial.v1"
+    },
+    {
+      "key": "lore.generator.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.lore.generator.v2",
+      "deploymentProfileKey": "deployment.lore.generator.v2"
+    },
+    {
+      "key": "lore.reviser.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.lore.reviser.v2",
+      "deploymentProfileKey": "deployment.lore.reviser.v2"
+    },
+    {
+      "key": "plot.outline_generator.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.outline_generator.v2",
+      "deploymentProfileKey": "deployment.plot.outline_generator.v2"
+    },
+    {
+      "key": "plot.outline_reviser.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.outline_reviser.v2",
+      "deploymentProfileKey": "deployment.plot.outline_reviser.v2"
+    },
+    {
+      "key": "plot.foreshadowing.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.plot.foreshadowing.v2",
+      "deploymentProfileKey": "deployment.plot.foreshadowing.v2"
+    },
+    {
+      "key": "reviewer.agent_updates_consistency.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.agent_updates_consistency.v1",
+      "deploymentProfileKey": "deployment.reviewer.agent_updates_consistency.v1"
+    },
+    {
+      "key": "reviewer.agent_updates_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.agent_updates_editorial.v1",
+      "deploymentProfileKey": "deployment.reviewer.agent_updates_editorial.v1"
     }
   ]
 }

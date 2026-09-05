@@ -12,6 +12,12 @@ from time import monotonic
 from typing import Literal, Protocol
 
 import jsonschema_rs
+from inkforge_contracts import (
+    AgentUpdatesInput,
+    AgentUpdatesOutput,
+    AgentUpdatesResult,
+    materialize_agent_updates_output,
+)
 from inkforge_contracts.execution import (
     ChapterDraftInput,
     ChapterDraftOutput,
@@ -80,7 +86,12 @@ BeginAttempt = Callable[[], Awaitable[int]]
 _SUPPORTED_OPERATION_HANDLERS = frozenset(
     {
         ("long_serial", "answer_question"),
+        ("long_serial", "create_lore"),
+        ("long_serial", "create_outline"),
+        ("long_serial", "manage_foreshadowing"),
         ("long_serial", "plan_chapter"),
+        ("long_serial", "revise_lore"),
+        ("long_serial", "revise_outline"),
         ("long_serial", "write_chapter"),
         ("long_serial", "rewrite_chapter_selection"),
         ("long_serial", "rewrite_scene"),
@@ -88,6 +99,40 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
         ("long_serial", "review_chapter"),
     }
 )
+_AGENT_UPDATES_OPERATIONS = frozenset(
+    {
+        "create_lore",
+        "revise_lore",
+        "create_outline",
+        "revise_outline",
+        "manage_foreshadowing",
+    }
+)
+_AGENT_UPDATES_GENERATOR_PROFILES = {
+    "create_lore": "lore.generator.v2",
+    "revise_lore": "lore.reviser.v2",
+    "create_outline": "plot.outline_generator.v2",
+    "revise_outline": "plot.outline_reviser.v2",
+    "manage_foreshadowing": "plot.foreshadowing.v2",
+}
+_AGENT_UPDATES_REVIEWER_PROFILES = {
+    "create_lore": "reviewer.agent_updates_consistency.v1",
+    "revise_lore": "reviewer.agent_updates_consistency.v1",
+    "create_outline": "reviewer.agent_updates_editorial.v1",
+    "revise_outline": "reviewer.agent_updates_editorial.v1",
+    "manage_foreshadowing": "reviewer.agent_updates_consistency.v1",
+}
+_AGENT_UPDATES_EVIDENCE_POLICIES = {
+    "create_lore": "evidence.long_serial.lore_create.v1",
+    "revise_lore": "evidence.long_serial.lore_revision.v1",
+    "create_outline": "evidence.long_serial.outline_create.v1",
+    "revise_outline": "evidence.long_serial.outline_revision.v1",
+    "manage_foreshadowing": "evidence.long_serial.foreshadowing.v1",
+}
+_AGENT_UPDATES_OUTPUT_SCHEMA = "output.agent_updates.v2"
+_AGENT_UPDATES_REVIEW_OUTPUT_SCHEMA = "output.chapter_review_report.v1"
+_AGENT_UPDATES_REVIEW_EVIDENCE_POLICY = "evidence.review.same_bundle_artifact_revision.v1"
+_AGENT_UPDATES_RUBRIC = "rubric.agent_updates.review.v1"
 _INTENT_OPERATIONS = frozenset(
     {"answer_question", "plan_chapter", "write_chapter", "rewrite_scene", "review_chapter"}
 )
@@ -1262,6 +1307,9 @@ def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCo
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
+    if request.workflow == "long_serial" and request.operation in _AGENT_UPDATES_OPERATIONS:
+        _validate_agent_updates_input(request)
+        return
     if request.workflow == "long_serial" and request.operation in {
         "write_chapter",
         "rewrite_scene",
@@ -1319,6 +1367,115 @@ def _validate_operation_input(request: ExecutionStepRequest) -> None:
         or chapter.range is not None
     ):
         raise ExecutionCapabilityError("长篇问答章节 Evidence 必须是完整 text 快照")
+
+
+def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
+    operation = request.operation
+    if operation not in _AGENT_UPDATES_OPERATIONS or request.novelId is None:
+        raise ExecutionCapabilityError("结构化资料 Step 必须绑定已实现 Operation 与 novelId")
+
+    index_items = [
+        item for item in request.evidenceBundle.items if item.resourceType == "agent_updates_index"
+    ]
+    if len(index_items) != 1:
+        raise ExecutionCapabilityError("结构化资料 Evidence 必须包含唯一 agent_updates_index")
+    index = index_items[0]
+    content = index.contentJson
+    metadata = index.metadata
+    if (
+        not index.exists
+        or index.contentType != "json"
+        or index.range is not None
+        or index.resourceId != request.novelId
+        or not isinstance(content, dict)
+        or not isinstance(content.get("items"), list)
+        or metadata.get("targetType") != "novel"
+        or metadata.get("targetId") != request.novelId
+        or metadata.get("roles") != ["index"]
+    ):
+        raise ExecutionCapabilityError("结构化资料 agent_updates_index 不完整或小说身份不一致")
+
+    if request.purpose == "generation":
+        expected = (
+            "generation",
+            "creative",
+            _AGENT_UPDATES_GENERATOR_PROFILES[operation],
+            _AGENT_UPDATES_OUTPUT_SCHEMA,
+            _AGENT_UPDATES_EVIDENCE_POLICIES[operation],
+        )
+    elif request.purpose == "review":
+        expected = (
+            "review",
+            "interactive",
+            _AGENT_UPDATES_REVIEWER_PROFILES[operation],
+            _AGENT_UPDATES_REVIEW_OUTPUT_SCHEMA,
+            _AGENT_UPDATES_REVIEW_EVIDENCE_POLICY,
+        )
+    else:
+        raise ExecutionCapabilityError("结构化资料 Step 只支持 generation/review")
+    actual = (
+        request.purpose,
+        request.lane,
+        request.modelProfile.profile,
+        request.outputSchema.name,
+        request.evidenceBundle.policyVersion,
+    )
+    if actual != expected:
+        raise ExecutionCapabilityError("结构化资料 Step 与冻结 handler 身份不一致")
+
+    try:
+        if request.purpose == "review":
+            if set(request.input) != {"task", "candidate"}:
+                raise ValueError("结构化资料复审只接受 task 与完整候选")
+            task = request.input["task"]
+            candidate = request.input["candidate"]
+            if not isinstance(task, dict):
+                raise ValueError("结构化资料复审 task 必须是对象")
+            allowed_task_keys = {
+                "workflow",
+                "operation",
+                "target",
+                "scope",
+                "userInstruction",
+                "originalUserInstruction",
+                "rubricVersion",
+            }
+            required_task_keys = {
+                "workflow",
+                "operation",
+                "userInstruction",
+                "rubricVersion",
+            }
+            if not required_task_keys.issubset(task) or not set(task).issubset(allowed_task_keys):
+                raise ValueError("结构化资料复审 task 字段不符合冻结契约")
+            if (
+                task["workflow"] != "long_serial"
+                or task["operation"] != operation
+                or task["rubricVersion"] != _AGENT_UPDATES_RUBRIC
+                or ("target" in task and not isinstance(task["target"], dict))
+                or ("scope" in task and not isinstance(task["scope"], dict))
+            ):
+                raise ValueError("结构化资料复审任务身份不一致")
+            AgentUpdatesInput.model_validate({"userInstruction": task["userInstruction"]})
+            if "originalUserInstruction" in task:
+                AgentUpdatesInput.model_validate(
+                    {"userInstruction": task["originalUserInstruction"]}
+                )
+            AgentUpdatesResult.model_validate(candidate)
+            return
+
+        generation = AgentUpdatesInput.model_validate(request.input)
+        previous = generation.previousCandidate
+        if previous is None:
+            if request.artifactId is not None or request.artifactRevision is not None:
+                raise ValueError("结构化资料初次生成不能绑定上一候选")
+        elif (
+            previous.artifactId != request.artifactId
+            or previous.artifactRevision != request.artifactRevision
+        ):
+            raise ValueError("结构化资料返工与精确上一候选身份不一致")
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ExecutionCapabilityError("结构化资料输入或完整候选不符合冻结契约") from exc
 
 
 def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
@@ -1717,6 +1874,11 @@ def _validate_provider_result(
             OutlineSelectionOutput.model_validate(result.structuredOutput)
         except ValidationError:
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "generation" and request.operation in _AGENT_UPDATES_OPERATIONS:
+        try:
+            AgentUpdatesOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "resolve_intent":
         try:
             _intent_command(request, result.structuredOutput)
@@ -1770,6 +1932,8 @@ def _derive_generation_output(
         output = ChapterReviewOutput.model_validate(output).model_dump(mode="json")
     elif request.workflow == "long_serial" and request.operation == "rewrite_outline_selection":
         output = materialize_outline_selection_output(output)
+    elif request.workflow == "long_serial" and request.operation in _AGENT_UPDATES_OPERATIONS:
+        output = materialize_agent_updates_output(output)
     return output
 
 
@@ -1790,6 +1954,11 @@ def _evaluation(
     for finding in findings:
         if not isinstance(finding, dict):
             raise ValueError("Reviewer finding 不是对象")
+        if request.operation in _AGENT_UPDATES_OPERATIONS and (
+            finding.get("candidateRange") is not None
+            or "candidatePatch" in finding
+        ):
+            raise ValueError("结构化资料 Reviewer 不允许正文定位或补丁")
         references = finding.get("evidence")
         if not isinstance(references, list):
             raise ValueError("Reviewer finding 缺少 evidence")

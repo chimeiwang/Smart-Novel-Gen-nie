@@ -119,8 +119,17 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
         "protocol_correction",
     }
 )
-RETAINED_EXECUTION_PROFILE_KEYS = frozenset({"system.intent_resolver.v1"})
-STAGED_OUTPUT_SCHEMA_KEYS = frozenset({"output.agent_updates.v2"})
+RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
+    {
+        "system.intent_resolver.v1",
+        "lore.generator.v1",
+        "lore.reviser.v1",
+        "plot.outline_generator.v1",
+        "plot.outline_reviser.v1",
+        "plot.foreshadowing.v1",
+    }
+)
+RETAINED_OUTPUT_SCHEMA_KEYS = frozenset({"output.agent_updates.v1"})
 NO_THINKING_OPERATION_KEYS = frozenset(
     {
         "long_serial.answer_question",
@@ -293,7 +302,7 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         cast(str, system_purpose["outputSchema"])
         for system_purpose in system_purposes.values()
     )
-    referenced_output_schemas.update(STAGED_OUTPUT_SCHEMA_KEYS)
+    referenced_output_schemas.update(RETAINED_OUTPUT_SCHEMA_KEYS)
     referenced_step_budgets = {
         cast(str, system_purpose["stepBudgetProfile"])
         for system_purpose in system_purposes.values()
@@ -466,6 +475,66 @@ def test_agent_updates_v2_schema_is_generated_without_changing_v1_placeholder() 
             assert_no_generator_annotations(node.get(keyword))
 
     assert_no_generator_annotations(schema)
+
+
+def test_structured_updates_step_assets_are_complete_but_not_business_enabled() -> None:
+    operations = {operation["operation"]: operation for operation in _operations()}
+    profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
+    prompts = _keyed_items(PROMPT_PROFILE_REGISTRY_PATH, "prompts")
+    outputs = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
+    budgets = _keyed_items(STEP_BUDGET_REGISTRY_PATH, "budgets")
+    cases = (
+        ("create_lore", "lore.generator", "consistency"),
+        ("revise_lore", "lore.reviser", "consistency"),
+        ("create_outline", "plot.outline_generator", "editorial"),
+        ("revise_outline", "plot.outline_reviser", "editorial"),
+        ("manage_foreshadowing", "plot.foreshadowing", "consistency"),
+    )
+    for operation_name, generator_name, reviewer_name in cases:
+        operation = operations[operation_name]
+        assert operation["v2Enabled"] is False
+        assert operation["generatorProfile"] == generator_name + ".v2"
+        assert operation["outputSchema"] == "output.agent_updates.v2"
+        assert operation["applyHandler"] == "apply.agent_updates.v1"
+        generator = profiles[operation["generatorProfile"]]
+        assert generator["supported"] is True
+        assert generator["reasoningMode"] == "bounded"
+        assert generator["version"] == 2
+        assert profiles[generator_name + ".v1"] == {
+            "key": generator_name + ".v1",
+            "version": 1,
+            "supported": False,
+            "reasoningMode": "bounded",
+            "purpose": "generation",
+            "promptProfile": "prompt.unavailable.generation.v1",
+            "deploymentProfileKey": "deployment.unavailable.generation.v1",
+        }
+        review = operation["reviewPolicy"]
+        reviewer_key = f"reviewer.agent_updates_{reviewer_name}.v1"
+        assert review["reviewerProfiles"] == [reviewer_key]
+        assert review["rubricVersion"] == "rubric.agent_updates.review.v1"
+        assert review["onUnavailable"] == "awaiting_user"
+        assert review["maxAutomaticRevisions"] == 1
+        assert profiles[reviewer_key]["reasoningMode"] == "disabled"
+        assert "candidateRange 必须为 null" in prompts[
+            profiles[reviewer_key]["promptProfile"]
+        ]["systemPrompt"]
+        finding = outputs[review["reviewerOutputSchema"]]["jsonSchema"]["properties"][
+            "findings"
+        ]["items"]
+        assert "candidatePatch" not in finding["properties"]
+        generator_budget = budgets[operation["generatorStepBudgetProfile"]]["budget"]
+        reviewer_budget = budgets[review["reviewerStepBudgetProfiles"][reviewer_key]][
+            "budget"
+        ]
+        assert generator_budget["maxModelCalls"] == reviewer_budget["maxModelCalls"] == 1
+        assert reviewer_budget["maxReasoningTokens"] == 0
+        for budget in (generator_budget, reviewer_budget):
+            assert budget["maxInputTokens"] == budget["maxPromptCacheMissTokens"]
+        for field in AGGREGATE_STEP_BUDGET_FIELDS:
+            assert 2 * (generator_budget[field] + reviewer_budget[field]) <= operation[
+                "runBudgetProfile"
+            ][field]
 
 
 def test_system_purposes_are_language_neutral_closed_and_honest() -> None:
