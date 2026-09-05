@@ -120,6 +120,7 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
     }
 )
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset({"system.intent_resolver.v1"})
+STAGED_OUTPUT_SCHEMA_KEYS = frozenset({"output.agent_updates.v2"})
 NO_THINKING_OPERATION_KEYS = frozenset(
     {
         "long_serial.answer_question",
@@ -292,6 +293,7 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         cast(str, system_purpose["outputSchema"])
         for system_purpose in system_purposes.values()
     )
+    referenced_output_schemas.update(STAGED_OUTPUT_SCHEMA_KEYS)
     referenced_step_budgets = {
         cast(str, system_purpose["stepBudgetProfile"])
         for system_purpose in system_purposes.values()
@@ -410,6 +412,60 @@ def test_every_registered_output_schema_is_strict_hash_bound_and_honest() -> Non
             assert schema["properties"] == {}, (
                 f"{item['key']} 尚未支持，不能用占位业务字段伪装可执行"
             )
+
+
+def test_agent_updates_v2_schema_is_generated_without_changing_v1_placeholder() -> None:
+    outputs = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
+    legacy = outputs["output.agent_updates.v1"]
+    assert legacy == {
+        "key": "output.agent_updates.v1",
+        "version": 1,
+        "supported": False,
+        "purpose": "generation",
+        "sha256": "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5",
+        "jsonSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "required": [],
+            "properties": {},
+        },
+    }
+
+    current = outputs["output.agent_updates.v2"]
+    assert current["version"] == 2
+    assert current["supported"] is True
+    assert current["purpose"] == "generation"
+    schema = current["jsonSchema"]
+    assert schema["required"] == ["summary", "updates"]
+    assert set(schema["properties"]) == {"summary", "updates"}
+    assert "updatesSha256" not in schema["properties"]
+    assert schema["properties"]["updates"]["additionalProperties"] is False
+    character_actions = schema["properties"]["updates"]["properties"]["characters"][
+        "items"
+    ]["anyOf"]
+    assert [branch["properties"]["action"]["const"] for branch in character_actions] == [
+        "create",
+        "update",
+        "delete",
+    ]
+    assert all(branch["additionalProperties"] is False for branch in character_actions)
+
+    def assert_no_generator_annotations(node: object) -> None:
+        if not isinstance(node, dict):
+            return
+        assert not ({"$defs", "$ref", "title", "description", "default"} & set(node))
+        for name, child in node.get("properties", {}).items():
+            assert isinstance(name, str)
+            assert_no_generator_annotations(child)
+        assert_no_generator_annotations(node.get("items"))
+        for keyword in ("anyOf", "allOf", "oneOf"):
+            for child in node.get(keyword, []):
+                assert_no_generator_annotations(child)
+        for keyword in ("if", "then", "else"):
+            assert_no_generator_annotations(node.get(keyword))
+
+    assert_no_generator_annotations(schema)
 
 
 def test_system_purposes_are_language_neutral_closed_and_honest() -> None:

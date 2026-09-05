@@ -35,7 +35,7 @@
   },
   "outputSchemaRegistry": {
     "path": "output-schema-registry.v1.json",
-    "sha256": "440079eaa443bc8f44f44ef85d9843bbd87a257d7a82d3b64ee34416e8cbfcf5"
+    "sha256": "cd9a30713495726e86bab5abb0f7367e6cba0ed350ad3ddc3ae3811cf8375e50"
   },
   "outputSchemaRegistrySchema": {
     "path": "output-schema-registry.schema.json",

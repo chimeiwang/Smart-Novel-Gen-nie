@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from inkforge_contracts.agent_updates import AgentUpdatesOutput
 from inkforge_contracts.execution import (
     CandidateTextPatch,
     ChapterDraftOutput,
@@ -70,13 +71,36 @@ def refresh(root: Path, *, check: bool) -> list[str]:
 
     output_path = root / "output-schema-registry.v1.json"
     outputs = json.loads(output_path.read_bytes())
+    agent_updates_schema = model_output_schema(AgentUpdatesOutput)
+    if not any(
+        output["key"] == "output.agent_updates.v2" for output in outputs["schemas"]
+    ):
+        legacy_index = next(
+            index
+            for index, output in enumerate(outputs["schemas"])
+            if output["key"] == "output.agent_updates.v1"
+        )
+        outputs["schemas"].insert(
+            legacy_index + 1,
+            {
+                "key": "output.agent_updates.v2",
+                "version": 2,
+                "supported": True,
+                "purpose": "generation",
+                "sha256": canonical_execution_sha256(agent_updates_schema),
+                "jsonSchema": agent_updates_schema,
+            },
+        )
     original_review_schema = next(
         schema["jsonSchema"]
         for schema in outputs["schemas"]
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
-        if output["key"] == "output.beat_plan.v1":
+        if output["key"] == "output.agent_updates.v2":
+            output["supported"] = True
+            output["jsonSchema"] = agent_updates_schema
+        elif output["key"] == "output.beat_plan.v1":
             output["supported"] = True
             output["jsonSchema"] = chapter_plan_schema()
         elif output["key"] == "output.chapter_draft.v1":

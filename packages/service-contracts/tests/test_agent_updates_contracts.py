@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 from inkforge_contracts import (
@@ -12,6 +13,23 @@ from inkforge_contracts import (
     materialize_agent_updates_output,
 )
 from pydantic import ValidationError
+
+_PARITY_FIXTURE = (
+    Path(__file__).resolve().parents[3]
+    / "apps/core-api-java/src/test/resources/protocol-fixtures/agent-updates-semantics.v1.json"
+)
+
+
+@pytest.mark.parametrize(
+    "case", json.loads(_PARITY_FIXTURE.read_text()), ids=lambda case: case["name"]
+)
+def test_core_and_agent_share_fixed_semantic_cases(case: dict[str, object]) -> None:
+    if case["accept"]:
+        value = case["value"]
+        assert AgentUpdatesOutput.model_validate(value).model_dump(mode="json") == value
+    else:
+        with pytest.raises(ValidationError):
+            AgentUpdatesOutput.model_validate(case["value"])
 
 
 def complete_updates() -> dict[str, object]:

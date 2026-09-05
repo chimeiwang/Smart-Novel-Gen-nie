@@ -1,7 +1,7 @@
 # Durable Agent V2 设定、大纲与伏笔迁移
 
-日期：2026-09-05。状态：共享模型、语言中立 Schema 和 Core 定向来源读取基础已通过本地门禁；
-候选物化、采用校验及 Core/Agent 业务接线尚未完成，五项尚未启用。
+日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 定向来源读取及不可变候选校验已通过本地门禁；
+正式 writer payload/完整 Diff 物化、采用校验及 Core/Agent 业务接线尚未完成，五项尚未启用。
 
 ## 范围复核结论
 
@@ -88,6 +88,24 @@ Agent 完整校验 Provider 输出后只派生 `updatesSha256`，形成严格 `A
 模型无需输出 fieldChanges。现有 Java writer 从不把它作为业务字段写入，主 UI 读取的也是 Artifact.diff；
 V2 由 Core 从冻结 before 与严格 update/action 确定性派生完整 Diff，不让模型重复或伪造 oldValue/newValue。
 正式应用仍只读取经过验证的 updates，不从 Diff 反推命令。
+
+### 不可变候选与执行输出 Schema
+
+下一切片使用独立 output.agent_updates.v2 作为严格 Provider 输出资产，复用现有 model_output_schema()
+内联路径，不改通用 JSON Schema 校验器；原 output.agent_updates.v1 占位内容保留。仅新增受支持的输出
+资产不代表五项 Operation 已启用，Profile、Step Budget 和 planner 未接齐前继续保留 v2Enabled=false。
+
+Core 在候选入口同时校验冻结 Provider Schema 和共享模型无法导出到 Schema 的确定性语义，并要求 Result
+精确只有 summary、updates、updatesSha256，按保留字段存在性的 updates 重算哈希。Core 的语义检查必须与
+已验证的 Python 共享模型一致，不能重新加入已撤销的双 ID 相等、patch key 唯一或动态父类型限制。
+
+durable.agent-updates-artifact.v1 只规范保存一份原始候选，以及 operation、novelId、Evidence bundle/manifest、
+生成 Step/result hash；不把正式写入需要的 CAS、create 请求键或完整 Diff 再交模型。存储 Diff 仅为可重建
+标记，展示和采用时从冻结事实派生完整 Diff/兼容 writer payload，不复制第二份候选作为权威。
+重建必须复验候选、冻结 Schema、来源身份和用途，失败不能被当成新的模型生成或从当前 Head 补数据。
+生成 Step/result 身份必须与调用方从权威生成记录取得的期望值比较，不能仅检验格式，也不能用候选自身
+的同名字段冒充期望值。候选摘要与完整 Step 结果的对应关系仍须在后续回调/读取适配中核验；独立值对象
+不能代替该数据库来源链的验收。
 
 ## 复审和用户决定
 
@@ -260,3 +278,35 @@ reference_material 修正；随后 9 项通过，复核补充两项关系归属�
 Catalog 仍为 7/21，执行资产、Web、CLI 源码和已安装 Skills 没有变化；没有部署、推送或更新安装 JAR。
 下一步仍须完成：初始最小索引/目标解析及 Evidence 扩展、候选与 Diff 物化、先 filter 再按所选项复验的
 事务适配、生成/复审/返工及显式/自然入口，最后补齐 Web/CLI 消费与业务 E2E。上述基础门禁不能替代这些验收。
+
+## 后续本地进展：严格执行输出与不可变候选（2026-09-05）
+
+执行输出 Registry 新增 output.agent_updates.v2，机械派生自 AgentUpdatesOutput；仅包含 summary/updates，
+不让 Provider 生成 updatesSha256。新输出 Schema 哈希为
+`1ebda5ea441d2f421199725ebdad05f9add5abc44875e040252e2b41810a3467`，执行 manifest 指纹为
+`8ee66362cf8d8547ac25fa3a5372a54c4924a3321e95f5f437338bb67f0c508f`。原 output.agent_updates.v1
+空占位及哈希原样保留，五项 Operation 仍未切到新输出资产，也未启用。
+
+DurableAgentUpdatesArtifact 已提供原始候选的 create/output/reconstruct：冻结 Provider Schema、确定性语义、
+updates 哈希、五项 operation、小说、bundle/manifest 和生成 Step/result 身份会复验；嵌套 updates 深冻结且
+保留缺省、显式 null、空串和原文。reconstruct 的生成 Step 身份期望值由调用方显式传入，合法格式但不匹配的
+身份同样拒绝。该类没有正式 writer 元数据、完整 Diff 或数据库调用，不能称为作者采用事务已实现。
+
+Python 与 Java 共用 `apps/core-api-java/src/test/resources/protocol-fixtures/agent-updates-semantics.v1.json`
+中的 50 个固定用例，覆盖既有 ID/名称优先级、空白文本差异、整型范围、可空字段、业务字段存在性、
+parentKey/parentId、patch 重复 key/动态父类型及 replace 限制；并补全嵌套深冻结、长文、结果字段/哈希和
+合法格式身份替换的 Core 用例。通用 WorkflowOutputValidator 没有修改，也未改造 Java DTO 生成器。
+
+最终门禁：
+
+- `./mvnw verify`：服务身份 11、服务契约 5、Core 941（含 3 skipped）、CLI 127，五个 reactor 全部成功；
+  日志 `/tmp/inkforge-agent-updates-candidate-maven-full.log`。
+- `uv run pytest -q`：4793 passed、3 skipped，仅保留既有 Starlette 弃用警告；日志
+  `/tmp/inkforge-agent-updates-candidate-python-full.log`。
+- 定向 Python 253 passed；最终全量包含 Core 候选 59 项。Ruff、Python 格式检查、覆盖 282 源码文件的
+  Mypy、api:check、执行 manifest --check 和 git diff --check 均通过。测试容器已自动清理。
+
+Catalog 仍为 7/21，Profile/Deployment、公共 API、CLI 和 Web 未变化；未推送、部署、更新安装包或调用真实模型。
+后续事务适配必须保留原数组索引来派生稳定 create 请求键，不能按过滤后的新下标重编号；大纲中引用同一
+候选前面新建的节点也不能被误当成缺失的历史数据库节点。仍须先复用现有 filter，再只读取所选动作的必要
+冻结来源来构造采用门禁，不将未选资料的 Head 变化或独立值对象校验当作完整业务闭环。

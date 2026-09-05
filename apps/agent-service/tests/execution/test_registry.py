@@ -68,8 +68,22 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "f7be00d2eb2cde1185e917f916ce0006a469d89f46fbdc236a8ecac5c2ecba05"
+        "8ee66362cf8d8547ac25fa3a5372a54c4924a3321e95f5f437338bb67f0c508f"
     )
+
+    legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
+    assert legacy_agent_updates.supported is False
+    assert legacy_agent_updates.sha256 == (
+        "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5"
+    )
+    assert legacy_agent_updates.json_schema_value()["properties"] == {}
+    agent_updates = registry.output_schemas["output.agent_updates.v2"]
+    assert agent_updates.supported is True
+    assert agent_updates.sha256 == (
+        "1ebda5ea441d2f421199725ebdad05f9add5abc44875e040252e2b41810a3467"
+    )
+    assert agent_updates.json_schema_value()["required"] == ["summary", "updates"]
+    assert "updatesSha256" not in agent_updates.json_schema_value()["properties"]
 
     resolved = registry.resolve("long_serial", "rewrite_chapter_selection")
     answer = registry.resolve("long_serial", "answer_question")
