@@ -47,7 +47,7 @@
       "items": {
         "$ref": "#/$defs/IntentAvailableOperation"
       },
-      "maxItems": 3,
+      "maxItems": 5,
       "minItems": 1,
       "title": "Availableoperations",
       "type": "array"

@@ -28,6 +28,26 @@ class LongReadCommandsTest {
     private final JsonMapper json = JsonMapper.builder().build();
 
     @Test
+    void 审阅完整报告兼容V1V2内联及文件输出(@TempDir Path directory) throws Exception {
+        for (int version : List.of(1, 2)) {
+            RecordingApi api = new RecordingApi(json);
+            String report = "  审阅报告😀\r\n".repeat(10_001) + "完整尾部🚀";
+            JsonNode response = json.valueToTree(Map.of("engineVersion", version, "taskId", "t1",
+                    "operation", "review_chapter", "status", "completed", "reviewReport", report));
+            api.nextResponse = response;
+            CliApplication application = application(api);
+            Result inline = run(application, "long.task.get", "{\"taskId\":\"t1\"}");
+            assertThat(inline.exit()).isZero();
+            assertThat(json.readTree(inline.stdout()).path("data").path("reviewReport").asText()).isEqualTo(report);
+            Path output = directory.resolve("审阅-" + version + ".json");
+            api.nextResponse = response;
+            Result file = run(application, "long.task.get", json.writeValueAsString(Map.of("taskId", "t1", "outputFile", output.toString())));
+            assertThat(file.exit()).isZero();
+            assertThat(json.readTree(Files.readString(output))).isEqualTo(response);
+        }
+    }
+
+    @Test
     void 公共路径片段使用RFC3986而不是表单编码() {
         assertThat(Payloads.segment("a~* /😀"))
                 .isEqualTo("a~%2A%20%2F%F0%9F%98%80");

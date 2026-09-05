@@ -113,6 +113,152 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 审阅完整报告有无会话均只完成一次且不写正式数据或草案() {
+        for (boolean withSession : List.of(true, false)) {
+            Flow flow = runningChapterReviewFlow("chapter-report-" + withSession, withSession);
+            String before = database.dsl().fetchOne("SELECT row_to_json(chapter)::text FROM public.\"Chapter\" chapter WHERE id = ?",
+                    "chapter-report-" + withSession + "-chapter").get(0, String.class);
+            String report = "  完整报告😀\r\n".repeat(10_000) + "最后一段，绝不截断。\n";
+            var result = reportResult(flow.request(), report);
+            assertThat(callbacks.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(callbacks.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            assertThat(json.readTree(database.dsl().fetchOne("SELECT output FROM public.\"WorkflowStep\" WHERE id = ?",
+                    flow.request().getStepId()).get(0, String.class)).get("report").asText()).isEqualTo(report);
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE id = ? AND status = 'completed'", flow.runId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId())).isZero();
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ? AND content = ?",
+                    flow.sessionId(), report)).isEqualTo(withSession ? 1 : 0);
+            assertThat(database.dsl().fetchOne("SELECT row_to_json(chapter)::text FROM public.\"Chapter\" chapter WHERE id = ?",
+                    "chapter-report-" + withSession + "-chapter").get(0, String.class)).isEqualTo(before);
+            var event = json.readTree(database.dsl().fetchOne("SELECT \"payloadJson\" FROM public.\"WorkflowEvent\" WHERE \"runId\" = ? AND \"eventType\" = 'completed'", flow.runId()).get(0, String.class));
+            assertThat(event.get("outcomeType").asText()).isEqualTo("chapter_review_report");
+            if (!withSession) assertThat(event.get("resultId").asText()).isEqualTo(flow.request().getStepId());
+        }
+    }
+
+    @Test
+    void 审阅拒绝空白报告且取消后的迟到报告只结算不发布() {
+        Flow invalid = runningChapterReviewFlow("chapter-report-empty", false);
+        assertThatThrownBy(() -> callbacks.result(reportResult(invalid.request(), " \n\t"))).isInstanceOf(ApiException.class);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", invalid.runId())).isZero();
+        callbacks.failure(preProviderFailure(invalid.request()));
+        Flow cancelled = runningChapterReviewFlow("chapter-report-cancel", true);
+        cancellations.request(cancelled.userId(), cancelled.runId(), "chapter-report-cancel-request");
+        callbacks.result(reportResult(cancelled.request(), "迟到的完整审阅报告"));
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?", cancelled.sessionId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", cancelled.runId())).isEqualTo(1);
+        assertThat(eventTypes(cancelled.runId())).endsWith("step_finished", "cancelled");
+    }
+
+    @Test
+    void 场景改写完整生成及自动Patch始终保留真实Operation并再次双审() {
+        Flow flow = runningChapterFlow("scene-patch", "rewrite_scene");
+        callbacks.result(chapterResult(flow.request(), "开场\n甲😀乙\n结尾完整保留"));
+        for (var reviewer : List.of(startNextPlanStep(flow), startNextPlanStep(flow))) {
+            assertThat(reviewer.getOperation()).isEqualTo("rewrite_scene");
+            assertThat((Map<String, Object>) reviewer.getInput().get("task")).containsEntry("operation", "rewrite_scene");
+            callbacks.result(chapterReviewResult(reviewer, "patch", "😀", "场景完整新细节"));
+        }
+        var stored = json.readTree(database.dsl().fetchOne("SELECT \"payloadJson\" FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId()).get(0, String.class));
+        assertThat(stored.get("operation").asText()).isEqualTo("rewrite_scene");
+        assertThat(stored.get("content").asText()).isEqualTo("开场\n甲场景完整新细节乙\n结尾完整保留");
+        for (var reviewer : List.of(startNextPlanStep(flow), startNextPlanStep(flow))) {
+            assertThat(reviewer.getOperation()).isEqualTo("rewrite_scene");
+            assertThat(reviewer.getArtifactRevision()).isEqualTo(2);
+            callbacks.result(reviewResult(reviewer));
+        }
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(5);
+        assertThat(database.dsl().fetchOne("SELECT content FROM public.\"Chapter\" WHERE id = ?", "scene-patch-chapter").get(0, String.class)).isEqualTo("甲😀乙");
+    }
+
+    private static Flow runningChapterReviewFlow(String prefix, boolean withSession) {
+        Fixture fixture = fixture(prefix);
+        var op = registry.resolve("long_serial.review_chapter", false);
+        Map<String, Object> input = Map.of("userInstruction", "完整审阅当前章节，不修改正文");
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request", sha256(prefix), "long_serial", "review_chapter", "1", "chat",
+                fixture.novelId(), fixture.chapterId(), withSession ? fixture.sessionId() : null, "chapter", fixture.chapterId(), input, op.operation().evidencePolicy(),
+                List.of(new WorkflowEvidenceItemPlan("chapter_writing_context", fixture.chapterId(), true, null, API_NOW, null,
+                        Map.of("schemaVersion", 1, "novelId", fixture.novelId(), "currentChapter", Map.of("id", fixture.chapterId(), "content", "甲😀乙")), null, null, Map.of())),
+                op.operation().runBudget(), ExecutionPlanSnapshot.freeze(registry.catalogVersion(), registry.manifestFingerprint(), op),
+                new WorkflowInitialStepPlan("generation", op.operation().lane(), input, op.generatorProfile(), op.generatorStepBudget(), op.outputSchema())));
+        var request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        accept(request);
+        callbacks.progress(progress(request, unknownUsage()));
+        return new Flow(started.runId(), fixture.userId(), fixture.sessionId(), request);
+    }
+
+    @Test
+    void 两种大纲选区同来源最多返工一次且每轮仅一个编辑复审() {
+        for (String resourceType : List.of("outline_content", "outline_node_content")) {
+            String prefix = "outline-callback-" + resourceType;
+            Fixture fixture = fixture(prefix);
+            var op = registry.resolve("long_serial.rewrite_outline_selection", false);
+            String resourceId = prefix + "-source";
+            Map<String, Object> selection = Map.of("resourceType", resourceType, "resourceId", resourceId,
+                    "baseUpdatedAt", API_NOW.toString(), "baseContentHash", sha256("前😀后\r\n"),
+                    "selectionStart", 1, "selectionEnd", 2, "selectedTextHash", sha256("😀"));
+            Map<String, Object> input = Map.of("userInstruction", "补全这一段动机", "selectionTarget", selection);
+            var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request", sha256(prefix), "long_serial", "rewrite_outline_selection", "1", "chapter_generation",
+                    fixture.novelId(), fixture.chapterId(), fixture.sessionId(), resourceType, resourceId, input, op.operation().evidencePolicy(),
+                    List.of(new WorkflowEvidenceItemPlan(resourceType, resourceId, true, null, API_NOW, "前😀后\r\n", null, 1, 2,
+                            Map.of("role", "selection_source", "baseContentHash", sha256("前😀后\r\n"), "selectedTextHash", sha256("😀")))),
+                    op.operation().runBudget(), ExecutionPlanSnapshot.freeze(registry.catalogVersion(), registry.manifestFingerprint(), op),
+                    new WorkflowInitialStepPlan("generation", op.operation().lane(), input, op.generatorProfile(), op.generatorStepBudget(), op.outputSchema())));
+            var generation = dispatches.claimNext().orElseThrow();
+            assertThat(generation.getRunId()).isEqualTo(started.runId());
+            accept(generation);
+            callbacks.progress(progress(generation, unknownUsage()));
+            var result = outputResult(generation, "完整改写动机😀\n尾部");
+            callbacks.result(result);
+            assertThat(callbacks.result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            var flow = new Flow(started.runId(), fixture.userId(), fixture.sessionId(), generation);
+            var reviewer = startNextPlanStep(flow);
+            assertThat(reviewer.getModelProfile().getProfile()).isEqualTo("reviewer.outline_selection_editorial.v1");
+            assertThat(reviewer.getEvidenceBundle()).usingRecursiveComparison().ignoringFields("policyVersion")
+                    .isEqualTo(generation.getEvidenceBundle());
+            assertThat((Map<String, Object>) reviewer.getInput().get("task")).containsEntry("operation", "rewrite_outline_selection")
+                    .containsEntry("selectionTarget", selection);
+            callbacks.result(planReviewResult(reviewer, "outline_selection.local", 0.95));
+            var revised = startNextPlanStep(flow);
+            assertThat(revised.getPurpose()).isEqualTo("generation");
+            assertThat(revised.getInput()).containsOnlyKeys("userInstruction", "selectionTarget", "originalUserInstruction", "previousCandidate");
+            assertThat(revised.getInput()).containsEntry("originalUserInstruction", "补全这一段动机").containsEntry("selectionTarget", selection);
+            assertThat((Map<String, Object>) revised.getInput().get("previousCandidate"))
+                    .containsEntry("replacement", "完整改写动机😀\n尾部").containsEntry("artifactRevision", 1);
+            callbacks.result(outputResult(revised, "完整改写动机😀\n尾部"));
+            var secondReview = startNextPlanStep(flow);
+            assertThat(secondReview.getModelProfile().getProfile()).isEqualTo("reviewer.outline_selection_editorial.v1");
+            assertThat(secondReview.getArtifactRevision()).isEqualTo(2);
+            assertThat(secondReview.getEvidenceBundle()).usingRecursiveComparison().ignoringFields("policyVersion")
+                    .isEqualTo(generation.getEvidenceBundle());
+            callbacks.result(planReviewResult(secondReview, "outline_selection.local", 0.95));
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'review'", flow.runId())).isEqualTo(2);
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", flow.runId())).isEqualTo(2);
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowRun\" WHERE id = ? AND status = 'waiting_user'", flow.runId())).isEqualTo(1);
+            var payload = json.readTree(database.dsl().fetchOne("SELECT \"payloadJson\" FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", flow.runId()).get(0, String.class));
+            assertThat(payload.get("schema").asText()).isEqualTo("durable.outline-selection-artifact.v1");
+            assertThat(payload.get("kind").asText()).isEqualTo("outline_draft");
+            assertThat(payload.get("operation").asText()).isEqualTo("rewrite_outline_selection");
+            assertThat(payload.get("resourceType").asText()).isEqualTo(resourceType);
+            assertThat(payload.get("resourceId").asText()).isEqualTo(resourceId);
+            assertThat(payload.get("replacement").asText()).isEqualTo("完整改写动机😀\n尾部");
+            assertThat(payload.get("candidateSha256").asText()).isEqualTo(sha256("前完整改写动机😀\n尾部后\r\n"));
+            assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", flow.runId())).isEqualTo(4);
+            assertThat(database.dsl().fetchOne("SELECT content FROM public.\"Chapter\" WHERE id = ?", fixture.chapterId()).get(0, String.class)).isEqualTo("甲😀乙");
+        }
+    }
+
+    private static ExecutionStepResult reportResult(ExecutionStepRequest request, String report) {
+        var result = answerResult(request, "占位");
+        result.setOutput(JsonNullable.of(Map.of("report", report)));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    @Test
     void 自然业务准备被确定性拒绝时保留解析费用并以原业务错误结束() {
         Flow flow = runningIntentFlow("intent-preparation-rejected");
         var repository = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json,
@@ -326,12 +472,16 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     private static Flow runningChapterFlow(String prefix) {
+        return runningChapterFlow(prefix, "write_chapter");
+    }
+
+    private static Flow runningChapterFlow(String prefix, String operationKey) {
         Fixture fixture = fixture(prefix);
-        var op = registry.resolve("long_serial.write_chapter", false);
+        var op = registry.resolve("long_serial." + operationKey, false);
         Map<String, Object> input = Map.of("userInstruction", "完成当前章节正文", "targetWordCount", 2500);
         Map<String, Object> normalized = new LinkedHashMap<>(input);
-        normalized.putAll(Map.of("workflow", "long_serial", "operation", "write_chapter", "novelId", fixture.novelId(), "chapterId", fixture.chapterId()));
-        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request", sha256(prefix), "long_serial", "write_chapter", "1", "chapter_generation",
+        normalized.putAll(Map.of("workflow", "long_serial", "operation", operationKey, "novelId", fixture.novelId(), "chapterId", fixture.chapterId()));
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request", sha256(prefix), "long_serial", operationKey, "1", "chapter_generation",
                 fixture.novelId(), fixture.chapterId(), fixture.sessionId(), "chapter", fixture.chapterId(), normalized, op.operation().evidencePolicy(),
                 List.of(new WorkflowEvidenceItemPlan("chapter_writing_context", fixture.chapterId(), true, null, API_NOW, null,
                         Map.of("schemaVersion", 1, "novelId", fixture.novelId(), "currentChapter", Map.of("id", fixture.chapterId(), "content", "甲😀乙")), null, null, Map.of("role", "chapter_writing_context"))),

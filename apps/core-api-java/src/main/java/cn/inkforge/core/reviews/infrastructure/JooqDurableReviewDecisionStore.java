@@ -1,17 +1,19 @@
 package cn.inkforge.core.reviews.infrastructure;
 
 import static cn.inkforge.core.db.generated.Tables.CHAPTER;
+import static cn.inkforge.core.db.generated.Tables.OUTLINE;
+import static cn.inkforge.core.db.generated.Tables.OUTLINENODE;
 
 import cn.inkforge.contracts.api.ArtifactDecisionPublicResponse;
 import cn.inkforge.contracts.api.ReviewArtifactDecisionRequest;
 import cn.inkforge.contracts.api.WorkflowArtifactSnapshot;
 import cn.inkforge.contracts.api.WorkflowCurrentStepSnapshot;
 import cn.inkforge.contracts.api.WritingRunV2Response;
-import cn.inkforge.core.db.generated.tables.records.ChapterRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
+import cn.inkforge.core.platform.text.TextLength;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.ReviewArtifactState;
@@ -24,6 +26,7 @@ import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
+import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
 import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
 import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
@@ -41,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.openapitools.jackson.nullable.JsonNullable;
@@ -152,12 +156,15 @@ final class JooqDurableReviewDecisionStore {
         ExecutionPlanSnapshot executionPlan = executionContext.requireBusinessPlan();
         requireSupported(locked, executionPlan);
         boolean beatPlan = "beat_plan".equals(locked.kind());
-        boolean chapterDraft = "write_chapter".equals(executionContext.effectiveOperation());
+        boolean chapterDraft = Set.of("write_chapter", "rewrite_scene")
+                .contains(executionContext.effectiveOperation());
         if (((beatPlan || chapterDraft) && nullable(request.getEditedReplacement()) != null)
                 || (!chapterDraft && nullable(request.getEditedContent()) != null)) {
             throw validation("编辑字段与 Core 权威草案类型不匹配");
         }
-        Source source = beatPlan || chapterDraft ? null : lockAndVerifySource(transaction, locked);
+        Source source = beatPlan || chapterDraft
+                ? null
+                : lockAndVerifySource(transaction, locked, executionContext);
         Revision revision = chapterDraft ? exactChapterRevision(transaction, locked) : beatPlan ? exactPlanRevision(transaction, locked) : exactRevision(locked, source);
         LocalDateTime now = DatabaseTimestamp.now(clock);
         String decision = request.getDecision().getValue();
@@ -348,6 +355,14 @@ final class JooqDurableReviewDecisionStore {
                 && "chapter_draft".equals(locked.kind())
                 && "long_serial.write_chapter".equals(executionPlan.operation().key())
                 && "apply.chapter_draft.v1".equals(executionPlan.operation().applyHandler());
+        operation |= "rewrite_scene".equals(executionPlan.operation().operation())
+                && "chapter_draft".equals(locked.kind())
+                && "long_serial.rewrite_scene".equals(executionPlan.operation().key())
+                && "apply.chapter_draft.v1".equals(executionPlan.operation().applyHandler());
+        operation |= "rewrite_outline_selection".equals(executionPlan.operation().operation())
+                && "outline_draft".equals(locked.kind())
+                && "long_serial.rewrite_outline_selection".equals(executionPlan.operation().key())
+                && "apply.outline_selection.v1".equals(executionPlan.operation().applyHandler());
         boolean supported = operation && "long_serial".equals(locked.run().get("workflow", String.class))
                 && locked.artifact().get("taskId", String.class) == null
                 && Objects.equals(
@@ -356,6 +371,21 @@ final class JooqDurableReviewDecisionStore {
                 && Objects.equals(
                         locked.run().get("chapterId", String.class),
                         locked.artifact().get("chapterId", String.class));
+        if (supported) {
+            String targetType = locked.run().get("targetType", String.class);
+            String targetId = locked.run().get("targetId", String.class);
+            if ("rewrite_outline_selection".equals(executionPlan.operation().operation())) {
+                supported = Set.of("outline_content", "outline_node_content").contains(targetType)
+                        && targetId != null;
+            } else if ("rewrite_chapter_selection".equals(
+                    executionPlan.operation().operation())) {
+                supported = "chapter_content".equals(targetType)
+                        && locked.chapterId().equals(targetId);
+            } else {
+                supported = "chapter".equals(targetType)
+                        && locked.chapterId().equals(targetId);
+            }
+        }
         if (!supported) {
             throw new ApiException(
                     409,
@@ -364,9 +394,16 @@ final class JooqDurableReviewDecisionStore {
         }
     }
 
-    private Source lockAndVerifySource(DSLContext transaction, Locked locked) {
+    private Source lockAndVerifySource(
+            DSLContext transaction, Locked locked, WorkflowExecutionContext context) {
+        String resourceType = "rewrite_outline_selection".equals(context.effectiveOperation())
+                ? locked.run().get("targetType", String.class)
+                : "chapter_content";
+        String resourceId = "rewrite_outline_selection".equals(context.effectiveOperation())
+                ? locked.run().get("targetId", String.class)
+                : locked.chapterId();
         String bundleId = locked.run().get("currentEvidenceBundleId", String.class);
-        if (bundleId == null) throw sourceConflict(locked.chapterId());
+        if (bundleId == null) throw sourceConflict(resourceType, resourceId);
         Record evidence = transaction.fetchOne(
                 """
                 SELECT item.id, item."resourceId", item."resourceUpdatedAt", item."contentText",
@@ -375,36 +412,36 @@ final class JooqDurableReviewDecisionStore {
                 JOIN public."WorkflowEvidenceBundle" AS bundle
                   ON bundle.id = item."bundleId"
                 WHERE bundle.id = ? AND bundle."runId" = ?
-                  AND item."resourceType" = 'chapter_content'
+                  AND item."resourceType" = ?
                   AND item."resourceId" = ? AND item.exists
                   AND item."contentType" = 'text'
                 """,
                 bundleId,
                 locked.runId(),
-                locked.chapterId());
-        if (evidence == null) throw sourceConflict(locked.chapterId());
-        ChapterRecord chapter = transaction.selectFrom(CHAPTER)
-                .where(
-                        CHAPTER.ID.eq(locked.chapterId()),
-                        CHAPTER.NOVELID.eq(locked.novelId()))
-                .forUpdate()
-                .fetchOne();
-        if (chapter == null || chapter.getContent() == null || chapter.getUpdatedat() == null) {
-            throw sourceConflict(locked.chapterId());
+                resourceType,
+                resourceId);
+        if (evidence == null) throw sourceConflict(resourceType, resourceId);
+        Record source = lockSelectionResource(
+                transaction, locked.novelId(), resourceType, resourceId);
+        if (source == null
+                || source.get("content", String.class) == null
+                || source.get("updatedAt", LocalDateTime.class) == null) {
+            throw sourceConflict(resourceType, resourceId);
         }
-        String current = chapter.getContent();
+        String current = source.get("content", String.class);
+        LocalDateTime currentUpdatedAt = source.get("updatedAt", LocalDateTime.class);
         LocalDateTime evidenceUpdatedAt = evidence.get("resourceUpdatedAt", LocalDateTime.class);
         String evidenceHash = evidence.get("contentSha256", String.class);
         Map<String, Object> range = readObject(evidence.get("rangeJson", String.class));
         int start = integer(range, "startCodePoint");
         int end = integer(range, "endCodePoint");
         int length = ReviewArtifactRules.codePointLength(current);
-        if (!Objects.equals(chapter.getUpdatedat(), evidenceUpdatedAt)
+        if (!Objects.equals(currentUpdatedAt, evidenceUpdatedAt)
                 || !Objects.equals(ReviewArtifactRules.sha256(current), evidenceHash)
                 || start < 0
                 || end <= start
                 || end > length) {
-            throw sourceConflict(locked.chapterId());
+            throw sourceConflict(resourceType, resourceId);
         }
         String selected = ReviewArtifactRules.slice(current, start, end);
         String selectedHash = ReviewArtifactRules.sha256(selected);
@@ -412,14 +449,15 @@ final class JooqDurableReviewDecisionStore {
         if (!Objects.equals(metadata.get("baseContentHash"), evidenceHash)
                 || !Objects.equals(metadata.get("selectedTextHash"), selectedHash)
                 || !Objects.equals(evidence.get("contentText", String.class), current)) {
-            throw sourceConflict(locked.chapterId());
+            throw sourceConflict(resourceType, resourceId);
         }
         return new Source(
                 bundleId,
                 evidence.get("id", String.class),
-                locked.chapterId(),
+                resourceType,
+                resourceId,
                 current,
-                chapter.getUpdatedat(),
+                currentUpdatedAt,
                 evidenceHash,
                 start,
                 end,
@@ -427,6 +465,36 @@ final class JooqDurableReviewDecisionStore {
                 selectedHash,
                 ReviewArtifactRules.slice(current, 0, start),
                 ReviewArtifactRules.slice(current, end, length));
+    }
+
+    private static Record lockSelectionResource(
+            DSLContext transaction, String novelId, String resourceType, String resourceId) {
+        if ("chapter_content".equals(resourceType)) {
+            return transaction.select(
+                            CHAPTER.CONTENT.as("content"), CHAPTER.UPDATEDAT.as("updatedAt"))
+                    .from(CHAPTER)
+                    .where(CHAPTER.ID.eq(resourceId), CHAPTER.NOVELID.eq(novelId))
+                    .forUpdate()
+                    .fetchOne();
+        }
+        if ("outline_content".equals(resourceType)) {
+            return transaction.select(
+                            OUTLINE.CONTENT.as("content"), OUTLINE.UPDATEDAT.as("updatedAt"))
+                    .from(OUTLINE)
+                    .where(OUTLINE.ID.eq(resourceId), OUTLINE.NOVELID.eq(novelId))
+                    .forUpdate()
+                    .fetchOne();
+        }
+        if ("outline_node_content".equals(resourceType)) {
+            return transaction.select(
+                            OUTLINENODE.CONTENT.as("content"),
+                            OUTLINENODE.UPDATEDAT.as("updatedAt"))
+                    .from(OUTLINENODE)
+                    .where(OUTLINENODE.ID.eq(resourceId), OUTLINENODE.NOVELID.eq(novelId))
+                    .forUpdate()
+                    .fetchOne();
+        }
+        return null;
     }
 
     private Revision exactChapterRevision(DSLContext tx, Locked locked) {
@@ -440,7 +508,9 @@ final class JooqDurableReviewDecisionStore {
             throw new ApiException(409, "ARTIFACT_SOURCE_VERSION_CONFLICT", "正文草案的冻结来源已变化",
                     Map.of("resourceType", "chapter_writing_context", "resourceId", locked.chapterId()));
         }
-        var materialized = DurableChapterDraftArtifact.reconstruct(payload, diff, evidence.bundleId(), evidence.manifestHash(), locked.chapterId(), evidence.content());
+        String operation = executionContext(tx, locked.run()).effectiveOperation();
+        var materialized = DurableChapterDraftArtifact.reconstruct(operation, payload, diff,
+                evidence.bundleId(), evidence.manifestHash(), locked.chapterId(), evidence.content());
         return new Revision(locked.revision().get("revision", Integer.class), materialized.payload(), materialized.diff(), payload, diff);
     }
 
@@ -453,8 +523,10 @@ final class JooqDurableReviewDecisionStore {
         } catch (IllegalArgumentException exception) {
             throw validation("V2 editedContent 必须是完整非空白正文");
         }
-        var stored = DurableChapterDraftArtifact.create(sourceBundleId(locked), string(base.storedPayload(), "evidenceManifestSha256"),
-                locked.chapterId(), output, decisionStepId, decisionHash);
+        String operation = executionContext(tx, locked.run()).effectiveOperation();
+        var stored = DurableChapterDraftArtifact.create(operation, sourceBundleId(locked),
+                string(base.storedPayload(), "evidenceManifestSha256"), locked.chapterId(),
+                output, decisionStepId, decisionHash);
         int revision = Math.addExact(base.number(), 1);
         tx.execute("""
                 INSERT INTO public."ReviewArtifactRevision" (id, "artifactId", revision, summary, "payloadJson", "diffJson", "createdByAgent", "createdAt")
@@ -465,8 +537,10 @@ final class JooqDurableReviewDecisionStore {
                 WHERE id = ? AND revision = ? AND status = CAST('awaiting_user' AS "ReviewArtifactStatus")
                 """, revision, canonicalJson(stored.payload()), canonicalJson(stored.diff()), now, locked.artifactId(), base.number());
         if (changed != 1) throw revisionConflict(base.number(), revision);
-        var materialized = DurableChapterDraftArtifact.reconstruct(stored.payload(), stored.diff(), sourceBundleId(locked),
-                string(base.storedPayload(), "evidenceManifestSha256"), locked.chapterId(), string(base.diff(), "before"));
+        var materialized = DurableChapterDraftArtifact.reconstruct(operation, stored.payload(),
+                stored.diff(), sourceBundleId(locked),
+                string(base.storedPayload(), "evidenceManifestSha256"), locked.chapterId(),
+                string(base.diff(), "before"));
         return new Revision(revision, materialized.payload(), materialized.diff(), stored.payload(), stored.diff());
     }
 
@@ -543,18 +617,30 @@ final class JooqDurableReviewDecisionStore {
                     "ARTIFACT_REVISION_HEAD_INCONSISTENT",
                     "待审核草案 head 与精确修订事实不一致");
         }
-        DurableSelectionArtifact.Materialized materialized =
-                DurableSelectionArtifact.reconstruct(
-                        storedPayload, storedDiff, durableEvidence(source));
+        Map<String, Object> payload;
+        Map<String, Object> diff;
+        if ("rewrite_outline_selection".equals(
+                storedPayload.get("operation"))) {
+            DurableOutlineSelectionArtifact.Materialized materialized =
+                    DurableOutlineSelectionArtifact.reconstruct(
+                            storedPayload, storedDiff, durableOutlineEvidence(source));
+            payload = materialized.payload();
+            diff = materialized.diff();
+        } else {
+            DurableSelectionArtifact.Materialized materialized =
+                    DurableSelectionArtifact.reconstruct(
+                            storedPayload, storedDiff, durableEvidence(source));
+            payload = materialized.payload();
+            diff = materialized.diff();
+        }
         requireCandidate(
-                materialized.payload(),
-                materialized.diff(),
-                locked.chapterId(),
+                payload,
+                diff,
                 source);
         return new Revision(
                 locked.revision().get("revision", Integer.class),
-                materialized.payload(),
-                materialized.diff(),
+                payload,
+                diff,
                 storedPayload,
                 storedDiff);
     }
@@ -567,24 +653,49 @@ final class JooqDurableReviewDecisionStore {
             String editedReplacement,
             LocalDateTime now) {
         if (editedReplacement == null) return base;
-        if (editedReplacement.isBlank()) {
+        if (TextLength.count(editedReplacement) == 0) {
             throw new ApiException(
                     422, "VALIDATION_ERROR", "V2 editedReplacement 不能为空白");
         }
         String candidate = source.prefix() + editedReplacement + source.suffix();
-        DurableSelectionArtifact.Stored stored = DurableSelectionArtifact.withCandidateHash(
-                DurableSelectionArtifact.edit(
-                        new DurableSelectionArtifact.Stored(
-                                base.storedPayload(), base.storedDiff()),
-                        editedReplacement),
-                ReviewArtifactRules.sha256(candidate));
-        DurableSelectionArtifact.Materialized materialized =
-                DurableSelectionArtifact.reconstruct(
-                        stored.payload(), stored.diff(), durableEvidence(source));
+        Map<String, Object> storedPayload;
+        Map<String, Object> storedDiff;
+        Map<String, Object> payload;
+        Map<String, Object> diff;
+        if ("rewrite_outline_selection".equals(
+                base.storedPayload().get("operation"))) {
+            DurableOutlineSelectionArtifact.Stored stored =
+                    DurableOutlineSelectionArtifact.withCandidateHash(
+                            DurableOutlineSelectionArtifact.edit(
+                                    new DurableOutlineSelectionArtifact.Stored(
+                                            base.storedPayload(), base.storedDiff()),
+                                    editedReplacement),
+                            ReviewArtifactRules.sha256(candidate));
+            DurableOutlineSelectionArtifact.Materialized materialized =
+                    DurableOutlineSelectionArtifact.reconstruct(
+                            stored.payload(), stored.diff(), durableOutlineEvidence(source));
+            storedPayload = stored.payload();
+            storedDiff = stored.diff();
+            payload = materialized.payload();
+            diff = materialized.diff();
+        } else {
+            DurableSelectionArtifact.Stored stored = DurableSelectionArtifact.withCandidateHash(
+                    DurableSelectionArtifact.edit(
+                            new DurableSelectionArtifact.Stored(
+                                    base.storedPayload(), base.storedDiff()),
+                            editedReplacement),
+                    ReviewArtifactRules.sha256(candidate));
+            DurableSelectionArtifact.Materialized materialized =
+                    DurableSelectionArtifact.reconstruct(
+                            stored.payload(), stored.diff(), durableEvidence(source));
+            storedPayload = stored.payload();
+            storedDiff = stored.diff();
+            payload = materialized.payload();
+            diff = materialized.diff();
+        }
         requireCandidate(
-                materialized.payload(),
-                materialized.diff(),
-                locked.chapterId(),
+                payload,
+                diff,
                 source);
 
         int revision = Math.addExact(base.number(), 1);
@@ -598,8 +709,8 @@ final class JooqDurableReviewDecisionStore {
                 ids.next(),
                 locked.artifactId(),
                 revision,
-                canonicalJson(stored.payload()),
-                canonicalJson(stored.diff()),
+                canonicalJson(storedPayload),
+                canonicalJson(storedDiff),
                 now);
         int changed = transaction.execute(
                 """
@@ -609,25 +720,39 @@ final class JooqDurableReviewDecisionStore {
                 WHERE id = ? AND revision = ? AND status = CAST('awaiting_user' AS "ReviewArtifactStatus")
                 """,
                 revision,
-                canonicalJson(stored.payload()),
-                canonicalJson(stored.diff()),
+                canonicalJson(storedPayload),
+                canonicalJson(storedDiff),
                 now,
                 locked.artifactId(),
                 base.number());
         if (changed != 1) throw revisionConflict(base.number(), revision);
         return new Revision(
                 revision,
-                materialized.payload(),
-                materialized.diff(),
-                stored.payload(),
-                stored.diff());
+                payload,
+                diff,
+                storedPayload,
+                storedDiff);
     }
 
     private static DurableSelectionArtifact.Evidence durableEvidence(Source source) {
         return new DurableSelectionArtifact.Evidence(
                 source.bundleId(),
                 source.itemId(),
-                "chapter_content",
+                source.resourceType(),
+                source.resourceId(),
+                DatabaseTimestamp.api(source.updatedAt()),
+                source.content(),
+                source.contentHash(),
+                source.start(),
+                source.end());
+    }
+
+    private static DurableOutlineSelectionArtifact.Evidence durableOutlineEvidence(
+            Source source) {
+        return new DurableOutlineSelectionArtifact.Evidence(
+                source.bundleId(),
+                source.itemId(),
+                source.resourceType(),
                 source.resourceId(),
                 DatabaseTimestamp.api(source.updatedAt()),
                 source.content(),
@@ -639,17 +764,29 @@ final class JooqDurableReviewDecisionStore {
     private static void requireCandidate(
             Map<String, Object> payload,
             Map<String, Object> diff,
-            String chapterId,
             Source source) {
         Map<String, Object> target = map(payload.get("target"), "target");
         String replacement = string(payload, "replacement");
         String candidate = source.prefix() + replacement + source.suffix();
-        boolean valid = "chapter_draft".equals(payload.get("kind"))
-                && "replace_selection".equals(target.get("mode"))
-                && "chapter_content".equals(target.get("resourceType"))
-                && chapterId.equals(target.get("resourceId"))
-                && "chapter_content".equals(payload.get("resourceType"))
-                && chapterId.equals(payload.get("resourceId"))
+        String mode = switch (source.resourceType()) {
+            case "chapter_content" -> "replace_selection";
+            case "outline_content" -> "outline_content_selection";
+            case "outline_node_content" -> "outline_node_content_selection";
+            default -> null;
+        };
+        String kind = "chapter_content".equals(source.resourceType())
+                ? "chapter_draft"
+                : "outline_draft";
+        String operation = "chapter_content".equals(source.resourceType())
+                ? "rewrite_chapter_selection"
+                : "rewrite_outline_selection";
+        boolean valid = kind.equals(payload.get("kind"))
+                && operation.equals(payload.get("operation"))
+                && Objects.equals(mode, target.get("mode"))
+                && source.resourceType().equals(target.get("resourceType"))
+                && source.resourceId().equals(target.get("resourceId"))
+                && source.resourceType().equals(payload.get("resourceType"))
+                && source.resourceId().equals(payload.get("resourceId"))
                 && timestampEquals(payload.get("baseUpdatedAt"), source.updatedAt())
                 && source.contentHash().equals(payload.get("baseContentHash"))
                 && Integer.valueOf(source.start()).equals(payload.get("selectionStart"))
@@ -661,14 +798,18 @@ final class JooqDurableReviewDecisionStore {
                 && candidate.equals(payload.get("candidate"))
                 && ReviewArtifactRules.sha256(replacement).equals(payload.get("contentSha256"))
                 && "selection".equals(diff.get("type"))
-                && "replace_selection".equals(diff.get("mode"))
+                && Objects.equals(mode, diff.get("mode"))
+                && (diff.get("resourceType") == null
+                        || source.resourceType().equals(diff.get("resourceType")))
+                && (diff.get("resourceId") == null
+                        || source.resourceId().equals(diff.get("resourceId")))
                 && source.content().equals(diff.get("before"))
                 && candidate.equals(diff.get("after"))
                 && candidate.equals(diff.get("candidate"))
                 && source.prefix().equals(diff.get("prefix"))
                 && source.suffix().equals(diff.get("suffix"))
                 && replacement.equals(diff.get("replacement"));
-        if (!valid) throw sourceConflict(chapterId);
+        if (!valid) throw sourceConflict(source.resourceType(), source.resourceId());
     }
 
     private String insertDecisionStep(
@@ -775,7 +916,8 @@ final class JooqDurableReviewDecisionStore {
                 : null;
         input.put("originalUserInstruction", originalInstruction);
         input.put("userInstruction", nullable(request.getUserMessage()));
-        if ("write_chapter".equals(context.effectiveOperation())) {
+        if (Set.of("write_chapter", "rewrite_scene")
+                .contains(context.effectiveOperation())) {
             input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
                     "artifactRevision", revision.number(), "payload", DurableChapterDraftArtifact.output(revision.storedPayload())));
         } else if ("beat_plan".equals(locked.kind())) {
@@ -1168,7 +1310,7 @@ final class JooqDurableReviewDecisionStore {
         String content = nullable(request.getEditedContent());
         if (replacement != null && content != null) throw validation("全文与选区编辑字段不能同时提交");
         if (request.getDecision() == ReviewArtifactDecisionRequest.DecisionEnum.APPROVE) {
-            if (replacement != null && replacement.isBlank()) {
+            if (replacement != null && TextLength.count(replacement) == 0) {
                 throw validation("V2 editedReplacement 不能为空白");
             }
             return;
@@ -1176,7 +1318,7 @@ final class JooqDurableReviewDecisionStore {
         if (replacement != null || content != null) throw validation("只有 V2 approve 可以提交编辑字段");
         if (request.getDecision() == ReviewArtifactDecisionRequest.DecisionEnum.REVISE) {
             String message = nullable(request.getUserMessage());
-            if (message == null || message.isBlank()) {
+            if (message == null || TextLength.count(message) == 0) {
                 throw validation("V2 revise 必须携带非空白 userMessage");
             }
         }
@@ -1242,11 +1384,15 @@ final class JooqDurableReviewDecisionStore {
     }
 
     private static ApiException sourceConflict(String chapterId) {
+        return sourceConflict("chapter_content", chapterId);
+    }
+
+    private static ApiException sourceConflict(String resourceType, String resourceId) {
         return new ApiException(
                 409,
                 "ARTIFACT_SOURCE_VERSION_CONFLICT",
                 "选区草案的来源版本已变化",
-                Map.of("resourceType", "chapter_content", "resourceId", chapterId));
+                Map.of("resourceType", resourceType, "resourceId", resourceId));
     }
 
     private static ApiException revisionConflict(int expected, int current) {
@@ -1313,6 +1459,7 @@ final class JooqDurableReviewDecisionStore {
     private record Source(
             String bundleId,
             String itemId,
+            String resourceType,
             String resourceId,
             String content,
             LocalDateTime updatedAt,

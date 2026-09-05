@@ -238,7 +238,10 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         "long_serial.answer_question",
         "long_serial.plan_chapter",
         "long_serial.write_chapter",
+        "long_serial.rewrite_scene",
         "long_serial.rewrite_chapter_selection",
+        "long_serial.rewrite_outline_selection",
+        "long_serial.review_chapter",
     }
     answer = next(
         operation
@@ -490,7 +493,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "long_serial.answer_question",
         "long_serial.plan_chapter",
         "long_serial.write_chapter",
+        "long_serial.rewrite_scene",
         "long_serial.rewrite_chapter_selection",
+        "long_serial.rewrite_outline_selection",
+        "long_serial.review_chapter",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
@@ -499,7 +505,8 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         assert generator["purpose"] == "generation"
         expected_reasoning = (
             "disabled"
-            if operation["key"] == "long_serial.answer_question"
+            if operation["key"]
+            in {"long_serial.answer_question", "long_serial.review_chapter"}
             else "bounded"
         )
         assert generator["reasoningMode"] == expected_reasoning
@@ -511,7 +518,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         }
 
         reviewers = [profiles[key] for key in operation["reviewPolicy"]["reviewerProfiles"]]
-        if operation["key"] == "long_serial.answer_question":
+        if operation["reviewPolicy"]["mode"] == "none":
             assert reviewers == []
         else:
             assert reviewers
@@ -566,7 +573,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert scene["required"] == ["goal"]
             assert "order" not in scene["properties"]
             assert "beatCount" not in output_schema["jsonSchema"]["properties"]
-        elif operation["key"] == "long_serial.write_chapter":
+        elif operation["key"] in {
+            "long_serial.write_chapter",
+            "long_serial.rewrite_scene",
+        }:
             assert output_schema["jsonSchema"]["required"] == ["summary", "content"]
             assert set(output_schema["jsonSchema"]["properties"]) == {"summary", "content"}
             assert output_schema["jsonSchema"]["properties"]["summary"]["maxLength"] == 1000
@@ -577,14 +587,28 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             expected_output_field = (
                 "answer"
                 if operation["key"] == "long_serial.answer_question"
-                else "replacement"
+                else (
+                    "report"
+                    if operation["key"] == "long_serial.review_chapter"
+                    else "replacement"
+                )
             )
             assert output_schema["jsonSchema"]["required"] == [expected_output_field]
             assert set(output_schema["jsonSchema"]["properties"]) == {expected_output_field}
+            expected_pattern = (
+                "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680"
+                "\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]"
+                if operation["key"]
+                in {
+                    "long_serial.rewrite_outline_selection",
+                    "long_serial.review_chapter",
+                }
+                else r"\S"
+            )
             assert output_schema["jsonSchema"]["properties"][expected_output_field] == {
                 "type": "string",
                 "minLength": 1,
-                "pattern": r"\S",
+                "pattern": expected_pattern,
             }
 
         prompt_hashes = {
@@ -716,7 +740,7 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
 
     for key in CHAPTER_DRAFT_OPERATION_KEYS:
         budget = operations[key]["runBudgetProfile"]
-        if key == "long_serial.write_chapter":
+        if key in {"long_serial.write_chapter", "long_serial.rewrite_scene"}:
             assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 180000
         else:
             assert budget["maxPromptCacheMissTokens"] <= 60000

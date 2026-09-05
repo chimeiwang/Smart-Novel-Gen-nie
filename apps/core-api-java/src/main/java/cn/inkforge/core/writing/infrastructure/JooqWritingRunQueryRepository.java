@@ -20,10 +20,15 @@ import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
-import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.catalog.WorkflowStepSnapshotFactory;
+import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
+import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
+import cn.inkforge.core.workflows.domain.WorkflowUsageStatus;
+import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import cn.inkforge.core.workflows.protocol.WorkflowOutputValidator;
 import cn.inkforge.core.writing.application.WritingRunQueryRepository;
 import cn.inkforge.core.writing.domain.WritingRunCursor;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
@@ -36,8 +41,8 @@ import java.util.Objects;
 import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
-import tools.jackson.databind.ObjectMapper;
 import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 /** 使用批量关联读取避免 N+1，并在内存中应用依赖统一结果投影的过滤条件。 */
 final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
@@ -123,13 +128,15 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             if (!userId.equals(run.userId())) {
                 throw forbidden();
             }
-            V2Related related = v2Related(context, List.of(taskId));
+            V2Related related = v2Related(context, List.of(taskId), true);
             return v2Response(
                     context,
                     run,
                     related.activeSteps().getOrDefault(taskId, List.of()),
                     related.failedSteps().get(taskId),
-                    related.artifacts().get(taskId));
+                    related.artifacts().get(taskId),
+                    related.completedGenerations().getOrDefault(taskId, List.of()),
+                    true);
         });
     }
 
@@ -181,7 +188,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             Map<String, List<ReviewartifactRecord>> artifacts = groupArtifacts(
                     artifacts(context, taskIds));
             Map<String, V2Run> runs = v2Runs(context, runIds);
-            V2Related related = v2Related(context, runIds);
+            V2Related related = v2Related(context, runIds, false);
             for (RunCandidate candidate : candidates) {
                 WritingRunPublicListItem item;
                 if (candidate.engineVersion() == 1) {
@@ -208,7 +215,9 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                             run,
                             related.activeSteps().getOrDefault(run.id(), List.of()),
                             related.failedSteps().get(run.id()),
-                            related.artifacts().get(run.id()));
+                            related.artifacts().get(run.id()),
+                            related.completedGenerations().getOrDefault(run.id(), List.of()),
+                            false);
                     if (operation != null && !operation.equals(response.getOperation())) continue;
                     if (outcome != null && !outcome.equals(v2Outcome(response.getStatus()))) {
                         continue;
@@ -442,18 +451,27 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
     }
 
     private static V2Related v2Related(
-            DSLContext context, List<String> runIds) {
+            DSLContext context, List<String> runIds, boolean includeCompletedGenerations) {
         if (runIds.isEmpty()) return V2Related.empty();
         String placeholders = placeholders(runIds.size());
         Map<String, List<V2Step>> activeSteps = new LinkedHashMap<>();
         Map<String, V2Step> failedSteps = new LinkedHashMap<>();
+        Map<String, List<V2CompletedGeneration>> completedGenerations = new LinkedHashMap<>();
+        String completedGenerationColumns = includeCompletedGenerations
+                ? """
+                  , step."stepType"::text AS step_type, step.input, step."inputHash",
+                    step.output, step."resultHash", step."outputSchema",
+                    step."outputSchemaVersion", step."budgetJson", step."usageJson",
+                    step."artifactId", step."artifactRevision"
+                  """
+                : "";
         context.fetch(
                 """
                         WITH selected_steps AS (
                           SELECT step.id, step."runId", step.ordinal, step.purpose, step.lane,
                                  step.status::text AS status, step."attemptCount",
                                  step."fencingToken", step."errorCode", step."modelProfile",
-                                 step."modelProfileVersion", step."resolvedModelJson"
+                                 step."modelProfileVersion", step."resolvedModelJson"%s
                           FROM public."WorkflowStep" AS step
                           WHERE step.ordinal IS NOT NULL AND step."runId" IN (%s)
                         ), latest_progress AS (
@@ -475,7 +493,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                         LEFT JOIN latest_progress AS progress
                           ON progress."runId" = step."runId" AND progress.step_id = step.id
                         ORDER BY step."runId", step.ordinal ASC, step.id ASC
-                        """.formatted(placeholders),
+                        """.formatted(completedGenerationColumns, placeholders),
                         runIds.toArray())
                 .forEach(value -> {
                     V2Step step = new V2Step(
@@ -499,6 +517,32 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                     if ("failed".equals(step.status())) {
                         failedSteps.put(step.runId(), step);
                     }
+                    if (includeCompletedGenerations
+                            && "generation".equals(step.purpose())
+                            && "completed".equals(step.status())) {
+                        completedGenerations
+                                .computeIfAbsent(step.runId(), ignored -> new ArrayList<>())
+                                .add(new V2CompletedGeneration(
+                                        step.id(),
+                                        step.runId(),
+                                        step.ordinal(),
+                                        value.get("step_type", String.class),
+                                        step.purpose(),
+                                        step.lane(),
+                                        value.get("input", String.class),
+                                        value.get("inputHash", String.class),
+                                        value.get("output", String.class),
+                                        value.get("resultHash", String.class),
+                                        step.modelProfile(),
+                                        step.modelProfileVersion(),
+                                        value.get("outputSchema", String.class),
+                                        value.get("outputSchemaVersion", String.class),
+                                        value.get("budgetJson", String.class),
+                                        step.resolvedModelJson(),
+                                        value.get("usageJson", String.class),
+                                        value.get("artifactId", String.class),
+                                        value.get("artifactRevision", Integer.class)));
+                    }
                 });
         Map<String, V2Artifact> artifacts = new LinkedHashMap<>();
         context.fetch(
@@ -518,7 +562,8 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                     artifacts.putIfAbsent(artifact.runId(), artifact);
                 });
         activeSteps.replaceAll((ignored, values) -> List.copyOf(values));
-        return new V2Related(activeSteps, failedSteps, artifacts);
+        completedGenerations.replaceAll((ignored, values) -> List.copyOf(values));
+        return new V2Related(activeSteps, failedSteps, artifacts, completedGenerations);
     }
 
     private WritingRunV2Response v2Response(
@@ -526,7 +571,9 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             V2Run run,
             List<V2Step> activeStepValues,
             V2Step failedStep,
-            V2Artifact artifact) {
+            V2Artifact artifact,
+            List<V2CompletedGeneration> completedGenerations,
+            boolean includeReviewReport) {
         boolean cancelRequested = run.cancelRequestedAt() != null;
         if ("cancelled".equals(run.status()) && !cancelRequested) {
             throw new IllegalStateException("cancelled V2 WorkflowRun 缺少取消时间");
@@ -587,11 +634,188 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 .currentStep(current)
                 .cancelRequestedAt(DatabaseTimestamp.api(run.cancelRequestedAt()))
                 .artifact(artifactSnapshot)
-                .error(error);
+                .error(error)
+                .reviewReport(includeReviewReport
+                        ? reviewReport(executionPlan, run, completedGenerations)
+                        : null);
         if (executionPlan.initialIntentPlan() != null && executionContexts != null) {
             response.clarification(executionContexts.pendingClarification(transaction, run.id(), run.status()));
         }
         return response;
+    }
+
+    private String reviewReport(
+            WorkflowExecutionContext executionPlan,
+            V2Run run,
+            List<V2CompletedGeneration> completedGenerations) {
+        if (!"review_chapter".equals(executionPlan.effectiveOperation())) return null;
+        if (!"completed".equals(run.status())) return null;
+        if (completedGenerations.size() != 1) {
+            throw new IllegalStateException("已完成的整章审阅 Run 必须只有一个 generation 结果");
+        }
+        V2CompletedGeneration step = completedGenerations.getFirst();
+        if (!"agent".equals(step.stepType())
+                || step.artifactId() != null
+                || step.artifactRevision() != null
+                || step.input() == null
+                || step.inputHash() == null
+                || step.output() == null
+                || step.resultHash() == null
+                || step.resolvedModelJson() == null
+                || step.usageJson() == null) {
+            throw new IllegalStateException("已完成的整章审阅 generation 持久事实不完整");
+        }
+        Map<String, Object> input = readObject(step.input(), "整章审阅 generation input");
+        if (!input.keySet().equals(Set.of("userInstruction"))
+                || !(input.get("userInstruction") instanceof String instruction)
+                || instruction.isBlank()
+                || !ExecutionCanonicalJson.sha256(input).equals(step.inputHash())) {
+            throw new IllegalStateException("整章审阅 generation 输入与冻结哈希不一致");
+        }
+        if (step.modelProfileVersion() == null
+                || step.outputSchemaVersion() == null
+                || step.budgetJson() == null) {
+            throw new IllegalStateException("整章审阅 generation 执行身份不完整");
+        }
+        ExecutionPlanSnapshot.Step frozen = executionPlan.requireStep(
+                step.purpose(),
+                step.lane(),
+                step.modelProfile(),
+                Integer.parseInt(step.modelProfileVersion()),
+                step.outputSchema(),
+                Integer.parseInt(step.outputSchemaVersion()),
+                readObject(step.budgetJson(), "整章审阅 generation budget"));
+        Map<String, Object> output = readObject(step.output(), "整章审阅 generation output");
+        try {
+            WorkflowOutputValidator.validate(frozen.outputSchema().jsonSchema(), output);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("整章审阅 generation 输出不符合冻结 Schema", exception);
+        }
+        if (!output.keySet().equals(Set.of("report"))
+                || !(output.get("report") instanceof String report)
+                || report.isBlank()) {
+            throw new IllegalStateException("整章审阅 generation 缺少完整非空白报告");
+        }
+        Map<String, Object> resultMaterial = new LinkedHashMap<>();
+        resultMaterial.put("resultKind", "output");
+        Map<String, Object> resolvedModel = readObject(
+                step.resolvedModelJson(), "整章审阅 generation resolvedModel");
+        Map<String, Object> usage = readObject(
+                step.usageJson(), "整章审阅 generation usage");
+        requireResolvedModel(resolvedModel, frozen);
+        requireUsage(usage, frozen);
+        resultMaterial.put("resolvedModel", resolvedModel);
+        resultMaterial.put("usage", usage);
+        resultMaterial.put("value", output);
+        if (!ExecutionCanonicalJson.sha256(resultMaterial).equals(step.resultHash())) {
+            throw new IllegalStateException("整章审阅 generation 结果与完整哈希不一致");
+        }
+        return report;
+    }
+
+    private static void requireResolvedModel(
+            Map<String, Object> value, ExecutionPlanSnapshot.Step frozen) {
+        Set<String> keys = Set.of(
+                "deploymentProfileKey",
+                "deploymentFingerprint",
+                "provider",
+                "model",
+                "transportProfile",
+                "endpointProfile",
+                "structuredOutputRoute",
+                "capabilityVersion",
+                "reasoningMode",
+                "supportsRequestIdempotency");
+        if (!value.keySet().equals(keys)
+                || !(value.get("supportsRequestIdempotency") instanceof Boolean supports)) {
+            throw new IllegalStateException("整章审阅 generation resolvedModel 形状无效");
+        }
+        try {
+            new WorkflowResolvedModel(
+                            requiredString(value, "deploymentProfileKey"),
+                            requiredString(value, "deploymentFingerprint"),
+                            requiredString(value, "provider"),
+                            requiredString(value, "model"),
+                            requiredString(value, "transportProfile"),
+                            requiredString(value, "endpointProfile"),
+                            requiredString(value, "structuredOutputRoute"),
+                            requiredString(value, "capabilityVersion"),
+                            requiredString(value, "reasoningMode"),
+                            supports)
+                    .requireAuthorizedBy(frozen.modelProfile().toDomain());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("整章审阅 generation resolvedModel 不符合冻结授权", exception);
+        }
+    }
+
+    private static void requireUsage(
+            Map<String, Object> value, ExecutionPlanSnapshot.Step frozen) {
+        Set<String> allowed = Set.of(
+                "usageStatus",
+                "inputTokens",
+                "cachedTokens",
+                "promptCacheMissTokens",
+                "completionTokens",
+                "reasoningTokens",
+                "visibleOutputTokens",
+                "costMicros",
+                "providerAttempts",
+                "protocolCorrections",
+                "wallTimeMillis");
+        if (!allowed.containsAll(value.keySet())
+                || !value.keySet().containsAll(Set.of(
+                        "usageStatus", "providerAttempts", "protocolCorrections", "wallTimeMillis"))) {
+            throw new IllegalStateException("整章审阅 generation usage 形状无效");
+        }
+        try {
+            WorkflowStepUsage usage = new WorkflowStepUsage(
+                    WorkflowUsageStatus.fromWireValue(requiredString(value, "usageStatus")),
+                    nullableLong(value, "inputTokens"),
+                    nullableLong(value, "cachedTokens"),
+                    nullableLong(value, "promptCacheMissTokens"),
+                    nullableLong(value, "completionTokens"),
+                    nullableLong(value, "reasoningTokens"),
+                    nullableLong(value, "visibleOutputTokens"),
+                    nullableLong(value, "costMicros"),
+                    requiredInt(value, "providerAttempts"),
+                    requiredInt(value, "protocolCorrections"),
+                    requiredLong(value, "wallTimeMillis"));
+            frozen.stepBudget().budget().requireWithin(usage);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("整章审阅 generation usage 不符合冻结预算", exception);
+        }
+    }
+
+    private static String requiredString(Map<String, Object> value, String key) {
+        if (!(value.get(key) instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException(key + " 必须是非空字符串");
+        }
+        return text;
+    }
+
+    private static Long nullableLong(Map<String, Object> value, String key) {
+        if (!value.containsKey(key)) return null;
+        return requiredLong(value, key);
+    }
+
+    private static int requiredInt(Map<String, Object> value, String key) {
+        return Math.toIntExact(requiredLong(value, key));
+    }
+
+    private static long requiredLong(Map<String, Object> value, String key) {
+        if (!(value.get(key) instanceof Number number)
+                || number.doubleValue() != number.longValue()) {
+            throw new IllegalArgumentException(key + " 必须是整数");
+        }
+        return number.longValue();
+    }
+
+    private Map<String, Object> readObject(String value, String label) {
+        try {
+            return json.readValue(value, new TypeReference<>() {});
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException(label + " 不是合法 JSON 对象", exception);
+        }
     }
 
     private WorkflowCurrentStepSnapshot stepSnapshot(
@@ -715,13 +939,35 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
             String status,
             int revision) {}
 
+    private record V2CompletedGeneration(
+            String id,
+            String runId,
+            int ordinal,
+            String stepType,
+            String purpose,
+            String lane,
+            String input,
+            String inputHash,
+            String output,
+            String resultHash,
+            String modelProfile,
+            String modelProfileVersion,
+            String outputSchema,
+            String outputSchemaVersion,
+            String budgetJson,
+            String resolvedModelJson,
+            String usageJson,
+            String artifactId,
+            Integer artifactRevision) {}
+
     private record V2Related(
             Map<String, List<V2Step>> activeSteps,
             Map<String, V2Step> failedSteps,
-            Map<String, V2Artifact> artifacts) {
+            Map<String, V2Artifact> artifacts,
+            Map<String, List<V2CompletedGeneration>> completedGenerations) {
 
         private static V2Related empty() {
-            return new V2Related(Map.of(), Map.of(), Map.of());
+            return new V2Related(Map.of(), Map.of(), Map.of(), Map.of());
         }
     }
 }

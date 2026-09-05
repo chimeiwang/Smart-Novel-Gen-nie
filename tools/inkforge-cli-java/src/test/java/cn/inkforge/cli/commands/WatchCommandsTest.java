@@ -32,6 +32,21 @@ class WatchCommandsTest {
     private final JsonMapper json = JsonMapper.builder().build();
 
     @Test
+    void 长篇V2审阅终态保留完整大报告且不要求会话或Artifact() {
+        WatchApi api = new WatchApi(json);
+        ObjectNode snapshot = (ObjectNode) v2Status("completed", null, 8);
+        String report = "审阅😀\r\n".repeat(20_001) + "完整尾部🚀";
+        snapshot.put("operation", "review_chapter");
+        snapshot.put("reviewReport", report);
+        api.response(snapshot);
+        Invocation result = invoke("long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+        assertThat(result.exit()).isZero();
+        assertThat(result.frames().getLast().path("type").asText()).isEqualTo("terminal");
+        assertThat(result.frames().getLast().path("data").path("reviewReport").asText()).isEqualTo(report);
+        assertThat(api.sseCursors).isEmpty();
+    }
+
+    @Test
     void 待澄清观察返回完整问题而不是要求Artifact() {
         WatchApi api = new WatchApi(json);
         ObjectNode snapshot = (ObjectNode) v2Status("waiting_user", null, 8);

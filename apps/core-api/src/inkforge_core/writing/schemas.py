@@ -356,6 +356,7 @@ class WritingRunV2Response(WorkflowRunSnapshot):
     chapterId: str | None
     commandId: str | None = Field(json_schema_extra={"enum": [None]})
     commandStatus: str | None = Field(json_schema_extra={"enum": [None]})
+    reviewReport: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_v2_projection(self) -> Self:

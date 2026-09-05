@@ -71,6 +71,14 @@ Agent 消息，不能把 SSE 或任务状态拼成回答。问答的 `writingSes
 
 `long.artifact.approve` 对选区 Artifact 使用 `editedReplacement` 或 `editedReplacementFile`，对全文草案继续使用 `editedContent`。每次决定前先 GET Artifact 并查看完整 Diff，独立确认后提交稳定幂等请求，完成后再次 GET 回读；CLI 会执行 sourceBinding preflight 并拒绝错误的全文/选区编辑字段。
 
+2026-09-05 的 V2 `review_chapter` 保持显式 start 可省略 writingSessionId；完成后
+`long.task.get/watch` 直接返回完整 reviewReport，不要求额外会话查询或 Artifact 决定。指定 outputFile 时
+保存完整 JSON。`rewrite_scene` 仍生成整章候选，批准使用 editedContent/editedContentFile；
+`rewrite_outline_selection` 只生成总纲/节点选区 replacement，批准只用 editedReplacement/editedReplacementFile。
+自然入口新增审阅和场景改写，大纲选区须显式绑定来源。命令数 125 不变，活动 Operator 允许范围不变；
+实现与验收状态见 `docs/specs/2026-09-05-durable-review-and-rewrites.md`，Skills 更新清单见
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。仓内更新尚未安装为本机新固定 JAR。
+
 - 长篇命令只通过 `/api/v1/**` 访问 Core，不连接数据库、Agent Service 或内部接口。
 - 小说、章节、任务、草案和质量状态始终以 Core 为权威；CLI 不创建 manifest、dirty 标志、本地章节
   镜像或任务账本。

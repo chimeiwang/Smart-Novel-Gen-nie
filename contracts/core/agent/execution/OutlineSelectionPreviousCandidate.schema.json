@@ -1,0 +1,33 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/OutlineSelectionPreviousCandidate/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifactId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Artifactid",
+      "type": "string"
+    },
+    "artifactRevision": {
+      "exclusiveMinimum": 0,
+      "title": "Artifactrevision",
+      "type": "integer"
+    },
+    "replacement": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Replacement",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifactId",
+    "artifactRevision",
+    "replacement"
+  ],
+  "title": "OutlineSelectionPreviousCandidate",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.OutlineSelectionPreviousCandidate"
+}

@@ -264,11 +264,12 @@ class _Store:
 
     def chapter_writing_submission(self, payload: object) -> None:
         """只从透明请求提取角色/revision/幂等身份，不持久化 input 或候选。"""
-        if not isinstance(payload, dict) or (
-            payload.get("workflow"),
-            payload.get("operation"),
-            payload.get("purpose"),
-        ) != ("long_serial", "write_chapter", "review"):
+        if (
+            not isinstance(payload, dict)
+            or payload.get("workflow") != "long_serial"
+            or payload.get("operation") not in {"write_chapter", "rewrite_scene"}
+            or payload.get("purpose") != "review"
+        ):
             return
         profile = payload.get("modelProfile")
         profile_key = profile.get("profile") if isinstance(profile, dict) else None

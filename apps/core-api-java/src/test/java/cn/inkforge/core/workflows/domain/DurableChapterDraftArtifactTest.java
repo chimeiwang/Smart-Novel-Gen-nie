@@ -57,6 +57,31 @@ class DurableChapterDraftArtifactTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void 场景改写保留真实操作且旧写章持久形状不变() {
+        var output = output("完整改写后的章节😀");
+        var legacy = DurableChapterDraftArtifact.create("bundle", HASH, "chapter", output, "step", HASH);
+        var explicitWrite = DurableChapterDraftArtifact.create(
+                "write_chapter", "bundle", HASH, "chapter", output, "step", HASH);
+        var scene = DurableChapterDraftArtifact.create(
+                "rewrite_scene", "bundle", HASH, "chapter", output, "step", HASH);
+
+        assertThat(explicitWrite).isEqualTo(legacy);
+        assertThat(legacy.payload()).containsEntry("operation", "write_chapter");
+        assertThat(legacy.payload().keySet()).isEqualTo(scene.payload().keySet());
+        assertThat(scene.payload()).containsEntry("operation", "rewrite_scene");
+        assertThat(DurableChapterDraftArtifact.reconstruct(
+                        "rewrite_scene", scene.payload(), scene.diff(), "bundle", HASH,
+                        "chapter", "原章节")
+                .payload()).containsEntry("operation", "rewrite_scene");
+        assertThatThrownBy(() -> DurableChapterDraftArtifact.reconstruct(
+                        scene.payload(), scene.diff(), "bundle", HASH, "chapter", "原章节"))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> DurableChapterDraftArtifact.create(
+                        "plan_chapter", "bundle", HASH, "chapter", output, "step", HASH))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     static Map<String, Object> output(String content) {
         return Map.of("summary", "完整摘要", "content", content, "contentSha256", DurableSelectionArtifact.sha256(content),
                 "wordCount", TextLength.count(content));

@@ -67,9 +67,7 @@ def test_intent_input_rejects_blank_or_non_string_messages(value):
 )
 def test_intent_input_rejects_invalid_or_duplicate_clarifications(answers):
     with pytest.raises(ValidationError):
-        IntentResolutionInput.model_validate(
-            {"userInstruction": "规划", "clarifications": answers}
-        )
+        IntentResolutionInput.model_validate({"userInstruction": "规划", "clarifications": answers})
 
 
 def test_intent_context_has_no_shared_operation_catalog_or_extra_workspace():
@@ -94,13 +92,25 @@ def test_intent_context_has_no_shared_operation_catalog_or_extra_workspace():
         {"chapterTitle": None},
         {"availableOperations": []},
         {"availableOperations": [available_operation()] * 2},
-        {"availableOperations": [available_operation(f"operation_{index}") for index in range(4)]},
+        {"availableOperations": [available_operation(f"operation_{index}") for index in range(6)]},
         {"availableOperations": None},
     ],
 )
 def test_intent_context_rejects_inconsistent_authorized_shape(changed):
     with pytest.raises(ValidationError):
         IntentContext.model_validate(context() | changed)
+
+
+def test_intent_context_allows_five_frozen_operations() -> None:
+    operations = [available_operation(f"operation_{index}") for index in range(5)]
+    assert (
+        len(
+            IntentContext.model_validate(
+                context() | {"availableOperations": operations}
+            ).availableOperations
+        )
+        == 5
+    )
 
 
 @pytest.mark.parametrize(

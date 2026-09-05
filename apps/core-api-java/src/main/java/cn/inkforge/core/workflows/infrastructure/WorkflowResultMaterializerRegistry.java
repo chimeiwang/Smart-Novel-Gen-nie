@@ -16,6 +16,12 @@ final class WorkflowResultMaterializerRegistry {
             new Binding("apply.beat_plan.v1", Materializer.BEAT_PLAN_REVIEW_ARTIFACT),
             "long_serial.write_chapter",
             new Binding("apply.chapter_draft.v1", Materializer.CHAPTER_DRAFT_REVIEW_ARTIFACT),
+            "long_serial.rewrite_scene",
+            new Binding("apply.chapter_draft.v1", Materializer.CHAPTER_DRAFT_REVIEW_ARTIFACT),
+            "long_serial.review_chapter",
+            new Binding("apply.chapter_review_report.v1", Materializer.CHAPTER_REVIEW_REPORT),
+            "long_serial.rewrite_outline_selection",
+            new Binding("apply.outline_selection.v1", Materializer.OUTLINE_SELECTION_REVIEW_ARTIFACT),
             "long_serial.rewrite_chapter_selection",
             new Binding(
                     "apply.chapter_selection.v1",
@@ -51,9 +57,11 @@ final class WorkflowResultMaterializerRegistry {
 
     enum Materializer {
         CHAT_ANSWER,
+        CHAPTER_REVIEW_REPORT,
         BEAT_PLAN_REVIEW_ARTIFACT,
         CHAPTER_DRAFT_REVIEW_ARTIFACT,
-        CHAPTER_SELECTION_REVIEW_ARTIFACT
+        CHAPTER_SELECTION_REVIEW_ARTIFACT,
+        OUTLINE_SELECTION_REVIEW_ARTIFACT
     }
 
     private record Binding(String applyHandler, Materializer materializer) {}

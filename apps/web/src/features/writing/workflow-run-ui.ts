@@ -57,6 +57,10 @@ const MODEL_PROFILE_LABELS: Readonly<Record<string, string>> = {
   "reviewer.chapter_plan_editorial.v1": "章节规划复审",
   "writer.chapter_selection.v1": "章节选区改写",
   "writer.chapter_draft.v1": "章节正文生成",
+  "writer.scene_rewrite.v1": "场景改写",
+  "editor.chapter_review_text.v1": "章节审阅",
+  "plot.outline_selection.v1": "大纲选区改写",
+  "reviewer.outline_selection_editorial.v1": "大纲编辑复审",
   "reviewer.chapter_draft_consistency.v1": "正文一致性校验",
   "reviewer.chapter_draft_editorial.v1": "正文编辑复审",
   "reviewer.consistency.v1": "一致性校验",
@@ -286,7 +290,8 @@ export function workflowRunShouldStopObservation(state: WorkflowRunUiState | nul
 }
 
 export function workflowEventRequiresSessionMessageRefresh(event: WorkflowEvent): boolean {
-  return event.eventType === "completed" && event.payload.outcomeType === "chat_answer";
+  return event.eventType === "completed"
+    && ["chat_answer", "chapter_review_report"].includes(event.payload.outcomeType);
 }
 
 export function workflowEventRequiresSnapshotRefresh(

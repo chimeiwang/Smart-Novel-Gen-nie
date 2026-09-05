@@ -25,6 +25,7 @@ import cn.inkforge.core.workflows.catalog.WorkflowIntentSelection;
 import cn.inkforge.core.workflows.domain.DurableIntentDecision;
 import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
+import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import cn.inkforge.core.workflows.domain.ChapterDraftPatches;
@@ -673,6 +674,10 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         switch (materializer) {
             case CHAT_ANSWER -> completeChatAnswer(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case CHAPTER_REVIEW_REPORT -> completeChapterReview(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case OUTLINE_SELECTION_REVIEW_ARTIFACT -> completeSelectionGeneration(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CHAPTER_SELECTION_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case BEAT_PLAN_REVIEW_ARTIFACT -> completeSelectionGeneration(
@@ -692,7 +697,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             Map<String, Object> output,
             LocalDateTime now) {
         boolean beatPlan = "long_serial.plan_chapter".equals(executionPlan.operation().key());
-        boolean chapterDraft = "long_serial.write_chapter".equals(executionPlan.operation().key());
+        boolean chapterDraft = isChapterDraft(executionPlan);
         if (!beatPlan && !chapterDraft) validateSelectionGenerationOutput(frozenStep.outputSchema(), output);
         Artifact artifact = chapterDraft ? materializeChapterDraft(
                 transaction, locked, executionPlan, output, body.getResultHash(), now) : beatPlan ? materializeBeatPlan(
@@ -794,8 +799,44 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         updateRun(transaction, body.getRunId(), "completed", sequence, null, now, now);
     }
 
+    private void completeChapterReview(DSLContext transaction, Locked locked, ExecutionPlanSnapshot plan,
+            ExecutionPlanSnapshot.Step frozenStep, ExecutionStepResult body, WorkflowStepUsage usage,
+            Map<String, Object> output, LocalDateTime now) {
+        requireReadOnlyPlan(locked, plan);
+        try {
+            WorkflowOutputValidator.validate(frozenStep.outputSchema().jsonSchema(), output);
+        } catch (IllegalArgumentException exception) {
+            throw invalid("审阅报告不符合冻结 Schema");
+        }
+        if (!output.keySet().equals(java.util.Set.of("report"))
+                || !(output.get("report") instanceof String report) || report.isBlank()) {
+            throw invalid("审阅 output 必须精确包含完整非空白 report");
+        }
+        String sessionId = locked.run().get("writingSessionId", String.class);
+        String resultId = sessionId == null ? body.getStepId() : persistReadOnlyMessage(
+                transaction, locked, frozenStep, report, body.getResultHash(), "chapter_review_report", now);
+        completeStep(transaction, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
+        long sequence = appendStepFinished(transaction, locked, "completed", null,
+                locked.run().get("lastEventSequence", Long.class), now);
+        sequence = appendEvent(transaction, body.getRunId(), sequence, "completed",
+                Map.of("outcomeType", "chapter_review_report", "resultId", resultId), "run:completed", now);
+        updateRun(transaction, body.getRunId(), "completed", sequence, null, now, now);
+    }
+
+    private static boolean isChapterDraft(ExecutionPlanSnapshot plan) {
+        return java.util.Set.of("long_serial.write_chapter", "long_serial.rewrite_scene").contains(plan.operation().key());
+    }
+
     private static void requireChatAnswerPlan(
             Locked locked, ExecutionPlanSnapshot executionPlan) {
+        requireReadOnlyPlan(locked, executionPlan);
+        String writingSessionId = locked.run().get("writingSessionId", String.class);
+        if (writingSessionId == null || writingSessionId.isBlank()) {
+            throw invalid("问答 Run 缺少写作会话归属");
+        }
+    }
+
+    private static void requireReadOnlyPlan(Locked locked, ExecutionPlanSnapshot executionPlan) {
         if (executionPlan.operation().mutating()
                 || !executionPlan.operation().deterministicValidators().containsAll(List.of(
                         "validator.schema_strict.v1", "validator.complete_output.v1"))
@@ -804,11 +845,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 || !executionPlan.systemSteps().isEmpty()
                 || locked.step().get("artifactId", String.class) != null
                 || locked.step().get("artifactRevision", Integer.class) != null) {
-            throw invalid("问答 Step 与冻结的只读无评审执行计划不一致");
-        }
-        String writingSessionId = locked.run().get("writingSessionId", String.class);
-        if (writingSessionId == null || writingSessionId.isBlank()) {
-            throw invalid("问答 Run 缺少写作会话归属");
+            throw invalid("只读 Step 与冻结的无评审执行计划不一致");
         }
     }
 
@@ -837,6 +874,11 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             String answer,
             String resultHash,
             LocalDateTime now) {
+        return persistReadOnlyMessage(transaction, locked, frozenStep, answer, resultHash, "chat_answer", now);
+    }
+
+    private String persistReadOnlyMessage(DSLContext transaction, Locked locked,
+            ExecutionPlanSnapshot.Step frozenStep, String answer, String resultHash, String outcomeType, LocalDateTime now) {
         String sessionId = locked.run().get("writingSessionId", String.class);
         Record session = transaction.fetchOne(
                 """
@@ -848,7 +890,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 locked.run().get("novelId", String.class),
                 locked.run().get("chapterId", String.class));
         if (session == null) {
-            throw invalid("问答 Run 绑定的写作会话不存在或范围不一致");
+            throw invalid("只读 Run 绑定的写作会话不存在或范围不一致");
         }
         String messageId = ids.next();
         String agentId = "编辑";
@@ -859,7 +901,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         source.put("stepId", locked.step().get("id", String.class));
         source.put("modelProfile", frozenStep.modelProfile().profile());
         source.put("resultHash", resultHash);
-        source.put("outcomeType", "chat_answer");
+        source.put("outcomeType", outcomeType);
         String metadata = WorkflowMessageMetadata.serialize(
                 locked.run().get("id", String.class),
                 "done",
@@ -1017,28 +1059,34 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             Map<String, Object> output,
             String generationResultHash,
             LocalDateTime now) {
-        if (!"long_serial.rewrite_chapter_selection"
-                        .equals(executionPlan.operation().key())
-                || !"apply.chapter_selection.v1"
+        boolean outline = "long_serial.rewrite_outline_selection".equals(executionPlan.operation().key());
+        if ((!outline && !"long_serial.rewrite_chapter_selection".equals(executionPlan.operation().key()))
+                || !(outline ? "apply.outline_selection.v1" : "apply.chapter_selection.v1")
                         .equals(executionPlan.operation().applyHandler())
                 || !executionPlan.operation().deterministicValidators().containsAll(List.of(
                         "validator.schema_strict.v1",
                         "validator.unicode_selection.v1",
                         "validator.selection_source_hash.v1",
                         "validator.selection_outside_unchanged.v1"))) {
-            throw invalid("首个 callback 纵切只支持长篇章节选区改写");
+            throw invalid("选区操作与冻结应用策略不一致");
         }
         String bundleId = locked.step().get("evidenceBundleId", String.class);
         String chapterId = locked.run().get("chapterId", String.class);
+        String resourceType = outline ? locked.run().get("targetType", String.class) : "chapter_content";
+        String resourceId = outline ? locked.run().get("targetId", String.class) : chapterId;
+        if (outline && !java.util.Set.of("outline_content", "outline_node_content").contains(resourceType)) {
+            throw invalid("大纲选区必须绑定总纲或节点来源");
+        }
         Record evidence = transaction.fetchOne(
                 """
-                SELECT id, "resourceId", "resourceUpdatedAt", "contentText", "contentSha256", "rangeJson"
+                SELECT id, "resourceId", "resourceUpdatedAt", "contentText", "contentSha256", "rangeJson", "metadataJson"
                 FROM public."WorkflowEvidenceItem"
-                WHERE "bundleId" = ? AND "resourceType" = 'chapter_content'
+                WHERE "bundleId" = ? AND "resourceType" = ?
                   AND "resourceId" = ? AND exists AND "contentType" = 'text'
                 """,
                 bundleId,
-                chapterId);
+                resourceType,
+                resourceId);
         if (evidence == null || evidence.get("rangeJson", String.class) == null) {
             throw invalid("选区改写 Evidence 缺少完整正文或码点范围");
         }
@@ -1048,6 +1096,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid("选区替换文本与 contentSha256 不一致");
         }
         String source = evidence.get("contentText", String.class);
+        if (source == null || !sha256(source).equals(evidence.get("contentSha256", String.class))) {
+            throw invalid("选区 Evidence 完整原文哈希不一致");
+        }
         Map<String, Object> range = readObject(evidence.get("rangeJson", String.class));
         int start = integer(range, "startCodePoint");
         int end = integer(range, "endCodePoint");
@@ -1066,6 +1117,24 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         String suffix = slice(source, end, sourceLength);
         String candidate = prefix + replacement + suffix;
         String baseHash = evidence.get("contentSha256", String.class);
+        if (outline) {
+            requireOutlineSelectionMetadata(evidence, baseHash, selectedHash);
+            Map<String, Object> binding = object(runInput.get("selectionTarget"), "大纲 selectionTarget");
+            if (!resourceType.equals(binding.get("resourceType")) || !resourceId.equals(binding.get("resourceId"))
+                    || !baseHash.equals(binding.get("baseContentHash"))
+                    || !selectedHash.equals(binding.get("selectedTextHash"))
+                    || start != integer(binding, "selectionStart") || end != integer(binding, "selectionEnd")
+                    || !DatabaseTimestamp.api(evidence.get("resourceUpdatedAt", LocalDateTime.class)).toInstant()
+                            .equals(java.time.OffsetDateTime.parse(string(binding, "baseUpdatedAt")).toInstant())) {
+                throw invalid("大纲选区 Run 与冻结来源绑定不一致");
+            }
+            var stored = DurableOutlineSelectionArtifact.create(bundleId, evidence.get("id", String.class),
+                    resourceType, resourceId, DatabaseTimestamp.api(evidence.get("resourceUpdatedAt", LocalDateTime.class)),
+                    baseHash, start, end, selectedHash, replacement, replacementHash, sha256(candidate),
+                    locked.step().get("id", String.class), generationResultHash);
+            return persistCandidate(transaction, locked, "outline_draft", "大纲选区改写", null,
+                    stored.payload(), stored.diff(), now);
+        }
         DurableSelectionArtifact.Stored stored = DurableSelectionArtifact.create(
                 bundleId,
                 evidence.get("id", String.class),
@@ -1142,7 +1211,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 """, bundleId, locked.run().get("id", String.class), locked.run().get("chapterId", String.class));
         if (bundle == null || !ExecutionCanonicalJson.sha256(readObject(bundle.get("contentJson", String.class)))
                 .equals(bundle.get("contentSha256", String.class))) throw invalid("正文草案缺少完整可信 Evidence");
-        var stored = DurableChapterDraftArtifact.create(bundleId, bundle.get("manifestSha256", String.class),
+        var stored = DurableChapterDraftArtifact.create(plan.operation().operation(), bundleId, bundle.get("manifestSha256", String.class),
                 locked.run().get("chapterId", String.class), output, locked.step().get("id", String.class), resultHash);
         return persistCandidate(tx, locked, "chapter_draft", "章节正文草案", string(output, "summary"), stored.payload(), stored.diff(), now);
     }
@@ -1292,7 +1361,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid("Run 的 userInstruction 必须是字符串或 null");
         }
         if ("long_serial.plan_chapter".equals(executionPlan.operation().key())
-                || "long_serial.write_chapter".equals(executionPlan.operation().key())) {
+                || isChapterDraft(executionPlan)
+                || "long_serial.rewrite_outline_selection".equals(executionPlan.operation().key())) {
             Map<String, Object> generationInput = readObject(locked.step().get("input", String.class));
             if (REVIEW.equals(locked.step().get("purpose", String.class))) {
                 generationInput = object(generationInput.get("task"), "Reviewer task");
@@ -1443,9 +1513,11 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         ExecutionPlanSnapshot executionPlan = executionPlan(locked.run());
         boolean planPolicy = "long_serial.plan_chapter".equals(executionPlan.operation().key())
                 && "review.chapter_plan_one_revision_else_author.v1".equals(executionPlan.reviewPolicy().mergePolicy());
-        boolean chapterPolicy = "long_serial.write_chapter".equals(executionPlan.operation().key())
+        boolean chapterPolicy = isChapterDraft(executionPlan)
                 && "review.chapter_draft.patch_or_author.v1".equals(executionPlan.reviewPolicy().mergePolicy());
-        if ((!planPolicy && !chapterPolicy && !"review.merge_all_pass_else_author.v1"
+        boolean outlinePolicy = "long_serial.rewrite_outline_selection".equals(executionPlan.operation().key())
+                && "review.outline_selection_one_revision_else_author.v1".equals(executionPlan.reviewPolicy().mergePolicy());
+        if ((!planPolicy && !chapterPolicy && !outlinePolicy && !"review.merge_all_pass_else_author.v1"
                         .equals(executionPlan.reviewPolicy().mergePolicy()))
                 || !"awaiting_user"
                         .equals(executionPlan.reviewPolicy().onUnavailable())) {
@@ -1522,7 +1594,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                         "reviewAvailability", availability),
                 "review:completed:" + artifactId + ":" + artifactRevision,
                 now);
-        if (planPolicy && "complete".equals(availability) && "issues_found".equals(verdict)
+        if ((planPolicy || outlinePolicy) && "complete".equals(availability) && "issues_found".equals(verdict)
                 && enqueueAutomaticRevision(transaction, locked, executionPlan, evaluations, false, now)) {
             transaction.execute("""
                     UPDATE public."ReviewArtifact" SET status = CAST('draft' AS "ReviewArtifactStatus"), "updatedAt" = ?
@@ -1562,6 +1634,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
 
     private boolean enqueueAutomaticRevision(DSLContext tx, Locked locked,
             ExecutionPlanSnapshot plan, List<Record> evaluations, boolean chapterDraft, LocalDateTime now) {
+        boolean outlineSelection = "long_serial.rewrite_outline_selection".equals(plan.operation().key());
+        String localDimension = chapterDraft ? "chapter_draft.local"
+                : outlineSelection ? "outline_selection.local" : "chapter_plan.local";
         List<Map<String, Object>> findings = new ArrayList<>();
         for (Record evaluation : evaluations) {
             // 任何分歧或无法判断都交作者；模型不能自行把结构阻塞降级为局部返工。
@@ -1569,7 +1644,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             List<Map<String, Object>> values = json.readValue(evaluation.get("findingsJson", String.class), new TypeReference<>() {});
             if (values.isEmpty()) return false;
             for (Map<String, Object> finding : values) {
-                if (!(chapterDraft ? "chapter_draft.local" : "chapter_plan.local").equals(finding.get("dimension"))
+                if (!localDimension.equals(finding.get("dimension"))
                         || !(finding.get("confidence") instanceof Number confidence)
                         || !Double.isFinite(confidence.doubleValue()) || confidence.doubleValue() < 0.8) return false;
             }
@@ -1595,9 +1670,12 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         if (bundle == null) throw invalid("自动返工缺少冻结 Evidence");
         Map<String, Object> payload = readObject(stored.get("payloadJson", String.class));
         if (chapterDraft) {
-            DurableChapterDraftArtifact.reconstruct(payload, readObject(stored.get("diffJson", String.class)),
+            DurableChapterDraftArtifact.reconstruct(plan.operation().operation(), payload, readObject(stored.get("diffJson", String.class)),
                     bundle.get("id", String.class), bundle.get("manifestSha256", String.class), locked.run().get("chapterId", String.class),
                     chapterWritingContent(tx, locked));
+        } else if (outlineSelection) {
+            DurableOutlineSelectionArtifact.reconstruct(payload, readObject(stored.get("diffJson", String.class)),
+                    outlineSelectionEvidence(tx, locked));
         } else {
             DurableBeatPlanArtifact.reconstruct(payload, readObject(stored.get("diffJson", String.class)),
                     bundle.get("id", String.class), bundle.get("manifestSha256", String.class), locked.run().get("chapterId", String.class));
@@ -1609,9 +1687,16 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         if (originalGeneration == null) throw invalid("自动返工缺少原始 generation 输入");
         Map<String, Object> input = new LinkedHashMap<>(readObject(originalGeneration.get("input", String.class)));
         input.put("originalUserInstruction", input.get("userInstruction"));
-        input.put("userInstruction", (chapterDraft ? "依据同一冻结来源修正下列明确局部问题，输出完整正文：" : "依据同一冻结来源修正下列明确局部问题，输出完整章节计划：") + canonicalJson(findings));
-        input.put("previousArtifact", Map.of("artifactId", artifactId, "artifactRevision", revision,
-                "payload", chapterDraft ? DurableChapterDraftArtifact.output(payload) : DurableBeatPlanArtifact.output(payload)));
+        input.put("userInstruction", (chapterDraft ? "依据同一冻结来源修正下列明确局部问题，输出完整正文："
+                : outlineSelection ? "依据同一冻结来源修正下列明确局部问题，仅输出完整选区 replacement："
+                : "依据同一冻结来源修正下列明确局部问题，输出完整章节计划：") + canonicalJson(findings));
+        if (outlineSelection) {
+            input.put("previousCandidate", Map.of("artifactId", artifactId, "artifactRevision", revision,
+                    "replacement", payload.get("replacement")));
+        } else {
+            input.put("previousArtifact", Map.of("artifactId", artifactId, "artifactRevision", revision,
+                    "payload", chapterDraft ? DurableChapterDraftArtifact.output(payload) : DurableBeatPlanArtifact.output(payload)));
+        }
         ExecutionPlanSnapshot.Step generator = plan.generator();
         String stepId = ids.next();
         String idempotencyKey = runId + "." + stepId;
@@ -1635,6 +1720,43 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 Integer.toString(generator.modelProfile().version()), generator.outputSchema().name(),
                 Integer.toString(generator.outputSchema().version()), json.writeValueAsString(generator.stepBudget().stored()), now, now);
         return true;
+    }
+
+    private DurableOutlineSelectionArtifact.Evidence outlineSelectionEvidence(DSLContext tx, Locked locked) {
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        Record evidence = tx.fetchOne("""
+                SELECT item.* FROM public."WorkflowEvidenceItem" item
+                JOIN public."WorkflowEvidenceBundle" bundle ON bundle.id = item."bundleId"
+                WHERE bundle.id = ? AND bundle."runId" = ? AND item."resourceType" = ?
+                  AND item."resourceId" = ? AND item.exists AND item."contentType" = 'text'
+                """, bundleId, locked.run().get("id", String.class),
+                locked.run().get("targetType", String.class), locked.run().get("targetId", String.class));
+        if (evidence == null || evidence.get("rangeJson", String.class) == null) {
+            throw invalid("大纲选区返工缺少冻结完整 Evidence");
+        }
+        Map<String, Object> range = readObject(evidence.get("rangeJson", String.class));
+        String content = evidence.get("contentText", String.class);
+        int start = integer(range, "startCodePoint");
+        int end = integer(range, "endCodePoint");
+        if (content == null || start < 0 || end <= start || end > content.codePointCount(0, content.length())) {
+            throw invalid("大纲选区返工来源范围无效");
+        }
+        requireOutlineSelectionMetadata(evidence, sha256(content), sha256(slice(content, start, end)));
+        return new DurableOutlineSelectionArtifact.Evidence(bundleId, evidence.get("id", String.class),
+                evidence.get("resourceType", String.class), evidence.get("resourceId", String.class),
+                DatabaseTimestamp.api(evidence.get("resourceUpdatedAt", LocalDateTime.class)),
+                evidence.get("contentText", String.class), evidence.get("contentSha256", String.class),
+                integer(range, "startCodePoint"), integer(range, "endCodePoint"));
+    }
+
+    private void requireOutlineSelectionMetadata(Record evidence, String sourceHash, String selectedHash) {
+        Map<String, Object> metadata = readObject(evidence.get("metadataJson", String.class));
+        if (!metadata.keySet().equals(java.util.Set.of("role", "baseContentHash", "selectedTextHash"))
+                || !"selection_source".equals(metadata.get("role"))
+                || !sourceHash.equals(metadata.get("baseContentHash"))
+                || !selectedHash.equals(metadata.get("selectedTextHash"))) {
+            throw invalid("大纲选区 Evidence 来源 metadata 不一致");
+        }
     }
 
     private Long automaticallyReviseChapter(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
@@ -1687,7 +1809,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Map<String, Object> oldPayload = readObject(revision.get("payloadJson", String.class));
         String bundleId = locked.step().get("evidenceBundleId", String.class);
         String manifest = tx.fetchOne("SELECT \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?", bundleId, runId).get(0, String.class);
-        DurableChapterDraftArtifact.reconstruct(oldPayload, readObject(revision.get("diffJson", String.class)), bundleId,
+        DurableChapterDraftArtifact.reconstruct(plan.operation().operation(), oldPayload, readObject(revision.get("diffJson", String.class)), bundleId,
                 manifest, locked.run().get("chapterId", String.class), chapterWritingContent(tx, locked));
         String content;
         try {
@@ -1702,7 +1824,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 "evidenceBundleId", bundleId, "findings", references);
         Map<String, Object> result = Map.of("artifactId", artifactId, "artifactRevision", oldRevision + 1, "contentSha256", output.get("contentSha256"));
         String resultHash = ExecutionCanonicalJson.sha256(result);
-        var stored = DurableChapterDraftArtifact.create(bundleId, manifest, locked.run().get("chapterId", String.class), output, stepId, resultHash);
+        var stored = DurableChapterDraftArtifact.create(plan.operation().operation(), bundleId, manifest, locked.run().get("chapterId", String.class), output, stepId, resultHash);
         Artifact artifact = persistCandidate(tx, locked, "chapter_draft", "章节正文草案", string(output, "summary"), stored.payload(), stored.diff(), now, "Core");
         int ordinal = tx.fetchOne("SELECT max(ordinal) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", runId).get(0, Integer.class) + 1;
         tx.execute("""

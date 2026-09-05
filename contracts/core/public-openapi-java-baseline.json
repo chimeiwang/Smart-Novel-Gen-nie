@@ -15604,6 +15604,11 @@
             "type": "string",
             "x-inkforge-source-nullable": true
           },
+          "reviewReport": {
+            "title": "Reviewreport",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
           "revision": {
             "exclusiveMinimum": 0.0,
             "title": "Revision",

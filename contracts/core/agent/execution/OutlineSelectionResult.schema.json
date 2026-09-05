@@ -1,0 +1,25 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/OutlineSelectionResult/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "contentSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contentsha256",
+      "type": "string"
+    },
+    "replacement": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Replacement",
+      "type": "string"
+    }
+  },
+  "required": [
+    "replacement",
+    "contentSha256"
+  ],
+  "title": "OutlineSelectionResult",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.OutlineSelectionResult"
+}

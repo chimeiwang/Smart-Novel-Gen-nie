@@ -17,6 +17,9 @@ class IntentExecutionPlanSnapshotTest {
 
     private static final List<String> OPERATIONS = List.of(
             "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter");
+    private static final List<String> FIVE_OPERATIONS = List.of(
+            "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.review_chapter",
+            "long_serial.rewrite_scene", "long_serial.write_chapter");
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
@@ -47,6 +50,26 @@ class IntentExecutionPlanSnapshotTest {
         assertThat(IntentExecutionPlanSnapshot.fromStored(copy(snapshot.stored())).stored()).isEqualTo(snapshot.stored());
         assertThat(json.writeValueAsString(snapshot.stored())).doesNotContain("systemPrompt", "endpointProfile", "apiKey");
         snapshot.requireInitialIdentity("long_serial", null, registry.catalogVersion());
+    }
+
+    @Test
+    void 新计划冻结五项而旧三项存储计划继续按原内容恢复() {
+        ExecutionRegistry registry = registry();
+        IntentExecutionPlanSnapshot old = IntentExecutionPlanSnapshot.freeze(registry, OPERATIONS);
+        Map<String, Object> oldStored = copy(old.stored());
+        IntentExecutionPlanSnapshot current = IntentExecutionPlanSnapshot.freeze(registry, FIVE_OPERATIONS);
+        assertThat(current.operationPlans()).extracting(plan -> plan.operation().key())
+                .containsExactlyElementsOf(FIVE_OPERATIONS);
+        IntentExecutionPlanSnapshot restoredOld = IntentExecutionPlanSnapshot.fromStored(oldStored);
+        assertThat(restoredOld.stored()).isEqualTo(old.stored());
+        assertThat(restoredOld.operationPlans()).extracting(plan -> plan.operation().key())
+                .containsExactlyElementsOf(OPERATIONS);
+        assertThat(current.requireOperationPlan("long_serial.review_chapter").operation().operation())
+                .isEqualTo("review_chapter");
+        assertThat(current.requireOperationPlan("long_serial.rewrite_scene").operation().operation())
+                .isEqualTo("rewrite_scene");
+        assertThatThrownBy(() -> current.requireOperationPlan("long_serial.rewrite_outline_selection"))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

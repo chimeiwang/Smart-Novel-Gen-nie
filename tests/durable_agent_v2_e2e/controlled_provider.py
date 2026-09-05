@@ -137,10 +137,10 @@ def _chapter_writing_revision(
     if len(envelopes) != 1 or not isinstance(envelopes[0], dict):
         raise ValueError("E2E 正文复审缺少唯一执行信封")
     envelope = envelopes[0]
-    if (envelope.get("workflow"), envelope.get("operation"), envelope.get("purpose")) != (
-        "long_serial",
-        "write_chapter",
-        "review",
+    if (
+        envelope.get("workflow") != "long_serial"
+        or envelope.get("operation") not in {"write_chapter", "rewrite_scene"}
+        or envelope.get("purpose") != "review"
     ):
         raise ValueError("E2E 正文复审执行身份不匹配")
     try:

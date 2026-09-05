@@ -20,6 +20,8 @@ from pydantic import (
     model_validator,
 )
 
+from .long_serial import SelectionTarget
+
 EXECUTION_PROTOCOL_VERSION = "2.0"
 EXECUTION_HASH_ALGORITHM = "inkforge-canonical-json/1"
 EXECUTION_CALLBACK_HTTP_METHOD = "PUT"
@@ -556,7 +558,7 @@ class IntentContext(_StrictModel):
     novelId: ExecutionId
     chapterId: ExecutionId
     chapterTitle: str
-    availableOperations: list[IntentAvailableOperation] = Field(min_length=1, max_length=3)
+    availableOperations: list[IntentAvailableOperation] = Field(min_length=1, max_length=5)
 
     @model_validator(mode="after")
     def validate_unique_operations(self) -> Self:
@@ -573,6 +575,67 @@ class ChapterDraftOutput(_StrictModel):
 
     summary: str = Field(min_length=1, max_length=1000, pattern=_CHAPTER_TEXT_PATTERN)
     content: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class ChapterReviewInput(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    userInstruction: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class ChapterReviewOutput(_StrictModel):
+    """作者可见的完整业务审阅报告；不是候选 EvidenceEvaluation。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    report: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class OutlineSelectionOutput(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    replacement: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class OutlineSelectionResult(OutlineSelectionOutput):
+    contentSha256: Sha256
+
+    @model_validator(mode="after")
+    def validate_derived_hash(self) -> Self:
+        expected = hashlib.sha256(self.replacement.encode("utf-8")).hexdigest()
+        if self.contentSha256 != expected:
+            raise ValueError("大纲选区 contentSha256 与完整 replacement 不一致")
+        return self
+
+
+class OutlineSelectionPreviousCandidate(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    artifactId: ExecutionId
+    artifactRevision: StrictPositiveInt
+    replacement: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+
+
+class OutlineSelectionInput(_StrictModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    userInstruction: str = Field(min_length=1, pattern=_CHAPTER_TEXT_PATTERN)
+    selectionTarget: SelectionTarget
+    originalUserInstruction: str | None = Field(
+        default=None, min_length=1, pattern=_CHAPTER_TEXT_PATTERN
+    )
+    previousCandidate: OutlineSelectionPreviousCandidate | None = None
+
+    @model_validator(mode="after")
+    def validate_revision_pair(self) -> Self:
+        fields = self.model_fields_set & {"originalUserInstruction", "previousCandidate"}
+        if fields and (
+            len(fields) != 2
+            or self.originalUserInstruction is None
+            or self.previousCandidate is None
+        ):
+            raise ValueError("大纲选区返工必须同时绑定原指令和精确上一候选")
+        return self
 
 
 class ChapterDraftResult(ChapterDraftOutput):
@@ -627,6 +690,15 @@ def materialize_chapter_draft_output(value: object) -> dict[str, JsonValue]:
         "wordCount": count_chapter_text_length(draft.content),
     }
     return ChapterDraftResult.model_validate(output).model_dump(mode="json")
+
+
+def materialize_outline_selection_output(value: object) -> dict[str, JsonValue]:
+    replacement = OutlineSelectionOutput.model_validate(value).replacement
+    result = {
+        "replacement": replacement,
+        "contentSha256": hashlib.sha256(replacement.encode("utf-8")).hexdigest(),
+    }
+    return OutlineSelectionResult.model_validate(result).model_dump(mode="json")
 
 
 class ChapterPlanSceneOutput(_StrictModel):

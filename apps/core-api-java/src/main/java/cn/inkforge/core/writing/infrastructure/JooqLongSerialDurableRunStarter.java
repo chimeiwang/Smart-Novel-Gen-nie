@@ -48,7 +48,8 @@ import tools.jackson.core.type.TypeReference;
 final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStarter {
 
     private static final Set<String> NATURAL_OPERATIONS = Set.of(
-            "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter");
+            "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.review_chapter",
+            "long_serial.rewrite_scene", "long_serial.write_chapter");
 
     private final CoreDatabase database;
     private final LongSerialRunAssembler assembler;
@@ -94,8 +95,11 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
         this.planners = Map.of(
                 "long_serial.answer_question", this::planAnswerQuestion,
                 "long_serial.plan_chapter", this::planChapter,
+                "long_serial.review_chapter", this::planChapterReview,
+                "long_serial.rewrite_scene", this::planSceneRewrite,
                 "long_serial.write_chapter", this::planChapterWriting,
-                "long_serial.rewrite_chapter_selection", this::planChapterSelectionRewrite);
+                "long_serial.rewrite_chapter_selection", this::planChapterSelectionRewrite,
+                "long_serial.rewrite_outline_selection", this::planOutlineSelectionRewrite);
     }
 
     @Override
@@ -152,6 +156,8 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 String description = switch (operation) {
                     case "answer_question" -> "回答当前章节的问题";
                     case "plan_chapter" -> "生成当前章节的剧情规划";
+                    case "review_chapter" -> "审阅当前章节并生成完整报告";
+                    case "rewrite_scene" -> "按要求改写场景并形成完整章节候选";
                     case "write_chapter" -> "生成当前章节的完整正文草案";
                     default -> throw new IllegalStateException("自然入口包含未支持操作");
                 };
@@ -322,6 +328,52 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                 assembled.selectionAttachmentMetadata());
     }
 
+    private PreparedStart planOutlineSelectionRewrite(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        PreparedStart selection = planChapterSelectionRewrite(
+                transaction, userId, request, normalized);
+        return new PreparedStart(
+                selection.runKind(),
+                selection.targetType(),
+                selection.targetId(),
+                Map.of(
+                        "userInstruction", request.getUserInstruction(),
+                        "selectionTarget", normalized.body().get("selectionTarget")),
+                selection.evidenceItems(),
+                selection.userMessageSource());
+    }
+
+    private PreparedStart planChapterReview(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        requireLongSerialOwner(transaction, userId, request);
+        var evidence = chapterWritingSources.capture(
+                transaction, request.getNovelId(), request.getChapterId(), request.getUserInstruction());
+        return new PreparedStart(
+                "chat",
+                "chapter",
+                request.getChapterId(),
+                Map.of("userInstruction", request.getUserInstruction()),
+                List.of(new WorkflowEvidenceItemPlan(
+                        "chapter_writing_context", request.getChapterId(), true, null,
+                        evidence.chapterUpdatedAt(), null, evidence.context(), null, null,
+                        Map.of("role", "chapter_writing_context"))),
+                null);
+    }
+
+    private PreparedStart planSceneRewrite(
+            DSLContext transaction,
+            String userId,
+            LongSerialStartWritingRunRequest request,
+            LongSerialRunAssembler.Normalized normalized) {
+        return planChapterWriting(transaction, userId, request, normalized);
+    }
+
     private PreparedStart planAnswerQuestion(
             DSLContext transaction,
             String userId,
@@ -489,13 +541,16 @@ final class JooqLongSerialDurableRunStarter implements LongSerialDurableRunStart
                     "IDEMPOTENCY_KEY_REUSED",
                     "同一 clientRequestId 已用于不同 Agent 请求");
         }
-        if (IntentExecutionPlanSnapshot.PLAN_VERSION.equals(json.readTree(run.get("modelPolicyJson", String.class))
-                .path("planVersion").asText())) {
-            if (executionContexts == null) throw new IllegalStateException("自然 Run 的重放上下文未装配");
-            // 自然 Run 会从问题推进到业务 Artifact；重放与 GET 必须共用完整权威投影。
+        if (executionContexts != null) {
+            // 自然 Run 会从问题推进到业务 Artifact，显式整章审阅还需投影完整报告；
+            // 生产装配下所有 V2 重放与 GET 共用同一份权威查询。
             return (WritingRunV2Response) new JooqWritingRunQueryRepository(database,
                     new WritingRunStatusProjector(json, new WritingRunOutcomeProjector(), clock),
                     new WritingRunCursor(json), json, true, executionContexts).getPublic(userId, run.get("id", String.class));
+        }
+        if (IntentExecutionPlanSnapshot.PLAN_VERSION.equals(json.readTree(run.get("modelPolicyJson", String.class))
+                .path("planVersion").asText())) {
+            throw new IllegalStateException("自然 Run 的重放上下文未装配");
         }
         List<Record> activeStepRecords = transaction.fetch(
                 """

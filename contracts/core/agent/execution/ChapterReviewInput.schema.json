@@ -1,0 +1,19 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/ChapterReviewInput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "userInstruction": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Userinstruction",
+      "type": "string"
+    }
+  },
+  "required": [
+    "userInstruction"
+  ],
+  "title": "ChapterReviewInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChapterReviewInput"
+}

@@ -11,13 +11,13 @@
       "deploymentProfileKey": "deployment.editor.answer.v1"
     },
     {
-      "key": "editor.chapter_review.v1",
+      "key": "editor.chapter_review_text.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "disabled",
-      "purpose": "evaluation",
-      "promptProfile": "prompt.unavailable.evaluation.v1",
-      "deploymentProfileKey": "deployment.unavailable.evaluation.v1"
+      "purpose": "generation",
+      "promptProfile": "prompt.editor.chapter_review_text.v1",
+      "deploymentProfileKey": "deployment.editor.chapter_review_text.v1"
     },
     {
       "key": "lore.generator.v1",
@@ -76,11 +76,11 @@
     {
       "key": "plot.outline_selection.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "bounded",
       "purpose": "generation",
-      "promptProfile": "prompt.unavailable.generation.v1",
-      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+      "promptProfile": "prompt.plot.outline_selection.v1",
+      "deploymentProfileKey": "deployment.plot.outline_selection.v1"
     },
     {
       "key": "plot.short_medium_outline.v1",
@@ -229,11 +229,11 @@
     {
       "key": "writer.scene_rewrite.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "reasoningMode": "bounded",
       "purpose": "generation",
-      "promptProfile": "prompt.unavailable.generation.v1",
-      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+      "promptProfile": "prompt.writer.scene_rewrite.v1",
+      "deploymentProfileKey": "deployment.writer.scene_rewrite.v1"
     },
     {
       "key": "writer.short_medium_manuscript.v1",
@@ -270,6 +270,15 @@
       "purpose": "review",
       "promptProfile": "prompt.reviewer.chapter_draft_editorial.v1",
       "deploymentProfileKey": "deployment.reviewer.chapter_draft_editorial.v1"
+    },
+    {
+      "key": "reviewer.outline_selection_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.outline_selection_editorial.v1",
+      "deploymentProfileKey": "deployment.reviewer.outline_selection_editorial.v1"
     }
   ]
 }

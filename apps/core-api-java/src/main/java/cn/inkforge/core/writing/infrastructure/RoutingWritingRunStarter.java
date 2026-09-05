@@ -134,8 +134,8 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
             }
             if (routeDurable) {
                 if (locked && isDurableMutation(request)) {
-                    requireNoActiveLegacyMutation(transaction, scope.chapterId());
-                    requireNoActiveDurableMutation(transaction, scope.chapterId());
+                    requireNoActiveLegacyMutation(transaction, scope);
+                    requireNoActiveDurableMutation(transaction, scope);
                 }
                 if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
                     return durable.startNatural(userId, natural.request());
@@ -144,7 +144,7 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 return durable.startFresh(userId, durableRequest);
             }
             if (locked && isLegacyMutation(request)) {
-                requireNoActiveDurableMutation(transaction, scope.chapterId());
+                requireNoActiveDurableMutation(transaction, scope);
             }
             return legacy.start(userId, request);
         });
@@ -243,21 +243,22 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
     private static StartScope startScope(ParsedWritingRunStartRequest request) {
         if (request instanceof ParsedWritingRunStartRequest.Natural value) {
             var body = value.request();
-            return new StartScope(body.getNovelId(), body.getChapterId(), body.getWritingSessionId());
+            return new StartScope(body.getNovelId(), body.getChapterId(), body.getWritingSessionId(),
+                    mutationTarget("chapter", body.getChapterId()));
         }
         if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
             LongSerialStartWritingRunRequest body = value.request();
-            return new StartScope(
-                    body.getNovelId(),
-                    body.getChapterId(),
-                    nullable(body.getWritingSessionId()));
+            MutationTarget target = body.getOperation() == LongSerialStartWritingRunRequest.OperationEnum.REWRITE_OUTLINE_SELECTION
+                    && body.getSelectionTarget() != null
+                    ? mutationTarget(body.getSelectionTarget().getResourceType().getValue(),
+                            body.getSelectionTarget().getResourceId())
+                    : mutationTarget("chapter", body.getChapterId());
+            return new StartScope(body.getNovelId(), body.getChapterId(), nullable(body.getWritingSessionId()), target);
         }
         if (request instanceof ParsedWritingRunStartRequest.Legacy value) {
             var body = value.request();
-            return new StartScope(
-                    body.getNovelId(),
-                    body.getChapterId(),
-                    nullable(body.getWritingSessionId()));
+            return new StartScope(body.getNovelId(), body.getChapterId(), nullable(body.getWritingSessionId()),
+                    mutationTarget("chapter", body.getChapterId()));
         }
         return null;
     }
@@ -297,39 +298,39 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         return session != null;
     }
 
-    private void requireNoActiveLegacyMutation(
-            DSLContext transaction, String chapterId) {
+    private void requireNoActiveLegacyMutation(DSLContext transaction, StartScope scope) {
         List<Record> rows = transaction.fetch(
                 """
-                SELECT task.id, command."payloadJson"
+                SELECT task.id, task."chapterId", command."payloadJson"
                 FROM public."WritingTask" AS task
                 LEFT JOIN public."WritingRunCommand" AS command
                   ON command."taskId" = task.id AND command.kind = 'start'
-                WHERE task."chapterId" = ? AND task.phase NOT IN ('completed', 'error')
+                WHERE task."novelId" = ? AND task.phase NOT IN ('completed', 'error')
                 ORDER BY task."createdAt" ASC, task.id ASC
                 FOR UPDATE OF task
                 """,
-                chapterId);
+                scope.novelId());
         Set<String> seen = new HashSet<>();
         for (Record row : rows) {
             String taskId = row.get("id", String.class);
-            if (seen.add(taskId)
-                    && startPayloadMutating(row.get("payloadJson", String.class))) {
+            if (seen.add(taskId) && startPayloadConflicts(
+                    row.get("payloadJson", String.class),
+                    row.get("chapterId", String.class),
+                    scope)) {
                 throw busy();
             }
         }
     }
 
-    private void requireNoActiveDurableMutation(
-            DSLContext transaction, String chapterId) {
+    private void requireNoActiveDurableMutation(DSLContext transaction, StartScope scope) {
         List<Record> active = transaction.fetch(
                 """
                 SELECT id, workflow, operation, "operationCatalogVersion", "chapterId", "targetType", "targetId", "modelPolicyJson" FROM public."WorkflowRun"
-                WHERE "engineVersion" = 2 AND "chapterId" = ?
+                WHERE "engineVersion" = 2 AND "novelId" = ?
                   AND status IN ('pending', 'running', 'waiting_user')
                 ORDER BY "createdAt", id
                 """,
-                chapterId);
+                scope.novelId());
         for (Record run : active) {
             boolean mutating = executionContexts == null
                     ? executionPlan(run.get("modelPolicyJson", String.class)).operation().mutating()
@@ -338,7 +339,12 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                             run.get("operationCatalogVersion", String.class), run.get("chapterId", String.class),
                             run.get("targetType", String.class), run.get("targetId", String.class)),
                             json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<Map<String, Object>>() {})).conservativeMutating();
-            if (mutating) {
+            String targetType = run.get("targetType", String.class);
+            String targetId = run.get("targetId", String.class);
+            boolean sameChapter = scope.chapterId().equals(run.get("chapterId", String.class));
+            boolean sameTarget = targetType == null || targetId == null
+                    || scope.mutationTarget().equals(mutationTarget(targetType, targetId));
+            if (mutating && (sameChapter || sameTarget)) {
                 throw busy();
             }
         }
@@ -390,8 +396,10 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         };
     }
 
-    private boolean startPayloadMutating(String serialized) {
-        if (serialized == null) return true;
+    private boolean startPayloadConflicts(
+            String serialized, String existingChapterId, StartScope requested) {
+        boolean sameChapter = requested.chapterId().equals(existingChapterId);
+        if (serialized == null) return sameChapter;
         Map<String, Object> payload;
         try {
             Object parsed = json.readValue(serialized, new TypeReference<Object>() {});
@@ -402,25 +410,35 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 payload.put(key, entry.getValue());
             }
         } catch (RuntimeException exception) {
-            return true;
+            return sameChapter;
         }
         Object metadata = payload.get("_inkforgeCommand");
         if (!(metadata instanceof Map<?, ?> map)
                 || !"start".equals(map.get("commandKind"))) {
-            return true;
+            return sameChapter;
         }
         Object job = payload.get("job");
         if (!(job instanceof Map<?, ?> value)
                 || !"long_serial".equals(value.get("workflow"))
                 || !(value.get("operation") instanceof String operation)) {
-            return true;
+            return sameChapter;
         }
-        return !PROVABLY_READ_ONLY_LEGACY_OPERATIONS.contains(operation);
+        if (PROVABLY_READ_ONLY_LEGACY_OPERATIONS.contains(operation)) return false;
+        if (sameChapter) return true;
+        if (!"rewrite_outline_selection".equals(operation)) {
+            return requested.mutationTarget().equals(
+                    mutationTarget("chapter", existingChapterId));
+        }
+        Object selectionValue = value.get("selectionTarget");
+        if (!(selectionValue instanceof Map<?, ?> selection)
+                || !(selection.get("resourceType") instanceof String type)
+                || !(selection.get("resourceId") instanceof String id)) return false;
+        return requested.mutationTarget().equals(new MutationTarget(type, id));
     }
 
     private static ApiException busy() {
         return new ApiException(
-                409, "WRITING_TARGET_BUSY", "当前章节已有进行中的写作任务");
+                409, "WRITING_TARGET_BUSY", "当前写作目标已有进行中的写作任务");
     }
 
     private static ApiException foregroundBusy() {
@@ -448,5 +466,11 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
         return value != null && value.isPresent() ? value.orElse(null) : null;
     }
 
-    private record StartScope(String novelId, String chapterId, String writingSessionId) {}
+    private static MutationTarget mutationTarget(String type, String id) {
+        return new MutationTarget("chapter".equals(type) ? "chapter_content" : type, id);
+    }
+
+    private record MutationTarget(String type, String id) {}
+    private record StartScope(
+            String novelId, String chapterId, String writingSessionId, MutationTarget mutationTarget) {}
 }

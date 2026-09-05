@@ -9,9 +9,18 @@ from inkforge_core.writing.schemas import (
     ClarifyWritingRunRequest,
     NaturalStartWritingRunRequest,
     WritingRunStartRequest,
+    WritingRunV2Response,
 )
 from inkforge_core.writing.tasks import WritingTaskService
 from pydantic import TypeAdapter, ValidationError
+
+
+def test_optional_v2_review_report_omits_none_and_preserves_complete_text():
+    response = WritingRunV2Response.model_construct()
+    assert "reviewReport" not in response.model_dump(mode="json")
+    report = "  完整审阅😀\r\n" * 10_001 + "尾部🚀"
+    response = WritingRunV2Response.model_construct(reviewReport=report)
+    assert response.model_dump(mode="json")["reviewReport"] == report
 
 
 def natural():

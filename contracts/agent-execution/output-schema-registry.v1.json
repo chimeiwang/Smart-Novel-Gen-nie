@@ -377,6 +377,28 @@
       }
     },
     {
+      "key": "output.chapter_review_text.v1",
+      "version": 1,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "711a51ffb3ea23b0ce9ec3200a6f896a0d7fa017656ca9cf17f5259cb10f376e",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "minLength": 1,
+            "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+            "type": "string"
+          }
+        },
+        "required": [
+          "report"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "key": "output.chapter_selection_replacement.v1",
       "version": 1,
       "supported": true,
@@ -465,15 +487,23 @@
     {
       "key": "output.outline_selection_replacement.v1",
       "version": 1,
-      "supported": false,
+      "supported": true,
       "purpose": "generation",
-      "sha256": "7cce9970b1299f7789482edd63b456ed5edd6cb79dd6d9be98e076866db957e5",
+      "sha256": "9a3edede8ca19edf83edf90b63bab136dc63aff5d21b329c575085175f250090",
       "jsonSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
         "additionalProperties": false,
-        "required": [],
-        "properties": {}
+        "properties": {
+          "replacement": {
+            "minLength": 1,
+            "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+            "type": "string"
+          }
+        },
+        "required": [
+          "replacement"
+        ],
+        "type": "object"
       }
     },
     {

@@ -28,7 +28,8 @@ public final class IntentExecutionPlanSnapshot {
     public static final int MAX_CLARIFICATIONS = 2;
     public static final int MAX_RESOLVER_STEPS = MAX_CLARIFICATIONS + 1;
     private static final Set<String> ALLOWED_OPERATIONS = Set.of(
-            "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter");
+            "long_serial.answer_question", "long_serial.plan_chapter", "long_serial.review_chapter",
+            "long_serial.rewrite_scene", "long_serial.write_chapter");
     private static final Set<String> ROOT_KEYS = Set.of("planVersion", "hashAlgorithm", "planSha256", "plan");
     private static final Set<String> PLAN_KEYS = Set.of(
             "workflow", "operationCatalogVersion", "executionManifestFingerprint", "resolver",
@@ -181,7 +182,7 @@ public final class IntentExecutionPlanSnapshot {
         if (keys == null || keys.isEmpty() || keys.size() > ALLOWED_OPERATIONS.size()
                 || new LinkedHashSet<>(keys).size() != keys.size()
                 || keys.stream().anyMatch(key -> key == null || !ALLOWED_OPERATIONS.contains(key))) {
-            throw invalid("自然入口授权操作必须非空、无重复且只含已接通的问答、规划、正文");
+            throw invalid("自然入口授权操作必须非空、无重复且只含已接通的五项当前章操作");
         }
     }
 

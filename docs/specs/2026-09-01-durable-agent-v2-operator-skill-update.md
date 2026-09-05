@@ -3,7 +3,7 @@
 ## 状态与适用边界
 
 - 日期：2026-09-01
-- 终审更新：2026-09-04
+- 最近更新：2026-09-05；新增审阅/改写章节，本阶段验收状态见对应规格。
 - 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
@@ -53,7 +53,7 @@ Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成�
 
 ## 命令面与 Skill 行为变化
 
-2026-09-04 普通聊天迁移补充：`2026-09-04-durable-natural-language-entry.md` 仍在实施。当前分支已接通
+2026-09-04 普通聊天迁移补充：`2026-09-04-durable-natural-language-entry.md` 已完成本地隔离验收。当前分支已接通
 通用 Java/Python CLI 的自然输入与澄清模式，Web 区分新请求、当前澄清与明确草案返工；完整验收状态以该规格
 为准。本轮没有更新两份已安装 Skill 的脚本、说明或固定 JAR，也没有部署服务器。
 
@@ -71,6 +71,31 @@ Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成�
   猜测问题已回答。没有新增 SSE 事件类型或 CLI 命令名。
 - 仓内 README、`SKILL.md`、命令参考和固定 JAR 的升级是不同动作；本轮只提供说明，安装必须另获明确要求，
   不能把旧包的成功身份验证当作新模式可用。
+
+### 整章审阅与改写（2026-09-05）
+
+本节供后续更新两份 Skill 的说明与命令参考使用，当前不修改活动 Skill、固定 JAR 或其允许范围。
+对应实现和验收记录见 `2026-09-05-durable-review-and-rewrites.md`。
+
+| 操作 | 通用 CLI 输入与结果 | 后续 Skill 说明应写明 |
+| --- | --- | --- |
+| review_chapter | 显式 start 可省略 writingSessionId；V2 完成后 get/watch 的 data.reviewReport 保留全文 | 报告不产生 Artifact，不执行 approve；未绑定会话也能直接读取；不要用是否有消息判断任务失败 |
+| rewrite_scene | 完整章节草案，approve 只接受 editedContent 或 editedContentFile | 当前 wrapper 未允许此操作；场景由指令指定，程序不承诺未绑定区域逐字不变 |
+| rewrite_outline_selection | Outline 行或 OutlineNode 行的完整来源和精确 selectionTarget；approve 只接受 editedReplacement 或 editedReplacementFile | 当前 wrapper 未允许；来源必须是同小说的真实行 ID，不能拿 novelId/章节 ID 替代 |
+
+审阅的正常顺序是 `long.agent.start` → `long.task.watch` → 必要时 `long.task.get`。watcher 最终
+`type=terminal,data.status=completed,data.reviewReport` 才是 V2 已完成结果；V1 仍按 outcome 判定。
+`long.task.get` 指定 outputFile 时保存完整 JSON，其中 reviewReport 保留空格、换行和 Unicode，不裁切正文。
+会话存在时还会保存编辑消息，但调用者无须额外创建会话才能读报告。
+
+两类改写的通用 CLI 顺序是 start → watch 的 waiting_user → artifact.get 指定 revision →
+artifact.approve/revise/discard。正文编辑与选区编辑字段不可互换；决定带 expectedRevision 和稳定
+clientRequestId，网络结果不确定时重放原决定或回读同一 Run，不能另起一个改写任务冒充重试。
+
+自然入口新增 review_chapter 与 rewrite_scene；outline 选区仍需显式绑定，不能从文字猜选区。
+两份 Operator 仍拒绝任何 inputMode、rewrite_scene 和 rewrite_outline_selection；原三操作中的
+review_chapter 只有目标 Core 命中已验收 V2 路由时才返回上述新格式。更新 Skill 时应记录对应 Core 版本、
+固定 JAR 来源和离线验证结果，不能把本节存在解释为安装或生产已经完成。
 
 2026-09-01 问答阶段的 CLI 命令名不变；当时只有 `long.agent.start` 的 Operation 集合增加了 `answer_question`。已有 Operation 的输入和结果
 语义、身份预检、固定 origin/profile、Keychain 与幂等边界保持不变。`long.task.watch` 的命令名和中断语义不变，

@@ -196,6 +196,14 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   Reviewer 的结构化 candidatePatch 与 suggestion 解释文字严格区分；Core 独占局部修改、全篇返工、
   不可变 revision 和正式采用。零模型 candidate_patch 是 Core 的 persistence/control Step，不调用 Agent，
   不伪造模型用量或积分预留；最多一次自动修改后必须再次双复审，剩余问题交作者。
+- V2 `long_serial.review_chapter` 使用独立 `editor.chapter_review_text.v1`，消费完整
+  `chapter_writing_context`，只输出非空白完整 report；Core 负责只读完成和可选会话消息，不产生 Artifact。
+  它不是输出 contentVerdict/findings 的候选 Reviewer，也不更新质量终检。`rewrite_scene` 使用场景专用
+  生成提示、完整 ChapterDraft 结果与正文双 Reviewer；真实 operation 始终保留，不生成程序场景范围。
+  `rewrite_outline_selection` 只消费总纲/节点的完整 text Evidence 和精确 range，返回 replacement 与
+  程序派生哈希，单独大纲编辑 Reviewer 复审。Core 独占拼接、返工和最终采用。
+  自然解析支持新冻结的五项无选区操作；旧三项快照仍按原授权集合恢复。具体本地验收状态见
+  `docs/specs/2026-09-05-durable-review-and-rewrites.md`，代码支持不表示服务器已开放。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

@@ -24231,6 +24231,17 @@
             ],
             "title": "Operation"
           },
+          "reviewReport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewreport"
+          },
           "revision": {
             "exclusiveMinimum": 0.0,
             "title": "Revision",

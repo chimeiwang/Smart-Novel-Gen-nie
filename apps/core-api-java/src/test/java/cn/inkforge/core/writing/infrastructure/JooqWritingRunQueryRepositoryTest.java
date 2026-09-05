@@ -22,6 +22,8 @@ import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
+import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -53,6 +55,8 @@ class JooqWritingRunQueryRepositoryTest {
     private static final ExecutionPlanSnapshot EXECUTION_PLAN =
             EXECUTION_REGISTRY.freezePlan(
                     "long_serial.rewrite_chapter_selection", false);
+    private static final ExecutionPlanSnapshot REVIEW_PLAN =
+            EXECUTION_REGISTRY.freezePlan("long_serial.review_chapter", false);
 
     @Container
     private static final PostgreSQLContainer POSTGRES =
@@ -384,6 +388,62 @@ class JooqWritingRunQueryRepositoryTest {
     }
 
     @Test
+    void 完成整章审阅仅GET投影完整报告而列表与其他操作不携带() {
+        Fixture fixture = fixture("writing-query-review-report");
+        String report = "  第一段完整报告😀\r\n\r\n第二段保留尾部空格  \n";
+        insertCompletedReviewRun(fixture, "run-review-report", report, NOW.plusSeconds(10));
+
+        WritingRunV2Response single = v2(fixture.userId(), "run-review-report");
+        assertThat(single.getReviewReport()).isEqualTo(report);
+        var listed = repository.list(
+                fixture.userId(), fixture.novelId(), null, null,
+                "review_chapter", "succeeded", null, 10);
+        assertThat(listed.getItems())
+                .singleElement()
+                .satisfies(item -> assertThat(((WritingRunV2Response) item).getReviewReport())
+                        .isNull());
+
+        insertV2Run(
+                fixture,
+                "run-non-review-report",
+                "completed",
+                "rewrite_chapter_selection",
+                NOW.plusSeconds(11),
+                fixture.chapterId(),
+                null,
+                null);
+        insertV2Step(
+                "run-non-review-report",
+                "step-non-review-report",
+                1,
+                "completed",
+                NOW.plusSeconds(11),
+                null);
+        assertThat(v2(fixture.userId(), "run-non-review-report").getReviewReport()).isNull();
+    }
+
+    @Test
+    void 完成整章审阅缺少唯一合法generation结果时拒绝伪装终态() {
+        Fixture fixture = fixture("writing-query-review-missing");
+        insertV2Run(
+                fixture,
+                "run-review-missing",
+                "completed",
+                REVIEW_PLAN,
+                NOW.plusSeconds(12),
+                fixture.chapterId(),
+                null,
+                null,
+                null,
+                "chat",
+                "chapter");
+
+        assertThatThrownBy(() -> repository.getPublic(fixture.userId(), "run-review-missing"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("只有一个 generation");
+    }
+
+    @Test
     void 列表按创建时间和ID稳定倒序且保留无会话任务() {
         Fixture fixture = fixture("writing-query-list");
         insertTask(fixture, "task-older", NOW, "session-1");
@@ -590,9 +650,34 @@ class JooqWritingRunQueryRepositoryTest {
         if (!EXECUTION_PLAN.operation().operation().equals(operation)) {
             throw new IllegalArgumentException("V2 fixture operation 与冻结计划不一致");
         }
+        insertV2Run(
+                fixture,
+                runId,
+                status,
+                EXECUTION_PLAN,
+                createdAt,
+                chapterId,
+                cancelRequestedAt,
+                errorCode,
+                writingSessionId,
+                "chapter_generation",
+                chapterId == null ? null : "chapter_content");
+    }
+
+    private void insertV2Run(
+            Fixture fixture,
+            String runId,
+            String status,
+            ExecutionPlanSnapshot plan,
+            LocalDateTime createdAt,
+            String chapterId,
+            LocalDateTime cancelRequestedAt,
+            String errorCode,
+            String writingSessionId,
+            String runKind,
+            String targetType) {
         boolean terminal = Set.of("completed", "failed", "cancelled").contains(status);
         String cancelRequestId = cancelRequestedAt == null ? null : "cancel-" + runId;
-        String targetType = chapterId == null ? null : "chapter_content";
         database.dsl().execute(
                 """
                 INSERT INTO public."WorkflowRun" (
@@ -603,7 +688,7 @@ class JooqWritingRunQueryRepositoryTest {
                   "lastEventSequence", revision, "cancelRequestId",
                   "cancelRequestedAt", "completedAt", "errorCode"
                 ) VALUES (
-                  ?, ?, ?, ?, CAST('chapter_generation' AS public."WorkflowRunKind"),
+                  ?, ?, ?, ?, CAST(? AS public."WorkflowRunKind"),
                   CAST(? AS public."WorkflowRunStatus"), ?, ?, 2, ?, ?,
                   ?, ?, ?, ?, ?, ?, '{}', ?, 7, 3, ?, ?, ?, ?
                 )
@@ -612,22 +697,116 @@ class JooqWritingRunQueryRepositoryTest {
                 fixture.novelId(),
                 chapterId,
                 fixture.userId(),
+                runKind,
                 status,
                 createdAt,
                 createdAt,
-                EXECUTION_PLAN.operation().workflow(),
-                operation,
-                EXECUTION_PLAN.operationCatalogVersion(),
+                plan.operation().workflow(),
+                plan.operation().operation(),
+                plan.operationCatalogVersion(),
                 writingSessionId,
                 "idempotency-" + runId,
                 "a".repeat(64),
                 targetType,
                 chapterId,
-                JSON.writeValueAsString(EXECUTION_PLAN.stored()),
+                JSON.writeValueAsString(plan.stored()),
                 cancelRequestId,
                 cancelRequestedAt,
                 terminal ? createdAt.plusSeconds(1) : null,
                 errorCode);
+    }
+
+    private void insertCompletedReviewRun(
+            Fixture fixture, String runId, String report, LocalDateTime createdAt) {
+        insertV2Run(
+                fixture,
+                runId,
+                "completed",
+                REVIEW_PLAN,
+                createdAt,
+                fixture.chapterId(),
+                null,
+                null,
+                null,
+                "chat",
+                "chapter");
+        ExecutionPlanSnapshot.Step generator = REVIEW_PLAN.generator();
+        Map<String, Object> input = Map.of("userInstruction", "请完整审阅当前章节");
+        Map<String, Object> output = Map.of("report", report);
+        String deploymentProfile = generator.modelProfile().deploymentProfileKey();
+        String reasoningMode = generator.modelProfile().reasoningMode();
+        Map<String, Object> resolvedModel = Map.of(
+                "deploymentProfileKey", deploymentProfile,
+                "deploymentFingerprint", WorkflowResolvedModel.fingerprint(
+                        deploymentProfile,
+                        "fake",
+                        "fake",
+                        "transport.fake.v1",
+                        "endpoint.local-fake.v1",
+                        "responses_json_schema_v1",
+                        "capability.fake.structured-output.v1",
+                        reasoningMode,
+                        true),
+                "provider", "fake",
+                "model", "fake",
+                "transportProfile", "transport.fake.v1",
+                "endpointProfile", "endpoint.local-fake.v1",
+                "structuredOutputRoute", "responses_json_schema_v1",
+                "capabilityVersion", "capability.fake.structured-output.v1",
+                "reasoningMode", reasoningMode,
+                "supportsRequestIdempotency", true);
+        Map<String, Object> usage = Map.ofEntries(
+                Map.entry("usageStatus", "complete"),
+                Map.entry("inputTokens", 10),
+                Map.entry("cachedTokens", 0),
+                Map.entry("promptCacheMissTokens", 10),
+                Map.entry("completionTokens", 6),
+                Map.entry("reasoningTokens", 0),
+                Map.entry("visibleOutputTokens", 6),
+                Map.entry("costMicros", 0),
+                Map.entry("providerAttempts", 1),
+                Map.entry("protocolCorrections", 0),
+                Map.entry("wallTimeMillis", 12));
+        Map<String, Object> resultMaterial = Map.of(
+                "resultKind", "output",
+                "resolvedModel", resolvedModel,
+                "usage", usage,
+                "value", output);
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, output,
+                  "createdAt", ordinal, purpose, lane, "attemptCount", "fencingToken",
+                  "idempotencyKey", "requestHash", "inputHash", "resultHash",
+                  "modelProfile", "modelProfileVersion", "outputSchema",
+                  "outputSchemaVersion", "budgetJson", "resolvedModelJson", "usageJson",
+                  "submittedAt", "updatedAt", "completedAt"
+                ) VALUES (
+                  ?, ?, 'editor', CAST('agent' AS public."WorkflowStepType"),
+                  CAST('completed' AS public."WorkflowStepStatus"), ?, ?, ?, 1,
+                  'generation', ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                "step-" + runId,
+                runId,
+                JSON.writeValueAsString(input),
+                JSON.writeValueAsString(output),
+                createdAt,
+                generator.lane(),
+                "idempotency-step-" + runId,
+                "b".repeat(64),
+                ExecutionCanonicalJson.sha256(input),
+                ExecutionCanonicalJson.sha256(resultMaterial),
+                generator.modelProfile().profile(),
+                Integer.toString(generator.modelProfile().version()),
+                generator.outputSchema().name(),
+                Integer.toString(generator.outputSchema().version()),
+                JSON.writeValueAsString(generator.stepBudget().stored()),
+                JSON.writeValueAsString(resolvedModel),
+                JSON.writeValueAsString(usage),
+                createdAt,
+                createdAt,
+                createdAt.plusSeconds(1));
     }
 
     private void insertV2Step(

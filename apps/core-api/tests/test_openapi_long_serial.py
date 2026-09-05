@@ -287,6 +287,7 @@ def test_openapi_run_responses_use_explicit_engine_discriminators() -> None:
         "artifact",
         "error",
         "clarification",
+        "reviewReport",
         "commandId",
         "commandStatus",
     }
@@ -308,6 +309,9 @@ def test_openapi_run_responses_use_explicit_engine_discriminators() -> None:
     assert v2["properties"]["engineVersion"]["const"] == 2
     assert v2["properties"]["commandId"]["enum"] == [None]
     assert v2["properties"]["commandStatus"]["enum"] == [None]
+    assert v2["properties"]["reviewReport"]["anyOf"] == [
+        {"type": "string"}, {"type": "null"},
+    ]
     assert v2["properties"]["clarification"]["anyOf"] == [
         {"$ref": "#/components/schemas/WorkflowClarificationSnapshot"},
         {"type": "null"},

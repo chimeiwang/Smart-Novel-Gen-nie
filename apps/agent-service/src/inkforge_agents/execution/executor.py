@@ -19,6 +19,8 @@ from inkforge_contracts.execution import (
     ChapterPlanInput,
     ChapterPlanOutput,
     ChapterPlanResult,
+    ChapterReviewInput,
+    ChapterReviewOutput,
     ChatAnswerInput,
     ChatAnswerOutput,
     EvidenceEvaluation,
@@ -28,6 +30,9 @@ from inkforge_contracts.execution import (
     IntentContext,
     IntentResolutionInput,
     IntentResolutionOutput,
+    OutlineSelectionInput,
+    OutlineSelectionOutput,
+    OutlineSelectionResult,
     ProposedCommand,
     ResolvedModelRef,
     StepUsage,
@@ -36,6 +41,7 @@ from inkforge_contracts.execution import (
     canonical_execution_sha256,
     materialize_chapter_draft_output,
     materialize_chapter_plan_output,
+    materialize_outline_selection_output,
 )
 from pydantic import JsonValue, ValidationError
 
@@ -77,9 +83,14 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
         ("long_serial", "plan_chapter"),
         ("long_serial", "write_chapter"),
         ("long_serial", "rewrite_chapter_selection"),
+        ("long_serial", "rewrite_scene"),
+        ("long_serial", "rewrite_outline_selection"),
+        ("long_serial", "review_chapter"),
     }
 )
-_INTENT_OPERATIONS = frozenset({"answer_question", "plan_chapter", "write_chapter"})
+_INTENT_OPERATIONS = frozenset(
+    {"answer_question", "plan_chapter", "write_chapter", "rewrite_scene", "review_chapter"}
+)
 
 
 class ExecutionModelPort(Protocol):
@@ -167,9 +178,7 @@ class StatelessExecutionStepExecutor:
     ) -> bool:
         """验证当前 Provider 能精确执行 journal 冻结的部署身份。"""
 
-        if not self._model.supports_structured_output(
-            resolved.structuredOutputRoute
-        ):
+        if not self._model.supports_structured_output(resolved.structuredOutputRoute):
             return False
         try:
             current = _resolved_model(
@@ -203,9 +212,7 @@ class StatelessExecutionStepExecutor:
                 raise ExecutionCapabilityError("业务 Step 必须绑定 operation")
             operation = registry.resolve(request.workflow, request.operation)
         except ExecutionRegistryError as exc:
-            raise ExecutionCapabilityError(
-                "当前 Operation 未被 Catalog 精确授权"
-            ) from exc
+            raise ExecutionCapabilityError("当前 Operation 未被 Catalog 精确授权") from exc
 
         rubric_version: str | None = None
         if request.purpose == "generation":
@@ -278,9 +285,7 @@ class StatelessExecutionStepExecutor:
                 supports_request_idempotency=self._model.supports_request_idempotency,
             )
         except ExecutionRegistryReferenceError as exc:
-            raise ExecutionCapabilityError(
-                "当前部署模型未被 Deployment Profile 授权"
-            ) from exc
+            raise ExecutionCapabilityError("当前部署模型未被 Deployment Profile 授权") from exc
 
         resolved_model = _resolved_model(
             profile,
@@ -325,8 +330,11 @@ class StatelessExecutionStepExecutor:
                 contract = registry.resolve_system_purpose("resolve_intent", request.workflow)
             except ExecutionRegistryError as exc:
                 raise ExecutionCapabilityError("意图解析系统用途未被精确授权") from exc
-            if (contract.definition.parent_operations or request.lane != contract.definition.lane
-                    or request.evidenceBundle.policyVersion != contract.definition.evidence_policy):
+            if (
+                contract.definition.parent_operations
+                or request.lane != contract.definition.lane
+                or request.evidenceBundle.policyVersion != contract.definition.evidence_policy
+            ):
                 raise ExecutionCapabilityError("意图解析当前系统用途绑定不一致")
             _validate_profile_ref(request, contract.model_profile)
             _validate_output_schema_ref(request, contract.output_schema)
@@ -355,9 +363,12 @@ class StatelessExecutionStepExecutor:
         matching_budgets = tuple(
             budget
             for budget in registry.step_budgets.values()
-            if budget.supported and _step_budget_matches(request, budget)
-            and (request.purpose != "resolve_intent"
-                 or budget.key.startswith("step_budget.system.resolve_intent.v"))
+            if budget.supported
+            and _step_budget_matches(request, budget)
+            and (
+                request.purpose != "resolve_intent"
+                or budget.key.startswith("step_budget.system.resolve_intent.v")
+            )
         )
         if not matching_budgets:
             raise ExecutionCapabilityError("Execution Step Budget 未保留在 Registry")
@@ -376,9 +387,12 @@ class StatelessExecutionStepExecutor:
             rubric_version = _frozen_rubric_version(request)
         elif request.purpose == "resolve_intent":
             purpose = "resolve_intent"
-            if (profile.purpose != "generation" or output_schema.purpose != "generation"
-                    or not profile.key.startswith("system.intent_resolver.v")
-                    or not output_schema.key.startswith("output.proposed_command.v")):
+            if (
+                profile.purpose != "generation"
+                or output_schema.purpose != "generation"
+                or not profile.key.startswith("system.intent_resolver.v")
+                or not output_schema.key.startswith("output.proposed_command.v")
+            ):
                 raise ExecutionCapabilityError("意图解析 Profile/Output 用途不一致")
             rubric_version = None
         else:
@@ -523,16 +537,12 @@ class StatelessExecutionStepExecutor:
         def timeout_boundary_millis() -> int:
             # asyncio 取消与事件循环调度可能比授权截止点晚几个毫秒返回；这部分
             # 本地收尾延迟不属于 Provider 墙钟事实，不能伪造为模型超预算。
-            return min(
-                elapsed_millis(), request.budget.maxWallClockSeconds * 1_000
-            )
+            return min(elapsed_millis(), request.budget.maxWallClockSeconds * 1_000)
 
         def remaining_seconds() -> float:
             if provider_started is None:
                 return float(request.budget.maxWallClockSeconds)
-            remaining = request.budget.maxWallClockSeconds - (
-                monotonic() - provider_started
-            )
+            remaining = request.budget.maxWallClockSeconds - (monotonic() - provider_started)
             if remaining <= 0:
                 raise TimeoutError
             return remaining
@@ -548,9 +558,7 @@ class StatelessExecutionStepExecutor:
                             cancel_event=cancel_event,
                             lane=request.lane,
                             reviewer=request.purpose == "review",
-                            provider_timeout_seconds=float(
-                                request.budget.maxWallClockSeconds
-                            ),
+                            provider_timeout_seconds=float(request.budget.maxWallClockSeconds),
                         )
                     else:
                         async with asyncio.timeout(remaining_seconds()):
@@ -589,10 +597,7 @@ class StatelessExecutionStepExecutor:
                             )
                         continue
                     if _provider_outcome_unknown(
-                        exc,
-                        supports_request_idempotency=(
-                            self._model.supports_request_idempotency
-                        )
+                        exc, supports_request_idempotency=(self._model.supports_request_idempotency)
                     ):
                         return ProviderCallOutcome(
                             result=None,
@@ -698,9 +703,7 @@ class StatelessExecutionStepExecutor:
                 reasoning_mode=request.modelProfile.reasoningMode,
             )
             error_code = (
-                "STEP_BUDGET_EXCEEDED"
-                if _step_budget_exceeded(request, usage)
-                else "RUN_CANCELLED"
+                "STEP_BUDGET_EXCEEDED" if _step_budget_exceeded(request, usage) else "RUN_CANCELLED"
             )
             return _failure(
                 request,
@@ -1062,9 +1065,7 @@ def _frozen_rubric_version(request: ExecutionStepRequest) -> str:
     if not isinstance(task, Mapping):
         raise ExecutionCapabilityError("Reviewer input 缺少冻结任务目标")
     rubric = task.get("rubricVersion")
-    if not isinstance(rubric, str) or re.fullmatch(
-        r"[a-z][a-z0-9_.-]{0,127}", rubric
-    ) is None:
+    if not isinstance(rubric, str) or re.fullmatch(r"[a-z][a-z0-9_.-]{0,127}", rubric) is None:
         raise ExecutionCapabilityError("Reviewer input 缺少冻结 rubricVersion")
     return rubric
 
@@ -1146,7 +1147,8 @@ def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCo
     proposed = IntentResolutionOutput.model_validate(output)
     context = _validate_intent_input(request)
     if proposed.operation is not None and (
-        proposed.workflow != context.workflow or proposed.workflow != request.workflow
+        proposed.workflow != context.workflow
+        or proposed.workflow != request.workflow
         or proposed.operation not in {option.operation for option in context.availableOperations}
     ):
         raise ValueError("意图结果选择了未被当前上下文授权的操作")
@@ -1154,8 +1156,17 @@ def _intent_command(request: ExecutionStepRequest, output: object) -> ProposedCo
 
 
 def _validate_operation_input(request: ExecutionStepRequest) -> None:
-    if (request.workflow, request.operation) == ("long_serial", "write_chapter"):
+    if request.workflow == "long_serial" and request.operation in {
+        "write_chapter",
+        "rewrite_scene",
+    }:
         _validate_chapter_draft_input(request)
+        return
+    if (request.workflow, request.operation) == ("long_serial", "review_chapter"):
+        _validate_chapter_review_input(request)
+        return
+    if (request.workflow, request.operation) == ("long_serial", "rewrite_outline_selection"):
+        _validate_outline_selection_input(request)
         return
     if (request.workflow, request.operation) == ("long_serial", "plan_chapter"):
         _validate_chapter_plan_input(request)
@@ -1190,9 +1201,7 @@ def _validate_operation_input(request: ExecutionStepRequest) -> None:
     except ValidationError as exc:
         raise ExecutionCapabilityError("长篇问答 input 必须只含完整 userInstruction") from exc
     chapter_items = tuple(
-        item
-        for item in request.evidenceBundle.items
-        if item.resourceType == "chapter_content"
+        item for item in request.evidenceBundle.items if item.resourceType == "chapter_content"
     )
     if len(chapter_items) != 1:
         raise ExecutionCapabilityError("长篇问答必须冻结唯一目标章节正文 Evidence")
@@ -1210,9 +1219,7 @@ def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
     if request.novelId is None:
         raise ExecutionCapabilityError("章节规划必须绑定 novelId")
     context_items = [
-        item
-        for item in request.evidenceBundle.items
-        if item.resourceType == "chapter_plan_context"
+        item for item in request.evidenceBundle.items if item.resourceType == "chapter_plan_context"
     ]
     if len(context_items) != 1:
         raise ExecutionCapabilityError("章节规划 Evidence 必须包含唯一规划上下文")
@@ -1242,10 +1249,12 @@ def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
                 or task.get("rubricVersion") != "rubric.chapter_plan.review.v1"
             ):
                 raise ValueError("规划复审任务身份不一致")
-            ChapterPlanInput.model_validate({
-                "userInstruction": task.get("userInstruction"),
-                "targetWordCount": task.get("targetWordCount"),
-            })
+            ChapterPlanInput.model_validate(
+                {
+                    "userInstruction": task.get("userInstruction"),
+                    "targetWordCount": task.get("targetWordCount"),
+                }
+            )
             ChapterPlanResult.model_validate(request.input["candidate"])
             return
         plan = ChapterPlanInput.model_validate(request.input)
@@ -1295,7 +1304,7 @@ def _validate_chapter_draft_input(request: ExecutionStepRequest) -> None:
             if (
                 not isinstance(task, dict)
                 or task.get("workflow") != "long_serial"
-                or task.get("operation") != "write_chapter"
+                or task.get("operation") != request.operation
                 or task.get("rubricVersion") != "rubric.chapter_draft.review.v1"
             ):
                 raise ValueError("正文复审任务身份不一致")
@@ -1328,6 +1337,116 @@ def _validate_chapter_draft_input(request: ExecutionStepRequest) -> None:
         raise ExecutionCapabilityError("正文输入或完整候选不符合冻结契约") from exc
 
 
+def _validate_chapter_review_input(request: ExecutionStepRequest) -> None:
+    contexts = [
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType == "chapter_writing_context"
+    ]
+    item = (
+        contexts[0]
+        if len(contexts) == 1 and len(request.evidenceBundle.items) == 1
+        else None
+    )
+    context = item.contentJson if item is not None else None
+    chapter = context.get("currentChapter") if isinstance(context, dict) else None
+    schema_version = context.get("schemaVersion") if isinstance(context, dict) else None
+    if (
+        request.purpose != "generation"
+        or request.lane != "interactive"
+        or request.novelId is None
+        or request.artifactId is not None
+        or request.artifactRevision is not None
+        or item is None
+        or not item.exists
+        or item.contentType != "json"
+        or item.range is not None
+        or not isinstance(context, dict)
+        or type(schema_version) is not int
+        or schema_version != 1
+        or context.get("novelId") != request.novelId
+        or not isinstance(chapter, dict)
+        or chapter.get("id") != item.resourceId
+    ):
+        raise ExecutionCapabilityError("整章审阅输入或完整上下文身份不一致")
+    try:
+        ChapterReviewInput.model_validate(request.input)
+    except ValidationError as exc:
+        raise ExecutionCapabilityError("整章审阅 input 必须只含完整 userInstruction") from exc
+
+
+def _validate_outline_selection_input(request: ExecutionStepRequest) -> None:
+    contexts = [
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType in {"outline_content", "outline_node_content"}
+    ]
+    item = contexts[0] if len(contexts) == 1 and len(request.evidenceBundle.items) == 1 else None
+    try:
+        if request.purpose == "review":
+            if set(request.input) != {"task", "candidate"}:
+                raise ValueError("大纲选区复审只接受 task 与精确候选")
+            task = request.input["task"]
+            if (
+                not isinstance(task, dict)
+                or task.get("workflow") != "long_serial"
+                or task.get("operation") != "rewrite_outline_selection"
+                or task.get("rubricVersion") != "rubric.outline_selection.review.v1"
+            ):
+                raise ValueError("大纲选区复审任务身份不一致")
+            selection = OutlineSelectionInput.model_validate(
+                {
+                    "userInstruction": task.get("userInstruction"),
+                    "selectionTarget": task.get("selectionTarget"),
+                }
+            )
+            OutlineSelectionResult.model_validate(request.input["candidate"])
+        else:
+            selection = OutlineSelectionInput.model_validate(request.input)
+        target = selection.selectionTarget
+        if (
+            item is None
+            or request.novelId is None
+            or not item.exists
+            or item.contentType != "text"
+            or item.contentText is None
+        ):
+            raise ValueError("大纲选区缺少唯一完整正文 Evidence")
+        if (
+            item.resourceType != target.resourceType
+            or item.resourceId != target.resourceId
+            or item.range is None
+        ):
+            raise ValueError("大纲选区 Evidence 与 selectionTarget 不一致")
+        if (
+            item.range.startCodePoint != target.selectionStart
+            or item.range.endCodePoint != target.selectionEnd
+            or target.selectionEnd > len(item.contentText)
+        ):
+            raise ValueError("大纲选区 Evidence range 不一致")
+        if (
+            item.contentSha256 != target.baseContentHash
+            or item.resourceUpdatedAt != target.baseUpdatedAt
+        ):
+            raise ValueError("大纲选区 Evidence 来源版本不一致")
+        selected = item.contentText[target.selectionStart : target.selectionEnd]
+        if hashlib.sha256(selected.encode("utf-8")).hexdigest() != target.selectedTextHash:
+            raise ValueError("大纲选区正文或 selectedTextHash 不一致")
+        if request.purpose == "review":
+            return
+        previous = selection.previousCandidate
+        if previous is None:
+            if request.artifactId is not None or request.artifactRevision is not None:
+                raise ValueError("初始大纲改写不能绑定候选")
+        elif (
+            previous.artifactId != request.artifactId
+            or previous.artifactRevision != request.artifactRevision
+        ):
+            raise ValueError("大纲返工与精确上一候选不一致")
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ExecutionCapabilityError("大纲选区输入或 Evidence 不符合冻结契约") from exc
+
+
 def _retry_delay_seconds(base_seconds: float, attempt: int, request_hash: str) -> float:
     """按 requestHash 与 attempt 生成稳定抖动，重启可复现且不同请求不会惊群。"""
 
@@ -1349,9 +1468,7 @@ def _safe_to_retry(
         return False
     if error.code in {"connection_error", "timeout_error"}:
         return True
-    return error.code == "http_error" and (
-        error.statusCode is not None and error.statusCode >= 500
-    )
+    return error.code == "http_error" and (error.statusCode is not None and error.statusCode >= 500)
 
 
 def _provider_outcome_unknown(
@@ -1479,6 +1596,21 @@ def _validate_provider_result(
             ChapterDraftOutput.model_validate(result.structuredOutput)
         except ValidationError:
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "generation" and request.operation == "rewrite_scene":
+        try:
+            ChapterDraftOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "generation" and request.operation == "review_chapter":
+        try:
+            ChapterReviewOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
+    if request.purpose == "generation" and request.operation == "rewrite_outline_selection":
+        try:
+            OutlineSelectionOutput.model_validate(result.structuredOutput)
+        except ValidationError:
+            return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "resolve_intent":
         try:
             _intent_command(request, result.structuredOutput)
@@ -1523,8 +1655,15 @@ def _derive_generation_output(
         output = answer.model_dump(mode="json")
     elif request.workflow == "long_serial" and request.operation == "plan_chapter":
         output = materialize_chapter_plan_output(output)
-    elif request.workflow == "long_serial" and request.operation == "write_chapter":
+    elif request.workflow == "long_serial" and request.operation in {
+        "write_chapter",
+        "rewrite_scene",
+    }:
         output = materialize_chapter_draft_output(output)
+    elif request.workflow == "long_serial" and request.operation == "review_chapter":
+        output = ChapterReviewOutput.model_validate(output).model_dump(mode="json")
+    elif request.workflow == "long_serial" and request.operation == "rewrite_outline_selection":
+        output = materialize_outline_selection_output(output)
     return output
 
 

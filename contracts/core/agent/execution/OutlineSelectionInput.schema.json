@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "OutlineSelectionPreviousCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "replacement": {
+          "minLength": 1,
+          "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+          "title": "Replacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "replacement"
+      ],
+      "title": "OutlineSelectionPreviousCandidate",
+      "type": "object"
+    },
+    "SelectionTarget": {
+      "additionalProperties": false,
+      "description": "客户端提交的不可变选区身份；正文由 Core 从权威源派生。",
+      "properties": {
+        "baseContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Basecontenthash",
+          "type": "string"
+        },
+        "baseUpdatedAt": {
+          "format": "date-time",
+          "title": "Baseupdatedat",
+          "type": "string"
+        },
+        "resourceId": {
+          "minLength": 1,
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "enum": [
+            "chapter_content",
+            "outline_content",
+            "outline_node_content"
+          ],
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "selectedTextHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Selectedtexthash",
+          "type": "string"
+        },
+        "selectionEnd": {
+          "minimum": 0,
+          "title": "Selectionend",
+          "type": "integer"
+        },
+        "selectionStart": {
+          "minimum": 0,
+          "title": "Selectionstart",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash"
+      ],
+      "title": "SelectionTarget",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/OutlineSelectionInput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "originalUserInstruction": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Originaluserinstruction"
+    },
+    "previousCandidate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutlineSelectionPreviousCandidate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "selectionTarget": {
+      "$ref": "#/$defs/SelectionTarget"
+    },
+    "userInstruction": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Userinstruction",
+      "type": "string"
+    }
+  },
+  "required": [
+    "userInstruction",
+    "selectionTarget"
+  ],
+  "title": "OutlineSelectionInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.OutlineSelectionInput"
+}

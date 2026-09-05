@@ -30,8 +30,10 @@ def _draft():
     return {"summary": "完整写章说明", "content": "\ufeff 夜里，林舟推开门。\n😀\u0085"}
 
 
-def _request(*, reviewer: str | None = None, revision: bool = False):
-    operation = load_execution_registry(environment="test").resolve("long_serial", "write_chapter")
+def _request(
+    *, reviewer: str | None = None, revision: bool = False, operation_name: str = "write_chapter"
+):
+    operation = load_execution_registry(environment="test").resolve("long_serial", operation_name)
     profile = (
         next(p for p in operation.reviewer_profiles if p.key == reviewer)
         if reviewer
@@ -57,7 +59,7 @@ def _request(*, reviewer: str | None = None, revision: bool = False):
         payload = {
             "task": {
                 "workflow": "long_serial",
-                "operation": "write_chapter",
+                "operation": operation_name,
                 "userInstruction": "本轮修改要求B",
                 "originalUserInstruction": "最初要求A",
                 "targetWordCount": 4000,
@@ -68,7 +70,7 @@ def _request(*, reviewer: str | None = None, revision: bool = False):
     base = plan_request(revision=revision, reviewer=bool(reviewer))
     candidate = base.model_copy(
         update={
-            "operation": "write_chapter",
+            "operation": operation_name,
             "input": payload,
             "modelProfile": ModelProfileRef(
                 profile=profile.key,
@@ -159,6 +161,32 @@ def test_draft_catalog_has_six_cold_calls_and_dedicated_review_profiles():
     assert operation.operation.run_budget.max_model_calls == 6
     assert operation.operation.run_budget.max_prompt_cache_miss_tokens == 180_000
     assert all("选区外" not in p.prompt_profile.system_prompt for p in operation.reviewer_profiles)
+
+
+@pytest.mark.asyncio
+async def test_scene_rewrite_reuses_complete_chapter_result_with_distinct_profile():
+    request = _request(operation_name="rewrite_scene")
+    operation = load_execution_registry(environment="test").resolve("long_serial", "rewrite_scene")
+    assert operation.generator_profile.key == "writer.scene_rewrite.v1"
+    assert [profile.key for profile in operation.reviewer_profiles] == [
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+    ]
+    model = RecordingModel(result=_result(_draft()))
+    executor = _executor(model)
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_one_attempt,
+        cancel_event=asyncio.Event(),
+    )
+    assert (
+        ChapterDraftResult.model_validate(
+            executor.terminal_from_outcome(request, resolved, outcome).output
+        ).content
+        == _draft()["content"]
+    )
 
 
 @pytest.mark.asyncio

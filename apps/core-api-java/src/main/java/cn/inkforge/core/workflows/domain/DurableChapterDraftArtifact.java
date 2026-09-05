@@ -9,17 +9,25 @@ import java.util.Set;
 /** 全文章节候选只保存一份正文，来源和完整 Diff 由冻结 Evidence 重建。 */
 public final class DurableChapterDraftArtifact {
     public static final String SCHEMA = "durable.chapter-draft-artifact.v1";
+    private static final Set<String> OPERATIONS = Set.of("write_chapter", "rewrite_scene");
     private static final Set<String> OUTPUT_KEYS = Set.of("summary", "content", "contentSha256", "wordCount");
     private static final Map<String, Object> DIFF = Map.of("schema", SCHEMA, "type", "chapter_content");
     private DurableChapterDraftArtifact() {}
 
     public static Stored create(String bundleId, String manifestHash, String chapterId,
             Map<String, Object> output, String producingStepId, String producingResultHash) {
+        return create("write_chapter", bundleId, manifestHash, chapterId, output,
+                producingStepId, producingResultHash);
+    }
+
+    public static Stored create(String operation, String bundleId, String manifestHash,
+            String chapterId, Map<String, Object> output, String producingStepId,
+            String producingResultHash) {
         validateOutput(output);
         Map<String, Object> stored = new LinkedHashMap<>(output);
         stored.put("schema", SCHEMA);
         stored.put("kind", "chapter_draft");
-        stored.put("operation", "write_chapter");
+        stored.put("operation", operation(operation));
         stored.put("evidenceBundleId", nonBlank(bundleId));
         stored.put("evidenceManifestSha256", hash(manifestHash));
         stored.put("chapterId", nonBlank(chapterId));
@@ -55,11 +63,19 @@ public final class DurableChapterDraftArtifact {
 
     public static Materialized reconstruct(Map<String, Object> stored, Map<String, Object> diff,
             String bundleId, String manifestHash, String chapterId, String originalContent) {
+        return reconstruct("write_chapter", stored, diff, bundleId, manifestHash,
+                chapterId, originalContent);
+    }
+
+    public static Materialized reconstruct(String expectedOperation, Map<String, Object> stored,
+            Map<String, Object> diff, String bundleId, String manifestHash, String chapterId,
+            String originalContent) {
         try {
+            String operation = operation(expectedOperation);
             if (!stored.keySet().equals(Set.of("summary", "content", "contentSha256", "wordCount", "schema", "kind", "operation",
                     "evidenceBundleId", "evidenceManifestSha256", "chapterId", "producingStepId", "producingResultHash"))
                     || !SCHEMA.equals(stored.get("schema")) || !"chapter_draft".equals(stored.get("kind"))
-                    || !"write_chapter".equals(stored.get("operation")) || !DIFF.equals(diff)
+                    || !operation.equals(stored.get("operation")) || !DIFF.equals(diff)
                     || !bundleId.equals(stored.get("evidenceBundleId")) || !manifestHash.equals(stored.get("evidenceManifestSha256"))
                     || !chapterId.equals(stored.get("chapterId")) || originalContent == null) throw invalid();
             hash(manifestHash);
@@ -67,7 +83,7 @@ public final class DurableChapterDraftArtifact {
             hash(stored.get("producingResultHash"));
             Map<String, Object> payload = new LinkedHashMap<>(output(stored));
             payload.put("kind", "chapter_draft");
-            payload.put("operation", "write_chapter");
+            payload.put("operation", operation);
             payload.put("target", Map.of("mode", "existing_chapter", "chapterId", chapterId));
             return new Materialized(Map.copyOf(payload), Map.of("type", "chapter_content", "before", originalContent, "after", stored.get("content")));
         } catch (IllegalArgumentException | NullPointerException exception) {
@@ -80,6 +96,10 @@ public final class DurableChapterDraftArtifact {
     public static String nonBlank(Object value) {
         if (!(value instanceof String text) || TextLength.count(text) == 0) throw invalid();
         return text;
+    }
+    private static String operation(String value) {
+        if (!OPERATIONS.contains(value)) throw invalid();
+        return value;
     }
     private static String hash(Object value) {
         if (!(value instanceof String text) || !text.matches("[0-9a-f]{64}")) throw invalid();

@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 232,
+  "modelCount": 238,
   "models": [
     {
       "model": "AgentEvent",
@@ -109,6 +109,18 @@
       "module": "execution",
       "path": "execution/ChapterPlanSceneResult.schema.json",
       "sha256": "08dc4f386ffbb901dd02bbb6a4a09039e5e0a54eea1029dd28a8d32e23aae988"
+    },
+    {
+      "model": "ChapterReviewInput",
+      "module": "execution",
+      "path": "execution/ChapterReviewInput.schema.json",
+      "sha256": "e0c6e99af9ac5edd5ff7d4935ab90c6517e0ee8aef92ab1bed177b0ee859495f"
+    },
+    {
+      "model": "ChapterReviewOutput",
+      "module": "execution",
+      "path": "execution/ChapterReviewOutput.schema.json",
+      "sha256": "4ba25d0bad558fd1de79ad57b7c11efdf9444e2be984bdbc8eff3ed1d32045f0"
     },
     {
       "model": "ChatAnswerInput",
@@ -252,7 +264,7 @@
       "model": "IntentContext",
       "module": "execution",
       "path": "execution/IntentContext.schema.json",
-      "sha256": "85ecaa52d004562c95092667c9f27b6159f3c5ae9e8528bf3e1d8dc0ee0b6207"
+      "sha256": "631187036d419c449b608a03a79c4756752c3a0eb14f433c4c065c6bfa9d89f6"
     },
     {
       "model": "IntentResolutionInput",
@@ -271,6 +283,30 @@
       "module": "execution",
       "path": "execution/ModelProfileRef.schema.json",
       "sha256": "9046d9e9f5937b433f8c5db559ed693e4960562e6c0b7d0826e9fc8092a0b4f3"
+    },
+    {
+      "model": "OutlineSelectionInput",
+      "module": "execution",
+      "path": "execution/OutlineSelectionInput.schema.json",
+      "sha256": "7a6ca8f81ab2e7e1f93cae5ddabebdf6af4d86f7d2fbc13b465e8450489e6404"
+    },
+    {
+      "model": "OutlineSelectionOutput",
+      "module": "execution",
+      "path": "execution/OutlineSelectionOutput.schema.json",
+      "sha256": "feecb656f5956ff764f93b088503966be096f85b7ffdab6c35f67556d3ab7130"
+    },
+    {
+      "model": "OutlineSelectionPreviousCandidate",
+      "module": "execution",
+      "path": "execution/OutlineSelectionPreviousCandidate.schema.json",
+      "sha256": "f3c17b306926d22256d3b841d3e36e926c65ecf72c0e2beb7f1bcc869dba8e47"
+    },
+    {
+      "model": "OutlineSelectionResult",
+      "module": "execution",
+      "path": "execution/OutlineSelectionResult.schema.json",
+      "sha256": "5988a097597963ab19975da6dd6812be123c242b7824395fed433ad74a11bb77"
     },
     {
       "model": "OutputSchemaRef",

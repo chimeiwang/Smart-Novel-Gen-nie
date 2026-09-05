@@ -538,6 +538,17 @@ def test_watch_terminal_frame_keeps_complete_review_report() -> None:
     assert frames[-1]["data"]["reviewReport"].endswith("尾部🚀")
 
 
+def test_v2_watch_terminal_keeps_complete_review_report_without_session() -> None:
+    report = "  完整审阅😀\r\n" * 20_001 + "完整尾部🚀"
+    status = _v2_status("completed", operation="review_chapter", reviewReport=report)
+    api = WatchApi(snapshots=[status])
+    exit_code, frames, _stderr = _invoke(api, FakeClock())
+    assert exit_code == 0
+    assert frames[-1] == {"type": "terminal", "data": status}
+    assert frames[-1]["data"]["reviewReport"] == report
+    assert api.calls == [("GET", TASK_PATH, {})]
+
+
 def test_watch_ignores_terminal_looking_legacy_fields_while_outcome_is_running() -> None:
     running = _status(
         "running",

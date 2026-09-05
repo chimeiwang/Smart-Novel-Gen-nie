@@ -3,8 +3,8 @@ package cn.inkforge.core.writing.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import cn.inkforge.contracts.api.WritingRunResponse;
 import cn.inkforge.contracts.api.ClarifyWritingRunRequest;
+import cn.inkforge.contracts.api.WritingRunResponse;
 import cn.inkforge.contracts.api.WritingRunStartResponse;
 import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.core.generated.model.WritingRunStartBody;
@@ -22,11 +22,14 @@ import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
 import cn.inkforge.core.writing.application.WritingRunStartRequestParser;
 import cn.inkforge.core.workflows.application.DurableWorkflowService;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
-import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
-import cn.inkforge.core.workflows.infrastructure.JooqWorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.WorkflowIntentSelection;
 import cn.inkforge.core.workflows.domain.WorkflowIntentQuestion;
+import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
+import cn.inkforge.core.workflows.infrastructure.JooqWorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.writing.domain.WritingRunCursor;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
@@ -58,6 +61,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.MountableFile;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -144,7 +148,10 @@ class RoutingWritingRunStarterTest {
         assertThat(item.get("resourceType", String.class)).isEqualTo("intent_context");
         var context = json.readTree(item.get("contentJson", String.class));
         assertThat(context.has("content")).isFalse();
-        assertThat(context.path("availableOperations").size()).isEqualTo(3);
+        assertThat(context.path("availableOperations").size()).isEqualTo(5);
+        assertThat(context.path("availableOperations").findValues("operation").stream()
+                        .map(tools.jackson.databind.JsonNode::asText))
+                .containsExactly("answer_question", "plan_chapter", "review_chapter", "rewrite_scene", "write_chapter");
         var queries = queries();
         assertThat(((WritingRunV2Response) queries.getPublic(fixture.userId(), response.getRunId())).getCurrentStep().getPurpose())
                 .isEqualTo("resolve_intent");
@@ -171,6 +178,213 @@ class RoutingWritingRunStarterTest {
         router(active, "allowlist").start(active.userId(), naturalRequest(active, "natural-lock-request-001", "尚未判断是否写"));
         assertThatThrownBy(() -> router(active, "allowlist").start(active.userId(), requestWithoutSession(active, "natural-lock-write-0001", "同章新写入")))
                 .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void 整章审阅V2允许无会话并只冻结完整章节上下文() {
+        Fixture fixture = fixture("review-chapter-v2");
+        ParsedWritingRunStartRequest request = longSerialRequest(
+                fixture, "review-chapter-request-001", "review_chapter", false);
+        var response = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(), request);
+        assertThat(response.getOperation()).isEqualTo("review_chapter");
+        Record run = database.dsl().fetchOne("SELECT kind::text AS kind, \"writingSessionId\", \"targetType\", \"targetId\" FROM public.\"WorkflowRun\" WHERE id=?", response.getRunId());
+        assertThat(run.get("kind", String.class)).isEqualTo("chat");
+        assertThat(run.get("writingSessionId")).isNull();
+        assertThat(run.get("targetType", String.class)).isEqualTo("chapter");
+        assertThat(run.get("targetId", String.class)).isEqualTo(fixture.chapterId());
+        Record step = database.dsl().fetchOne("SELECT input FROM public.\"WorkflowStep\" WHERE id=?", response.getCurrentStep().getStepId());
+        assertThat(json.readTree(step.get("input", String.class)).properties().stream().map(Map.Entry::getKey).toList())
+                .containsExactly("userInstruction");
+        Record evidence = database.dsl().fetchOne("SELECT \"resourceType\", \"contentJson\" FROM public.\"WorkflowEvidenceItem\" WHERE \"bundleId\"=(SELECT \"currentEvidenceBundleId\" FROM public.\"WorkflowRun\" WHERE id=?)", response.getRunId());
+        assertThat(evidence.get("resourceType", String.class)).isEqualTo("chapter_writing_context");
+        assertThat(json.readTree(evidence.get("contentJson", String.class)).path("currentChapter").path("content").asText())
+                .isEqualTo(fixture.content());
+        assertThat(count("SELECT count(*) FROM public.\"WritingMessage\" WHERE metadata::jsonb->>'taskId'=?", response.getRunId())).isZero();
+
+        String report = "  完整大报告😀\r\n第二段保留结尾  \n";
+        completeReviewRun(response.getRunId(), response.getCurrentStep().getStepId(), report);
+        assertThat(((WritingRunV2Response) queries().getPublic(fixture.userId(), response.getRunId()))
+                        .getReviewReport())
+                .isEqualTo(report);
+        assertThat(queries().list(fixture.userId(), fixture.novelId(), null, null,
+                        "review_chapter", "succeeded", null, 20).getItems())
+                .singleElement()
+                .satisfies(item -> assertThat(((WritingRunV2Response) item).getReviewReport())
+                        .isNull());
+        WritingRunV2Response replay = (WritingRunV2Response) router("off").start(
+                fixture.userId(), request);
+        assertThat(replay.getRunId()).isEqualTo(response.getRunId());
+        assertThat(replay.getReviewReport()).isEqualTo(report);
+    }
+
+    @Test
+    void 场景改写V2保留真实操作并生成完整整章输入而非选区() {
+        Fixture fixture = fixture("rewrite-scene-v2");
+        var response = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(), longSerialRequest(fixture, "rewrite-scene-request-001", "rewrite_scene", false));
+        assertThat(response.getOperation()).isEqualTo("rewrite_scene");
+        Record run = database.dsl().fetchOne("SELECT operation, \"targetType\", \"targetId\", input FROM public.\"WorkflowRun\" WHERE id=?", response.getRunId());
+        assertThat(run.get("operation", String.class)).isEqualTo("rewrite_scene");
+        assertThat(run.get("targetType", String.class)).isEqualTo("chapter");
+        assertThat(json.readTree(run.get("input", String.class)).path("selectionTarget").isNull()).isTrue();
+        Record step = database.dsl().fetchOne("SELECT input FROM public.\"WorkflowStep\" WHERE id=?", response.getCurrentStep().getStepId());
+        assertThat(json.readTree(step.get("input", String.class)).properties().stream().map(Map.Entry::getKey).toList())
+                .containsExactlyInAnyOrder("userInstruction", "targetWordCount");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvidenceItem\" WHERE \"bundleId\"=(SELECT \"currentEvidenceBundleId\" FROM public.\"WorkflowRun\" WHERE id=?) AND \"resourceType\"='chapter_writing_context'", response.getRunId())).isEqualTo(1);
+    }
+
+    @Test
+    void 整章审阅绑定会话时仅创建一次原始用户消息且幂等重放不重复() {
+        Fixture fixture = fixture("review-chapter-session-v2");
+        ParsedWritingRunStartRequest request = longSerialRequest(
+                fixture, "review-chapter-session-request-001", "review_chapter", true);
+        WritingRunV2Response first = (WritingRunV2Response) router(fixture, "allowlist")
+                .start(fixture.userId(), request);
+        WritingRunV2Response replay = (WritingRunV2Response) router("off")
+                .start(fixture.userId(), request);
+
+        assertThat(replay.getRunId()).isEqualTo(first.getRunId());
+        assertThat(database.dsl().fetchOne(
+                                "SELECT \"writingSessionId\" FROM public.\"WorkflowRun\" WHERE id = ?",
+                                first.getRunId())
+                        .get("writingSessionId", String.class))
+                .isEqualTo(fixture.sessionId());
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE metadata::jsonb->>'taskId' = ?",
+                        first.getRunId()))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void 自然审阅的后续generation不依赖固定序号且GET与重放返回完整报告() {
+        Fixture fixture = fixture("natural-review-report");
+        ParsedWritingRunStartRequest request = naturalRequest(
+                fixture, "natural-review-report-start-001", "  请判断并审阅当前章😀\r\n");
+        WritingRunV2Response started = (WritingRunV2Response) router(fixture, "allowlist")
+                .start(fixture.userId(), request);
+        String report = "自然入口的完整审阅报告\r\n尾部空格  \n";
+        completeNaturalReviewRun(
+                started.getRunId(), started.getCurrentStep().getStepId(), report);
+
+        Record run = database.dsl().fetchOne(
+                "SELECT operation FROM public.\"WorkflowRun\" WHERE id = ?", started.getRunId());
+        assertThat(run.get("operation")).isNull();
+        WritingRunV2Response queried = (WritingRunV2Response) queries()
+                .getPublic(fixture.userId(), started.getRunId());
+        assertThat(queried.getOperation()).isEqualTo("review_chapter");
+        assertThat(queried.getReviewReport()).isEqualTo(report);
+        WritingRunV2Response replay = (WritingRunV2Response) router("off")
+                .start(fixture.userId(), request);
+        assertThat(replay.getRunId()).isEqualTo(started.getRunId());
+        assertThat(replay.getReviewReport()).isEqualTo(report);
+    }
+
+    @Test
+    void 大纲选区V2以真实总纲来源作为Run目标并冻结完整正文() {
+        Fixture fixture = fixture("rewrite-outline-selection-v2");
+        var response = (WritingRunV2Response) router(fixture, "allowlist").start(fixture.userId(),
+                longSerialRequest(fixture, "rewrite-outline-request-001", "rewrite_outline_selection", true));
+        assertThat(response.getOperation()).isEqualTo("rewrite_outline_selection");
+        Record run = database.dsl().fetchOne("SELECT \"targetType\", \"targetId\" FROM public.\"WorkflowRun\" WHERE id=?", response.getRunId());
+        assertThat(run.get("targetType", String.class)).isEqualTo("outline_content");
+        assertThat(run.get("targetId", String.class)).isEqualTo(fixture.outlineId());
+        Record step = database.dsl().fetchOne("SELECT input FROM public.\"WorkflowStep\" WHERE id=?", response.getCurrentStep().getStepId());
+        var input = json.readTree(step.get("input", String.class));
+        assertThat(input.properties().stream().map(Map.Entry::getKey).toList())
+                .containsExactlyInAnyOrder("userInstruction", "selectionTarget");
+        assertThat(input.path("selectionTarget").has("selectedText")).isFalse();
+        Record evidence = database.dsl().fetchOne("SELECT \"resourceType\", \"resourceId\", \"contentText\", \"rangeJson\" FROM public.\"WorkflowEvidenceItem\" WHERE \"bundleId\"=(SELECT \"currentEvidenceBundleId\" FROM public.\"WorkflowRun\" WHERE id=?)", response.getRunId());
+        assertThat(evidence.get("resourceType", String.class)).isEqualTo("outline_content");
+        assertThat(evidence.get("resourceId", String.class)).isEqualTo(fixture.outlineId());
+        assertThat(evidence.get("contentText", String.class)).isEqualTo(fixture.outlineContent());
+        assertThat(evidence.get("rangeJson", String.class)).isNotNull();
+    }
+
+    @Test
+    void 大纲节点选区V2冻结节点身份完整正文与严格输入() {
+        Fixture fixture = fixture("rewrite-outline-node-v2");
+        String nodeId = fixture.novelId() + "-outline-node";
+        String nodeContent = "节点甲😀乙丙";
+        insertOutlineNode(fixture, nodeId, nodeContent);
+        var response = (WritingRunV2Response) router(fixture, "allowlist").start(
+                fixture.userId(),
+                outlineSelectionRequest(
+                        fixture,
+                        "rewrite-outline-node-request-001",
+                        fixture.chapterId(),
+                        fixture.sessionId(),
+                        "outline_node_content",
+                        nodeId,
+                        nodeContent));
+
+        Record run = database.dsl().fetchOne(
+                "SELECT \"targetType\", \"targetId\", input FROM public.\"WorkflowRun\" WHERE id = ?",
+                response.getRunId());
+        assertThat(run.get("targetType", String.class)).isEqualTo("outline_node_content");
+        assertThat(run.get("targetId", String.class)).isEqualTo(nodeId);
+        assertThat(json.readTree(run.get("input", String.class)).path("selectionTarget")
+                        .path("resourceId").asText())
+                .isEqualTo(nodeId);
+        Record step = database.dsl().fetchOne(
+                "SELECT input FROM public.\"WorkflowStep\" WHERE id = ?",
+                response.getCurrentStep().getStepId());
+        var input = json.readTree(step.get("input", String.class));
+        assertThat(input.properties().stream().map(Map.Entry::getKey).toList())
+                .containsExactlyInAnyOrder("userInstruction", "selectionTarget");
+        assertThat(input.path("selectionTarget").has("selectedText")).isFalse();
+        Record evidence = database.dsl().fetchOne(
+                """
+                SELECT "resourceType", "resourceId", "contentText", "metadataJson"
+                FROM public."WorkflowEvidenceItem"
+                WHERE "bundleId" = (
+                  SELECT "currentEvidenceBundleId" FROM public."WorkflowRun" WHERE id = ?
+                )
+                """,
+                response.getRunId());
+        assertThat(evidence.get("resourceType", String.class)).isEqualTo("outline_node_content");
+        assertThat(evidence.get("resourceId", String.class)).isEqualTo(nodeId);
+        assertThat(evidence.get("contentText", String.class)).isEqualTo(nodeContent);
+        assertThat(json.readTree(evidence.get("metadataJson", String.class)))
+                .isEqualTo(json.valueToTree(Map.of(
+                        "role", "selection_source",
+                        "baseContentHash", sha256(nodeContent),
+                        "selectedTextHash", sha256(codePointSlice(nodeContent, 1, 3)))));
+    }
+
+    @Test
+    void 不同章节锚点改写同一大纲来源仍按真实资源互斥() {
+        Fixture fixture = fixture("rewrite-outline-source-lock");
+        String secondChapterId = fixture.novelId() + "-chapter-2";
+        String secondSessionId = fixture.novelId() + "-session-2";
+        insertChapterAndSession(fixture, secondChapterId, secondSessionId);
+        router(fixture, "allowlist").start(
+                fixture.userId(),
+                outlineSelectionRequest(
+                        fixture,
+                        "rewrite-outline-source-first-001",
+                        fixture.chapterId(),
+                        fixture.sessionId(),
+                        "outline_content",
+                        fixture.outlineId(),
+                        fixture.outlineContent()));
+
+        assertThatThrownBy(() -> router(fixture, "allowlist").start(
+                        fixture.userId(),
+                        outlineSelectionRequest(
+                                fixture,
+                                "rewrite-outline-source-second-001",
+                                secondChapterId,
+                                secondSessionId,
+                                "outline_content",
+                                fixture.outlineId(),
+                                fixture.outlineContent())))
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code()).isEqualTo("WRITING_TARGET_BUSY"));
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WorkflowRun\" WHERE \"novelId\" = ?",
+                        fixture.novelId()))
+                .isEqualTo(1);
     }
 
     private static ParsedWritingRunStartRequest naturalRequest(Fixture fixture, String id, String instruction) {
@@ -818,6 +1032,77 @@ class RoutingWritingRunStarterTest {
                 .isZero();
     }
 
+    @Test
+    void 大纲选区跨引擎只阻断同一真实来源而不误锁章节正文() {
+        Fixture sameSource = fixture("route-outline-cross-engine-same");
+        router(sameSource, "allowlist").start(
+                sameSource.userId(),
+                longSerialRequest(
+                        sameSource,
+                        "request-outline-v2-before-v1-001",
+                        "rewrite_outline_selection",
+                        true));
+        ParsedWritingRunStartRequest sameOutline = withWritingSession(
+                longSerialRequest(
+                        sameSource,
+                        "request-outline-v1-after-v2-001",
+                        "rewrite_outline_selection",
+                        true),
+                additionalSession(sameSource, "v1"));
+        assertThatThrownBy(() -> router("off").start(sameSource.userId(), sameOutline))
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code()).isEqualTo("WRITING_TARGET_BUSY"));
+
+        Fixture distinct = fixture("route-outline-cross-engine-distinct");
+        String secondChapterId = distinct.novelId() + "-chapter-2";
+        String secondSessionId = distinct.novelId() + "-session-2";
+        insertChapterAndSession(distinct, secondChapterId, secondSessionId);
+        router(distinct, "allowlist").start(
+                distinct.userId(),
+                requestWithoutSession(
+                        distinct,
+                        "request-chapter-v2-before-outline-v1-001",
+                        "先改写章节正文"));
+        WritingRunStartResponse outline = router("off").start(
+                distinct.userId(),
+                outlineSelectionRequest(
+                        distinct,
+                        "request-outline-v1-distinct-001",
+                        secondChapterId,
+                        secondSessionId,
+                        "outline_content",
+                        distinct.outlineId(),
+                        distinct.outlineContent()));
+        assertThat(outline).isInstanceOf(WritingRunResponse.class);
+
+        Fixture reverse = fixture("route-outline-cross-engine-reverse");
+        String reverseChapterId = reverse.novelId() + "-chapter-2";
+        String reverseSessionId = reverse.novelId() + "-session-2";
+        insertChapterAndSession(reverse, reverseChapterId, reverseSessionId);
+        router("off").start(
+                reverse.userId(),
+                outlineSelectionRequest(
+                        reverse,
+                        "request-outline-v1-before-v2-001",
+                        reverse.chapterId(),
+                        reverse.sessionId(),
+                        "outline_content",
+                        reverse.outlineId(),
+                        reverse.outlineContent()));
+        assertThatThrownBy(() -> router(reverse, "allowlist").start(
+                        reverse.userId(),
+                        outlineSelectionRequest(
+                                reverse,
+                                "request-outline-v2-after-v1-001",
+                                reverseChapterId,
+                                reverseSessionId,
+                                "outline_content",
+                                reverse.outlineId(),
+                                reverse.outlineContent())))
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code()).isEqualTo("WRITING_TARGET_BUSY"));
+    }
+
     @ParameterizedTest(name = "V1只读 operation={0}")
     @MethodSource("readOnlyV1Operations")
     void 不同WritingSession的只读V1与V2章节写入双向并存(String operation) {
@@ -1244,6 +1529,206 @@ class RoutingWritingRunStarterTest {
                 NOW);
     }
 
+    private static void completeReviewRun(String runId, String stepId, String report) {
+        ReviewCompletion completion = reviewCompletion(report);
+        database.dsl().execute(
+                """
+                UPDATE public."WorkflowStep"
+                SET status = CAST('completed' AS public."WorkflowStepStatus"),
+                    output = ?, "resultHash" = ?, "resolvedModelJson" = ?, "usageJson" = ?,
+                    "attemptCount" = 1, "fencingToken" = 1, "nextAttemptAt" = NULL,
+                    "completedAt" = ?, "updatedAt" = ?
+                WHERE id = ? AND "runId" = ?
+                """,
+                json.writeValueAsString(completion.output()),
+                completion.resultHash(),
+                json.writeValueAsString(completion.resolvedModel()),
+                json.writeValueAsString(completion.usage()),
+                NOW,
+                NOW,
+                stepId,
+                runId);
+        completeRun(runId);
+    }
+
+    private static void completeNaturalReviewRun(String runId, String resolverStepId, String report) {
+        Record run = database.dsl().fetchOne(
+                "SELECT \"modelPolicyJson\", input, \"chapterId\" FROM public.\"WorkflowRun\" WHERE id = ?",
+                runId);
+        IntentExecutionPlanSnapshot intent = IntentExecutionPlanSnapshot.fromStored(
+                json.readValue(run.get("modelPolicyJson", String.class), new TypeReference<>() {}));
+        ExecutionPlanSnapshot review = intent.requireOperationPlan("long_serial.review_chapter");
+        String intentBundleId = database.dsl().fetchOne(
+                        "SELECT \"evidenceBundleId\" FROM public.\"WorkflowStep\" WHERE id = ?",
+                        resolverStepId)
+                .get("evidenceBundleId", String.class);
+        String resolverResultHash = "a".repeat(64);
+        database.dsl().execute(
+                """
+                UPDATE public."WorkflowStep"
+                SET status = CAST('completed' AS public."WorkflowStepStatus"),
+                    "resultHash" = ?, "usageJson" = ?, "attemptCount" = 1,
+                    "fencingToken" = 1, "nextAttemptAt" = NULL,
+                    "completedAt" = ?, "updatedAt" = ?
+                WHERE id = ? AND "runId" = ?
+                """,
+                resolverResultHash,
+                json.writeValueAsString(Map.of(
+                        "usageStatus", "unknown",
+                        "providerAttempts", 1,
+                        "protocolCorrections", 0,
+                        "wallTimeMillis", 12)),
+                NOW,
+                NOW,
+                resolverStepId,
+                runId);
+        WorkflowIntentSelection selection = new WorkflowIntentSelection(
+                runId,
+                review.operation().key(),
+                review.sha256(),
+                resolverStepId,
+                resolverResultHash,
+                intentBundleId,
+                "chapter",
+                run.get("chapterId", String.class),
+                "chapter");
+        String selectionStepId = "selection-" + runId;
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, "createdAt",
+                  ordinal, purpose, lane, "attemptCount", "fencingToken",
+                  "idempotencyKey", "requestHash", "inputHash", "evidenceBundleId",
+                  "submittedAt", "updatedAt", "completedAt"
+                ) VALUES (
+                  ?, ?, 'core', CAST('persistence' AS public."WorkflowStepType"),
+                  CAST('completed' AS public."WorkflowStepStatus"), ?, ?, 2,
+                  'intent_selection', 'control', 0, 0, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                selectionStepId,
+                runId,
+                json.writeValueAsString(selection.stored()),
+                NOW,
+                runId + "." + selectionStepId,
+                selection.inputHash(),
+                selection.inputHash(),
+                intentBundleId,
+                NOW,
+                NOW,
+                NOW);
+
+        ReviewCompletion completion = reviewCompletion(report);
+        Map<String, Object> normalizedInput = json.readValue(
+                run.get("input", String.class), new TypeReference<>() {});
+        Map<String, Object> generationInput = Map.of(
+                "userInstruction", normalizedInput.get("userInstruction"));
+        String generationStepId = "generation-" + runId;
+        ExecutionPlanSnapshot.Step generator = review.generator();
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "agentId", "stepType", status, input, output, "createdAt",
+                  ordinal, purpose, lane, "attemptCount", "fencingToken", "idempotencyKey",
+                  "requestHash", "inputHash", "resultHash", "evidenceBundleId",
+                  "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion",
+                  "budgetJson", "resolvedModelJson", "usageJson", "submittedAt", "updatedAt", "completedAt"
+                ) VALUES (
+                  ?, ?, 'editor', CAST('agent' AS public."WorkflowStepType"),
+                  CAST('completed' AS public."WorkflowStepStatus"), ?, ?, ?, 3,
+                  'generation', ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                generationStepId,
+                runId,
+                json.writeValueAsString(generationInput),
+                json.writeValueAsString(completion.output()),
+                NOW,
+                generator.lane(),
+                runId + "." + generationStepId,
+                "b".repeat(64),
+                ExecutionCanonicalJson.sha256(generationInput),
+                completion.resultHash(),
+                intentBundleId,
+                generator.modelProfile().profile(),
+                Integer.toString(generator.modelProfile().version()),
+                generator.outputSchema().name(),
+                Integer.toString(generator.outputSchema().version()),
+                json.writeValueAsString(generator.stepBudget().stored()),
+                json.writeValueAsString(completion.resolvedModel()),
+                json.writeValueAsString(completion.usage()),
+                NOW,
+                NOW,
+                NOW);
+        completeRun(runId);
+    }
+
+    private static ReviewCompletion reviewCompletion(String report) {
+        ExecutionPlanSnapshot.Step generator = registry
+                .freezePlan("long_serial.review_chapter", false)
+                .generator();
+        String deploymentProfile = generator.modelProfile().deploymentProfileKey();
+        String reasoningMode = generator.modelProfile().reasoningMode();
+        Map<String, Object> resolvedModel = Map.of(
+                "deploymentProfileKey", deploymentProfile,
+                "deploymentFingerprint", WorkflowResolvedModel.fingerprint(
+                        deploymentProfile,
+                        "fake",
+                        "fake",
+                        "transport.fake.v1",
+                        "endpoint.local-fake.v1",
+                        "responses_json_schema_v1",
+                        "capability.fake.structured-output.v1",
+                        reasoningMode,
+                        true),
+                "provider", "fake",
+                "model", "fake",
+                "transportProfile", "transport.fake.v1",
+                "endpointProfile", "endpoint.local-fake.v1",
+                "structuredOutputRoute", "responses_json_schema_v1",
+                "capabilityVersion", "capability.fake.structured-output.v1",
+                "reasoningMode", reasoningMode,
+                "supportsRequestIdempotency", true);
+        Map<String, Object> usage = Map.ofEntries(
+                Map.entry("usageStatus", "complete"),
+                Map.entry("inputTokens", 10),
+                Map.entry("cachedTokens", 0),
+                Map.entry("promptCacheMissTokens", 10),
+                Map.entry("completionTokens", 6),
+                Map.entry("reasoningTokens", 0),
+                Map.entry("visibleOutputTokens", 6),
+                Map.entry("costMicros", 0),
+                Map.entry("providerAttempts", 1),
+                Map.entry("protocolCorrections", 0),
+                Map.entry("wallTimeMillis", 12));
+        Map<String, Object> output = Map.of("report", report);
+        String resultHash = ExecutionCanonicalJson.sha256(Map.of(
+                "resultKind", "output",
+                "resolvedModel", resolvedModel,
+                "usage", usage,
+                "value", output));
+        return new ReviewCompletion(output, resolvedModel, usage, resultHash);
+    }
+
+    private static void completeRun(String runId) {
+        database.dsl().execute(
+                """
+                UPDATE public."WorkflowRun"
+                SET status = CAST('completed' AS public."WorkflowRunStatus"),
+                    "completedAt" = ?, "updatedAt" = ?, revision = revision + 1
+                WHERE id = ?
+                """,
+                NOW,
+                NOW,
+                runId);
+    }
+
+    private record ReviewCompletion(
+            Map<String, Object> output,
+            Map<String, Object> resolvedModel,
+            Map<String, Object> usage,
+            String resultHash) {}
+
     private static RoutingWritingRunStarter router(
             String mode, DurableAgentExecutionReadiness readiness) {
         return router(null, mode, true, readiness);
@@ -1417,6 +1902,78 @@ class RoutingWritingRunStarterTest {
             body.put("scope", Map.of("kind", "chapter", "chapterId", fixture.chapterId()));
         }
         return parser.parse(new WritingRunStartBody(json.valueToTree(body)));
+    }
+
+    private static ParsedWritingRunStartRequest outlineSelectionRequest(
+            Fixture fixture,
+            String clientRequestId,
+            String chapterId,
+            String writingSessionId,
+            String resourceType,
+            String resourceId,
+            String content) {
+        String selected = codePointSlice(content, 1, 3);
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("clientRequestId", clientRequestId);
+        body.put("workflow", "long_serial");
+        body.put("novelId", fixture.novelId());
+        body.put("chapterId", chapterId);
+        body.put("writingSessionId", writingSessionId);
+        body.put("operation", "rewrite_outline_selection");
+        body.put("target", Map.of("type", "chapter", "id", chapterId));
+        body.put("scope", "outline_content".equals(resourceType)
+                ? Map.of("kind", "novel")
+                : Map.of("kind", "outline_node", "outlineNodeId", resourceId));
+        body.put("selectionTarget", Map.of(
+                "resourceType", resourceType,
+                "resourceId", resourceId,
+                "baseUpdatedAt", "2026-09-01T03:00:00Z",
+                "baseContentHash", sha256(content),
+                "selectionStart", 1,
+                "selectionEnd", 3,
+                "selectedTextHash", sha256(selected)));
+        body.put("targetWordCount", 1000);
+        body.put("userInstruction", "请改写大纲选区");
+        return parser.parse(new WritingRunStartBody(json.valueToTree(body)));
+    }
+
+    private static void insertOutlineNode(Fixture fixture, String nodeId, String content) {
+        database.dsl().execute(
+                """
+                INSERT INTO public."OutlineNode" (
+                  id, "novelId", kind, title, content, "order", "createdAt", "updatedAt"
+                ) VALUES (?, ?, 'stage', '大纲节点', ?, 1, ?, ?)
+                """,
+                nodeId,
+                fixture.novelId(),
+                content,
+                NOW,
+                NOW);
+    }
+
+    private static void insertChapterAndSession(
+            Fixture fixture, String chapterId, String sessionId) {
+        database.dsl().execute(
+                """
+                INSERT INTO public."Chapter" (
+                  id, "novelId", title, content, "order", status, "createdAt", "updatedAt"
+                ) VALUES (?, ?, '第二章', '第二章正文', 2, 'drafting', ?, ?)
+                """,
+                chapterId,
+                fixture.novelId(),
+                NOW,
+                NOW);
+        database.dsl().execute(
+                """
+                INSERT INTO public."WritingSession" (
+                  id, "novelId", "chapterId", phase, "createdAt", "updatedAt"
+                ) VALUES (?, ?, ?, 'idle', ?, ?)
+                """,
+                sessionId,
+                fixture.novelId(),
+                chapterId,
+                NOW,
+                NOW);
     }
 
     private static ParsedWritingRunStartRequest legacyRequestWithoutSession(

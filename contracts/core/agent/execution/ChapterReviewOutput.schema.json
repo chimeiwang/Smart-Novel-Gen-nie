@@ -1,0 +1,20 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/ChapterReviewOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "作者可见的完整业务审阅报告；不是候选 EvidenceEvaluation。",
+  "properties": {
+    "report": {
+      "minLength": 1,
+      "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]",
+      "title": "Report",
+      "type": "string"
+    }
+  },
+  "required": [
+    "report"
+  ],
+  "title": "ChapterReviewOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ChapterReviewOutput"
+}

@@ -39,6 +39,8 @@ def _context():
                 ("answer_question", "回答章节问题"),
                 ("plan_chapter", "规划章节"),
                 ("write_chapter", "生成完整正文"),
+                ("rewrite_scene", "改写场景并返回完整正文"),
+                ("review_chapter", "审阅章节"),
             ]
         ],
     }
@@ -166,7 +168,10 @@ def test_intent_system_has_complete_disabled_reasoning_assets_and_exact_budget()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["initial", "pending_recovery", "running_recovery"])
-@pytest.mark.parametrize("operation", ["answer_question", "plan_chapter", "write_chapter", None])
+@pytest.mark.parametrize(
+    "operation",
+    ["answer_question", "plan_chapter", "write_chapter", "rewrite_scene", "review_chapter", None],
+)
 async def test_intent_uses_one_no_tool_call_and_returns_proposed_command(mode, operation):
     request = _request(
         mode=mode,

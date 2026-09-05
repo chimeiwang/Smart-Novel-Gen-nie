@@ -149,3 +149,19 @@ Skill 更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-ski
 
 Java CLI 的输入映射、watcher 与双环境 Operator 拒绝模式有定向 JUnit；Web、Python对照及跨进程验收结果
 以 `../../docs/specs/2026-09-04-durable-natural-language-entry.md` 为准，不把单测当真实账号或生产验收。
+
+## 整章审阅与改写的 CLI 契约
+
+2026-09-05 仓内迁移沿用 `long.agent.start`、`long.task.get/watch` 和 `long.artifact.*`，不增加命令。
+`review_chapter` 显式请求可省略 writingSessionId；V2 完成后的 `reviewReport` 是完整报告，get/watch
+直接保留。`long.task.get` 的 outputFile 保存完整 JSON，报告不是 Artifact，无须批准。
+
+`rewrite_scene` 生成完整章节草案，作者可用 editedContent/editedContentFile 批准；
+`rewrite_outline_selection` 绑定总纲或节点的精确来源，只接受 editedReplacement/editedReplacementFile。
+两者均须先读取精确 Artifact revision，再提交决定。通用自然入口新增审阅和场景改写；大纲选区仍须显式
+提交 selectionTarget，不能仅凭自然语言猜测范围。
+
+活动 Operator 仍只允许原三种显式操作及 45 个命令；通用 CLI 支持改写不等于 wrapper 已开放。
+本阶段没有更新本机固定 JAR 或活动 Skill。供后续 Skills 更新的字段、调用顺序和限制清单见
+`../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的“整章审阅与改写”专节，
+验证进度见 `../../docs/specs/2026-09-05-durable-review-and-rewrites.md`。

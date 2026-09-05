@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "7405feccad1c014edbae8833ce260e2db67772b96d90d2814af9892203382142"
+        "2db29fa6d5e31651e0932e710c8da991c8ecdffe12dcafca57ca617f6023edbb"
     )
 
     resolved = registry.resolve("long_serial", "rewrite_chapter_selection")
@@ -81,19 +81,18 @@ def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     assert resolved.generator_profile.deployment_profile_key == (
         "deployment.writer.chapter_selection.v1"
     )
-    assert resolved.generator_profile.prompt_profile.key == (
-        "prompt.writer.chapter_selection.v1"
+    assert resolved.generator_profile.prompt_profile.key == ("prompt.writer.chapter_selection.v1")
+    assert (
+        hashlib.sha256(
+            resolved.generator_profile.prompt_profile.system_prompt.encode("utf-8")
+        ).hexdigest()
+        == resolved.generator_profile.prompt_profile.sha256
     )
-    assert hashlib.sha256(
-        resolved.generator_profile.prompt_profile.system_prompt.encode("utf-8")
-    ).hexdigest() == resolved.generator_profile.prompt_profile.sha256
     assert {profile.key for profile in resolved.reviewer_profiles} == {
         "reviewer.consistency.v1",
         "reviewer.editorial.v1",
     }
-    assert len(
-        {profile.prompt_profile.sha256 for profile in resolved.reviewer_profiles}
-    ) == 2
+    assert len({profile.prompt_profile.sha256 for profile in resolved.reviewer_profiles}) == 2
     assert resolved.output_schema.key == "output.chapter_selection_replacement.v1"
     assert resolved.output_schema.json_schema["additionalProperties"] is False
     assert not hasattr(resolved.generator_profile, "api_key")
@@ -115,6 +114,22 @@ def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     assert answer.reviewer_profiles == ()
     assert answer.reviewer_step_budgets == {}
     assert answer.reviewer_output_schema is None
+
+    review = registry.resolve("long_serial", "review_chapter")
+    assert review.generator_profile.key == "editor.chapter_review_text.v1"
+    assert review.output_schema.key == "output.chapter_review_text.v1"
+    assert "title" not in review.output_schema.json_schema
+    assert "description" not in review.output_schema.json_schema
+    assert "title" not in review.output_schema.json_schema["properties"]["report"]
+    assert review.operation.review_policy.mode == "none"
+    assert review.generator_step_budget.max_prompt_cache_miss_tokens == 80_000
+    outline = registry.resolve("long_serial", "rewrite_outline_selection")
+    assert [profile.key for profile in outline.reviewer_profiles] == [
+        "reviewer.outline_selection_editorial.v1"
+    ]
+    assert "title" not in outline.output_schema.json_schema
+    assert "title" not in outline.output_schema.json_schema["properties"]["replacement"]
+    assert outline.operation.run_budget.max_prompt_cache_miss_tokens == 90_000
 
     with pytest.raises(FrozenInstanceError):
         resolved.operation.v2_enabled = False  # type: ignore[misc]
@@ -181,7 +196,7 @@ def test_deployment_authorization_binds_transport_capability_and_environment() -
 def test_loader_rejects_disabled_and_environment_forbidden_operations() -> None:
     production = load_execution_registry(CONTRACT_ROOT, environment="production")
     with pytest.raises(ExecutionOperationDisabledError):
-        production.resolve("long_serial", "review_chapter")
+        production.resolve("long_serial", "create_outline")
     with pytest.raises(ExecutionOperationEnvironmentError):
         production.resolve("video", "chapter_cinematic_adaptation_v2")
 
@@ -197,9 +212,7 @@ def test_enabled_no_review_operation_rejects_hidden_reviewer_execution_refs(
     catalog = _read_json(catalog_path)
     operation = catalog["operations"][0]
     assert operation["key"] == "long_serial.answer_question"
-    operation["reviewPolicy"]["reviewerOutputSchema"] = (
-        "output.chapter_review_report.v1"
-    )
+    operation["reviewPolicy"]["reviewerOutputSchema"] = "output.chapter_review_report.v1"
     _write_json(catalog_path, catalog)
     _refresh_manifest_hash(contract_copy, "catalog")
 

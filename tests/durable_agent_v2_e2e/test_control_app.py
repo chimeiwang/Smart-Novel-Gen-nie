@@ -401,10 +401,12 @@ class _WritingSubmitClient(_FakeAsyncClient):
 
 
 @pytest.mark.parametrize("mode", ["pass", "revise_once", "patch_once", "patch_conflict"])
+@pytest.mark.parametrize("operation", ["write_chapter", "rewrite_scene"])
 def test_writing_review_control_binds_two_roles_and_exact_revision_durably(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     mode: str,
+    operation: str,
 ) -> None:
     _environment(monkeypatch)
     monkeypatch.setenv("E2E_CONTROL_DATABASE", str(tmp_path / "control.sqlite3"))
@@ -435,7 +437,7 @@ def test_writing_review_control_binds_two_roles_and_exact_revision_durably(
                 assert client.post(endpoint, json=identity, headers=headers).status_code == 409
                 body = {
                     "workflow": "long_serial",
-                    "operation": "write_chapter",
+                    "operation": operation,
                     "purpose": "review",
                     "idempotencyKey": key,
                     "artifactRevision": revision,
@@ -527,13 +529,13 @@ class _WritingDecisionClient(_ReviewDecisionClient):
         return await super().post(path, json=json)
 
 
-def _writing_review_request(role: str) -> ModelTurnRequest:
+def _writing_review_request(role: str, operation: str = "write_chapter") -> ModelTurnRequest:
     from inkforge_agents.execution.registry import load_execution_registry
     from inkforge_contracts import materialize_chapter_draft_output
 
     request = _review_request(f"reviewer.chapter_draft_{role}.v1")
     envelope = json.loads(request.messages[0].content)
-    envelope["operation"] = "write_chapter"
+    envelope["operation"] = operation
     envelope["input"] = {
         "candidate": materialize_chapter_draft_output(
             {
@@ -561,11 +563,13 @@ def _writing_review_request(role: str) -> ModelTurnRequest:
 @pytest.mark.parametrize("role", ["consistency", "editorial"])
 @pytest.mark.parametrize("revision", [1, 2])
 @pytest.mark.parametrize("mode", ["pass", "revise_once", "patch_once", "patch_conflict"])
+@pytest.mark.parametrize("operation", ["write_chapter", "rewrite_scene"])
 async def test_controlled_writing_review_modes_are_revision_bound_and_never_send_content(
     monkeypatch: pytest.MonkeyPatch,
     role: str,
     revision: int,
     mode: str,
+    operation: str,
 ) -> None:
     _WritingDecisionClient.mode = mode
     _WritingDecisionClient.revision = revision
@@ -574,7 +578,7 @@ async def test_controlled_writing_review_modes_are_revision_bound_and_never_send
     provider = controlled_provider.ControlledFakeModelProvider(
         control_url="http://control:8090", control_token="t" * 40
     )
-    request = _writing_review_request(role)
+    request = _writing_review_request(role, operation)
     result = await provider.complete_turn(request)
     jsonschema_rs.validator_for(request.structuredOutput.jsonSchema).validate(
         result.structuredOutput

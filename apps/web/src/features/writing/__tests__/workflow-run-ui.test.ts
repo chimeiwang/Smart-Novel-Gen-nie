@@ -524,7 +524,7 @@ test("正文写作显示整章生成双复审及非模型局部修改角色", ()
   assert.equal(workflowModelRoleLabel(null, "candidate_patch"), "局部修改候选");
 });
 
-test("只有 chat_answer 完成事件要求回读当前会话权威消息", () => {
+test("问答和只读章节审阅完成后回读当前会话权威消息", () => {
   const answerCompleted = workflowEvent(envelope(3, "completed", {
     outcomeType: "chat_answer",
     resultId: "message-1",
@@ -537,6 +537,9 @@ test("只有 chat_answer 完成事件要求回读当前会话权威消息", () =
   }));
 
   assert.equal(workflowEventRequiresSessionMessageRefresh(answerCompleted), true);
+  assert.equal(workflowEventRequiresSessionMessageRefresh(workflowEvent(envelope(5, "completed", {
+    outcomeType: "chapter_review_report", resultId: "report-message-1",
+  }))), true);
   assert.equal(workflowEventRequiresSessionMessageRefresh(artifactCompleted), false);
 });
 

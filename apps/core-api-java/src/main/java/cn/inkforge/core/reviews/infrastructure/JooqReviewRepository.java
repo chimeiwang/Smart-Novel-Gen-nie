@@ -42,10 +42,12 @@ import cn.inkforge.core.reviews.domain.ReviewArtifactSummary;
 import cn.inkforge.core.reviews.domain.SelectionMaterialization;
 import cn.inkforge.core.reviews.domain.SelectionSource;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
+import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -92,6 +94,7 @@ final class JooqReviewRepository implements ReviewRepository {
     private final ObjectMapper json;
     private final JooqReviewDecisionRouter decisions;
     private final boolean durableAgentSchemaReady;
+    private final WorkflowExecutionContextReader executionContexts;
 
     JooqReviewRepository(
             CoreDatabase database,
@@ -160,6 +163,9 @@ final class JooqReviewRepository implements ReviewRepository {
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.durableAgentSchemaReady = durableAgentSchemaReady;
+        this.executionContexts = executionContexts == null
+                ? WorkflowExecutionContextReader.frozenBusinessPlansOnly()
+                : executionContexts;
         JooqReviewDecisionStore legacy =
                 new JooqReviewDecisionStore(database, ids, clock, json, formalWriter);
         JooqDurableReviewDecisionStore durable = durableAgentSchemaReady
@@ -683,7 +689,8 @@ final class JooqReviewRepository implements ReviewRepository {
             result.setTitle((String) plan.get("title"));
             result.setSummary((String) plan.get("summary"));
         }
-        if (durable != null && "write_chapter".equals(payload.get("operation"))) {
+        if (durable != null && Set.of("write_chapter", "rewrite_scene")
+                .contains(payload.get("operation"))) {
             result.setSummary((String) payload.get("summary"));
         }
         result.setPayload(payload);
@@ -748,6 +755,7 @@ final class JooqReviewRepository implements ReviewRepository {
                 revisionRecord.get("payloadJson", String.class));
         Map<String, Object> storedDiff = parseObject(
                 revisionRecord.get("diffJson", String.class));
+        WorkflowExecutionContext executionContext = durableContext(context, artifact);
         if (revision == artifact.getRevision()
                 && (!storedPayload.equals(parseObject(artifact.getPayloadjson()))
                         || !storedDiff.equals(parseObject(artifact.getDiffjson())))) {
@@ -758,14 +766,23 @@ final class JooqReviewRepository implements ReviewRepository {
         }
         String bundleId = requiredStoredText(storedPayload, "evidenceBundleId");
         if (DurableChapterDraftArtifact.isStored(storedPayload)) {
+            String operation = requiredStoredText(storedPayload, "operation");
+            if (!Set.of("write_chapter", "rewrite_scene").contains(operation)
+                    || !operation.equals(executionContext.effectiveOperation())) {
+                throw artifactIntegrityError();
+            }
             var evidence = DurableChapterWritingReviewEvidence.read(context, json, artifact.getWorkflowrunid(), bundleId, artifact.getChapterid());
-            var materialized = DurableChapterDraftArtifact.reconstruct(storedPayload, storedDiff, bundleId,
-                    evidence.manifestHash(), artifact.getChapterid(), evidence.content());
+            var materialized = DurableChapterDraftArtifact.reconstruct(operation, storedPayload,
+                    storedDiff, bundleId, evidence.manifestHash(), artifact.getChapterid(),
+                    evidence.content());
             Object bindings = evidence.context().get("sourceBindings");
             if (!(bindings instanceof List<?> list) || list.isEmpty()) throw artifactIntegrityError();
             return new DurableDetail(materialized.payload(), materialized.diff(), list.stream().map(value -> json.convertValue(value, SourceBinding.class)).toList());
         }
         if (DurableBeatPlanArtifact.isStored(storedPayload)) {
+            if (!"plan_chapter".equals(executionContext.effectiveOperation())) {
+                throw artifactIntegrityError();
+            }
             DurableChapterPlanReviewEvidence evidence = DurableChapterPlanReviewEvidence.read(
                     context, json, artifact.getWorkflowrunid(), bundleId, artifact.getChapterid());
             DurableBeatPlanArtifact.Materialized plan = DurableBeatPlanArtifact.reconstruct(storedPayload,
@@ -795,6 +812,38 @@ final class JooqReviewRepository implements ReviewRepository {
         Integer start = number(range.get("startCodePoint"));
         Integer end = number(range.get("endCodePoint"));
         if (start == null || end == null) throw artifactIntegrityError();
+        if (DurableOutlineSelectionArtifact.isStored(storedPayload)) {
+            DurableOutlineSelectionArtifact.Evidence value =
+                    new DurableOutlineSelectionArtifact.Evidence(
+                            evidence.get("bundleId", String.class),
+                            evidence.get("id", String.class),
+                            evidence.get("resourceType", String.class),
+                            evidence.get("resourceId", String.class),
+                            DatabaseTimestamp.api(evidence.get("resourceUpdatedAt", LocalDateTime.class)),
+                            evidence.get("contentText", String.class),
+                            evidence.get("contentSha256", String.class),
+                            start,
+                            end);
+            if (!"rewrite_outline_selection".equals(executionContext.effectiveOperation())
+                    || !Objects.equals(value.resourceType(),
+                            executionContext.initialIdentity().targetType())
+                    || !Objects.equals(value.resourceId(),
+                            executionContext.initialIdentity().targetId())) {
+                throw artifactIntegrityError();
+            }
+            DurableOutlineSelectionArtifact.Materialized materialized =
+                    DurableOutlineSelectionArtifact.reconstruct(storedPayload, storedDiff, value);
+            SourceBinding binding = new SourceBinding(
+                    null,
+                    value.contentSha256(),
+                    true,
+                    value.resourceId(),
+                    value.resourceType(),
+                    evidence.get("resourceRevision", Integer.class),
+                    value.resourceUpdatedAt());
+            return new DurableDetail(
+                    materialized.payload(), materialized.diff(), List.of(binding));
+        }
         DurableSelectionArtifact.Evidence value = new DurableSelectionArtifact.Evidence(
                 evidence.get("bundleId", String.class),
                 evidence.get("id", String.class),
@@ -805,6 +854,12 @@ final class JooqReviewRepository implements ReviewRepository {
                 evidence.get("contentSha256", String.class),
                 start,
                 end);
+        if (!"rewrite_chapter_selection".equals(executionContext.effectiveOperation())
+                || !"chapter_content".equals(executionContext.initialIdentity().targetType())
+                || !Objects.equals(
+                        artifact.getChapterid(), executionContext.initialIdentity().targetId())) {
+            throw artifactIntegrityError();
+        }
         DurableSelectionArtifact.Materialized materialized =
                 DurableSelectionArtifact.reconstruct(storedPayload, storedDiff, value);
         SourceBinding binding = new SourceBinding(
@@ -816,6 +871,33 @@ final class JooqReviewRepository implements ReviewRepository {
                 evidence.get("resourceRevision", Integer.class),
                 value.resourceUpdatedAt());
         return new DurableDetail(materialized.payload(), materialized.diff(), List.of(binding));
+    }
+
+    private WorkflowExecutionContext durableContext(
+            DSLContext context, ReviewartifactRecord artifact) {
+        Record run = context.fetchOne(
+                """
+                SELECT id, workflow, operation, "operationCatalogVersion", "chapterId",
+                       "targetType", "targetId", "modelPolicyJson", "novelId"
+                FROM public."WorkflowRun" WHERE id = ? AND "engineVersion" = 2
+                """,
+                artifact.getWorkflowrunid());
+        if (run == null
+                || !Objects.equals(run.get("novelId", String.class), artifact.getNovelid())
+                || !Objects.equals(run.get("chapterId", String.class), artifact.getChapterid())) {
+            throw artifactIntegrityError();
+        }
+        return executionContexts.load(
+                context,
+                new WorkflowExecutionContext.RunIdentity(
+                        run.get("id", String.class),
+                        run.get("workflow", String.class),
+                        run.get("operation", String.class),
+                        run.get("operationCatalogVersion", String.class),
+                        run.get("chapterId", String.class),
+                        run.get("targetType", String.class),
+                        run.get("targetId", String.class)),
+                parseObject(run.get("modelPolicyJson", String.class)));
     }
 
     private List<ArtifactEvaluationResponse> durableEvaluations(

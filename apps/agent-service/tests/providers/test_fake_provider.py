@@ -182,14 +182,19 @@ async def test_fake_provider_returns_semantic_chapter_plan_without_system_fields
 
 @pytest.mark.asyncio
 async def test_fake_provider_returns_full_chapter_without_system_fields() -> None:
-    result = await FakeModelProvider().complete_turn(ModelTurnRequest(
-        messages=[{"role": "user", "content": "依据冻结资料写完整正文"}],
-        tools=[], maxOutputTokens=8000, policy=LEGACY_PROVIDER_DEFAULT,
-        structuredOutput={
-            "route": "chat_json_output_v1", "name": "output_chapter_draft_v1",
-            "jsonSchema": ChapterDraftOutput.model_json_schema(),
-        },
-    ))
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "依据冻结资料写完整正文"}],
+            tools=[],
+            maxOutputTokens=8000,
+            policy=LEGACY_PROVIDER_DEFAULT,
+            structuredOutput={
+                "route": "chat_json_output_v1",
+                "name": "output_chapter_draft_v1",
+                "jsonSchema": ChapterDraftOutput.model_json_schema(),
+            },
+        )
+    )
     output = ChapterDraftOutput.model_validate(result.structuredOutput)
     assert output.content == (
         "林舟把旧行动线索放在桌上，逐一核对。\n\n窗外雨声渐紧，他终于作出选择。"
@@ -199,3 +204,36 @@ async def test_fake_provider_returns_full_chapter_without_system_fields() -> Non
     assert set(result.structuredOutput) == {"summary", "content"}
     assert result.toolCalls == []
     assert result.finishReason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_returns_distinct_review_and_outline_outputs() -> None:
+    from inkforge_agents.providers.fake import (
+        FAKE_CHAPTER_REVIEW_REPORT,
+        FAKE_OUTLINE_SELECTION_REPLACEMENT,
+    )
+    from inkforge_contracts import ChapterReviewOutput, OutlineSelectionOutput
+
+    outputs = []
+    for name, schema in (
+        ("output_chapter_review_text_v1", ChapterReviewOutput.model_json_schema()),
+        ("output_outline_selection_replacement_v1", OutlineSelectionOutput.model_json_schema()),
+    ):
+        result = await FakeModelProvider().complete_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "隔离测试"}],
+                tools=[],
+                maxOutputTokens=12_000,
+                policy=LEGACY_PROVIDER_DEFAULT,
+                structuredOutput={
+                    "route": "chat_json_output_v1",
+                    "name": name,
+                    "jsonSchema": schema,
+                },
+            )
+        )
+        outputs.append(result.structuredOutput)
+    assert outputs == [
+        {"report": FAKE_CHAPTER_REVIEW_REPORT},
+        {"replacement": FAKE_OUTLINE_SELECTION_REPLACEMENT},
+    ]

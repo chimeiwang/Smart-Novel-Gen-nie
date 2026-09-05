@@ -49,7 +49,12 @@ ReviewArtifact 应用，也不得反向覆盖正式镜头或提示词。
 
 ## 长篇选区 ReviewArtifact 应用
 
-选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（CLI 可使用既有 `editedReplacementFile`）；V2 选区的公共请求只允许 `editedReplacement`，不得提交 `editedContent`、`selectedUpdateRefs` 或改写 source/prefix/suffix。V1 全文章节/大纲继续使用 `editedContent`；本分支新增的 V2 `write_chapter` 也使用完整 `editedContent`，不能因此向选区或规划开放该字段。V2 选区物化只接受 `long_serial/rewrite_chapter_selection/chapter_draft`，不得把其他 kind 当作 replacement；章节规划使用下文独立的结构化 Beat Plan 应用链。
+选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（CLI 可使用既有 `editedReplacementFile`）；V2 选区的公共请求只允许 `editedReplacement`，不得提交 `editedContent`、`selectedUpdateRefs` 或改写 source/prefix/suffix。V1 全文章节/大纲继续使用 `editedContent`；本分支 V2 `write_chapter` 与 `rewrite_scene` 也使用完整 `editedContent`，不能因此向选区或规划开放该字段。V2 章节选区只接受 `long_serial/rewrite_chapter_selection/chapter_draft`；2026-09-05 新增独立 `rewrite_outline_selection/outline_draft` 总纲和节点选区物化，必须与冻结资源类型、Run 和 Evidence 一致，不得把其他 kind 当作 replacement。章节规划使用下文独立的结构化 Beat Plan 应用链。
+
+`review_chapter` 的 V2 迁移只生成编辑完整报告，完成后以 Run.reviewReport 回读；有会话时另保存编辑消息。
+它不创建 RevisionBrief、ReviewArtifact 或 ChapterQualityCheck，不改变章节状态。场景改写沿用正文双审，
+大纲选区采用专用单编辑复审；一次自动返工后的剩余语义问题交作者，不能替代作者确认。
+这三项的本地验收进度见 `docs/specs/2026-09-05-durable-review-and-rewrites.md`，服务器状态另行验收。
 
 操作者在 approve 前必须先 GET Artifact，读取完整 diff（包括选区前后正文、replacement 和来源绑定），对该 diff 做一次独立确认，再使用稳定 `clientRequestId`、当前 `expectedRevision` 提交决定；V2 中该 wire 字段规范解释为 `expectedArtifactRevision`。Core 仍执行 sourceBinding preflight、幂等 fingerprint 与 revision/source CAS 校验。V1 返回受理后再次 GET Artifact/任务状态核对最终结果；V2 决定响应直接返回 PostgreSQL 权威 `WritingRunV2Response`，断流或结果不确定时仍按 `runId` 回读，不得从 HTTP 状态或前端乐观状态伪造完成。
 

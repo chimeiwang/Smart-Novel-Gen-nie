@@ -14,6 +14,9 @@ from .base import (
     ModelUsageDiagnostics,
 )
 
+FAKE_CHAPTER_REVIEW_REPORT = "本章人物行动清楚，线索核对形成推进；结尾选择可进一步强化后果。"
+FAKE_OUTLINE_SELECTION_REPLACEMENT = "人物核对新行动线索后，作出不可逆的选择。"
+
 
 class FakeModelProvider:
     billable = False
@@ -83,7 +86,13 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
         answers = input_value.get("clarifications", [])
         if answers:
             text = answers[-1].get("userMessage", "")
-        for operation in ("answer_question", "plan_chapter", "write_chapter"):
+        for operation in (
+            "answer_question",
+            "plan_chapter",
+            "write_chapter",
+            "rewrite_scene",
+            "review_chapter",
+        ):
             if text == f"【隔离意图:{operation}】":
                 return {
                     "workflow": "long_serial",
@@ -105,12 +114,18 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
             "arguments": {},
             "clarification": {
                 "code": "intent.unclear",
-                "prompt": "请明确希望问答、规划章节，还是生成完整正文。",
+                "prompt": "请明确希望问答、规划章节、生成或改写正文，还是审阅章节。",
             },
         }
     if "replacement" in properties:
-        replacement = "模拟选区替换文本"
+        replacement = (
+            FAKE_OUTLINE_SELECTION_REPLACEMENT
+            if structured.name == "output_outline_selection_replacement_v1"
+            else "模拟选区替换文本"
+        )
         return {"replacement": replacement}
+    if "report" in properties:
+        return {"report": FAKE_CHAPTER_REVIEW_REPORT}
     if "answer" in properties:
         return {"answer": "模拟模型已依据冻结章节证据回答问题。"}
     if {"summary", "content"} <= set(properties):

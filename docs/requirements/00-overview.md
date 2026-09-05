@@ -723,10 +723,15 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 具体环境变量规则见 Java CLI 文档。本地回环始终直连。
 
 当前工作分支的正文写作 V2 接入沿用 `long.agent.start` 与草案决定命令，不新增 CLI 命令。
-`long.artifact.approve` 只对 `write_chapter` 的现有章节正文候选开放 `editedContent` / `editedContentFile`；
+`long.artifact.approve` 对 `write_chapter`、`rewrite_scene` 的现有章节正文候选开放 `editedContent` / `editedContentFile`；
 规划不得提交编辑字段，选区只接受 `editedReplacement`。源码变更、已安装固定 JAR 和服务器开放状态分别验收，
 本轮进度及 Skill 更新示例见 `docs/specs/2026-09-04-durable-chapter-writing.md` 和
 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。
+
+2026-09-05 分支继续接入只读章节审阅、完整场景改写、总纲/节点精确选区改写。审阅完成结果由
+`long.task.get/watch` 的 reviewReport 完整读取，显式调用无会话也可用；两类改写仍须确认候选后采用。
+自然入口新增审阅和场景改写，大纲选区必须显式冻结来源。仓内验证进度见
+`docs/specs/2026-09-05-durable-review-and-rewrites.md`；本阶段未更新本机固定包或部署服务器。
 
 完整 125 命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
 `tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。

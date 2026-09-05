@@ -7805,6 +7805,8 @@ export interface components {
              * @enum {unknown}
              */
             commandStatus: null;
+            /** Reviewreport */
+            reviewReport?: string | null;
         };
         /** WritingSessionDetail */
         WritingSessionDetail: {
