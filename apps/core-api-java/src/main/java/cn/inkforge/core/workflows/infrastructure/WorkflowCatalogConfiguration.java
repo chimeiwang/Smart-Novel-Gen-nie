@@ -12,6 +12,7 @@ class WorkflowCatalogConfiguration {
     @Bean
     ExecutionRegistry workflowExecutionRegistry(CoreSettings settings) {
         return ExecutionRegistry.loadClasspath(
-                ExecutionRegistry.Environment.valueOf(settings.environment().name()));
+                ExecutionRegistry.Environment.valueOf(settings.environment().name()))
+                .withRagEmbeddingConfig(settings.ragEmbeddingModel(), settings.ragEmbeddingBaseUrl());
     }
 }

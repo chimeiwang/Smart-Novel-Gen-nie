@@ -20,6 +20,7 @@ from inkforge_contracts.execution import (
     canonical_execution_sha256,
 )
 from inkforge_contracts.quality import ConsistencyQualityReport
+from inkforge_contracts.rag_execution import RagEmbeddingBatchOutput
 from inkforge_contracts.short_medium_execution import (
     ShortMediumCheckOutput,
     ShortMediumContentOutput,
@@ -129,6 +130,8 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
+        if output["key"] == "output.embedding_batch.v2":
+            output["jsonSchema"] = model_output_schema(RagEmbeddingBatchOutput)
         if output["key"] == "output.style_portrait_section.v2":
             output["jsonSchema"] = model_output_schema(StylePortraitSectionOutput)
         if output["key"] == "output.consistency_quality_report.v2":

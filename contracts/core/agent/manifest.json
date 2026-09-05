@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 291,
+  "modelCount": 295,
   "models": [
     {
       "model": "AgentUpdates",
@@ -378,7 +378,7 @@
       "model": "EvidenceEvaluation",
       "module": "execution",
       "path": "execution/EvidenceEvaluation.schema.json",
-      "sha256": "9230b0db59e4db353b89f17b0a2155bdc9f6099fc01c02ff2c7663e7a60249a4"
+      "sha256": "50f7daf037792722530295f402311e9e9d2b492b27eada61ccbf5a0101845f88"
     },
     {
       "model": "EvidenceExpansionItem",
@@ -438,19 +438,19 @@
       "model": "ExecutionStepAccepted",
       "module": "execution",
       "path": "execution/ExecutionStepAccepted.schema.json",
-      "sha256": "948052fbecce5b3c940ca4fd6194c94d426eccb51472f7b6866cbf288dd768a7"
+      "sha256": "b120dfa8fa359a67591a4ab2d64433340f04d18e2db50c5923187de81dbea696"
     },
     {
       "model": "ExecutionStepFailure",
       "module": "execution",
       "path": "execution/ExecutionStepFailure.schema.json",
-      "sha256": "fe50dec132208dc40839c2de7249e7335b8942599fc3413a6098bc98b4708ad7"
+      "sha256": "0455cd3571d4f0da05735af7e0c1702432b5230b452a67fc17c840f7828d0074"
     },
     {
       "model": "ExecutionStepProgress",
       "module": "execution",
       "path": "execution/ExecutionStepProgress.schema.json",
-      "sha256": "7fb7416ea22628f72a21214e6a53d9603bdc968cedb5714e938cd579aaf2f358"
+      "sha256": "467f4cb69ae6f01049351428bbeb746bea13a77a5c22a92871a3793f56d4a1c9"
     },
     {
       "model": "ExecutionStepRequest",
@@ -462,7 +462,7 @@
       "model": "ExecutionStepResult",
       "module": "execution",
       "path": "execution/ExecutionStepResult.schema.json",
-      "sha256": "173e80791e21857918b4bf0faf63650b30f1a1410b565c14887c9d2e9d09820a"
+      "sha256": "6d80bd7f93b6e73ea5fa57ed8b7e871684468bb284aa5f32e1548dfc7968f7aa"
     },
     {
       "model": "IntentAvailableOperation",
@@ -558,7 +558,7 @@
       "model": "ResolvedModelRef",
       "module": "execution",
       "path": "execution/ResolvedModelRef.schema.json",
-      "sha256": "40daddf484cec416d0bf4bf44eeacc83f4e863ecc65229305739fd5213de56d4"
+      "sha256": "49ce0648c5bdedd804d7c07414303261bba7bbd65d7316c910b72d58d19f31c6"
     },
     {
       "model": "StepBudget",
@@ -721,6 +721,30 @@
       "module": "quality_execution",
       "path": "quality_execution/QualityStepInput.schema.json",
       "sha256": "7c9de9b2d447bac2953172122d87ceaa397b15294efa963fd77e77567ad40eb0"
+    },
+    {
+      "model": "RagEmbeddingBatchOutput",
+      "module": "rag_execution",
+      "path": "rag_execution/RagEmbeddingBatchOutput.schema.json",
+      "sha256": "347096ea089bbb756b96c299b7da7c4f31b974afaeee9561d3a6c9da592564ff"
+    },
+    {
+      "model": "RagEmbeddingContextV2",
+      "module": "rag_execution",
+      "path": "rag_execution/RagEmbeddingContextV2.schema.json",
+      "sha256": "2bcc3ac2ac4d4e5713b137214e8f2145329c1b9375327596214b06d98c4f05f0"
+    },
+    {
+      "model": "RagEmbeddingRunInput",
+      "module": "rag_execution",
+      "path": "rag_execution/RagEmbeddingRunInput.schema.json",
+      "sha256": "54498a2c70e9ef02339bc4083573633f695f3ffb3c466a1a69727c1956858f3e"
+    },
+    {
+      "model": "RagEmbeddingStepInput",
+      "module": "rag_execution",
+      "path": "rag_execution/RagEmbeddingStepInput.schema.json",
+      "sha256": "8ae280be74dc5da7411bbb06787059eeeb954696cebd75560cc85cec82093d4a"
     },
     {
       "model": "ArtifactIdArgs",
@@ -1674,7 +1698,7 @@
       "model": "RunSnapshot",
       "module": "workflow_events",
       "path": "workflow_events/RunSnapshot.schema.json",
-      "sha256": "a79cf41554709f6fff1a5ba5598024ea4ddf3e060b67511fc6fc91caffbf0388"
+      "sha256": "a86943400cb5c44f20e8a41d733ef0ced9b459fea12a6a1bf7e96bd7a5bd229b"
     },
     {
       "model": "StepFinishedEventPayload",
@@ -1686,7 +1710,7 @@
       "model": "StepProgressEventPayload",
       "module": "workflow_events",
       "path": "workflow_events/StepProgressEventPayload.schema.json",
-      "sha256": "1c9b5dda24f0627165b37e445f8b628d1e7ee59a122b51768497eb2e6ad0e60a"
+      "sha256": "81b9d0f07591db5dcc990a239de283cd49e1d1d37e03b9fa63f6baacbffe782e"
     },
     {
       "model": "StepQueuedEventPayload",
@@ -1716,7 +1740,7 @@
       "model": "WorkflowCurrentStepSnapshot",
       "module": "workflow_events",
       "path": "workflow_events/WorkflowCurrentStepSnapshot.schema.json",
-      "sha256": "77082fb3df514a287c2edda30df46f4c6c996df4fbde30ff10da7265b2bc6402"
+      "sha256": "6c879785cd8e8d03c6070687104dac1bb040a396110e4b8e5f48b1b969a9a07a"
     },
     {
       "model": "WorkflowErrorSnapshot",
@@ -1728,13 +1752,13 @@
       "model": "WorkflowEventEnvelope",
       "module": "workflow_events",
       "path": "workflow_events/WorkflowEventEnvelope.schema.json",
-      "sha256": "6796306f94040dd06af7cec083681e4f7da7dad516793853bc0a7f2f16de216a"
+      "sha256": "c43cfee7d8150a4d818de7ec6a344ce1db50503dd680b752d99f59ef9d651afc"
     },
     {
       "model": "WorkflowRunSnapshot",
       "module": "workflow_events",
       "path": "workflow_events/WorkflowRunSnapshot.schema.json",
-      "sha256": "8cbb67a7ea24a9c8b51d47e77fb7b7abadab2b9add1215e8da75a7f211c75e84"
+      "sha256": "267fa5c635830b36866d501a24478b85124f22d3f2d34084eadbddf063c400fc"
     },
     {
       "model": "WorkflowStepProgressSnapshot",

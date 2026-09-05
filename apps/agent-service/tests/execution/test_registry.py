@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "15b2c6ff1a46699d3d926ef26c4ba15394cdc2e14fb68b0e2a71b9ebccf60b2e"
+        "9f679762c74ec39314e0daa222db3a5a98ad15309fedd44ce496822398b891a5"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -316,7 +316,7 @@ def test_loader_preserves_zero_output_run_budget_without_treating_it_as_step_bud
 
     embedding = registry.operations["rag.embedding"]
 
-    assert embedding.run_budget.max_model_calls == 1
+    assert embedding.run_budget.max_model_calls == 7
     assert embedding.run_budget.max_completion_tokens == 0
     assert embedding.run_budget.max_reasoning_tokens == 0
     assert embedding.run_budget.max_visible_output_tokens == 0

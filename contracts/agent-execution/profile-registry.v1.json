@@ -2,6 +2,11 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "rag.embedding.v2", "version": 2, "supported": true,
+      "reasoningMode": "disabled", "purpose": "embedding",
+      "promptProfile": "prompt.rag.embedding.v2", "deploymentProfileKey": "deployment.rag.embedding.v2"
+    },
+    {
       "key": "style.portrait.v2",
       "version": 2,
       "supported": true,

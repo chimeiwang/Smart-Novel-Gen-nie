@@ -19,6 +19,11 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+if __package__:
+    from .rag_fixture import embedding_response
+else:
+    from rag_fixture import embedding_response
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -618,6 +623,23 @@ def create_app() -> FastAPI:
         if await provider_gate.wait():
             raise HTTPException(status_code=503, detail="E2E provider gate 已中止")
         return {"status": "proceed"}
+
+    @app.post("/v1/embeddings")
+    async def embeddings(request: Request) -> dict[str, object]:
+        if request.headers.get("authorization") != "Bearer " + token:
+            raise HTTPException(status_code=403, detail="隔离 embeddings 令牌无效")
+        try:
+            identity_data, response = embedding_response(await request.json())
+            identity = ProviderIdentity.model_validate(identity_data)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=422, detail="隔离 embeddings 完整批次请求不合法"
+            ) from None
+        store.provider_reached(identity)
+        if await provider_gate.wait():
+            raise HTTPException(status_code=503, detail="E2E embeddings gate 已中止")
+        store.provider_completed(identity)
+        return response
 
     @app.post("/control/provider/completed")
     async def provider_completed(

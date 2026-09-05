@@ -3,6 +3,36 @@
   "hashAlgorithm": "inkforge-canonical-json/1",
   "schemas": [
     {
+      "key": "output.embedding_batch.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "embedding",
+      "sha256": "93118d00b096cc95fb3afd2dd5e1a8d6fcf11953a8301773db904739f27c9c39",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "embeddings": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "type": "array"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "embeddings"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "key": "output.style_portrait_section.v2",
       "version": 2,
       "supported": true,

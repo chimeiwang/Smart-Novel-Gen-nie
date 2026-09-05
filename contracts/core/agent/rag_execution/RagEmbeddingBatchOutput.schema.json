@@ -1,0 +1,27 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/rag_execution/RagEmbeddingBatchOutput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "embeddings": {
+      "items": {
+        "items": {
+          "type": "number"
+        },
+        "maxItems": 4096,
+        "minItems": 1,
+        "type": "array"
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Embeddings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "embeddings"
+  ],
+  "title": "RagEmbeddingBatchOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.rag_execution.RagEmbeddingBatchOutput"
+}

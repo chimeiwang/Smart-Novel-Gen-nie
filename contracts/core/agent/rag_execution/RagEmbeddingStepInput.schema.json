@@ -1,0 +1,19 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/rag_execution/RagEmbeddingStepInput/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batchIndex": {
+      "maximum": 6,
+      "minimum": 0,
+      "title": "Batchindex",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "batchIndex"
+  ],
+  "title": "RagEmbeddingStepInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.rag_execution.RagEmbeddingStepInput"
+}

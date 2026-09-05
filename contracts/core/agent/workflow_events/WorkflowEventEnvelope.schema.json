@@ -431,6 +431,38 @@
     },
     "ResolvedModelRef": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "model": {
+                  "minLength": 1
+                },
+                "structuredOutputRoute": {
+                  "const": "embeddings_v1"
+                }
+              }
+            },
+            {
+              "properties": {
+                "model": {
+                  "maxLength": 2000,
+                  "minLength": 1
+                },
+                "structuredOutputRoute": {
+                  "enum": [
+                    "responses_json_schema_v1",
+                    "chat_json_output_v1",
+                    "quality_strict_tool_v1",
+                    "plain_text_v1"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ],
       "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
       "properties": {
         "capabilityVersion": {
@@ -460,7 +492,6 @@
           "type": "string"
         },
         "model": {
-          "maxLength": 2000,
           "minLength": 1,
           "title": "Model",
           "type": "string"
@@ -485,7 +516,8 @@
             "responses_json_schema_v1",
             "chat_json_output_v1",
             "quality_strict_tool_v1",
-            "plain_text_v1"
+            "plain_text_v1",
+            "embeddings_v1"
           ],
           "title": "Structuredoutputroute",
           "type": "string"

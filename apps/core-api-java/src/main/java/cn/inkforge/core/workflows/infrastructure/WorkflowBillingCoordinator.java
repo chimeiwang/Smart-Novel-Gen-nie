@@ -117,6 +117,19 @@ final class WorkflowBillingCoordinator {
             throw new WorkflowExecutionRejectedException("MODEL_DEPLOYMENT_NOT_AUTHORIZED");
         }
 
+        if ("rag".equals(run.get("workflow", String.class)) && "embedding".equals(run.get("operation", String.class))) {
+            // 同一索引的所有向量必须属于同一模型空间；配置更新不能在后续批次偷偷换模型或端点。
+            Record first = transaction.fetchOne("""
+                    SELECT "resolvedModelJson" FROM public."WorkflowStep"
+                    WHERE "runId" = ? AND id <> ? AND purpose = 'generation' AND status = 'completed'
+                    ORDER BY ordinal, id LIMIT 1
+                    """, runId, stepId);
+            if (first != null && (first.get("resolvedModelJson", String.class) == null
+                    || !readObject(first.get("resolvedModelJson", String.class)).equals(resolvedMap))) {
+                throw new WorkflowExecutionRejectedException("MODEL_DEPLOYMENT_NOT_AUTHORIZED");
+            }
+        }
+
         Record existing = lockReservation(transaction, stepId);
         Map<String, Object> pricing = pricingSnapshot(resolvedMap, deployment);
         WorkflowStepBudget stepBudget = frozenStep.stepBudget().budget();

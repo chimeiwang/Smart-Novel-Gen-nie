@@ -22,12 +22,17 @@ public record RagJobIdentity(String taskId, String runId) {
         Objects.requireNonNull(referenceId);
         Objects.requireNonNull(contentHash);
         Objects.requireNonNull(generation);
-        String generationText = UTC_MILLISECONDS.format(
-                generation.withOffsetSameInstant(ZoneOffset.UTC).truncatedTo(ChronoUnit.MILLIS));
+        String generationText = generationText(generation);
         String taskDigest = digestPrefix("rag:" + referenceId + ":" + contentHash);
         String runDigest =
                 digestPrefix("rag:" + referenceId + ":" + contentHash + ":" + generationText);
         return new RagJobIdentity("rag-" + taskDigest, "rag-" + runDigest);
+    }
+
+    /** 原 RAG 身份的固定 UTC 毫秒格式，同时用于 V2 冻结输入，不能套用通用 execution 微秒格式。 */
+    public static String generationText(OffsetDateTime generation) {
+        return UTC_MILLISECONDS.format(Objects.requireNonNull(generation)
+                .withOffsetSameInstant(ZoneOffset.UTC).truncatedTo(ChronoUnit.MILLIS));
     }
 
     private static String digestPrefix(String value) {

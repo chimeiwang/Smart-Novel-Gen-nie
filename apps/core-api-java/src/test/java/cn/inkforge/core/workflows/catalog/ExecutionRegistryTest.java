@@ -21,6 +21,25 @@ class ExecutionRegistryTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Test
+    void RAG配置绑定不能被复制给聊天或改为用户收费() {
+        for (String mutation : List.of("other-profile", "billable", "unknown-field", "empty-environments")) {
+            Map<String, byte[]> documents = classpathDocuments();
+            JsonNode deployment = JSON.readTree(documents.get("deployment-profile-registry.v1.json"));
+            var rag = findByKey(deployment.get("profiles"), "deployment.rag.embedding.v2").asObject();
+            switch (mutation) {
+                case "other-profile" -> rag.put("key", "deployment.other.embedding.v2");
+                case "billable" -> rag.get("configuredBinding").asObject().put("billable", true);
+                case "unknown-field" -> rag.get("configuredBinding").asObject().put("allowAnyModel", true);
+                case "empty-environments" -> rag.get("configuredBinding").asObject().putArray("allowedEnvironments");
+                default -> throw new IllegalStateException("未知测试变体");
+            }
+            replaceDocumentAndHash(documents, "deploymentProfileRegistry", "deployment-profile-registry.v1.json", JSON.writeValueAsBytes(deployment));
+            assertThatThrownBy(() -> ExecutionRegistry.load(documents::get, ExecutionRegistry.Environment.TEST))
+                    .as(mutation).isInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
     void 只解析目录中真实启用且依赖完整的纵切() {
         ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
 

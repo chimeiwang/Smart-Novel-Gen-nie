@@ -71,6 +71,7 @@ public final class ExecutionRegistry {
     private final Environment environment;
     private final String catalogVersion;
     private final String manifestFingerprint;
+    private final RagEmbeddingDeployment ragEmbeddingDeployment;
 
     private ExecutionRegistry(
             Map<String, Operation> operations,
@@ -83,6 +84,15 @@ public final class ExecutionRegistry {
             Environment environment,
             String catalogVersion,
             String manifestFingerprint) {
+        this(operations, profiles, deploymentProfiles, promptProfiles, outputSchemas, stepBudgets,
+                systemPurposes, environment, catalogVersion, manifestFingerprint, null);
+    }
+
+    private ExecutionRegistry(Map<String, Operation> operations, Map<String, Profile> profiles,
+            Map<String, DeploymentProfile> deploymentProfiles, Map<String, PromptProfile> promptProfiles,
+            Map<String, OutputSchema> outputSchemas, Map<String, StepBudgetProfile> stepBudgets,
+            Map<String, SystemPurpose> systemPurposes, Environment environment,
+            String catalogVersion, String manifestFingerprint, RagEmbeddingDeployment ragEmbeddingDeployment) {
         this.operations = Map.copyOf(operations);
         this.profiles = Map.copyOf(profiles);
         this.deploymentProfiles = Map.copyOf(deploymentProfiles);
@@ -93,6 +103,14 @@ public final class ExecutionRegistry {
         this.environment = Objects.requireNonNull(environment);
         this.catalogVersion = Objects.requireNonNull(catalogVersion);
         this.manifestFingerprint = Objects.requireNonNull(manifestFingerprint);
+        this.ragEmbeddingDeployment = ragEmbeddingDeployment;
+    }
+
+    /** 配置只绑定专用 embedding Deployment；目录资产和其他静态授权元组保持不可变。 */
+    public ExecutionRegistry withRagEmbeddingConfig(String model, String baseUrl) {
+        return new ExecutionRegistry(operations, profiles, deploymentProfiles, promptProfiles, outputSchemas,
+                stepBudgets, systemPurposes, environment, catalogVersion, manifestFingerprint,
+                RagEmbeddingDeployment.fromConfiguration(model, baseUrl));
     }
 
     public static ExecutionRegistry loadClasspath(Environment environment) {
@@ -270,7 +288,11 @@ public final class ExecutionRegistry {
         if (profile == null || !profile.supported()) {
             throw invalid("Deployment Profile 未发布或不存在");
         }
-        for (DeploymentModel allowed : profile.allowedModels()) {
+        List<DeploymentModel> candidates = profile.allowedModels();
+        if (profile.configuredBinding() != null && ragEmbeddingDeployment != null) {
+            candidates = List.of(ragEmbeddingDeployment.authorized(profile.configuredBinding()));
+        }
+        for (DeploymentModel allowed : candidates) {
             if (allowed.provider().equals(resolved.provider())
                     && allowed.model().equals(resolved.model())
                     && allowed.transportProfile().equals(resolved.transportProfile())
@@ -342,10 +364,10 @@ public final class ExecutionRegistry {
         requireRegistryVersion(root, "Deployment Profile Registry");
         Map<String, DeploymentProfile> result = new LinkedHashMap<>();
         for (Object raw : list(root, "profiles")) {
-            Map<String, Object> value = exactObject(
-                    raw,
-                    "deployment profile",
-                    Set.of("key", "version", "supported", "purpose", "allowedModels"));
+            Map<String, Object> rawValue = object(raw, "deployment profile");
+            Set<String> fields = new LinkedHashSet<>(Set.of("key", "version", "supported", "purpose", "allowedModels"));
+            if (rawValue.containsKey("configuredBinding")) fields.add("configuredBinding");
+            Map<String, Object> value = exactObject(raw, "deployment profile", fields);
             String key = string(value, "key");
             int version = positiveInt(value, "version");
             boolean supported = bool(value, "supported");
@@ -390,7 +412,7 @@ public final class ExecutionRegistry {
                         enumText(
                                 model,
                                 "structuredOutputRoute",
-                                Set.of("responses_json_schema_v1", "chat_json_output_v1", "quality_strict_tool_v1", "plain_text_v1")),
+                                Set.of("responses_json_schema_v1", "chat_json_output_v1", "quality_strict_tool_v1", "plain_text_v1", "embeddings_v1")),
                         capabilityVersion,
                         enumText(model, "reasoningMode", Set.of("disabled", "bounded")),
                         bool(model, "supportsRequestIdempotency"),
@@ -412,7 +434,24 @@ public final class ExecutionRegistry {
                 }
                 allowedModels.add(allowed);
             }
-            if (supported != !allowedModels.isEmpty()) {
+            ConfiguredDeploymentBinding binding = null;
+            if (value.containsKey("configuredBinding")) {
+                Map<String, Object> configured = exactObject(value.get("configuredBinding"), "configured binding",
+                        Set.of("key", "allowedEnvironments", "pricingVersion", "billable"));
+                List<String> environments = strings(configured, "allowedEnvironments");
+                requireUnique(environments, "Configured binding allowedEnvironments");
+                if (!RagEmbeddingDeployment.PROFILE.equals(key) || version != 2
+                        || !"embedding".equals(string(value, "purpose")) || !allowedModels.isEmpty()
+                        || !RagEmbeddingDeployment.BINDING.equals(string(configured, "key"))
+                        || !"credit-pricing.v1".equals(string(configured, "pricingVersion"))
+                        || bool(configured, "billable") || environments.isEmpty()
+                        || !Set.of("dev", "test", "production").containsAll(environments)) {
+                    throw invalid("配置绑定仅允许专用非收费 RAG embedding Deployment");
+                }
+                binding = new ConfiguredDeploymentBinding(string(configured, "key"), environments,
+                        string(configured, "pricingVersion"), false);
+            }
+            if (supported != (!allowedModels.isEmpty() || binding != null)) {
                 throw invalid("Deployment Profile supported 与 allowedModels 不一致：" + key);
             }
             DeploymentProfile profile = new DeploymentProfile(
@@ -423,7 +462,7 @@ public final class ExecutionRegistry {
                             value,
                             "purpose",
                             Set.of("generation", "evaluation", "embedding", "review", "media")),
-                    allowedModels);
+                    allowedModels, binding);
             requireVersionedKey(key, version);
             putUnique(result, key, profile, "Deployment Profile");
         }
@@ -480,7 +519,8 @@ public final class ExecutionRegistry {
             String reasoningMode =
                     enumText(value, "reasoningMode", Set.of("disabled", "bounded"));
             if (deployment.allowedModels().stream()
-                    .anyMatch(allowed -> !reasoningMode.equals(allowed.reasoningMode()))) {
+                    .anyMatch(allowed -> !reasoningMode.equals(allowed.reasoningMode()))
+                    || deployment.configuredBinding() != null && !"disabled".equals(reasoningMode)) {
                 throw invalid("Profile 与 Deployment Profile reasoningMode 不一致：" + key);
             }
             Profile profile = new Profile(
@@ -1164,9 +1204,21 @@ public final class ExecutionRegistry {
             int version,
             boolean supported,
             String purpose,
-            List<DeploymentModel> allowedModels) {
+            List<DeploymentModel> allowedModels,
+            ConfiguredDeploymentBinding configuredBinding) {
+        public DeploymentProfile(String key, int version, boolean supported, String purpose,
+                List<DeploymentModel> allowedModels) {
+            this(key, version, supported, purpose, allowedModels, null);
+        }
         public DeploymentProfile {
             allowedModels = List.copyOf(allowedModels);
+        }
+    }
+
+    public record ConfiguredDeploymentBinding(String key, List<String> allowedEnvironments,
+            String pricingVersion, boolean billable) {
+        public ConfiguredDeploymentBinding {
+            allowedEnvironments = List.copyOf(allowedEnvironments);
         }
     }
 

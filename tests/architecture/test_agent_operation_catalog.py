@@ -121,7 +121,8 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
 )
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
     {
-        "style.portrait.v1",
+    "style.portrait.v1",
+    "rag.embedding.v1",
         "quality.consistency.v1",
         "system.protocol_corrector.v1",
         "system.intent_resolver.v1",
@@ -144,7 +145,8 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
     {
-        "output.style_portrait.v1",
+    "output.style_portrait.v1",
+    "output.embedding_batch.v1",
         "output.consistency_quality_report.v1", "output.protocol_correction.v1",
         "output.agent_updates.v1", "output.agent_updates.v2",
         "output.short_medium_outline.v1", "output.short_medium_segment_manifest.v1",
@@ -185,6 +187,7 @@ NO_THINKING_OPERATION_KEYS = frozenset(
         "short_medium.full_check",
         "quality.consistency",
         "style.portrait",
+        "rag.embedding",
         "video.chapter_cinematic_adaptation_v2",
         "video.chapter_shot_prompt_v2",
     }
@@ -312,6 +315,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         "short_medium.full_check",
         "quality.consistency",
         "style.portrait",
+        "rag.embedding",
     }
     answer = next(
         operation
@@ -425,7 +429,17 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         _assert_key_version(deployment)
         assert not (set(deployment) & forbidden_deployment_names)
         allowed_models = deployment["allowedModels"]
-        assert bool(allowed_models) is deployment["supported"]
+        if "configuredBinding" in deployment:
+            assert deployment["key"] == "deployment.rag.embedding.v2"
+            assert deployment["purpose"] == "embedding" and deployment["supported"] is True
+            assert allowed_models == []
+            assert deployment["configuredBinding"] == {
+                "key": "binding.rag-embedding-config.v1",
+                "allowedEnvironments": ["dev", "test", "production"],
+                "pricingVersion": "credit-pricing.v1", "billable": False,
+            }
+        else:
+            assert bool(allowed_models) is deployment["supported"]
         identities = set()
         for allowed in allowed_models:
             assert set(allowed) == {
@@ -857,12 +871,15 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "short_medium.full_check",
         "quality.consistency",
         "style.portrait",
+        "rag.embedding",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is False
         generator = profiles[operation["generatorProfile"]]
         assert generator["supported"] is True
-        assert generator["purpose"] == "generation"
+        assert generator["purpose"] == (
+            "embedding" if operation["key"] == "rag.embedding" else "generation"
+        )
         expected_reasoning = (
             "disabled"
             if operation["key"]
@@ -872,6 +889,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 "short_medium.full_check",
                 "quality.consistency",
                 "style.portrait",
+                "rag.embedding",
             }
             else "bounded"
         )
@@ -879,9 +897,16 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         assert generator["deploymentProfileKey"]
         generator_deployment = deployments[generator["deploymentProfileKey"]]
         assert generator_deployment["supported"] is True
-        assert {item["reasoningMode"] for item in generator_deployment["allowedModels"]} == {
-            generator["reasoningMode"]
-        }
+        if operation["key"] == "rag.embedding":
+            assert generator_deployment["allowedModels"] == []
+            assert (
+                generator_deployment["configuredBinding"]["key"]
+                == "binding.rag-embedding-config.v1"
+            )
+        else:
+            assert {item["reasoningMode"] for item in generator_deployment["allowedModels"]} == {
+                generator["reasoningMode"]
+            }
 
         reviewers = [profiles[key] for key in operation["reviewPolicy"]["reviewerProfiles"]]
         if operation["reviewPolicy"]["mode"] == "none":
@@ -928,9 +953,22 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
 
         output_schema = output_schemas[operation["outputSchema"]]
         assert output_schema["supported"] is True
-        assert output_schema["purpose"] == "generation"
+        assert output_schema["purpose"] == (
+            "embedding" if operation["key"] == "rag.embedding" else "generation"
+        )
         assert output_schema["jsonSchema"]["properties"]
-        if operation["key"] == "long_serial.plan_chapter":
+        if operation["key"] == "rag.embedding":
+            schema = output_schema["jsonSchema"]
+            assert schema["required"] == ["embeddings"]
+            assert schema["additionalProperties"] is False
+            vectors = schema["properties"]["embeddings"]
+            assert vectors["minItems"] == 1 and vectors["maxItems"] == 10
+            assert vectors["items"]["minItems"] == 1 and vectors["items"]["maxItems"] == 4096
+            assert vectors["items"]["items"] == {"type": "number"}
+            assert operation["runBudgetProfile"]["maxModelCalls"] == 7
+            assert operation["runBudgetProfile"]["maxCompletionTokens"] == 0
+            assert operation["runBudgetProfile"]["maxInputTokens"] == 420000
+        elif operation["key"] == "long_serial.plan_chapter":
             assert output_schema["jsonSchema"]["required"] == [
                 "title", "summary", "chapterGoal", "sceneBeats"
             ]

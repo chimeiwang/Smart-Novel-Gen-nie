@@ -30,6 +30,12 @@
       },
       "canonicalUtf8": "{\"line\":\"\\n\\t\\r\\b\\f\",\"literal\":\"\\\\u001C\",\"null\":null,\"text\":\"\\u001c\\u001f\\u000b\"}",
       "sha256": "1a0ca655621bf0dcb612419f3601ec1f91ac226a5386751f4e74fb580fff5134"
+    },
+    {
+      "name": "embedding-finite-floats",
+      "value": {"embeddings": [[-0.0, 0.0, 1.25, -2.5, 1e-7, 1e-20, 123456.789]]},
+      "canonicalUtf8": "{\"embeddings\":[[0,0,1.25,-2.5,0.0000001,0.00000000000000000001,123456.789]]}",
+      "sha256": "414df77055cb700a1626069206f609af4972222a9d5fc4f5459eae05a547c8cd"
     }
   ]
 }

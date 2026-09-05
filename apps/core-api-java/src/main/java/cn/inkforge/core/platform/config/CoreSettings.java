@@ -57,6 +57,8 @@ public final class CoreSettings {
     private final URI agentServiceUrl;
     private final int agentMaxConcurrency;
     private final boolean ragIndexEnabled;
+    private final String ragEmbeddingModel;
+    private final String ragEmbeddingBaseUrl;
     private final boolean workflowEventDebugEnabled;
     private final boolean durableAgentExecutionSchemaReady;
     private final DurableAgentRouteMode durableAgentRouteMode;
@@ -107,6 +109,8 @@ public final class CoreSettings {
         this.agentMaxConcurrency = boundedInteger(
                 value.apply("AGENT_MAX_CONCURRENCY"), "AGENT_MAX_CONCURRENCY", 3, 1, 3);
         this.ragIndexEnabled = bool(value, "RAG_INDEX_ENABLED", false);
+        this.ragEmbeddingModel = value.apply("RAG_EMBEDDING_MODEL");
+        this.ragEmbeddingBaseUrl = value.apply("RAG_EMBEDDING_BASE_URL");
         this.workflowEventDebugEnabled = bool(
                 value, "WORKFLOW_EVENT_DEBUG_ENABLED", false);
         this.durableAgentExecutionSchemaReady = bool(
@@ -246,6 +250,10 @@ public final class CoreSettings {
     public boolean ragIndexEnabled() {
         return ragIndexEnabled;
     }
+
+    public String ragEmbeddingModel() { return ragEmbeddingModel; }
+
+    public String ragEmbeddingBaseUrl() { return ragEmbeddingBaseUrl; }
 
     public boolean workflowEventDebugEnabled() {
         return workflowEventDebugEnabled;

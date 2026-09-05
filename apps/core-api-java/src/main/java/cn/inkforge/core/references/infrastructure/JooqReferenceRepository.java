@@ -17,6 +17,9 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.patch.PatchField;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.references.application.ReferenceRepository;
+import cn.inkforge.core.references.application.RagIndexRunStarter;
+import cn.inkforge.core.references.application.RagIndexRegistrationUnavailable;
+import cn.inkforge.core.references.application.RagSubmissionException;
 import cn.inkforge.core.references.domain.RagDispatchRecord;
 import cn.inkforge.core.references.domain.RagDispatchStatus;
 import cn.inkforge.core.references.domain.RagIndexIntent;
@@ -36,9 +39,11 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * 基于冻结 PostgreSQL 结构的参考资料与 pgvector 仓储。
@@ -51,6 +56,7 @@ final class JooqReferenceRepository implements ReferenceRepository {
     private static final String SOURCE_TYPE = "reference_material";
     private static final String WAITING = "等待重新索引";
     private static final String DISABLED = "检索索引服务未配置";
+    private static final String REGISTRATION_UNAVAILABLE = "RAG_DURABLE_REGISTRATION_UNAVAILABLE";
     private static final int EMBEDDING_BATCH_SIZE = 10;
 
     private static final String SEARCH_SQL = """
@@ -76,11 +82,22 @@ final class JooqReferenceRepository implements ReferenceRepository {
     private final CoreDatabase database;
     private final CuidV1Generator ids;
     private final Clock clock;
+    private final boolean durableSchemaReady;
+    private final ObjectMapper json;
+    private final Supplier<RagIndexRunStarter> starters;
 
     JooqReferenceRepository(CoreDatabase database, CuidV1Generator ids, Clock clock) {
+        this(database, ids, clock, false, new ObjectMapper(), () -> null);
+    }
+
+    JooqReferenceRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            boolean durableSchemaReady, ObjectMapper json, Supplier<RagIndexRunStarter> starters) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
+        this.durableSchemaReady = durableSchemaReady;
+        this.json = Objects.requireNonNull(json);
+        this.starters = Objects.requireNonNull(starters);
     }
 
     @Override
@@ -107,9 +124,9 @@ final class JooqReferenceRepository implements ReferenceRepository {
             String clientRequestId,
             ReferenceData data,
             boolean indexEnabled) {
-        return database.dsl().transactionResult(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        return database.transactionResult(transaction -> {
             requireOwner(transaction, novelId, userId);
+            lockUserBeforeNovel(transaction, userId);
             lockNovel(transaction, novelId, userId);
             // 确定性资料 ID 支持创建响应丢失后的安全重放，同时保证原文与索引壳原子建立。
             String id = CommandResourceId.derive(
@@ -155,6 +172,7 @@ final class JooqReferenceRepository implements ReferenceRepository {
                     .set(RAGDOCUMENT.UPDATEDAT, now)
                     .returning()
                     .fetchSingle();
+            prepareNewIndex(transaction, userId, reference, document, indexEnabled);
             return new ReferenceCreateResult(
                     snapshot(reference, document), true, DatabaseTimestamp.api(now));
         });
@@ -168,9 +186,9 @@ final class JooqReferenceRepository implements ReferenceRepository {
             ReferencePatch patch,
             OffsetDateTime expectedUpdatedAt,
             boolean indexEnabled) {
-        return database.dsl().transactionResult(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        return database.transactionResult(transaction -> {
             requireOwner(transaction, novelId, userId);
+            lockUserBeforeNovel(transaction, userId);
             lockNovel(transaction, novelId, userId);
             LockedReference locked = lockReference(transaction, novelId, referenceId);
             ReferencematerialRecord reference = locked.reference();
@@ -208,6 +226,7 @@ final class JooqReferenceRepository implements ReferenceRepository {
                 document.setUpdatedat(DatabaseTimestamp.next(clock, document.getUpdatedat()));
             }
             if (titleChanged || contentChanged) document.store();
+            if (contentChanged) prepareNewIndex(transaction, userId, reference, document, indexEnabled);
             return new ReferenceUpdateResult(
                     snapshot(reference, document),
                     contentChanged,
@@ -221,8 +240,7 @@ final class JooqReferenceRepository implements ReferenceRepository {
             String userId,
             String referenceId,
             OffsetDateTime expectedUpdatedAt) {
-        return database.dsl().transactionResult(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        return database.transactionResult(transaction -> {
             requireOwner(transaction, novelId, userId);
             lockNovel(transaction, novelId, userId);
             LockedReference locked = lockReference(transaction, novelId, referenceId);
@@ -252,11 +270,10 @@ final class JooqReferenceRepository implements ReferenceRepository {
             String taskId,
             String runId,
             String expectedContentHash) {
-        return database.dsl().transactionResult(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        return database.transactionResult(transaction -> {
             requireOwner(transaction, novelId, userId);
             LockedReference locked = lockReference(transaction, novelId, referenceId);
-            requireCurrentJob(locked, expectedContentHash, taskId, runId);
+            requireCurrentJob(transaction, locked, expectedContentHash, taskId, runId);
             return snapshot(locked.reference(), locked.document());
         });
     }
@@ -269,12 +286,17 @@ final class JooqReferenceRepository implements ReferenceRepository {
             String runId,
             String expectedContentHash,
             List<List<BigDecimal>> embeddings) {
-        return database.dsl().transactionResult(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        return database.transactionResult(transaction -> {
             LockedReference locked = lockReference(transaction, novelId, referenceId);
+            requireCurrentJob(transaction, locked, expectedContentHash, taskId, runId);
+            return replaceCurrentIndex(transaction, locked, embeddings);
+        });
+    }
+
+    ReferenceSnapshot replaceCurrentIndex(DSLContext transaction, LockedReference locked, List<List<BigDecimal>> embeddings) {
             ReferencematerialRecord reference = locked.reference();
             RagdocumentRecord document = locked.document();
-            requireCurrentJob(locked, expectedContentHash, taskId, runId);
+            String novelId = reference.getNovelid();
             if (document.getStatus() == Ragdocumentstatus.ready) {
                 return snapshot(reference, document);
             }
@@ -325,7 +347,6 @@ final class JooqReferenceRepository implements ReferenceRepository {
             // 成功回调属于当前代次的终态，不推进 updatedAt，重放身份必须继续有效。
             document.store();
             return snapshot(reference, document);
-        });
     }
 
     @Override
@@ -334,9 +355,9 @@ final class JooqReferenceRepository implements ReferenceRepository {
             String userId,
             String referenceId,
             String expectedContentHash) {
-        return database.dsl().transactionResult(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        return database.transactionResult(transaction -> {
             requireOwner(transaction, novelId, userId);
+            lockUserBeforeNovel(transaction, userId);
             lockNovel(transaction, novelId, userId);
             LockedReference locked = lockReference(transaction, novelId, referenceId);
             requireCurrentHash(locked, expectedContentHash);
@@ -355,6 +376,7 @@ final class JooqReferenceRepository implements ReferenceRepository {
             document.setErrormessage(WAITING);
             document.setUpdatedat(DatabaseTimestamp.next(clock, document.getUpdatedat()));
             document.store();
+            prepareNewIndex(transaction, userId, locked.reference(), document, true);
             return new RagIndexIntent(
                     expectedContentHash, DatabaseTimestamp.api(document.getUpdatedat()));
         });
@@ -368,16 +390,16 @@ final class JooqReferenceRepository implements ReferenceRepository {
             String runId,
             String expectedContentHash,
             String message) {
-        database.dsl().transaction(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        database.transactionResult(transaction -> {
             LockedReference locked = lockReference(transaction, novelId, referenceId);
-            requireCurrentJob(locked, expectedContentHash, taskId, runId);
+            requireCurrentJob(transaction, locked, expectedContentHash, taskId, runId);
             RagdocumentRecord document = locked.document();
-            if (document.getStatus() == Ragdocumentstatus.failed) return;
+            if (document.getStatus() == Ragdocumentstatus.failed) return null;
             if (document.getStatus() == Ragdocumentstatus.ready) throw terminalConflict();
             document.setStatus(Ragdocumentstatus.failed);
             document.setErrormessage(message);
             document.store();
+            return null;
         });
     }
 
@@ -427,6 +449,13 @@ final class JooqReferenceRepository implements ReferenceRepository {
                 .on(NOVEL.ID.eq(REFERENCEMATERIAL.NOVELID))
                 .where(RAGDOCUMENT.STATUS.eq(Ragdocumentstatus.disabled)
                         .and(RAGDOCUMENT.ERRORMESSAGE.eq(WAITING)))
+                .and(durableSchemaReady ? DSL.condition("""
+                        NOT EXISTS (SELECT 1 FROM public."WorkflowRun" run WHERE run."engineVersion"=2
+                          AND run.workflow='rag' AND run.operation='embedding' AND run."sourceType"='rag_index_v2'
+                          AND run."sourceId"="RagDocument"."sourceId"
+                          AND run.input::jsonb->>'contentHash'="RagDocument"."contentHash"
+                          AND (run.input::jsonb->>'indexGeneration')::timestamp="RagDocument"."updatedAt")
+                        """) : DSL.trueCondition())
                 .orderBy(RAGDOCUMENT.UPDATEDAT.asc(), RAGDOCUMENT.ID.asc())
                 .limit(limit)
                 .forEach(record -> {
@@ -448,23 +477,24 @@ final class JooqReferenceRepository implements ReferenceRepository {
     @Override
     public void markDispatchTerminal(RagDispatchRecord record, RagDispatchStatus status) {
         if (status == RagDispatchStatus.QUEUED || status == RagDispatchStatus.RUNNING) return;
-        database.dsl().transaction(configuration -> {
-            DSLContext transaction = DSL.using(configuration);
+        database.transactionResult(transaction -> {
             LockedReference locked = lockReference(
                     transaction, record.novelId(), record.referenceId());
             if (!pending(locked, record.contentHash())
                     || !DatabaseTimestamp.sameInstant(
                             locked.document().getUpdatedat(), record.generation())) {
-                return;
+                return null;
             }
+            if (boundRun(transaction, record.referenceId(), record.contentHash(), record.generation()) != null) return null;
             locked.document().setStatus(Ragdocumentstatus.failed);
             locked.document().setErrormessage(
                     "智能体索引任务已终止：" + status.name().toLowerCase(java.util.Locale.ROOT));
             locked.document().store();
+            return null;
         });
     }
 
-    private static LockedReference lockReference(
+    static LockedReference lockReference(
             DSLContext transaction, String novelId, String referenceId) {
         ReferencematerialRecord reference = transaction.selectFrom(REFERENCEMATERIAL)
                 .where(REFERENCEMATERIAL.ID.eq(referenceId)
@@ -476,7 +506,7 @@ final class JooqReferenceRepository implements ReferenceRepository {
         return new LockedReference(reference, document);
     }
 
-    private static RagdocumentRecord requireDocument(
+    static RagdocumentRecord requireDocument(
             DSLContext context, String novelId, String referenceId, boolean lock) {
         var query = context.selectFrom(RAGDOCUMENT)
                 .where(RAGDOCUMENT.NOVELID.eq(novelId)
@@ -499,12 +529,15 @@ final class JooqReferenceRepository implements ReferenceRepository {
         }
     }
 
-    private static void requireCurrentJob(
+    private void requireCurrentJob(
+            DSLContext transaction,
             LockedReference locked,
             String expectedContentHash,
             String taskId,
             String runId) {
         requireCurrentHash(locked, expectedContentHash);
+        if (boundRun(transaction, locked.reference().getId(), expectedContentHash,
+                DatabaseTimestamp.api(locked.document().getUpdatedat())) != null) throw stale();
         RagJobIdentity current = RagJobIdentity.create(
                 locked.reference().getId(),
                 expectedContentHash,
@@ -620,6 +653,74 @@ final class JooqReferenceRepository implements ReferenceRepository {
         return new ApiException(422, "EMBEDDING_COUNT_MISMATCH", "嵌入向量数量与资料分块数量不一致");
     }
 
-    private record LockedReference(
+    record LockedReference(
             ReferencematerialRecord reference, RagdocumentRecord document) {}
+
+    /** 新代次的空结果/容量失败在 Core 确定性收敛，不触发供应商，也不撤销资料 CRUD。 */
+    private void prepareNewIndex(DSLContext transaction, String userId, ReferencematerialRecord reference,
+            RagdocumentRecord document, boolean indexEnabled) {
+        if (!indexEnabled) return;
+        String content = reference.getContent();
+        int count = content.codePointCount(0, content.length());
+        if (count == 0 || count > RagRules.MAX_CHUNK_CODE_POINTS * RagRules.MAX_INDEX_CHUNKS) {
+            document.setStatus(count == 0 ? Ragdocumentstatus.ready : Ragdocumentstatus.failed);
+            document.setErrormessage(count == 0 ? null : "索引生成失败");
+            document.store();
+            return;
+        }
+        RagIndexRunStarter starter = starters.get();
+        if (starter != null) {
+            try {
+                starter.bindNewGeneration(transaction, userId, reference.getNovelid(), reference.getId(),
+                        content, document.getContenthash(), DatabaseTimestamp.api(document.getUpdatedat()));
+            } catch (RagIndexRegistrationUnavailable exception) {
+                // 该精确异常仅发生在任何 Run 写入前；SQL 或登记中途错误绝不能被吞掉。
+                document.setStatus(Ragdocumentstatus.failed);
+                document.setErrormessage(REGISTRATION_UNAVAILABLE);
+                document.store();
+            }
+        }
+    }
+
+    private void lockUserBeforeNovel(DSLContext transaction, String userId) {
+        if (durableSchemaReady) transaction.fetchOne("SELECT id FROM public.\"User\" WHERE id=? FOR KEY SHARE", userId);
+    }
+
+    DurableRagIndexRun boundRun(DSLContext transaction, String referenceId, String hash, OffsetDateTime generation) {
+        if (!durableSchemaReady) return null;
+        Record run = transaction.fetchOne("""
+                SELECT id FROM public."WorkflowRun" WHERE "engineVersion"=2 AND "sourceType"='rag_index_v2'
+                  AND "sourceId"=? AND "idempotencyKey"=?
+                """, referenceId, RagJobIdentity.create(referenceId, hash, generation).runId());
+        return run == null ? null : DurableRagIndexRun.load(transaction, json, run.get("id", String.class));
+    }
+
+    RagDispatchStatus recordedSubmission(String userId, String novelId, String referenceId, String hash, OffsetDateTime generation) {
+        return database.transactionResult(tx -> {
+            requireOwner(tx, novelId, userId);
+            LockedReference locked = lockReference(tx, novelId, referenceId);
+            requireCurrentHash(locked, hash);
+            if (!DatabaseTimestamp.sameInstant(locked.document().getUpdatedat(), generation)) throw stale();
+            if (REGISTRATION_UNAVAILABLE.equals(locked.document().getErrormessage())) {
+                throw new RagSubmissionException("RAG_INDEX_UNAVAILABLE");
+            }
+            DurableRagIndexRun run = boundRun(tx, referenceId, hash, generation);
+            if (run != null) {
+                if (!userId.equals(run.userId()) || !novelId.equals(run.novelId())) throw stale();
+                return switch (run.status()) {
+                    case "pending" -> RagDispatchStatus.QUEUED;
+                    case "running" -> RagDispatchStatus.RUNNING;
+                    case "completed" -> RagDispatchStatus.COMPLETED;
+                    case "failed" -> RagDispatchStatus.FAILED;
+                    case "cancelled" -> RagDispatchStatus.CANCELLED;
+                    default -> throw new IllegalArgumentException("RAG 运行状态无效");
+                };
+            }
+            return switch (locked.document().getStatus()) {
+                case ready -> RagDispatchStatus.COMPLETED;
+                case failed -> RagDispatchStatus.FAILED;
+                default -> null;
+            };
+        });
+    }
 }

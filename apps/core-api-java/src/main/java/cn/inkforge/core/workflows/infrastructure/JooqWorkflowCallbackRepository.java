@@ -22,6 +22,7 @@ import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePrepara
 import cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
+import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
@@ -87,6 +88,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion;
     private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
     private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion;
+    private final java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -143,6 +145,19 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion,
             java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
             java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion) {
+        this(database, ids, clock, json, registry, leaseDuration, contexts, businessPreparation,
+                structuredCandidates, shortMediumCompletion, qualityCompletion, styleCompletion, () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
+            java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
+            java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion,
+            java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -156,6 +171,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 requiredRegistry.enabledOperationKeys("quality", false));
         WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
                 requiredRegistry.enabledOperationKeys("style", false));
+        WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
+                requiredRegistry.enabledOperationKeys("rag", false));
         if (leaseDuration == null || leaseDuration.isZero() || leaseDuration.isNegative()) {
             throw new IllegalArgumentException("Workflow callback lease 必须为正数");
         }
@@ -167,6 +184,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.shortMediumCompletion = Objects.requireNonNull(shortMediumCompletion);
         this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
         this.styleCompletion = Objects.requireNonNull(styleCompletion);
+        this.ragCompletion = Objects.requireNonNull(ragCompletion);
     }
 
     @Override
@@ -758,6 +776,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid(exception.getMessage());
         }
         switch (materializer) {
+            case RAG_INDEX -> completeRagIndex(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case STYLE_PORTRAIT -> completeStylePortrait(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CONSISTENCY_QUALITY -> completeQuality(
@@ -779,6 +799,130 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             case AGENT_UPDATES_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
+    }
+
+    private void completeRagIndex(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+            ExecutionPlanSnapshot.Step generator, ExecutionStepResult body, WorkflowStepUsage usage,
+            Map<String, Object> output, LocalDateTime now) {
+        if (!isRagRun(locked.run()) || locked.run().get("novelId") == null
+                || locked.run().get("chapterId") != null || locked.run().get("writingSessionId") != null
+                || !"reference".equals(locked.run().get("targetType", String.class))
+                || !GENERATION.equals(locked.step().get("purpose", String.class))
+                || locked.step().get("artifactId") != null || !plan.reviewers().isEmpty() || !plan.systemSteps().isEmpty()) {
+            throw invalid("RAG 索引必须是小说级无草案的串行 embedding 批次");
+        }
+        String runId = body.getRunId();
+        WorkflowRagIndexCompletion completion = ragCompletion();
+        int chunkCount = completion.frozenChunkCount(tx, runId);
+        int batches = Math.ceilDiv(chunkCount, 10);
+        if (chunkCount < 1 || chunkCount > 64 || batches > plan.runBudget().maxModelCalls()) {
+            throw invalid("RAG 完整分块超出冻结调用额度");
+        }
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        if (!Objects.equals(bundleId, locked.run().get("currentEvidenceBundleId", String.class))) {
+            throw invalid("RAG 批次必须使用原冻结来源");
+        }
+        List<Record> previous = tx.fetch("""
+                SELECT input, "inputHash", output, "evidenceBundleId", "modelProfile", "outputSchema"
+                FROM public."WorkflowStep" WHERE "runId" = ? AND purpose = 'generation' AND status = 'completed'
+                ORDER BY ordinal, id
+                """, runId);
+        if (previous.size() >= batches) throw invalid("RAG 批次数量超出冻结来源");
+        List<List<java.math.BigDecimal>> vectors = new ArrayList<>();
+        for (int index = 0; index < previous.size(); index++) {
+            Record step = previous.get(index);
+            Map<String, Object> input = readObject(step.get("input", String.class));
+            requireHash(step.get("inputHash", String.class), input, "embedding batch input");
+            if (!Map.of("batchIndex", index).equals(input)
+                    || !Objects.equals(bundleId, step.get("evidenceBundleId", String.class))
+                    || !generator.modelProfile().profile().equals(step.get("modelProfile", String.class))
+                    || !generator.outputSchema().name().equals(step.get("outputSchema", String.class))) {
+                throw invalid("已完成 RAG 批次顺序或来源不匹配");
+            }
+            vectors.addAll(embeddingVectors(generator, readObject(step.get("output", String.class)),
+                    Math.min(10, chunkCount - index * 10)));
+        }
+        Map<String, Object> input = readObject(locked.step().get("input", String.class));
+        requireHash(locked.step().get("inputHash", String.class), input, "embedding batch input");
+        if (!Map.of("batchIndex", previous.size()).equals(input)) throw invalid("RAG 当前批次不符合冻结顺序");
+        vectors.addAll(embeddingVectors(generator, output, Math.min(10, chunkCount - previous.size() * 10)));
+        int dimension = vectors.getFirst().size();
+        boolean dimensionMismatch = vectors.stream().anyMatch(vector -> vector.size() != dimension);
+        boolean storageRangeInvalid = vectors.stream().flatMap(List::stream).anyMatch(value ->
+                !Float.isFinite(value.floatValue()));
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null,
+                locked.run().get("lastEventSequence", Long.class), now);
+        if (!completion.isCurrent(tx, runId)) {
+            cancelInvalidatedRag(tx, locked, sequence, now);
+            return;
+        }
+        if (dimensionMismatch) {
+            // 每批单独合法但跨批维度漂移属于确定性业务失败，保留真实用量并结束，不能无限重投同一终报。
+            failRun(tx, locked, "EMBEDDING_DIMENSION_MISMATCH", false, sequence, now);
+            return;
+        }
+        if (storageRangeInvalid) {
+            // pgvector 使用 float4；不可存的原始数值只能明确失败，不能裁切、归零或无限重投终报。
+            failRun(tx, locked, "EMBEDDING_OUTPUT_INVALID", false, sequence, now);
+            return;
+        }
+        if (previous.size() + 1 < batches) {
+            appendGenerationStep(tx, locked, generator, Map.of("batchIndex", previous.size() + 1), bundleId, null, now);
+            updateRun(tx, runId, "running", sequence, null, null, now);
+            return;
+        }
+        String status = completion.complete(tx, runId, vectors);
+        if ("cancelled".equals(status)) {
+            cancelInvalidatedRag(tx, locked, sequence, now);
+            return;
+        }
+        if (!"completed".equals(status)) throw invalid("RAG 物化端口返回非法状态");
+        sequence = appendEvent(tx, runId, sequence, "completed", Map.of("outcomeType", "rag_index",
+                "resultId", locked.run().get("targetId", String.class)), "run:completed", now);
+        updateRun(tx, runId, "completed", sequence, null, now, now);
+    }
+
+    private static List<List<java.math.BigDecimal>> embeddingVectors(ExecutionPlanSnapshot.Step generator,
+            Map<String, Object> output, int expectedCount) {
+        try { WorkflowOutputValidator.validate(generator.outputSchema().jsonSchema(), output); }
+        catch (IllegalArgumentException exception) { throw invalid("RAG 批次不符合冻结 Schema"); }
+        if (!output.keySet().equals(Set.of("embeddings")) || !(output.get("embeddings") instanceof List<?> raw)
+                || raw.size() != expectedCount) throw invalid("RAG 向量数量不匹配完整批次");
+        List<List<java.math.BigDecimal>> result = new ArrayList<>();
+        for (Object item : raw) {
+            if (!(item instanceof List<?> values) || values.isEmpty() || values.size() > 4096) {
+                throw invalid("RAG 向量维度无效");
+            }
+            List<java.math.BigDecimal> vector = new ArrayList<>();
+            for (Object number : values) {
+                if (!(number instanceof Number value) || !Double.isFinite(value.doubleValue())) {
+                    throw invalid("RAG 向量只能包含有限数值");
+                }
+                vector.add(new java.math.BigDecimal(value.toString()));
+            }
+            result.add(List.copyOf(vector));
+        }
+        return List.copyOf(result);
+    }
+
+    private static boolean isRagRun(Record run) {
+        return "rag".equals(run.get("workflow", String.class)) && "embedding".equals(run.get("operation", String.class));
+    }
+
+    private WorkflowRagIndexCompletion ragCompletion() {
+        WorkflowRagIndexCompletion completion = ragCompletion.get();
+        if (completion == null) throw new IllegalStateException("RAG 索引耐久投影端口未装配");
+        return completion;
+    }
+
+    private void cancelInvalidatedRag(DSLContext tx, Locked locked, long sequence, LocalDateTime now) {
+        String runId = locked.run().get("id", String.class);
+        String cancelRequestId = "rag-invalidated." + runId;
+        tx.execute("UPDATE public.\"WorkflowRun\" SET \"cancelRequestId\" = ?, \"cancelRequestedAt\" = ? WHERE id = ?",
+                cancelRequestId, now, runId);
+        sequence = appendEvent(tx, runId, sequence, "cancelled", Map.of("cancelRequestId", cancelRequestId), "run:cancelled", now);
+        updateRun(tx, runId, "cancelled", sequence, "RUN_CANCELLED", now, now);
     }
 
     private void completeStylePortrait(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
@@ -2455,6 +2599,14 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             Boolean outcomeUnknown,
             long previousSequence,
             LocalDateTime now) {
+        if (isRagRun(locked.run())) {
+            String terminal = ragCompletion().finish(transaction, locked.run().get("id", String.class), "failed");
+            if ("cancelled".equals(terminal)) {
+                cancelInvalidatedRag(transaction, locked, previousSequence, now);
+                return;
+            }
+            if (!"failed".equals(terminal)) throw invalid("RAG 物化端口返回非法失败状态");
+        }
         if (isStyleRun(locked.run())) {
             if (!styleCompletion().targetExists(transaction, locked.run().get("id", String.class))) {
                 cancelDeletedStyle(transaction, locked, previousSequence, now);
@@ -2551,6 +2703,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         }
         if (isStyleRun(locked.run())) {
             styleCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled");
+        }
+        if (isRagRun(locked.run())) {
+            ragCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled");
         }
         sequence = appendEvent(
                 transaction,

@@ -572,17 +572,11 @@ class ShortMediumDurableHttpIntegrationTest {
                 "capability.fake.structured-output.v1",
                 reasoning,
                 true);
-        return new ResolvedModelRef(
-                "capability.fake.structured-output.v1",
-                fingerprint,
-                deployment,
-                "endpoint.local-fake.v1",
-                "fake",
-                "fake",
-                ResolvedModelRef.ReasoningModeEnum.fromValue(reasoning),
-                ResolvedModelRef.StructuredOutputRouteEnum.RESPONSES_JSON_SCHEMA_V1,
-                true,
-                "transport.fake.v1");
+        return new ResolvedModelRef().capabilityVersion("capability.fake.structured-output.v1")
+                .deploymentFingerprint(fingerprint).deploymentProfileKey(deployment).endpointProfile("endpoint.local-fake.v1")
+                .model("fake").provider("fake").reasoningMode(ResolvedModelRef.ReasoningModeEnum.fromValue(reasoning))
+                .structuredOutputRoute(ResolvedModelRef.StructuredOutputRouteEnum.RESPONSES_JSON_SCHEMA_V1)
+                .supportsRequestIdempotency(true).transportProfile("transport.fake.v1");
     }
 
     private JsonNode preview(Fixture fixture, String documentType, String baseVersionId)

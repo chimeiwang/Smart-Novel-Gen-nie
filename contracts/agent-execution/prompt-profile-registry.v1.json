@@ -3,6 +3,14 @@
   "hashAlgorithm": "sha256-utf8/1",
   "prompts": [
     {
+      "key": "prompt.rag.embedding.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "embedding",
+      "sha256": "45932d5065bc33b3248a86e924f34aa40b68949b93e31f82667bb34d33f30c46",
+      "systemPrompt": "参考资料索引使用独立 embeddings 协议，每次发送本批完整文本；本协议说明不发送供应商。"
+    },
+    {
       "key": "prompt.style.portrait.v2",
       "version": 2,
       "supported": true,

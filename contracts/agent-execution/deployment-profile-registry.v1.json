@@ -2,6 +2,14 @@
   "registryVersion": "1",
   "profiles": [
     {
+      "key": "deployment.rag.embedding.v2", "version": 2, "supported": true, "purpose": "embedding",
+      "allowedModels": [],
+      "configuredBinding": {
+        "key": "binding.rag-embedding-config.v1", "allowedEnvironments": ["dev", "test", "production"],
+        "pricingVersion": "credit-pricing.v1", "billable": false
+      }
+    },
+    {
       "key": "deployment.style.portrait.v2",
       "version": 2,
       "supported": true,

@@ -318,6 +318,13 @@ RAG 索引是 ReferenceMaterial 的可重建派生数据。
 - Agent 通过 semantic_search_references 只读召回参考资料片段。
 - RAG 召回结果不能直接写正式库；任何正式设定、大纲或正文变更仍必须走 ReviewArtifact。
 
+V2 后台索引在新代次受理事务中冻结完整原文，每批最多 10 块、最多 7 个串行 Step；只在全部批次成功后一次
+发布索引。已完成批次重启后不重调，正文或索引代次变化使旧运行失效，标题变化不重建。旧 pending 代次
+继续原 V1，不能按新的路由开关重选引擎。空正文由 Core 直接完成空索引，超出原容量只使索引失败，不拒绝
+资料保存。用户积分仍不扣费，供应商未提供的用量字段保持未知。查询 embedding 不在本次迁移范围。
+CLI 仍通过 `long.resources.get` 读取资料和原 `long.reference.reindex` 重建，无新命令。
+仓内及跨进程验收状态见 `docs/specs/2026-09-05-durable-rag-embedding.md`，不代表真实环境已经更新。
+
 ## 文风画像
 
 ### 文风库

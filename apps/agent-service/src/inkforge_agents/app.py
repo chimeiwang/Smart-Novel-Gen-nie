@@ -41,6 +41,7 @@ from .observability.router import router as debug_router
 from .operations.definitions import validate_public_operation_definitions
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
+from .providers.embeddings import OpenAIExecutionEmbeddingProvider
 from .providers.seedance import SeedanceProvider
 from .providers.seedance_router import router as seedance_router
 from .providers.selector import create_model_provider
@@ -81,7 +82,11 @@ def create_app(
 ) -> FastAPI:
     validate_public_operation_definitions()
     loaded_settings = settings or (create_testing_settings() if testing else Settings())
-    execution_registry = load_execution_registry(environment=loaded_settings.environment)
+    execution_registry = load_execution_registry(
+        environment=loaded_settings.environment
+    ).with_rag_embedding_config(
+        loaded_settings.rag_embedding_model, loaded_settings.rag_embedding_base_url
+    )
     provider: ModelProvider | None = model_provider
     provider_error: str | None = None
     if model_provider is not None:
@@ -422,6 +427,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
             queue = cast(RedisRunQueue | None, app.state.run_queue)
             if provider is not None and queue is not None and app.state.queue_consumer is None:
                 embedding_provider: OpenAIEmbeddingProvider | None = None
+                execution_embedding_provider: OpenAIExecutionEmbeddingProvider | None = None
                 if (
                     settings.rag_embedding_api_key is not None
                     and settings.rag_embedding_base_url
@@ -444,9 +450,15 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         embedding_http,
                         model=settings.rag_embedding_model,
                     )
+                    if settings.rag_index_enabled:
+                        execution_embedding_provider = OpenAIExecutionEmbeddingProvider(
+                            embedding_http, model=settings.rag_embedding_model,
+                            base_url=settings.rag_embedding_base_url,
+                        )
                 app.state.embedding_provider = embedding_provider
                 model_runtime = ModelRuntime(
                     provider,
+                    embedding_provider=execution_embedding_provider,
                     billing=CoreBillingGateway(core),
                     observer=WorkflowModelObserver(workflow_log),
                     max_concurrency=settings.agent_max_concurrency,
@@ -550,6 +562,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     registry=app.state.execution_registry,
                     executor=StatelessExecutionStepExecutor(
                         model_runtime,
+                        embedding=model_runtime,
                         max_output_tokens=settings.model_max_output_tokens,
                     ),
                     callbacks=ExecutionCallbackClient(core_http, signer),

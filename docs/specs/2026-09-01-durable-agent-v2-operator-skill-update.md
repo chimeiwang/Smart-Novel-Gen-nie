@@ -321,7 +321,7 @@ Core 负责；CLI 透传选择不等于自行写资料。五项仓内启用不�
 ## 2026-09-05 中短篇四操作观察
 
 本节是后续两份 Skill 的更新契约，不直接编辑活动 `SKILL.md`、脚本或固定 JAR。中短篇四项已仓内启用，
-当时 Catalog 为 16/21；后续一致性终检达到 17/21，加入文风画像后当前为 18/21，剩余 RAG 索引和两个开发视频操作。四项已完成本地独立
+当时 Catalog 为 16/21；后续一致性终检达到 17/21、文风画像达到 18/21，加入 RAG 后当前已验收为 19/21，另有两个开发视频操作尚未完成。四项已完成本地独立
 Java Core/Python Agent、受控 Fake Provider 验收与全仓门禁，包含双段正文的 Agent 重启、每段仅一次实际
 Fake 调用、三类候选幂等采用和全文检查零候选；不是实际供应商或生产验收。
 完整证据以 `2026-09-05-durable-short-medium-workflows.md` 为准。
@@ -523,3 +523,21 @@ CLI 调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary �
   `plain_text_v1` 是内部路由，不是需要 Skill 传入的新参数。
 - 后续只需在 Skill 的能力说明中保留“仅应用或清除已有文风”，不要把网页画像能力写成 CLI 已支持。
   本批不替换固定 JAR、不修改活动 Skills、不声称生产已生效。
+
+## 资料索引耐久迁移（2026-09-05，仓内验收完成）
+
+实施与验收状态以 `2026-09-05-durable-rag-embedding.md` 为准。本项改变服务器端索引执行和恢复方式，
+不新增公共接口或 CLI 命令，也不直接修改活动 Skill、入口脚本或固定安装包。
+
+- `long.reference.create/update/delete/reindex` 沿用既有参数、响应和退出码；`long.resources.get` 仍读取资料列表，
+  不存在 `long.reference.list` 命令。具体允许集合仍以原
+  CLI/Operator 契约为准，不因内部 `rag.embedding` 操作存在扩大 Skill 权限。
+- `long.reference.reindex` 仍提交原 referenceId、expectedContentHash 等既有字段，202/accepted 只说明
+  受理；后续通过 `long.resources.get` 回读资料的 `ragStatus`、`contentHash`、`errorMessage`，不能把受理当作已可检索。
+- 正文变化使旧代次失效；同内容在终态后重建是新代次。断线后先回读资料状态，不应为恢复而自动反复
+  reindex。服务器按已保存代次恢复未完成批次，不重复调用已完成批次，也不把旧结果覆盖新正文。
+- 空正文的空索引直接 ready；超出原 64 块容量只报告索引失败，完整原文仍保留。没有新增索引积分扣费。
+- 不传 batchIndex、模型名、端点、预算或内部 Run/Step ID，不加入 `long.agent.start.operation`，
+  不通过 `long.task.watch` 假造原接口未返回的 RAG taskId，不给 CLI 开 Agent 直连入口。
+
+维护 Skill 时只同步上述观察和恢复说明，无需增加命令、Python 依赖或新的凭据存储方式。

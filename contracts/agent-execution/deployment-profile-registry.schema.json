@@ -21,6 +21,15 @@
     }
   },
   "$defs": {
+    "configuredBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "allowedEnvironments", "pricingVersion", "billable"],
+      "properties": {
+        "key": {"const": "binding.rag-embedding-config.v1"},
+        "allowedEnvironments": {"const": ["dev", "test", "production"]},
+        "pricingVersion": {"const": "credit-pricing.v1"}, "billable": {"const": false}
+      }
+    },
     "versionedIdentifier": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
@@ -72,7 +81,8 @@
             "responses_json_schema_v1",
             "chat_json_output_v1",
             "quality_strict_tool_v1",
-            "plain_text_v1"
+            "plain_text_v1",
+            "embeddings_v1"
           ]
         },
         "capabilityVersion": {
@@ -137,11 +147,22 @@
           "items": {
             "$ref": "#/$defs/allowedModel"
           }
+        },
+        "configuredBinding": {
+          "$ref": "#/$defs/configuredBinding"
         }
       },
       "allOf": [
         {
+          "if": {"required": ["configuredBinding"]},
+          "then": {"properties": {
+            "key": {"const": "deployment.rag.embedding.v2"}, "version": {"const": 2},
+            "supported": {"const": true}, "purpose": {"const": "embedding"}, "allowedModels": {"maxItems": 0}
+          }}
+        },
+        {
           "if": {
+            "not": {"required": ["configuredBinding"]},
             "properties": {
               "supported": {
                 "const": true

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Literal, Self, cast
@@ -24,13 +24,19 @@ from pydantic import (
     model_validator,
 )
 
+from ..providers.embeddings import EmbeddingIdentity, embedding_endpoint_profile
+
 Environment = Literal["dev", "test", "production"]
 ReasoningMode = Literal["disabled", "bounded"]
 ProfilePurpose = Literal["generation", "review", "evaluation", "embedding", "media"]
 OutputPurpose = Literal["generation", "evaluation", "embedding", "media"]
 Lane = Literal["interactive", "creative", "batch_media"]
 StructuredOutputRoute = Literal[
-    "responses_json_schema_v1", "chat_json_output_v1", "quality_strict_tool_v1", "plain_text_v1"
+    "responses_json_schema_v1",
+    "chat_json_output_v1",
+    "quality_strict_tool_v1",
+    "plain_text_v1",
+    "embeddings_v1",
 ]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
@@ -203,12 +209,20 @@ class _DeploymentModelDocument(_StrictModel):
     billable: bool
 
 
+class _ConfiguredEmbeddingBinding(_StrictModel):
+    key: Literal["binding.rag-embedding-config.v1"]
+    allowedEnvironments: list[Environment]
+    pricingVersion: Literal["credit-pricing.v1"]
+    billable: Literal[False]
+
+
 class _DeploymentProfileDocument(_StrictModel):
     key: str
     version: int = Field(ge=1)
     supported: bool
     purpose: ProfilePurpose
     allowedModels: list[_DeploymentModelDocument]
+    configuredBinding: _ConfiguredEmbeddingBinding | None = None
 
 
 class _DeploymentProfileRegistryDocument(_StrictModel):
@@ -337,6 +351,7 @@ class DeploymentProfileDefinition:
     supported: bool
     purpose: ProfilePurpose
     allowed_models: tuple[DeploymentModelDefinition, ...]
+    configured_binding: _ConfiguredEmbeddingBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +463,18 @@ class ExecutionRegistry:
     output_schemas: Mapping[str, OutputSchemaDefinition]
     step_budgets: Mapping[str, StepBudgetDefinition]
     system_purposes: Mapping[str, SystemPurposeDefinition]
+    rag_embedding_identity: EmbeddingIdentity | None = None
+
+    def with_rag_embedding_config(
+        self, model: str | None, base_url: str | None
+    ) -> ExecutionRegistry:
+        """仅为 RAG configuredBinding 注入当前非秘密配置，不改资产指纹或其他模型。"""
+        identity = (
+            None
+            if not model or not base_url
+            else EmbeddingIdentity(model, embedding_endpoint_profile(base_url))
+        )
+        return replace(self, rag_embedding_identity=identity)
 
     def resolve_system_purpose(self, purpose: str, workflow: str) -> ResolvedSystemPurpose:
         """初次系统用途独立于业务 Operation，必须由当前 Registry 完整授权。"""
@@ -487,6 +514,35 @@ class ExecutionRegistry:
         profile = self.deployment_profiles.get(deployment_profile_key)
         if profile is None or not profile.supported:
             raise ExecutionRegistryReferenceError("Deployment Profile 未发布或不存在")
+        if profile.configured_binding is not None:
+            binding = profile.configured_binding
+            identity = self.rag_embedding_identity
+            if (
+                identity is None
+                or self.environment not in binding.allowedEnvironments
+                or provider != identity.provider
+                or model != identity.model
+                or transport_profile != identity.transport_profile
+                or endpoint_profile != identity.endpoint_profile
+                or capability_version != identity.capability_version
+                or structured_output_route != "embeddings_v1"
+                or reasoning_mode != "disabled"
+                or supports_request_idempotency
+            ):
+                raise ExecutionRegistryReferenceError("RAG 模型未与当前独立配置精确绑定")
+            return DeploymentModelDefinition(
+                provider,
+                model,
+                transport_profile,
+                endpoint_profile,
+                structured_output_route,
+                capability_version,
+                reasoning_mode,
+                False,
+                tuple(binding.allowedEnvironments),
+                binding.pricingVersion,
+                False,
+            )
         for allowed in profile.allowed_models:
             if (
                 allowed.provider == provider
@@ -727,7 +783,19 @@ def _deployment_profiles(
             raise ExecutionRegistryReferenceError(
                 f"Deployment Profile Registry 存在重复 key：{item.key}"
             )
-        if item.supported != bool(item.allowedModels):
+        binding = item.configuredBinding
+        if binding is not None and (
+            item.key != "deployment.rag.embedding.v2"
+            or item.version != 2
+            or not item.supported
+            or item.purpose != "embedding"
+            or item.allowedModels
+            or binding.allowedEnvironments != ["dev", "test", "production"]
+        ):
+            raise ExecutionRegistryReferenceError(
+                "configuredBinding 只能用于精确 RAG embedding 部署"
+            )
+        if item.supported != bool(item.allowedModels or binding):
             raise ExecutionRegistryReferenceError(
                 f"Deployment Profile supported 与 allowedModels 不一致：{item.key}"
             )
@@ -780,6 +848,7 @@ def _deployment_profiles(
             supported=item.supported,
             purpose=item.purpose,
             allowed_models=tuple(allowed_models),
+            configured_binding=binding,
         )
     return result
 

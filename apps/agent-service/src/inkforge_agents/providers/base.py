@@ -25,6 +25,7 @@ ModelStructuredOutputRoute = Literal[
     "chat_json_output_v1",
     "quality_strict_tool_v1",
     "plain_text_v1",
+    "embeddings_v1",
 ]
 ModelStructuredOutputDiagnosticCode = Literal[
     "json_decode_error",

@@ -25,6 +25,12 @@ from ..providers.base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
+from ..providers.embeddings import (
+    EmbeddingIdentity,
+    EmbeddingRequest,
+    EmbeddingResult,
+    ExecutionEmbeddingProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,10 +247,12 @@ class ModelRuntime:
         billing: BillingPort | None = None,
         observer: ModelCallObserver | None = None,
         max_concurrency: int = 1,
+        embedding_provider: ExecutionEmbeddingProvider | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("模型调用并发数必须为正整数")
         self._provider = provider
+        self._embedding_provider = embedding_provider
         self._billing = billing
         self._observer = observer
         self._max_concurrency = max_concurrency
@@ -334,6 +342,29 @@ class ModelRuntime:
                 return attempt, await self._provider.complete_turn(request)
             async with asyncio.timeout(provider_timeout_seconds):
                 return attempt, await self._provider.complete_turn(request)
+
+    @property
+    def embedding_identity(self) -> EmbeddingIdentity | None:
+        return None if self._embedding_provider is None else self._embedding_provider.identity
+
+    async def run_execution_embedding(
+        self,
+        request: EmbeddingRequest,
+        *,
+        before_provider: Callable[[], Awaitable[int]],
+        lane: ModelLane,
+        provider_timeout_seconds: float | None = None,
+    ) -> tuple[int, EmbeddingResult]:
+        """独立 embedding 单次 HTTP 与聊天共用原同一个并发门，计费由 Core 决定。"""
+        provider = self._embedding_provider
+        if provider is None:
+            raise ValueError("独立索引供应商未配置")
+        async with self._limiter.acquire(lane, reviewer=False):
+            attempt = await before_provider()
+            if provider_timeout_seconds is None:
+                return attempt, await provider.embed_batch(request)
+            async with asyncio.timeout(provider_timeout_seconds):
+                return attempt, await provider.embed_batch(request)
 
     async def _run_turn_limited(
         self,

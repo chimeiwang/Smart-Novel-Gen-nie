@@ -1,0 +1,13 @@
+# 仅 run_e2e --phase rag 加载；不修改生产或其他验收 phase 的供应商配置。
+services:
+  core-api:
+    environment:
+      RAG_INDEX_ENABLED: "true"
+      RAG_EMBEDDING_MODEL: e2e-embedding-vector-v1
+      RAG_EMBEDDING_BASE_URL: http://e2e-control:8090
+  agent-service:
+    environment:
+      RAG_INDEX_ENABLED: "true"
+      RAG_EMBEDDING_MODEL: e2e-embedding-vector-v1
+      RAG_EMBEDDING_BASE_URL: http://e2e-control:8090
+      RAG_EMBEDDING_API_KEY: ${E2E_EXECUTION_CONTROL_TOKEN:?必须配置随机测试控制令牌}

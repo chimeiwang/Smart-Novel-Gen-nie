@@ -53,6 +53,7 @@ from inkforge_contracts.execution import (
     materialize_chapter_plan_output,
     materialize_outline_selection_output,
 )
+from inkforge_contracts.rag_execution import RagEmbeddingBatchOutput, RagEmbeddingStepInput
 from inkforge_contracts.short_medium_execution import materialize_short_medium_output
 from inkforge_contracts.style_execution import StylePortraitSectionOutput, StylePortraitStepInput
 from pydantic import JsonValue, ValidationError
@@ -69,6 +70,7 @@ from ..providers.base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
+from ..providers.embeddings import EmbeddingExecutionPort, EmbeddingRequest, EmbeddingResult
 from ..runtime.portrait_prompts import PORTRAIT_SECTION_INSTRUCTIONS
 from .portrait import portrait_context
 from .quality import (
@@ -77,6 +79,7 @@ from .quality import (
     quality_response,
     validate_quality_request,
 )
+from .rag import rag_context
 from .registry import (
     ExecutionRegistry,
     ExecutionRegistryError,
@@ -104,6 +107,7 @@ _SUPPORTED_OPERATION_HANDLERS = frozenset(
         *(("short_medium", operation) for operation in SHORT_MEDIUM_HANDLERS),
         ("quality", "consistency"),
         ("style", "portrait"),
+        ("rag", "embedding"),
         ("long_serial", "answer_question"),
         ("long_serial", "create_lore"),
         ("long_serial", "create_outline"),
@@ -290,7 +294,7 @@ class ResolvedExecutionStep:
 
 @dataclass(frozen=True, slots=True)
 class ProviderCallOutcome:
-    result: ModelTurnResult | None
+    result: ModelTurnResult | EmbeddingResult | None
     provider_attempts: int
     elapsed_millis: int
     failure_category: FailureCategory | None = None
@@ -305,12 +309,14 @@ class StatelessExecutionStepExecutor:
         *,
         max_output_tokens: int,
         retry_base_seconds: float = 0.05,
+        embedding: EmbeddingExecutionPort | None = None,
     ) -> None:
         if max_output_tokens < 1:
             raise ValueError("V2 execution 模型输出能力必须为正整数")
         if retry_base_seconds < 0:
             raise ValueError("V2 execution 重试退避不能为负数")
         self._model = model
+        self._embedding = embedding
         self._max_output_tokens = max_output_tokens
         self._retry_base_seconds = retry_base_seconds
 
@@ -321,6 +327,11 @@ class StatelessExecutionStepExecutor:
     ) -> bool:
         """验证当前 Provider 能精确执行 journal 冻结的部署身份。"""
 
+        if resolved.structuredOutputRoute == "embeddings_v1":
+            try:
+                return self._embedding_resolved_model(profile) == resolved
+            except ExecutionCapabilityError:
+                return False
         if not self._model.supports_structured_output(resolved.structuredOutputRoute):
             return False
         try:
@@ -344,6 +355,8 @@ class StatelessExecutionStepExecutor:
         request: ExecutionStepRequest,
         registry: ExecutionRegistry,
     ) -> ResolvedExecutionStep:
+        if request.workflow == "rag":
+            return self._resolve_embedding(request, registry)
         if request.purpose == "resolve_intent":
             return self._resolve_intent(request, registry)
         if request.workflow == "quality":
@@ -453,6 +466,72 @@ class StatelessExecutionStepExecutor:
             rubric_version=rubric_version,
             structured_output_route=structured_output_route,
             resolved_model=resolved_model,
+        )
+
+    def _embedding_resolved_model(self, profile: ProfileDefinition) -> ResolvedModelRef:
+        identity = None if self._embedding is None else self._embedding.embedding_identity
+        if identity is None:
+            raise ExecutionCapabilityError("独立索引供应商未配置")
+        return _resolved_model(
+            profile,
+            provider=identity.provider,
+            model=identity.model,
+            transport_profile=identity.transport_profile,
+            endpoint_profile=identity.endpoint_profile,
+            structured_output_route="embeddings_v1",
+            capability_version=identity.capability_version,
+            supports_request_idempotency=False,
+        )
+
+    def _resolve_embedding(
+        self, request: ExecutionStepRequest, registry: ExecutionRegistry
+    ) -> ResolvedExecutionStep:
+        try:
+            rag_context(request)
+            if request.dispatchMode == "initial":
+                operation = registry.resolve("rag", "embedding")
+                profile, schema, budget = (
+                    operation.generator_profile,
+                    operation.output_schema,
+                    operation.generator_step_budget,
+                )
+            else:
+                profile = registry.profiles["rag.embedding.v2"]
+                schema = registry.output_schemas["output.embedding_batch.v2"]
+                budget = registry.step_budgets["step_budget.rag.embedding.generator.v2"]
+            if (
+                profile.purpose != "embedding"
+                or schema.purpose != "embedding"
+                or profile.reasoning_mode != "disabled"
+            ):
+                raise ValueError("索引执行必须绑定 embedding 专用逻辑用途")
+            _validate_profile_ref(request, profile)
+            _validate_prompt_profile_ref(request, profile.prompt_profile)
+            _validate_output_schema_ref(request, schema)
+            _validate_step_budget(request, budget)
+            resolved = self._embedding_resolved_model(profile)
+            registry.require_authorized_deployment(
+                deployment_profile_key=resolved.deploymentProfileKey,
+                provider=resolved.provider,
+                model=resolved.model,
+                transport_profile=resolved.transportProfile,
+                endpoint_profile=resolved.endpointProfile,
+                structured_output_route=resolved.structuredOutputRoute,
+                capability_version=resolved.capabilityVersion,
+                reasoning_mode=resolved.reasoningMode,
+                supports_request_idempotency=False,
+            )
+        except (ValueError, KeyError, ExecutionRegistryError) as exc:
+            raise ExecutionCapabilityError("索引 Step 未被精确冻结契约或配置授权") from exc
+        return ResolvedExecutionStep(
+            "generation",
+            profile,
+            profile.prompt_profile,
+            schema,
+            budget,
+            None,
+            "embeddings_v1",
+            resolved,
         )
 
     def _resolve_quality(
@@ -657,8 +736,16 @@ class StatelessExecutionStepExecutor:
         self,
         request: ExecutionStepRequest,
         resolved: ResolvedExecutionStep,
-    ) -> ModelTurnRequest:
+    ) -> ModelTurnRequest | EmbeddingRequest:
         route = resolved.structured_output_route
+        if route == "embeddings_v1":
+            embedding_context = rag_context(request)
+            texts = embedding_context.batch(
+                RagEmbeddingStepInput.model_validate(request.input).batchIndex
+            )
+            if sum(len(text) for text in texts) > request.budget.maxInputTokens:
+                raise ExecutionCapabilityError("索引本批完整来源超过 Step maxInputTokens")
+            return EmbeddingRequest(texts=texts)
         system_prompt = resolved.prompt_profile.system_prompt
         if route == "plain_text_v1":
             context = portrait_context(request)
@@ -763,7 +850,7 @@ class StatelessExecutionStepExecutor:
     async def call_provider(
         self,
         request: ExecutionStepRequest,
-        model_request: ModelTurnRequest,
+        model_request: ModelTurnRequest | EmbeddingRequest,
         *,
         begin_attempt: BeginAttempt,
         cancel_event: asyncio.Event,
@@ -778,6 +865,11 @@ class StatelessExecutionStepExecutor:
             )
         provider_started: float | None = None
         attempts = 0
+        supports_idempotency = (
+            False
+            if isinstance(model_request, EmbeddingRequest)
+            else self._model.supports_request_idempotency
+        )
 
         async def record_attempt() -> int:
             nonlocal attempts, provider_started
@@ -810,6 +902,7 @@ class StatelessExecutionStepExecutor:
                         attempts, result = await _call_with_cancel(
                             self._model,
                             model_request,
+                            embedding=self._embedding,
                             before_provider=record_attempt,
                             cancel_event=cancel_event,
                             lane=request.lane,
@@ -821,6 +914,7 @@ class StatelessExecutionStepExecutor:
                             attempts, result = await _call_with_cancel(
                                 self._model,
                                 model_request,
+                                embedding=self._embedding,
                                 before_provider=record_attempt,
                                 cancel_event=cancel_event,
                                 lane=request.lane,
@@ -840,7 +934,7 @@ class StatelessExecutionStepExecutor:
                 except ProviderTransportError as exc:
                     retry_safe = _safe_to_retry(
                         exc,
-                        supports_request_idempotency=(self._model.supports_request_idempotency),
+                        supports_request_idempotency=supports_idempotency,
                     )
                     if retry_safe and attempts <= request.budget.maxProviderRetries:
                         async with asyncio.timeout(remaining_seconds()):
@@ -853,7 +947,7 @@ class StatelessExecutionStepExecutor:
                             )
                         continue
                     if _provider_outcome_unknown(
-                        exc, supports_request_idempotency=(self._model.supports_request_idempotency)
+                        exc, supports_request_idempotency=supports_idempotency
                     ):
                         return ProviderCallOutcome(
                             result=None,
@@ -888,7 +982,7 @@ class StatelessExecutionStepExecutor:
                     )
                 except TimeoutError:
                     if (
-                        self._model.supports_request_idempotency
+                        supports_idempotency
                         and attempts > 0
                         and attempts <= request.budget.maxProviderRetries
                     ):
@@ -1012,6 +1106,8 @@ class StatelessExecutionStepExecutor:
             reasoning_mode=request.modelProfile.reasoningMode,
             quality_tool_response=request.workflow == "quality",
         )
+        if isinstance(result, EmbeddingResult):
+            return self._embedding_terminal(request, resolved, result, usage, now)
         if request.workflow == "quality":
             failure = _validate_quality_provider_result(request, result, usage)
             if failure is not None:
@@ -1189,6 +1285,66 @@ class StatelessExecutionStepExecutor:
             completedAt=now,
         )
 
+    def _embedding_terminal(
+        self,
+        request: ExecutionStepRequest,
+        resolved: ResolvedExecutionStep,
+        result: EmbeddingResult,
+        usage: StepUsage,
+        now: datetime,
+    ) -> ExecutionStepResult | ExecutionStepFailure:
+        code = (
+            "STEP_BUDGET_EXCEEDED"
+            if _step_budget_exceeded(request, usage)
+            else result.protocol_error
+        )
+        output: dict[str, JsonValue] = {}
+        if code is None:
+            try:
+                value = RagEmbeddingBatchOutput.model_validate({"embeddings": result.embeddings})
+                expected = rag_context(request).batch(
+                    RagEmbeddingStepInput.model_validate(request.input).batchIndex
+                )
+                if len(value.embeddings) != len(expected):
+                    raise ValueError("索引向量数量与本批完整分块不一致")
+                output = value.model_dump(mode="json")
+            except (ValueError, ValidationError):
+                code = "EMBEDDING_OUTPUT_INVALID"
+        if code is not None:
+            return _failure(
+                request,
+                resolved.resolved_model,
+                usage=usage,
+                category="validation",
+                code=code,
+                outcome_unknown=False,
+                failed_at=now,
+            )
+        result_hash = canonical_execution_sha256(
+            {
+                "resultKind": "output",
+                "resolvedModel": resolved.resolved_model.model_dump(mode="json", exclude_none=True),
+                "usage": usage.model_dump(mode="json", exclude_none=True),
+                "value": output,
+            }
+        )
+        return ExecutionStepResult(
+            protocolVersion="2.0",
+            jobId=request.jobId,
+            runId=request.runId,
+            novelId=request.novelId,
+            stepId=request.stepId,
+            fencingToken=request.fencingToken,
+            requestHash=request.requestHash,
+            inputHash=request.inputHash,
+            resolvedModel=resolved.resolved_model,
+            resultKind="output",
+            output=output,
+            resultHash=result_hash,
+            usage=usage,
+            completedAt=now,
+        )
+
     def _execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
         resolver = getattr(self._model, "execution_identity", None)
         if callable(resolver):
@@ -1272,30 +1428,41 @@ class ProviderModelRuntimeAdapter:
 
 
 class _ProviderCancelled(Exception):
-    def __init__(self, result: ModelTurnResult | None) -> None:
+    def __init__(self, result: ModelTurnResult | EmbeddingResult | None) -> None:
         self.result = result
         super().__init__("provider_cancelled")
 
 
 async def _call_with_cancel(
     model: ExecutionModelPort,
-    request: ModelTurnRequest,
+    request: ModelTurnRequest | EmbeddingRequest,
     *,
+    embedding: EmbeddingExecutionPort | None = None,
     before_provider: BeginAttempt,
     cancel_event: asyncio.Event,
     lane: Literal["interactive", "creative", "batch_media"],
     reviewer: bool,
     provider_timeout_seconds: float | None,
-) -> tuple[int, ModelTurnResult]:
-    provider_task = asyncio.create_task(
-        model.run_execution_turn(
+) -> tuple[int, ModelTurnResult | EmbeddingResult]:
+    async def invoke() -> tuple[int, ModelTurnResult | EmbeddingResult]:
+        if isinstance(request, EmbeddingRequest):
+            if embedding is None:
+                raise ExecutionCapabilityError("独立索引运行时未配置")
+            return await embedding.run_execution_embedding(
+                request,
+                before_provider=before_provider,
+                lane=lane,
+                provider_timeout_seconds=provider_timeout_seconds,
+            )
+        return await model.run_execution_turn(
             request,
             before_provider=before_provider,
             lane=lane,
             reviewer=reviewer,
             provider_timeout_seconds=provider_timeout_seconds,
         )
-    )
+
+    provider_task = asyncio.create_task(invoke())
     cancel_task = asyncio.create_task(cancel_event.wait())
     try:
         done, _ = await asyncio.wait(
@@ -1303,7 +1470,7 @@ async def _call_with_cancel(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if cancel_task in done and cancel_event.is_set():
-            result: ModelTurnResult | None = None
+            result: ModelTurnResult | EmbeddingResult | None = None
             if provider_task.done() and not provider_task.cancelled():
                 try:
                     _, result = provider_task.result()
@@ -1659,7 +1826,9 @@ def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
         raise ExecutionCapabilityError("结构化资料 Step 必须绑定已实现 Operation 与 novelId")
 
     index_items = [
-        item for item in request.evidenceBundle.items if item.resourceType == "agent_updates_index"
+        item
+        for item in request.evidenceBundle.items
+        if item.resourceType == "agent_updates_index"
     ]
     if len(index_items) != 1:
         raise ExecutionCapabilityError("结构化资料 Evidence 必须包含唯一 agent_updates_index")
@@ -1790,9 +1959,7 @@ def _agent_updates_evidence_request(
 ) -> AgentUpdatesEvidenceRequestOutput:
     output = AgentUpdatesEvidenceRequestOutput.model_validate(value)
     index = next(
-        item
-        for item in request.evidenceBundle.items
-        if item.resourceType == "agent_updates_index"
+        item for item in request.evidenceBundle.items if item.resourceType == "agent_updates_index"
     )
     content = index.contentJson
     items = content.get("items") if isinstance(content, dict) else None
@@ -2098,7 +2265,7 @@ def _elapsed_millis(started: float) -> int:
 
 
 def _usage(
-    result: ModelTurnResult | None,
+    result: ModelTurnResult | EmbeddingResult | None,
     *,
     provider_attempts: int,
     wall_time_millis: int,
@@ -2109,6 +2276,21 @@ def _usage(
         return _unknown_usage(
             provider_attempts=provider_attempts,
             wall_time_millis=wall_time_millis,
+        )
+    if isinstance(result, EmbeddingResult):
+        if result.input_tokens is None:
+            return _unknown_usage(
+                provider_attempts=provider_attempts, wall_time_millis=wall_time_millis
+            )
+        return StepUsage(
+            usageStatus="partial",
+            providerAttempts=provider_attempts,
+            protocolCorrections=0,
+            wallTimeMillis=wall_time_millis,
+            inputTokens=result.input_tokens,
+            completionTokens=0,
+            reasoningTokens=0,
+            visibleOutputTokens=0,
         )
     input_tokens = result.usage.promptTokens
     cached_tokens = result.usage.cachedTokens

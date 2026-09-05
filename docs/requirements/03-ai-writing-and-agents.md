@@ -141,8 +141,8 @@ Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模�
 完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
 
 五项显式/自然入口、最多一次自动完整返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21；随后中短篇
-四项接线与本地验收达到 16/21，一致性终检阶段达到 17/21，当前加入文风画像后 Catalog 为 18/21，
-自然入口仍支持十项无选区操作。剩余 RAG 索引和两个开发视频操作共三项尚未迁移。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
+四项接线与本地验收达到 16/21，一致性终检阶段达到 17/21，文风画像达到 18/21；加入 RAG 接线后 Catalog 为 19/21，
+自然入口仍支持十项无选区操作。剩余两个开发视频操作尚未迁移，RAG 最终门禁以独立规格为准。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
 启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
 显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
 manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节锚点，scope 不取消既有跨分区候选能力。
@@ -155,6 +155,11 @@ Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组�
 已完成报告，不新增 Reviewer、候选或写作限制。原可选 taskId 兼容同归属 V1 Task 与 V2 写作 Run，
 CLI 继续 `long.quality.*`，不新增参数或直接访问 Agent。实现及验收见
 `docs/specs/2026-09-05-durable-consistency-quality.md`，固定安装与生产状态分别核对。
+
+资料后台索引使用独立 embedding 适配，每批一个耐久 Step，不运行模型工具循环。Core 冻结原文和索引
+代次，各批复用同一来源、模型与端点身份，完整索引只在最后一次性发布；不重复调用已完成批次。用户积分
+不扣费，缺失用量不伪造；查询 embedding 不在这次迁移范围。CLI 资料命令及接口保持原状，验收证据见
+`docs/specs/2026-09-05-durable-rag-embedding.md`。
 
 ## V2 文风画像迁移进度
 

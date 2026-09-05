@@ -402,10 +402,42 @@ def calculate_resolved_model_fingerprint(
 class ResolvedModelRef(_StrictModel):
     """Agent 对逻辑 Profile 的一次可审计部署解析。"""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        json_schema_extra={
+            "allOf": [
+                {
+                    "anyOf": [
+                        {
+                            "properties": {
+                                "structuredOutputRoute": {"const": "embeddings_v1"},
+                                "model": {"minLength": 1},
+                            },
+                        },
+                        {
+                            "properties": {
+                                "structuredOutputRoute": {
+                                    "enum": [
+                                        "responses_json_schema_v1",
+                                        "chat_json_output_v1",
+                                        "quality_strict_tool_v1",
+                                        "plain_text_v1",
+                                    ]
+                                },
+                                "model": {"minLength": 1, "maxLength": 2000},
+                            },
+                        },
+                    ]
+                }
+            ]
+        },
+    )
+
     deploymentProfileKey: ProtocolCode
     deploymentFingerprint: Sha256
     provider: ProtocolCode
-    model: NonBlankText
+    model: Annotated[str, Field(min_length=1)]
     transportProfile: ProtocolCode
     endpointProfile: ProtocolCode
     structuredOutputRoute: Literal[
@@ -413,6 +445,7 @@ class ResolvedModelRef(_StrictModel):
         "chat_json_output_v1",
         "quality_strict_tool_v1",
         "plain_text_v1",
+        "embeddings_v1",
     ]
     capabilityVersion: ProtocolCode
     reasoningMode: Literal["disabled", "bounded"]
@@ -422,6 +455,8 @@ class ResolvedModelRef(_StrictModel):
 
     @model_validator(mode="after")
     def validate_fingerprint(self) -> Self:
+        if self.structuredOutputRoute != "embeddings_v1":
+            self.model = TypeAdapter(NonBlankText).validate_python(self.model)
         expected = calculate_resolved_model_fingerprint(
             deployment_profile_key=self.deploymentProfileKey,
             provider=self.provider,

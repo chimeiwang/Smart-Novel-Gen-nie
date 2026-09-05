@@ -9,6 +9,7 @@ import cn.inkforge.core.workflows.application.WorkflowCancellationRequestResult;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
+import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
@@ -40,6 +41,7 @@ final class JooqWorkflowRunCancellationRepository
     private final WorkflowBillingCoordinator billing;
     private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
     private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion;
+    private final java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion;
 
     JooqWorkflowRunCancellationRepository(
             CoreDatabase database,
@@ -60,6 +62,14 @@ final class JooqWorkflowRunCancellationRepository
             ObjectMapper json, ExecutionRegistry registry,
             java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
             java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion) {
+        this(database, ids, clock, json, registry, qualityCompletion, styleCompletion, () -> null);
+    }
+
+    JooqWorkflowRunCancellationRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion,
+            java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -67,6 +77,20 @@ final class JooqWorkflowRunCancellationRepository
         this.billing = new WorkflowBillingCoordinator(ids, json, registry);
         this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
         this.styleCompletion = Objects.requireNonNull(styleCompletion);
+        this.ragCompletion = Objects.requireNonNull(ragCompletion);
+    }
+
+    @Override
+    public WorkflowCancellationRequestResult requestInvalidatedRag(String userId, String runId, String clientRequestId) {
+        requireNonBlank(userId, "userId"); requireNonBlank(runId, "runId"); requireNonBlank(clientRequestId, "clientRequestId");
+        return database.transactionResult(tx -> {
+            Record run = lockRun(tx, runId, userId);
+            if (TERMINAL_RUNS.contains(run.get("status", String.class))
+                    || run.get("cancelRequestedAt", LocalDateTime.class) != null) return new WorkflowCancellationRequestResult(List.of());
+            if (!isRagRun(run)) throw new IllegalArgumentException("失效索引取消只能引用 RAG 运行");
+            if (!ragCompletion().isInvalidated(tx, runId)) return new WorkflowCancellationRequestResult(List.of());
+            return request(tx, userId, runId, clientRequestId);
+        });
     }
 
     @Override
@@ -416,6 +440,9 @@ final class JooqWorkflowRunCancellationRepository
         if (isStyleRun(run)) {
             styleCompletion().finish(transaction, run.get("id", String.class), "cancelled");
         }
+        if (isRagRun(run)) {
+            ragCompletion().finish(transaction, run.get("id", String.class), "cancelled");
+        }
         long sequence = Math.addExact(previousSequence, 1L);
         transaction.execute(
                 """
@@ -459,6 +486,16 @@ final class JooqWorkflowRunCancellationRepository
 
     private static boolean isStyleRun(Record run) {
         return "style".equals(run.get("workflow", String.class)) && "portrait".equals(run.get("operation", String.class));
+    }
+
+    private static boolean isRagRun(Record run) {
+        return "rag".equals(run.get("workflow", String.class)) && "embedding".equals(run.get("operation", String.class));
+    }
+
+    private WorkflowRagIndexCompletion ragCompletion() {
+        WorkflowRagIndexCompletion completion = ragCompletion.get();
+        if (completion == null) throw new IllegalStateException("RAG 索引耐久投影端口未装配");
+        return completion;
     }
 
     private WorkflowStylePortraitCompletion styleCompletion() {

@@ -23,6 +23,7 @@ CONTRACT_MODULES = (
     "operations",
     "quality",
     "quality_execution",
+    "rag_execution",
     "read_tools",
     "runs",
     "short_medium",
@@ -53,6 +54,7 @@ MODULE_SCHEMA_VERSIONS = {
     "short_medium_execution": "2.0",
     "quality_execution": "2.0",
     "style_execution": "2.0",
+    "rag_execution": "2.0",
 }
 
 

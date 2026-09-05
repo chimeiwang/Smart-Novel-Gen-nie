@@ -2,6 +2,14 @@
   "registryVersion": "1",
   "budgets": [
     {
+      "key": "step_budget.rag.embedding.generator.v2", "version": 2, "supported": true,
+      "budget": {
+        "maxModelCalls": 1, "maxInputTokens": 60000, "maxPromptCacheMissTokens": 60000,
+        "maxCompletionTokens": 0, "maxReasoningTokens": 0, "maxVisibleOutputTokens": 0,
+        "maxCostMicros": 500000, "maxWallClockSeconds": 180, "maxProviderRetries": 2, "maxProtocolCorrections": 0
+      }
+    },
+    {
       "key": "step_budget.style.portrait.generator.v2",
       "version": 2,
       "supported": true,

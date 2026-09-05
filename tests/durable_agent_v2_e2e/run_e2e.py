@@ -277,6 +277,7 @@ class ComposeStack:
         self.evidence_dir = evidence_dir
         self._started = False
         self.last_service_restart: dict[str, object] = {}
+        self.rag_embeddings = False
 
     def activate_durable_scope(self, *, user_id: str, novel_id: str) -> None:
         self.environment.update(
@@ -300,7 +301,7 @@ class ComposeStack:
 
     @property
     def command(self) -> list[str]:
-        return [
+        command = [
             self.docker,
             "compose",
             "-p",
@@ -308,6 +309,9 @@ class ComposeStack:
             "-f",
             str(COMPOSE_FILE),
         ]
+        if self.rag_embeddings:
+            command.extend(["-f", str(ROOT / "tests/durable_agent_v2_e2e/compose.rag.yaml")])
+        return command
 
     def run(
         self,
@@ -2155,6 +2159,7 @@ def run(
         raise FileExistsError("证据目录已存在，拒绝覆盖")
     evidence_dir.mkdir(parents=True, mode=0o700)
     stack = ComposeStack(evidence_dir)
+    stack.rag_embeddings = phase == "rag"
     sampler = ResourceSampler(stack)
     acceptance: Acceptance | None = None
     report: dict[str, object] = {
@@ -2175,6 +2180,11 @@ def run(
         "scenarios": [],
     }
     cleanup: dict[str, object] = {}
+    if phase == "rag":
+        report["scope"] = "local-isolated-controlled-embeddings-http"
+        report["composeOverrideSha256"] = hashlib.sha256(
+            (ROOT / "tests/durable_agent_v2_e2e/compose.rag.yaml").read_bytes()
+        ).hexdigest()
     try:
         if rebuild_agent:
             stack.build_agent()
@@ -2207,7 +2217,12 @@ def run(
                 }
             )
 
-        if phase == "style":
+        if phase == "rag":
+            from tests.durable_agent_v2_e2e.rag import scenarios as rag_scenarios
+
+            for scenario in rag_scenarios(acceptance):
+                record_scenario(scenario)
+        elif phase == "style":
             from tests.durable_agent_v2_e2e.style import scenarios as style_scenarios
 
             for scenario in style_scenarios(acceptance):
@@ -2332,6 +2347,7 @@ def main() -> int:
             "short-medium",
             "quality",
             "style",
+            "rag",
         ),
         default="minimum",
         help=(
@@ -2344,7 +2360,8 @@ def main() -> int:
             "review-rewrites 验证整章审阅、场景改写和两类大纲选区的完整 V2 闭环；"
             "short-medium 验证四操作、双段完整前缀、Agent重启恢复、精确候选采用与完整报告；"
             "quality 验证原终检接口、完整报告、一次独立纠正和失败终态的 Agent 重启重放；"
-            "style 验证用户级画像完整五节、首节重启重放、原空白与字数规则及单节重做"
+            "style 验证用户级画像完整五节、首节重启重放、原空白与字数规则及单节重做；"
+            "rag 验证真实本地 embeddings HTTP、多批索引原子完成、重启重放与未知用量零扣费"
         ),
     )
     parser.add_argument(

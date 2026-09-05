@@ -53,6 +53,15 @@ def _expand_compose_default(expression: object, overrides: dict[str, str]) -> st
     return match.group("default") if value in (None, "") else value
 
 
+def test_rag_binding_shares_only_non_secret_configuration_with_core() -> None:
+    core = _compose_environment_mapping("core-api")
+    agent = _compose_environment_mapping("agent-service")
+    for key in ("RAG_EMBEDDING_MODEL", "RAG_EMBEDDING_BASE_URL"):
+        assert core[key] == agent[key] == "${" + key + ":-}"
+    assert "RAG_EMBEDDING_API_KEY" not in core
+    assert "RAG_EMBEDDING_API_KEY" in agent
+
+
 def _service_block(source: str, service: str) -> str:
     match = re.search(
         rf"(?ms)^  {re.escape(service)}:\n(?P<body>.*?)"

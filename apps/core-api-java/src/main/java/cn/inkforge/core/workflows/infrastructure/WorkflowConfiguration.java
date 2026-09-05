@@ -21,6 +21,7 @@ import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
+import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -70,7 +71,8 @@ class WorkflowConfiguration {
             CoreSettings settings,
             WorkflowExecutionContextReader contexts,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
         return new JooqWorkflowDispatchRepository(
                 database,
                 ids,
@@ -78,7 +80,7 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30),
-                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
+                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
     }
 
     @Bean
@@ -93,7 +95,8 @@ class WorkflowConfiguration {
             ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates,
             ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
@@ -101,7 +104,7 @@ class WorkflowConfiguration {
                 objectMapper,
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
-                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
+                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
     }
 
     @Bean
@@ -129,9 +132,10 @@ class WorkflowConfiguration {
             ObjectMapper objectMapper,
             ExecutionRegistry workflowExecutionRegistry,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
         return new JooqWorkflowRunCancellationRepository(
-                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
+                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
     }
 
     @Bean
@@ -146,8 +150,9 @@ class WorkflowConfiguration {
     WorkflowCancellationReconciler workflowCancellationReconciler(
             WorkflowRunCancellationService cancellations,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion) {
-        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1), qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable);
+            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
+        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1), qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
     }
 
     @Bean

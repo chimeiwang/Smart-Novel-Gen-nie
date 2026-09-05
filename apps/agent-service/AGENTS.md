@@ -224,8 +224,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
   不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
   Core 已接显式与自然入口、最多一次自动完整返工和作者采用；中短篇四项及一致性终检阶段达到 17/21，
-  当前加入文风画像后仓内 Catalog 已启用 18/21，剩余 RAG 索引和两个开发视频操作共三项尚未迁移，
-  不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
+  文风画像阶段仓内 Catalog 为 18/21，加入 RAG 索引接线后为 19/21，剩余两个开发视频操作尚未迁移，
+  RAG 最终门禁以独立规格为准，不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
   其余问题或额度不足交作者，旧冻结策略不扩大。来源补齐计模型额度但不冒充候选 revision，结构化业务最多四次调用。
   显式 scope：设定两项/创建大纲为 novel，修改大纲为 novel 或 outline_node，伏笔为 novel 或当前 chapter；
   公共 target 始终是章节锚点，不限制既有跨分区候选。详细隔离验收及最终仓内门禁见
@@ -245,6 +245,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   单节只更新目标；不引入 ReviewArtifact。新 V2 不创建 StylePortraitTask 影子行，原 V1 任务及恢复继续保留，
   原查询双读。Agent/Core、全仓门禁与隔离独立进程验证均通过，结果见
   `docs/specs/2026-09-05-durable-style-portrait.md` 最终记录为准；不代表生产或固定安装已更新。
+- V2 `rag.embedding` 通过独立 `embeddings_v1` 适配执行，每个 generation Step 只提交一批最多 10 块的
+  完整文本，逻辑用途为 embedding，不伪装聊天请求或工具循环。最多 7 批共用原 execution journal 和
+  ModelRuntime 全局并发门。Core 在新代次事务内冻结原文，全部批次成功才发布索引；旧 pending 不换引擎。
+  实际模型和端点配置指纹必须与 Core 非秘密配置精确匹配，同一 Run 批间不能换模型。用户积分不扣费，
+  缺失用量保持未知或部分已知的零金额待对账。查询 embedding 原路径不变，CLI 无 Agent 直连入口；
+  验收状态见 `docs/specs/2026-09-05-durable-rag-embedding.md`。
 - execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
   已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
   提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。

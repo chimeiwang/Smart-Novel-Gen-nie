@@ -39,6 +39,12 @@ public final class ExecutionRegistryFixtures {
         return modifiedOperation(environment, "style.portrait", operation -> operation.put("v2Enabled", true));
     }
 
+    /** RAG 测试仍精确绑定真实受控 HTTP 配置，不借用聊天 fake 身份。 */
+    public static ExecutionRegistry ragOperationEnabled(ExecutionRegistry.Environment environment) {
+        return modifiedOperation(environment, "rag.embedding", operation -> operation.put("v2Enabled", true))
+                .withRagEmbeddingConfig("e2e-embedding-vector-v1", "http://e2e-control:8090");
+    }
+
     private static ExecutionRegistry modifiedSelectionOperation(
             ExecutionRegistry.Environment environment,
             Consumer<Map<String, Object>> modification) {

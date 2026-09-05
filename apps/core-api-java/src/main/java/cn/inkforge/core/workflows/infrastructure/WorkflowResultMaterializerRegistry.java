@@ -38,6 +38,7 @@ final class WorkflowResultMaterializerRegistry {
         result.put("short_medium.full_check", new Binding("apply.short_medium_check_report.v1", Materializer.SHORT_MEDIUM));
         result.put("quality.consistency", new Binding("apply.consistency_quality_report.v1", Materializer.CONSISTENCY_QUALITY));
         result.put("style.portrait", new Binding("apply.style_portrait.v1", Materializer.STYLE_PORTRAIT));
+        result.put("rag.embedding", new Binding("apply.rag_embedding.v1", Materializer.RAG_INDEX));
         return Map.copyOf(result);
     }
 
@@ -79,7 +80,8 @@ final class WorkflowResultMaterializerRegistry {
         AGENT_UPDATES_REVIEW_ARTIFACT,
         SHORT_MEDIUM,
         CONSISTENCY_QUALITY,
-        STYLE_PORTRAIT
+        STYLE_PORTRAIT,
+        RAG_INDEX
     }
 
     private record Binding(String applyHandler, Materializer materializer) {}

@@ -5411,7 +5411,7 @@ export interface components {
              * Structuredoutputroute
              * @enum {string}
              */
-            structuredOutputRoute: "responses_json_schema_v1" | "chat_json_output_v1" | "quality_strict_tool_v1" | "plain_text_v1";
+            structuredOutputRoute: "responses_json_schema_v1" | "chat_json_output_v1" | "quality_strict_tool_v1" | "plain_text_v1" | "embeddings_v1";
             /** Capabilityversion */
             capabilityVersion: string;
             /**
@@ -5424,7 +5424,15 @@ export interface components {
              * @description 仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true
              */
             supportsRequestIdempotency: boolean;
-        };
+        } & ({
+            /** @constant */
+            structuredOutputRoute?: "embeddings_v1";
+            model?: unknown;
+        } | {
+            /** @enum {unknown} */
+            structuredOutputRoute?: "responses_json_schema_v1" | "chat_json_output_v1" | "quality_strict_tool_v1" | "plain_text_v1";
+            model?: unknown;
+        });
         /** ResumeWritingRunRequest */
         ResumeWritingRunRequest: {
             /** Clientrequestid */

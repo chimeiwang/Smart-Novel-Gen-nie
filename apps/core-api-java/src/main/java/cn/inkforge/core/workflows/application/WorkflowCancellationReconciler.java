@@ -12,6 +12,7 @@ public final class WorkflowCancellationReconciler {
     private final AtomicBoolean stop = new AtomicBoolean();
     private final java.util.function.Supplier<WorkflowQualityCompletion> quality;
     private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styles;
+    private final java.util.function.Supplier<WorkflowRagIndexCompletion> rag;
 
     public WorkflowCancellationReconciler(
             WorkflowRunCancellationService cancellations, Duration interval) {
@@ -26,9 +27,17 @@ public final class WorkflowCancellationReconciler {
     public WorkflowCancellationReconciler(WorkflowRunCancellationService cancellations, Duration interval,
             java.util.function.Supplier<WorkflowQualityCompletion> quality,
             java.util.function.Supplier<WorkflowStylePortraitCompletion> styles) {
+        this(cancellations, interval, quality, styles, () -> null);
+    }
+
+    public WorkflowCancellationReconciler(WorkflowRunCancellationService cancellations, Duration interval,
+            java.util.function.Supplier<WorkflowQualityCompletion> quality,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styles,
+            java.util.function.Supplier<WorkflowRagIndexCompletion> rag) {
         this.cancellations = Objects.requireNonNull(cancellations);
         this.quality = Objects.requireNonNull(quality);
         this.styles = Objects.requireNonNull(styles);
+        this.rag = Objects.requireNonNull(rag);
         if (interval == null || interval.isZero() || interval.isNegative()) {
             throw new IllegalArgumentException("Workflow 取消对账间隔必须为正数");
         }
@@ -48,6 +57,13 @@ public final class WorkflowCancellationReconciler {
         if (portraits != null) {
             for (var run : portraits.findDeletedRuns(20)) {
                 cancellations.cancelDeletedStyle(run);
+                invalidated++;
+            }
+        }
+        WorkflowRagIndexCompletion indexes = rag.get();
+        if (indexes != null) {
+            for (var run : indexes.findInvalidatedRuns(20)) {
+                cancellations.cancelInvalidatedRag(run);
                 invalidated++;
             }
         }

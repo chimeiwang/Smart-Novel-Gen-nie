@@ -113,6 +113,206 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void RAG两批完整向量成功才物化且缺失用量保持零金额待对账() {
+        RagFlow flow = ragFlow("rag-batches", 11);
+        var first = flow.request();
+        var result = ragResult(first, 10, 2);
+        assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        org.mockito.Mockito.verify(flow.projection(), org.mockito.Mockito.never()).complete(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList());
+        assertThat(runStatus(first.getRunId())).isEqualTo("running");
+        var second = flow.dispatches().claimNext().orElseThrow();
+        assertThat(second.getInput()).containsExactlyInAnyOrderEntriesOf(Map.of("batchIndex", 1));
+        assertThat(second.getEvidenceBundle()).isEqualTo(first.getEvidenceBundle());
+        prepareRag(flow, second);
+        flow.callbacks().result(ragResult(second, 1, 2));
+        String runId = first.getRunId();
+        assertThat(runStatus(runId)).isEqualTo("completed");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND status = 'completed'", runId)).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND status = 'reconciliation_required' AND \"reservedMicros\" = 0 AND \"chargedMicros\" = 0", runId)).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", runId)).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"CreditLedger\" WHERE \"userId\" = ?", flow.fixture().userId())).isZero();
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvent\" WHERE \"runId\" = ? AND \"eventType\" = 'completed'", runId)).isEqualTo(1);
+        org.mockito.Mockito.verify(flow.projection()).complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(runId),
+                org.mockito.ArgumentMatchers.argThat(vectors -> vectors.size() == 11 && vectors.stream().allMatch(vector -> vector.size() == 2)));
+    }
+
+    @Test
+    void RAG跨批维度变化明确失败且失效来源不追加新批次() {
+        RagFlow dimension = ragFlow("rag-dimension", 11);
+        dimension.callbacks().result(ragResult(dimension.request(), 10, 2));
+        var second = dimension.dispatches().claimNext().orElseThrow();
+        prepareRag(dimension, second);
+        var result = ragResult(second, 1, 3);
+        assertThat(dimension.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(dimension.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(runStatus(second.getRunId())).isEqualTo("failed");
+        assertThat(database.dsl().fetchOne("SELECT \"errorCode\" FROM public.\"WorkflowRun\" WHERE id = ?", second.getRunId()).get(0, String.class))
+                .isEqualTo("EMBEDDING_DIMENSION_MISMATCH");
+        RagFlow invalidated = ragFlow("rag-invalidated", 11);
+        org.mockito.Mockito.when(invalidated.projection().isCurrent(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(false);
+        invalidated.callbacks().result(ragResult(invalidated.request(), 10, 2));
+        assertThat(runStatus(invalidated.request().getRunId())).isEqualTo("cancelled");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", invalidated.request().getRunId())).isEqualTo(1);
+    }
+
+    @Test
+    void RAG取消必须复验失效并可接收迟到完整向量() {
+        RagFlow flow = ragFlow("rag-cancel", 11);
+        var request = flow.request();
+        String key = "rag-invalidated." + request.getRunId();
+        flow.cancellations().requestInvalidatedRag(flow.fixture().userId(), request.getRunId(), key);
+        assertThat(database.dsl().fetchOne("SELECT \"cancelRequestId\" FROM public.\"WorkflowRun\" WHERE id = ?", request.getRunId()).get(0, String.class)).isNull();
+        org.mockito.Mockito.when(flow.projection().isInvalidated(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        flow.cancellations().requestInvalidatedRag(flow.fixture().userId(), request.getRunId(), key);
+        flow.callbacks().result(ragResult(request, 10, 2));
+        assertThat(runStatus(request.getRunId())).isEqualTo("cancelled");
+        org.mockito.Mockito.verify(flow.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(request.getRunId()), org.mockito.ArgumentMatchers.eq("cancelled"));
+    }
+
+    @Test
+    void RAG新配置虽然获准也不能在同一索引后续批次换模型() {
+        RagFlow flow = ragFlow("rag-model-drift", 11);
+        flow.callbacks().result(ragResult(flow.request(), 10, 2));
+        var second = flow.dispatches().claimNext().orElseThrow();
+        var resolved = ragAgentResolved(second);
+        resolved.setModel("new-embedding-model");
+        resolved.setDeploymentFingerprint(WorkflowResolvedModel.fingerprint(resolved.getDeploymentProfileKey(), resolved.getProvider(),
+                resolved.getModel(), resolved.getTransportProfile(), resolved.getEndpointProfile(), "embeddings_v1", resolved.getCapabilityVersion(), "disabled", false));
+        flow.dispatches().recordAccepted(second, accepted(second, resolved));
+        var api = ragApiResolved(second).model(resolved.getModel()).deploymentFingerprint(resolved.getDeploymentFingerprint());
+        var changed = ExecutionRegistryFixtures.ragOperationEnabled(ExecutionRegistry.Environment.TEST)
+                .withRagEmbeddingConfig("new-embedding-model", "http://e2e-control:8090");
+        var callback = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, changed, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> null, () -> null, flow::projection);
+        assertThat(callback.progress(progress(second, unknownUsage()).resolvedModel(api)).getStatus())
+                .isEqualTo(ExecutionCallbackReceipt.StatusEnum.STALE);
+        assertThat(runStatus(second.getRunId())).isEqualTo("failed");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"stepId\" = ?", second.getStepId())).isZero();
+    }
+
+    @Test
+    void RAG调用未知结果可保留零金额待对账并明确失败() {
+        RagFlow flow = ragFlow("rag-unknown", 11);
+        var request = flow.request();
+        var failure = reviewFailure(request).resolvedModel(ragApiResolved(request))
+                .usage(new StepUsage(0, 1, StepUsage.UsageStatusEnum.UNKNOWN, 100)).outcomeUnknown(true)
+                .errorCode("MODEL_OUTCOME_UNKNOWN").errorCategory(ExecutionStepFailure.ErrorCategoryEnum.MODEL_OUTCOME_UNKNOWN);
+        failure.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.failureHashMaterial(failure)));
+        assertThat(flow.callbacks().failure(failure).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(runStatus(request.getRunId())).isEqualTo("failed");
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND status = 'reconciliation_required' AND \"reservedMicros\" = 0", request.getRunId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"TokenUsage\" WHERE \"runId\" = ?", request.getRunId())).isZero();
+    }
+
+    @Test
+    void RAG有限double但数据库不能存储的向量明确收敛而不是无限重放() {
+        for (String text : List.of("1e100", "-1e100")) {
+            // 先由真实 pgvector 证明边界，不能用 H2 或只凭 Java float 转换猜测。
+            assertThatThrownBy(() -> database.dsl().fetchValue("SELECT CAST(? AS vector)", "[" + text + "]"))
+                    .isInstanceOf(org.jooq.exception.DataAccessException.class);
+        }
+        for (String text : List.of("1e100", "-1e100")) {
+            RagFlow flow = ragFlow("rag-range-" + (text.startsWith("-") ? "negative" : "positive"), 1);
+            var result = ragResult(flow.request(), 1, 1).output(Map.of("embeddings", List.of(List.of(Double.valueOf(text)))));
+            result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+            assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+            assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+            assertThat(runStatus(flow.request().getRunId())).isEqualTo("failed");
+            assertThat(database.dsl().fetchOne("SELECT \"errorCode\" FROM public.\"WorkflowRun\" WHERE id = ?", flow.request().getRunId()).get(0, String.class))
+                    .isEqualTo("EMBEDDING_OUTPUT_INVALID");
+            assertThat(count("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND status = 'reconciliation_required' AND \"reservedMicros\" = 0", flow.request().getRunId())).isEqualTo(1);
+            org.mockito.Mockito.verify(flow.projection(), org.mockito.Mockito.never()).complete(
+                    org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList());
+        }
+    }
+
+    @Test
+    void RAG不因float4正常舍入新增下溢拒绝且Step保留原向量() {
+        assertThat(database.dsl().fetchValue("SELECT CAST(CAST(? AS vector) AS text)", "[1e-100]"))
+                .isEqualTo("[0]");
+        RagFlow flow = ragFlow("rag-underflow", 1);
+        var result = ragResult(flow.request(), 1, 1).output(Map.of("embeddings", List.of(List.of(1e-100))));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        flow.callbacks().result(result);
+        assertThat(runStatus(flow.request().getRunId())).isEqualTo("completed");
+        String stored = database.dsl().fetchOne("SELECT output FROM public.\"WorkflowStep\" WHERE id=?", flow.request().getStepId()).get(0, String.class);
+        assertThat(json.readTree(stored).get("embeddings").get(0).get(0).asDouble()).isEqualTo(1e-100);
+    }
+
+    private static RagFlow ragFlow(String prefix, int chunks) {
+        Fixture fixture = fixture(prefix);
+        var enabled = ExecutionRegistryFixtures.ragOperationEnabled(ExecutionRegistry.Environment.TEST);
+        var operation = enabled.resolve("rag.embedding", false);
+        var ids = new CuidV1Generator(CLOCK);
+        var projection = org.mockito.Mockito.mock(cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion.class);
+        org.mockito.Mockito.when(projection.frozenChunkCount(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(chunks);
+        org.mockito.Mockito.when(projection.isCurrent(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
+        org.mockito.Mockito.when(projection.complete(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList())).thenReturn("completed");
+        org.mockito.Mockito.when(projection.finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(2));
+        String referenceId = prefix + "-reference";
+        String content = "甲😀".repeat(chunks * 900);
+        Map<String, Object> input = Map.of("referenceId", referenceId, "contentHash", sha256(content), "indexGeneration", "2026-09-01T03:00:00.000Z");
+        Map<String, Object> context = new LinkedHashMap<>(input); context.put("content", content); context.put("chunkCount", chunks);
+        var evidence = new WorkflowEvidenceItemPlan("rag_embedding_context", referenceId, true, null, null, null, context, null, null, Map.of());
+        var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request-0001", sha256(prefix),
+                "rag", "embedding", enabled.catalogVersion(), "chat", fixture.novelId(), null, null, "reference", referenceId,
+                input, operation.operation().evidencePolicy(), List.of(evidence), operation.operation().runBudget(), enabled.freezePlan("rag.embedding", false),
+                new WorkflowInitialStepPlan("generation", operation.operation().lane(), Map.of("batchIndex", 0),
+                        operation.generatorProfile(), operation.generatorStepBudget(), operation.outputSchema()), null,
+                new WorkflowStartPlan.SourceBinding("rag_index_v2", referenceId)));
+        var dispatch = new JooqWorkflowDispatchRepository(database, ids, CLOCK, json, enabled, Duration.ofSeconds(30), 3,
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> projection);
+        var callback = new JooqWorkflowCallbackRepository(database, ids, CLOCK, json, enabled, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> null, () -> null, () -> projection);
+        var cancel = new JooqWorkflowRunCancellationRepository(database, ids, CLOCK, json, enabled, () -> null, () -> null, () -> projection);
+        var request = dispatch.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        var flow = new RagFlow(fixture, request, dispatch, callback, cancel, projection);
+        prepareRag(flow, request);
+        return flow;
+    }
+
+    private static void prepareRag(RagFlow flow, ExecutionStepRequest request) {
+        flow.dispatches().recordAccepted(request, accepted(request, ragAgentResolved(request)));
+        flow.callbacks().progress(progress(request, unknownUsage()).resolvedModel(ragApiResolved(request)));
+    }
+
+    private static cn.inkforge.contracts.agent.ResolvedModelRef ragAgentResolved(ExecutionStepRequest request) {
+        String model = "e2e-embedding-vector-v1";
+        String endpoint = cn.inkforge.core.workflows.catalog.RagEmbeddingDeployment.fromConfiguration(model, "http://e2e-control:8090").endpointProfile();
+        String profile = request.getModelProfile().getDeploymentProfileKey();
+        return new cn.inkforge.contracts.agent.ResolvedModelRef().capabilityVersion("capability.openai-embeddings.batch.v1")
+                .deploymentFingerprint(WorkflowResolvedModel.fingerprint(profile, "openai_embeddings", model, "transport.openai-embeddings.v1", endpoint,
+                        "embeddings_v1", "capability.openai-embeddings.batch.v1", "disabled", false))
+                .deploymentProfileKey(profile).endpointProfile(endpoint).model(model).provider("openai_embeddings")
+                .reasoningMode(cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.DISABLED)
+                .structuredOutputRoute(cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.fromValue("embeddings_v1"))
+                .supportsRequestIdempotency(false).transportProfile("transport.openai-embeddings.v1");
+    }
+
+    private static ResolvedModelRef ragApiResolved(ExecutionStepRequest request) {
+        return toApiResolved(ragAgentResolved(request));
+    }
+
+    private static ExecutionStepResult ragResult(ExecutionStepRequest request, int count, int dimension) {
+        List<List<Double>> vectors = java.util.stream.IntStream.range(0, count)
+                .mapToObj(index -> java.util.stream.IntStream.range(0, dimension).mapToObj(axis -> (index + axis + 1) * 0.125).toList()).toList();
+        var result = outputResult(request, "占位").resolvedModel(ragApiResolved(request))
+                .usage(new StepUsage(0, 1, StepUsage.UsageStatusEnum.PARTIAL, 100)
+                        .inputTokens(100).completionTokens(0).reasoningTokens(0).visibleOutputTokens(0))
+                .output(Map.of("embeddings", vectors));
+        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+        return result;
+    }
+
+    private record RagFlow(Fixture fixture, ExecutionStepRequest request, JooqWorkflowDispatchRepository dispatches,
+            JooqWorkflowCallbackRepository callbacks, JooqWorkflowRunCancellationRepository cancellations,
+            cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion projection) {}
+
+    @Test
     void 画像五节串行复用冻结来源且逐节原文与空小说账务都可重放() {
         StyleFlow flow = styleFlow("portrait-full", null, true);
         var request = flow.request();
@@ -258,10 +458,7 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     private static ResolvedModelRef styleApiResolved(ExecutionStepRequest request) {
-        var resolved = styleAgentResolved(request);
-        return new ResolvedModelRef(resolved.getCapabilityVersion(), resolved.getDeploymentFingerprint(), resolved.getDeploymentProfileKey(),
-                resolved.getEndpointProfile(), resolved.getModel(), resolved.getProvider(), ResolvedModelRef.ReasoningModeEnum.DISABLED,
-                ResolvedModelRef.StructuredOutputRouteEnum.fromValue("plain_text_v1"), true, resolved.getTransportProfile());
+        return toApiResolved(styleAgentResolved(request));
     }
 
     private static ExecutionStepResult styleResult(ExecutionStepRequest request, String raw) {
@@ -425,10 +622,7 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     private static ResolvedModelRef qualityApiResolved(ExecutionStepRequest request) {
-        var resolved = qualityAgentResolved(request);
-        return new ResolvedModelRef(resolved.getCapabilityVersion(), resolved.getDeploymentFingerprint(), resolved.getDeploymentProfileKey(),
-                resolved.getEndpointProfile(), resolved.getModel(), resolved.getProvider(), ResolvedModelRef.ReasoningModeEnum.DISABLED,
-                ResolvedModelRef.StructuredOutputRouteEnum.fromValue("quality_strict_tool_v1"), true, resolved.getTransportProfile());
+        return toApiResolved(qualityAgentResolved(request));
     }
 
     private static ExecutionStepFailure qualityFailure(ExecutionStepRequest request, String code, StepUsage usage) {
@@ -2838,17 +3032,12 @@ class JooqWorkflowCallbackRepositoryTest {
                 "capability.deepseek-v4.chat-json.v1",
                 reasoning,
                 false);
-        return new cn.inkforge.contracts.agent.ResolvedModelRef(
-                "capability.deepseek-v4.chat-json.v1",
-                fingerprint,
-                deployment,
-                endpointProfile,
-                "deepseek-v4-flash",
-                "openai_compatible",
-                cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.fromValue(reasoning),
-                cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.CHAT_JSON_OUTPUT_V1,
-                false,
-                "transport.deepseek-v4.v1");
+        return new cn.inkforge.contracts.agent.ResolvedModelRef()
+                .capabilityVersion("capability.deepseek-v4.chat-json.v1").deploymentFingerprint(fingerprint)
+                .deploymentProfileKey(deployment).endpointProfile(endpointProfile).model("deepseek-v4-flash").provider("openai_compatible")
+                .reasoningMode(cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.fromValue(reasoning))
+                .structuredOutputRoute(cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.CHAT_JSON_OUTPUT_V1)
+                .supportsRequestIdempotency(false).transportProfile("transport.deepseek-v4.v1");
     }
 
     private static ResolvedModelRef apiResolved(ExecutionStepRequest request) {
@@ -2857,21 +3046,7 @@ class JooqWorkflowCallbackRepositoryTest {
 
     private static ResolvedModelRef apiResolved(
             ExecutionStepRequest request, String endpointProfile) {
-        cn.inkforge.contracts.agent.ResolvedModelRef value =
-                agentResolved(request, endpointProfile);
-        return new ResolvedModelRef(
-                value.getCapabilityVersion(),
-                value.getDeploymentFingerprint(),
-                value.getDeploymentProfileKey(),
-                value.getEndpointProfile(),
-                value.getModel(),
-                value.getProvider(),
-                ResolvedModelRef.ReasoningModeEnum.fromValue(
-                        value.getReasoningMode().getValue()),
-                ResolvedModelRef.StructuredOutputRouteEnum.fromValue(
-                        value.getStructuredOutputRoute().getValue()),
-                value.getSupportsRequestIdempotency(),
-                value.getTransportProfile());
+        return toApiResolved(agentResolved(request, endpointProfile));
     }
 
     private static cn.inkforge.contracts.agent.ResolvedModelRef fakeAgentResolved(
@@ -2888,34 +3063,25 @@ class JooqWorkflowCallbackRepositoryTest {
                 "capability.fake.structured-output.v1",
                 reasoning,
                 true);
-        return new cn.inkforge.contracts.agent.ResolvedModelRef(
-                "capability.fake.structured-output.v1",
-                fingerprint,
-                deployment,
-                "endpoint.local-fake.v1",
-                "fake",
-                "fake",
-                cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.fromValue(reasoning),
-                cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.RESPONSES_JSON_SCHEMA_V1,
-                true,
-                "transport.fake.v1");
+        return new cn.inkforge.contracts.agent.ResolvedModelRef()
+                .capabilityVersion("capability.fake.structured-output.v1").deploymentFingerprint(fingerprint)
+                .deploymentProfileKey(deployment).endpointProfile("endpoint.local-fake.v1").model("fake").provider("fake")
+                .reasoningMode(cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.fromValue(reasoning))
+                .structuredOutputRoute(cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.RESPONSES_JSON_SCHEMA_V1)
+                .supportsRequestIdempotency(true).transportProfile("transport.fake.v1");
     }
 
     private static ResolvedModelRef fakeApiResolved(ExecutionStepRequest request) {
-        cn.inkforge.contracts.agent.ResolvedModelRef value = fakeAgentResolved(request);
-        return new ResolvedModelRef(
-                value.getCapabilityVersion(),
-                value.getDeploymentFingerprint(),
-                value.getDeploymentProfileKey(),
-                value.getEndpointProfile(),
-                value.getModel(),
-                value.getProvider(),
-                ResolvedModelRef.ReasoningModeEnum.fromValue(
-                        value.getReasoningMode().getValue()),
-                ResolvedModelRef.StructuredOutputRouteEnum.fromValue(
-                        value.getStructuredOutputRoute().getValue()),
-                value.getSupportsRequestIdempotency(),
-                value.getTransportProfile());
+        return toApiResolved(fakeAgentResolved(request));
+    }
+
+    private static ResolvedModelRef toApiResolved(cn.inkforge.contracts.agent.ResolvedModelRef value) {
+        return new ResolvedModelRef().capabilityVersion(value.getCapabilityVersion())
+                .deploymentFingerprint(value.getDeploymentFingerprint()).deploymentProfileKey(value.getDeploymentProfileKey())
+                .endpointProfile(value.getEndpointProfile()).model(value.getModel()).provider(value.getProvider())
+                .reasoningMode(ResolvedModelRef.ReasoningModeEnum.fromValue(value.getReasoningMode().getValue()))
+                .structuredOutputRoute(ResolvedModelRef.StructuredOutputRouteEnum.fromValue(value.getStructuredOutputRoute().getValue()))
+                .supportsRequestIdempotency(value.getSupportsRequestIdempotency()).transportProfile(value.getTransportProfile());
     }
 
     private static StepUsage unknownUsage() {

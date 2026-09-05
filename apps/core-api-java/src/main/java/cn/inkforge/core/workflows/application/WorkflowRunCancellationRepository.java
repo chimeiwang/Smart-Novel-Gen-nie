@@ -20,6 +20,11 @@ public interface WorkflowRunCancellationRepository {
         throw new UnsupportedOperationException("已删除文风的取消端口未实现");
     }
 
+    default WorkflowCancellationRequestResult requestInvalidatedRag(
+            String userId, String runId, String clientRequestId) {
+        throw new UnsupportedOperationException("失效 RAG 索引取消端口未实现");
+    }
+
     Optional<ExecutionCancelRequest> claimCancellationRetry();
 
     int settleExpired(int limit);
