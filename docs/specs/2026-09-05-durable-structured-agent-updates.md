@@ -1,7 +1,7 @@
 # Durable Agent V2 设定、大纲与伏笔迁移
 
-日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 定向来源读取、不可变候选校验及所选项采用
-事务适配已通过本地验证；正式 writer payload/完整 Diff 物化及 Core/Agent 业务接线尚未完成，五项尚未启用。
+日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 来源读取、不可变候选、完整 Diff/写入物化、
+生成回调及审核详情/决定已通过本地隔离验证；Agent 执行、证据扩展、自动返工策略与入口尚未全部接通，五项尚未启用。
 
 ## 范围复核结论
 
@@ -336,10 +336,10 @@ applyMaterialized 路径。旧 apply 路径保持原行为；物化路径的无 
 同一真实行在多个目标/直接引用中完全一致时去重，只有冲突快照拒绝。整树来源只读取每个节点一次完整行
 及显式成员清单，不为每个节点重复展开整组兄弟信息。所选目标冻结后被删除明确报告 SOURCE_CHANGED。
 
-此适配仍由测试直接构造，尚未装配进 JooqDurableReviewDecisionStore。调用方必须从权威候选及其冻结
+在 8a23d0d 检查点，此适配仍由测试直接构造，尚未装配进 JooqDurableReviewDecisionStore。调用方必须从权威候选及其冻结
 Evidence 物化输入并在同一审核事务记录 Artifact/Run 终态；不能让调用方自报 updates/来源代替这条链。
-名称唯一解析、默认 order 的冻结派生、同候选新建人物与经历等跨项身份映射、完整 Diff 以及生成 Step
-来源链尚待完成。当前仅支持已物化输入的验证结果不能被解读为原始 Provider 建议已能直接采用。
+该检查点的名称唯一解析、默认 order 的冻结派生、同候选新建人物与经历等跨项身份映射、完整 Diff 以及生成
+Step 来源链当时尚待完成；本节基础适配验证不单独代表原始 Provider 建议已能直接采用，后续进展见下节。
 
 本轮验证结果：
 
@@ -355,3 +355,65 @@ Evidence 物化输入并在同一审核事务记录 Artifact/Run 终态；不能
 - 未修改 Web 源码，未重复 Web 构建；测试仅使用隔离 PostgreSQL/Redis，Testcontainers 清单已为空。
   公共接口、CLI 命令和执行资产未变化，Catalog 仍为 7/21，无须更新活动 Skills；没有推送、部署、
   真实库变更、真实模型调用或安装包更新。
+
+## 建议物化与审核读取接线
+
+下一步把冻结候选转换为现有 agent_updates payload 和 Web 已支持的数组 Diff，不新增公共 DTO、CLI 参数
+或选择协议。Diff 使用 `{section,action,name,fields:[{field,label,oldValue?,newValue?}]}`；旧链路没有可直接
+复用的完整 builder，不能复活依赖可变 workspace 或信任模型 fieldChanges 的历史实现。
+
+Core 冻结一份 agent_updates_index 最小名录，仅含同小说资料身份/名称及必要的父级、类型和顺序，不含
+无关正文。名称唯一解析以该名录为准；实际被修改的历史资料仍须取得完整冻结来源，不能把名录当作 before。
+按现有 writer 的分区顺序和每个分区原顺序模拟临时状态，保留同候选先新建再更新、重命名后定位、删除、
+patch 临时 key 覆盖及 replace 部分采用。未提供的经历/大纲顺序从冻结名录和本候选前序动作派生。
+
+稳定创建身份统一绑定 Artifact/revision/原 section/index，复用现有 CommandResourceId。V2 内部 writer
+为大纲和伏笔补上确定性创建身份，以便跨项引用刚创建的资源；旧公共创建入口及 V1 writer 原行为不改。
+这些 Core 元数据不进入 Provider 输出契约。采用时只有真正选中的创建动作可以建立批内身份，引用未选
+创建项必须按旧写入规则失败并整单回滚，不自动补选。
+
+审核详情和决定必须复验精确修订、冻结 Evidence item 哈希和 bundle 归属，以及对应生成 Step 的 Run、
+Artifact/revision、结果哈希与完整输出；期望身份来自权威 Step，而不是候选自报。读取重建不得访问当前
+业务 Head。全部接线完成且端到端验证前，五项 Catalog 继续关闭；本轮不部署、不修改真实库或活动 Skills。
+
+本轮 Core 实现：
+
+- AgentUpdatesMaterializer 按原分区/数组顺序从冻结名录及完整 before 派生 writer payload 和数组 Diff，
+  支持重命名后的唯一名称定位、批内创建/修改/引用、缺省顺序、删除完整旧值和 replace 旧树隐式删除。
+  空串、null、未提供字段和原始 Unicode 文本不混同；Diff 不作为写入权威。
+- AgentUpdatesIdentity 与既有 CommandResourceId 统一创建身份；V2 大纲/伏笔创建补上稳定请求，旧入口
+  不变。所选集合不含依赖的创建动作时，不自动补选，不伪造历史来源，整个采用事务失败。
+- 生成回调注册五个结构化结果处理器，先在同一事务存候选并经审核域端口核验来源及物化，再写终报和安排
+  Reviewer。Step output 只保存 artifactId/revision/updatesSha256 指针，原始候选仍由精确修订保管。
+- 审核详情复验完整 manifest 与逐 item 哈希，按同 Run 生成 Step 的产出指针定位权威生成记录，并用原始
+  output、真实 resolvedModel/usage 重算结果哈希；摘要和 updates 都参与。历史详情不依赖当前作品 Head。
+  公共详情直接返回既有 Web 支持的 Diff 数组，且精确修订的 summary 不取可变 head 摘要。
+- 用户 approve/discard/revise 接入同一 Run；仅 agent_updates 的 approve 接受 selectedUpdateRefs，采用
+  调用前序事务适配，Run/Artifact/决定 Step 同事务提交。人工返工携带原始 summary/updates，不把物化元数据
+  回灌 Provider，也不按已过滤的数组重建原候选。
+
+本地回归已真实贯通生成回调 → Reviewer 回调 → 精确详情 → 作者采用 → Run completed；另以五种 operation
+的内存冻结计划覆盖部分采用、冲突时决定/状态回滚、幂等重放、原始候选返工和结果摘要不匹配拒绝。
+这些计划复用已注册测试模型/预算，仅证明 Core 接线，不是五项真实 Profile、Agent 执行或生产开放证明。
+尚须完成正式 Profile/Prompt/StepBudget、Agent 生成和专用复审、EvidenceExpansionRequest 新 bundle/Step、
+最多一次自动完整返工、显式/自然 planner 及对应 Web/CLI 业务 E2E；Catalog 继续保持 7/21。
+
+本次接线后的最终验证记录：
+
+- `./mvnw verify`：五个 reactor 全部成功，服务身份 11、服务契约 5、Core 987（3 skipped）、
+  CLI 129，无失败或错误；日志 `/tmp/inkforge-agent-updates-materialization-final-maven.log`。
+- `uv run pytest -q`：4805 passed、3 skipped，仅既有 Starlette 弃用警告；日志
+  `/tmp/inkforge-agent-updates-materialization-final-python.log`。这是 CLI 修正后的全仓重跑结果。
+- 全仓 Ruff 通过；四个服务/共享目录及 CLI 的 Mypy 覆盖 322 个源码文件并通过，日志
+  `/tmp/inkforge-agent-updates-materialization-final-mypy.log`。
+- `npm run test:web`、`npm run typecheck`、`npm run lint`、`npm run api:check` 和 `npm run build`
+  全部通过，日志分别为 `/tmp/inkforge-agent-updates-materialization-web-tests.log`、
+  `-typecheck.log`、`-lint.log`、`-api-check.log`、`-web-build.log`（相同文件名前缀）。
+- 所有 Java 数据库测试只使用隔离 Testcontainers；最终测试容器清单为空，没有执行真实库 DDL、
+  生产部署、远程写或真实供应商调用。
+
+消费者复核发现并修正两端 CLI 原先一律拒绝 V2 部分采用的漏接：仅 verified 的精确 agent_updates
+候选批准透传现有 selectedUpdateRefs，其余 V2 类型及返工/放弃语义不变，没有新增命令或参数。
+Java/Python 共享成功 fixture 31 例、V2 错误 fixture 19 例均已验证；Python CLI 全目录另有 641 项通过。
+源码候选 JAR 已构建，但没有安装到固定入口或改动活动 Skills。更新要求见
+`2026-09-01-durable-agent-v2-operator-skill-update.md` 的“结构化资料 V2 部分采用”。

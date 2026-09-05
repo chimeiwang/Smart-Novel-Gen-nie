@@ -168,6 +168,17 @@ def _is_writing_artifact(artifact: JsonObject) -> bool:
     )
 
 
+def _is_agent_updates_artifact(artifact: JsonObject) -> bool:
+    data = artifact.get("payload")
+    return (
+        artifact.get("sourceBindingStatus") == "verified"
+        and artifact.get("kind") == "agent_updates"
+        and isinstance(data, dict)
+        and data.get("kind") == "agent_updates"
+        and isinstance(data.get("updates"), dict)
+    )
+
+
 def _require_verified_source(
     runtime: CliRuntime,
     *,
@@ -238,8 +249,15 @@ def _decision_body(
             )
     elif body["engineVersion"] == 2:
         forbidden_v2 = {name for name in _EDIT_FIELDS if payload.get(name) is not None}
+        agent_updates = (
+            decision == "approve"
+            and artifact is not None
+            and _is_agent_updates_artifact(artifact)
+        )
         if decision == "approve" and artifact is not None:
-            if _is_selection_artifact(artifact):
+            if agent_updates:
+                forbidden_v2.discard("selectedUpdateRefs")
+            elif _is_selection_artifact(artifact):
                 forbidden_v2.difference_update({"editedReplacement", "editedReplacementFile"})
             elif _is_writing_artifact(artifact):
                 forbidden_v2.difference_update({"editedContent", "editedContentFile"})
@@ -261,6 +279,8 @@ def _decision_body(
                 body["editedContent"] = edited_content
             if edited_replacement is not None:
                 body["editedReplacement"] = edited_replacement
+            if agent_updates and "selectedUpdateRefs" in payload:
+                body["selectedUpdateRefs"] = payload["selectedUpdateRefs"]
     else:
         edited_content = _edited_content(payload)
         edited_replacement = _edited_replacement(payload)

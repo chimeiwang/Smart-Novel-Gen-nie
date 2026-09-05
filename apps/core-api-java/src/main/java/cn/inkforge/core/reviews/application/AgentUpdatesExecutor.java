@@ -108,7 +108,7 @@ public final class AgentUpdatesExecutor {
             count += experiences.size();
         }
         count += applyOutlineUpdates(novelId, userId, updates, historicalTargetsResolved);
-        count += applyForeshadowings(novelId, userId, updates);
+        count += applyForeshadowings(novelId, userId, updates, historicalTargetsResolved);
         count += applyReferences(novelId, userId, updates);
         if (updates.containsKey("outlineContent")) {
             String content = requireString(updates.get("outlineContent"), "outlineContent 必须是完整文本");
@@ -310,7 +310,7 @@ public final class AgentUpdatesExecutor {
         List<Map<String, Object>> adjustments = objectList(
                 updates.get("outlineAdjustments"), "outlineAdjustments 更新项结构无效");
         if ("replace".equals(updates.get("outlineTreeMode"))) {
-            replaceOutlineTree(novelId, userId, adjustments);
+            replaceOutlineTree(novelId, userId, adjustments, historicalTargetsResolved);
             return count + adjustments.size();
         }
         List<OutlineNodeResponse> existing = new ArrayList<>(outlines.listNodes(novelId, userId));
@@ -320,12 +320,12 @@ public final class AgentUpdatesExecutor {
             MutationAction action = action(item, "outlineAdjustments");
             String nodeId = resolveNodeId(item, historicalTargetsResolved && optionalNonEmptyString(item.get("nodeId")) == null
                     ? existing.stream().filter(node -> createdIds.contains(node.getId())).toList() : existing);
-            Map<String, Object> fields = outlineFields(item, clientIds);
+            Map<String, Object> fields = outlineFields(item, clientIds, historicalTargetsResolved);
             if (action == MutationAction.CREATE) {
                 var mutation = outlines.createNode(
                         novelId,
                         userId,
-                        ids.next(),
+                        historicalTargetsResolved ? clientRequestId(item, "outlineAdjustments") : ids.next(),
                         outlineNodeData(fields, existing.size()));
                 OutlineNodeResponse created =
                         node(outlines.listNodes(novelId, userId), mutation.getId());
@@ -358,7 +358,7 @@ public final class AgentUpdatesExecutor {
     }
 
     private void replaceOutlineTree(
-            String novelId, String userId, List<Map<String, Object>> adjustments) {
+            String novelId, String userId, List<Map<String, Object>> adjustments, boolean materialized) {
         if (adjustments.stream().anyMatch(value -> action(value, "outlineAdjustments") != MutationAction.CREATE)) {
             throw new IllegalArgumentException("整树替换只能包含新建节点");
         }
@@ -370,12 +370,12 @@ public final class AgentUpdatesExecutor {
         Map<String, String> clientIds = new HashMap<>();
         for (int order = 0; order < adjustments.size(); order++) {
             Map<String, Object> item = adjustments.get(order);
-            Map<String, Object> fields = outlineFields(item, clientIds);
+            Map<String, Object> fields = outlineFields(item, clientIds, materialized);
             fields.put("order", order);
             var mutation = outlines.createNode(
                     novelId,
                     userId,
-                    ids.next(),
+                    materialized ? clientRequestId(item, "outlineAdjustments") : ids.next(),
                     outlineNodeData(fields, order));
             OutlineNodeResponse value =
                     node(outlines.listNodes(novelId, userId), mutation.getId());
@@ -389,7 +389,7 @@ public final class AgentUpdatesExecutor {
     }
 
     private int applyForeshadowings(
-            String novelId, String userId, Map<String, Object> updates) {
+            String novelId, String userId, Map<String, Object> updates, boolean materialized) {
         if (!updates.containsKey("foreshadowing")) return 0;
         List<Map<String, Object>> values = objectList(
                 updates.get("foreshadowing"), "foreshadowing 必须是数组");
@@ -399,21 +399,21 @@ public final class AgentUpdatesExecutor {
                 throw new IllegalArgumentException("payoffNote 无法写入现有数据库结构");
             }
             String action = requireNonEmptyString(item.get("action"), "foreshadowing action 无效");
-            Set<String> allowed = Set.of(
+            Set<String> allowed = new LinkedHashSet<>(Set.of(
                     "action", "id", "name", "plantedAt", "plantedContent",
-                    "expectedPayoff", "payoffAt", "payoffNote");
+                    "expectedPayoff", "payoffAt", "payoffNote"));
+            if (materialized && "create".equals(action)) allowed.add("clientRequestId");
             rejectUnknown(item, allowed, "foreshadowing");
             if ("create".equals(action)) {
-                outlines.createForeshadowing(
-                        novelId,
-                        userId,
-                        new ForeshadowingData(
+                ForeshadowingData data = new ForeshadowingData(
                                 requireNonEmptyString(item.get("name"), "伏笔名称不能为空"),
                                 optionalString(item.get("plantedAt")),
                                 optionalString(item.get("plantedContent")),
                                 optionalString(item.get("expectedPayoff")),
                                 optionalString(item.get("payoffAt")),
-                                "active"));
+                                "active");
+                if (materialized) outlines.createForeshadowing(novelId, userId, clientRequestId(item, "foreshadowing"), data);
+                else outlines.createForeshadowing(novelId, userId, data);
                 continue;
             }
             if (existing == null) existing = outlines.listForeshadowings(novelId, userId);
@@ -490,7 +490,7 @@ public final class AgentUpdatesExecutor {
     }
 
     private static Map<String, Object> outlineFields(
-            Map<String, Object> item, Map<String, String> clientIds) {
+            Map<String, Object> item, Map<String, String> clientIds, boolean materialized) {
         Set<String> business = Set.of(
                 "title", "content", "kind", "parentId", "status", "order",
                 "linkedChapterId", "estimatedWordCount", "actualWordCount",
@@ -498,6 +498,7 @@ public final class AgentUpdatesExecutor {
         Set<String> allowed = new LinkedHashSet<>(business);
         allowed.addAll(Set.of(
                 "action", "nodeId", "nodeTitle", "clientKey", "parentKey", "fieldChanges"));
+        if (materialized && "create".equals(item.get("action"))) allowed.add("clientRequestId");
         rejectUnknown(item, allowed, "outlineAdjustments");
         Map<String, Object> fields = fields(item, business);
         if (!fields.containsKey("title") && item.get("nodeTitle") instanceof String title) {

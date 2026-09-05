@@ -71,6 +71,17 @@ Agent 消息，不能把 SSE 或任务状态拼成回答。问答的 `writingSes
 
 `long.artifact.approve` 对选区 Artifact 使用 `editedReplacement` 或 `editedReplacementFile`，对全文草案继续使用 `editedContent`。每次决定前先 GET Artifact 并查看完整 Diff，独立确认后提交稳定幂等请求，完成后再次 GET 回读；CLI 会执行 sourceBinding preflight 并拒绝错误的全文/选区编辑字段。
 
+当前源码候选另支持 V2 `agent_updates` 部分采用：只有精确 GET 的详情同时为
+`sourceBindingStatus=verified`、顶层和 payload 的 `kind=agent_updates`，且 `payload.updates` 为对象时，
+`long.artifact.approve` 才原样透传输入中已有的 `selectedUpdateRefs`。省略、显式 `null`、空数组和非空
+`section/index` 数组不会在 CLI 内互相改写；结构化资料候选不接受正文或 replacement 编辑字段，其他 V2 候选及
+revise/discard 保持既有拒绝规则。这组 kind/updates 条件只决定结构化选择字段能否透传：非 null 选择不满足条件时
+拒绝且不 POST；省略选择字段或其他 V2 候选沿既有语义忽略显式 null 时，不会因此新增 Artifact 类型门禁。
+Core 按精确 revision 和冻结来源在同一事务采用，冲突后必须重新读取并确认。
+这没有增加 125 个普通 CLI 命令，也没有扩大 45 命令/三 Operation 的 Operator 范围；Catalog 仍为 7/21，
+五项结构化资料 Operation 尚未启用。本项源码已构建并通过最终 Maven 门禁，但尚未更新到固定 JAR 或活动 Skills，
+也未部署服务器。
+
 2026-09-05 的 V2 `review_chapter` 保持显式 start 可省略 writingSessionId；完成后
 `long.task.get/watch` 直接返回完整 reviewReport，不要求额外会话查询或 Artifact 决定。指定 outputFile 时
 保存完整 JSON。`rewrite_scene` 仍生成整章候选，批准使用 editedContent/editedContentFile；

@@ -7,13 +7,13 @@ import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader.ResourceK
 import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader.Source;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
 import cn.inkforge.core.reviews.application.AgentUpdatesFrozenSources;
+import cn.inkforge.core.reviews.application.AgentUpdatesIdentity;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,20 +54,26 @@ public final class JooqAgentUpdatesApplier {
         if (artifactId == null || artifactId.isEmpty() || revision < 1) throw new IllegalArgumentException("草案身份无效");
         // 在副本上按原索引派生请求键；原候选、原 refs 和用于决定幂等的用户请求均不改写。
         Map<String, Object> prepared = AgentUpdatesExecutor.filter(materializedUpdates, null);
-        for (String section : requestKeySections()) {
+        for (String section : AgentUpdatesIdentity.createSections()) {
             List<Map<String, Object>> values = items(prepared, section);
             for (int index = 0; index < values.size(); index++) {
                 Map<String, Object> item = values.get(index);
-                if ("create".equals(item.get("action"))) item.put("clientRequestId", "agent-updates-" +
-                        ExecutionCanonicalJson.sha256(Map.of("artifactId", artifactId, "revision", revision,
-                                "section", section, "index", index)));
+                if ("create".equals(item.get("action"))) item.put("clientRequestId",
+                        AgentUpdatesIdentity.requestKey(artifactId, revision, section, index));
             }
         }
         Map<String, Object> selected = AgentUpdatesExecutor.filter(prepared, selectedRefs);
         if (selected.isEmpty()) throw new IllegalArgumentException("没有选择任何可应用更新");
+        Set<Source> created = new HashSet<>();
+        for (String section : AgentUpdatesIdentity.createSections()) {
+            for (Map<String, Object> item : items(selected, section)) {
+                if ("create".equals(item.get("action"))) created.add(new Source(KINDS.get(section),
+                        AgentUpdatesIdentity.resourceId(userId, novelId, section, (String) item.get("clientRequestId"))));
+            }
+        }
         return database.transactionResult(tx -> {
             lockNovel(tx, novelId, userId);
-            verifySelected(tx, novelId, selected, sources);
+            verifySelected(tx, novelId, selected, sources, created);
             int count = 0;
             // 同一实体可以被连续修改；冻结来源只在所有写入前核验，逐项 CAS 读取本事务自己的最新写入。
             for (String section : ENTITY_SECTIONS) count += applyItems(tx, novelId, userId, selected, section);
@@ -97,7 +103,8 @@ public final class JooqAgentUpdatesApplier {
         });
     }
 
-    private void verifySelected(DSLContext tx, String novel, Map<String, Object> selected, AgentUpdatesFrozenSources sources) {
+    private void verifySelected(DSLContext tx, String novel, Map<String, Object> selected, AgentUpdatesFrozenSources sources,
+            Set<Source> created) {
         Set<Source> checked = new HashSet<>();
         for (String section : KINDS.keySet()) {
             for (Map<String, Object> item : items(selected, section)) {
@@ -107,10 +114,12 @@ public final class JooqAgentUpdatesApplier {
                 if (!create && !inBatchOutline) {
                     String id = targetId(section, item);
                     Source target = new Source(KINDS.get(section), id);
-                    if (checked.add(target)) verifyTarget(tx, novel, target, sources);
-                    if ("delete".equals(item.get("action"))) verifyDelete(tx, novel, target, sources);
+                    if (!created.contains(target)) {
+                        if (checked.add(target)) verifyTarget(tx, novel, target, sources);
+                        if ("delete".equals(item.get("action"))) verifyDelete(tx, novel, target, sources);
+                    }
                 }
-                if (!"delete".equals(item.get("action"))) verifyReferences(tx, novel, section, item, sources);
+                if (!"delete".equals(item.get("action"))) verifyReferences(tx, novel, section, item, sources, created);
             }
         }
         if (selected.containsKey("outlineAdjustments") && "replace".equals(selected.get("outlineTreeMode"))) {
@@ -148,7 +157,7 @@ public final class JooqAgentUpdatesApplier {
     }
 
     private void verifyReferences(DSLContext tx, String novel, String section, Map<String, Object> item,
-            AgentUpdatesFrozenSources sources) {
+            AgentUpdatesFrozenSources sources, Set<Source> created) {
         if (section.equals("characterExperiences") && "create".equals(item.get("action")) && text(item.get("characterId")) == null) {
             throw new ApiException(409, "AGENT_UPDATES_EVIDENCE_REQUIRED", "经历所属人物尚未按冻结来源物化为 ID");
         }
@@ -166,6 +175,7 @@ public final class JooqAgentUpdatesApplier {
         for (Map.Entry<String, ResourceKind> reference : references.entrySet()) {
             String id = text(item.get(reference.getKey()));
             if (id == null) continue;
+            if (created.contains(new Source(reference.getValue(), id))) continue;
             // 显式引用只复验冻结身份、存在与归属，不把引用正文的无关编辑提升为目标 CAS。
             sources.require(reference.getValue(), id);
             currentTarget(tx, novel, reference.getValue(), id);
@@ -209,12 +219,6 @@ public final class JooqAgentUpdatesApplier {
             throw new IllegalArgumentException(section + " 必须是对象数组");
         }
         return (List<Map<String, Object>>) (List<?>) values;
-    }
-
-    private static List<String> requestKeySections() {
-        List<String> sections = new ArrayList<>(ENTITY_SECTIONS);
-        sections.addAll(List.of("characterExperiences", "references"));
-        return sections;
     }
 
     private static void same(Object before, Object after) {

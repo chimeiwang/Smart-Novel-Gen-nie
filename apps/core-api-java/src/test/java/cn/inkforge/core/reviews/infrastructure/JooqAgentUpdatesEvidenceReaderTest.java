@@ -51,6 +51,16 @@ class JooqAgentUpdatesEvidenceReaderTest {
     static void close() { if (database != null) database.close(); }
 
     @Test
+    void 最小名录含同作品身份和结构顺序但不包含资料正文() {
+        String novel = fixture();
+        String other = fixture();
+        var index = database.transactionResult(tx -> reader.captureIndex(tx, novel));
+        String content = JSON.writeValueAsString(index.contentJson());
+        assertThat(content).contains(novel + "-character", novel + "-experience", "characterId", "order", "parentId", "kind")
+                .doesNotContain(other, "background", "content", "无关人物秘密", "不得进入资料快照的章节正文", "参考全文", "plantedContent");
+    }
+
+    @Test
     void 定向人物保留完整原文和直接关系且不加载无关资料正文() {
         String novel = fixture();
         String full = " 原始设定😀\r\n".repeat(4000) + "不可丢失的末尾";

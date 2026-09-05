@@ -26,6 +26,43 @@ public final class JooqAgentUpdatesEvidenceReader implements AgentUpdatesEvidenc
     public JooqAgentUpdatesEvidenceReader(ObjectMapper json) { this.json = Objects.requireNonNull(json); }
 
     @Override
+    public WorkflowEvidenceItemPlan captureIndex(DSLContext tx, String novelId) {
+        if (tx.fetchOne("SELECT id FROM public.\"Novel\" WHERE id = ?", novelId) == null) throw invalid("小说不存在");
+        List<Map<String, Object>> index = new ArrayList<>();
+        for (ResourceKind kind : ResourceKind.values()) {
+            String table = switch (kind) {
+                case CHARACTER -> "Character";
+                case LOCATION -> "Location";
+                case ITEM -> "Item";
+                case FACTION -> "Faction";
+                case GLOSSARY -> "Glossary";
+                case CHARACTER_EXPERIENCE -> "CharacterExperience";
+                case OUTLINE_NODE -> "OutlineNode";
+                case FORESHADOWING -> "Foreshadowing";
+                case REFERENCE -> "ReferenceMaterial";
+                case CHAPTER_REFERENCE -> "Chapter";
+                default -> null;
+            };
+            if (table == null) continue;
+            String fields = switch (kind) {
+                case GLOSSARY -> "'term', source.term";
+                case CHARACTER_EXPERIENCE -> "'characterId', source.\"characterId\", 'order', source.\"order\"";
+                case OUTLINE_NODE -> "'title', source.title, 'parentId', source.\"parentId\", 'kind', source.kind, 'order', source.\"order\"";
+                case CHAPTER_REFERENCE -> "'title', source.title, 'order', source.\"order\"";
+                case REFERENCE -> "'title', source.title";
+                default -> "'name', source.name";
+            };
+            index.addAll(rows(tx, "SELECT jsonb_build_object('resourceType', ?, 'id', source.id, " + fields
+                    + ")::text AS snapshot FROM public.\"" + table + "\" source "
+                    + (kind == ResourceKind.CHARACTER_EXPERIENCE
+                    ? "JOIN public.\"Character\" owner ON owner.id = source.\"characterId\" WHERE owner.\"novelId\" = ?"
+                    : "WHERE source.\"novelId\" = ?") + " ORDER BY source.id", kind.wireName(), novelId));
+        }
+        return new WorkflowEvidenceItemPlan("agent_updates_index", novelId, true, null, null, null,
+                Map.of("items", index), null, null, Map.of("targetType", "novel", "targetId", novelId, "roles", List.of("index")));
+    }
+
+    @Override
     public List<WorkflowEvidenceItemPlan> capture(DSLContext tx, String novelId, List<Source> sources) {
         Objects.requireNonNull(tx);
         if (novelId == null || novelId.isEmpty()) throw new IllegalArgumentException("小说 ID 不能为空");

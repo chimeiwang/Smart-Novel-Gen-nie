@@ -56,6 +56,24 @@ def writing_artifact() -> JsonObject:
     }
 
 
+def agent_updates_artifact() -> JsonObject:
+    return {
+        "id": "updates-1",
+        "engineVersion": 2,
+        "revision": 4,
+        "sourceBindingStatus": "verified",
+        "kind": "agent_updates",
+        "payload": {
+            "kind": "agent_updates",
+            "summary": "更新人物和世界设定",
+            "updates": {
+                "characters": [{"action": "create", "name": "林舟"}],
+                "worldSetting": "雨城仍在封锁中。",
+            },
+        },
+    }
+
+
 @pytest.mark.parametrize("field_name", ["editedContent", "editedContentFile"])
 def test_v2_full_edit_preserves_content_and_reads_exact_revision(
     tmp_path: Path, field_name: str,
@@ -74,6 +92,158 @@ def test_v2_full_edit_preserves_content_and_reads_exact_revision(
     )
     assert api.calls[-1][2]["json"]["editedContent"] == content
     assert "editedContentFile" not in api.calls[-1][2]["json"]
+
+
+@pytest.mark.parametrize(
+    "selected_update_refs",
+    [
+        None,
+        [],
+        [
+            {"section": "characters", "index": 0},
+            {"section": "worldSetting"},
+        ],
+    ],
+)
+def test_v2_agent_updates_approve_preserves_selected_update_refs(
+    selected_update_refs: object,
+) -> None:
+    api = RecordingApi(
+        responses=[agent_updates_artifact(), {"decision": "approve"}],
+    )
+
+    artifacts.approve(
+        runtime(api),
+        payload(
+            artifactId="updates-1",
+            engineVersion=2,
+            expectedRevision=4,
+            clientRequestId="updates-approve-0001",
+            selectedUpdateRefs=selected_update_refs,
+        ),
+    )
+
+    assert api.calls[0] == (
+        "GET",
+        "/api/v1/review-artifacts/updates-1",
+        {"params": {"revision": 4}},
+    )
+    body = api.calls[-1][2]["json"]
+    assert "selectedUpdateRefs" in body
+    assert body["selectedUpdateRefs"] == selected_update_refs
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"kind": "beat_plan"},
+        {"payload": {"kind": "beat_plan", "updates": {}}},
+        {"payload": {"kind": "agent_updates"}},
+        {"payload": {"kind": "agent_updates", "updates": []}},
+    ],
+)
+def test_v2_selected_update_refs_require_exact_agent_updates_artifact(
+    changed: dict[str, object],
+) -> None:
+    artifact = agent_updates_artifact()
+    artifact.update(cast(JsonObject, changed))
+    api = RecordingApi(responses=[artifact])
+
+    with pytest.raises(CliInputError) as caught:
+        artifacts.approve(
+            runtime(api),
+            payload(
+                artifactId="updates-1",
+                engineVersion=2,
+                expectedRevision=4,
+                clientRequestId="updates-invalid-0001",
+                selectedUpdateRefs=[],
+            ),
+        )
+
+    assert caught.value.code == "V2_EDIT_FIELDS_FORBIDDEN"
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
+@pytest.mark.parametrize(
+    "edited",
+    [
+        {"editedContent": "不允许结构化全文编辑"},
+        {"editedReplacement": "不允许结构化选区编辑"},
+    ],
+)
+def test_v2_agent_updates_approve_rejects_text_edit_fields(
+    edited: dict[str, object],
+) -> None:
+    api = RecordingApi(responses=[agent_updates_artifact()])
+
+    with pytest.raises(CliInputError) as caught:
+        artifacts.approve(
+            runtime(api),
+            payload(
+                artifactId="updates-1",
+                engineVersion=2,
+                expectedRevision=4,
+                clientRequestId="updates-no-text-0001",
+                **edited,
+            ),
+        )
+
+    assert caught.value.code == "V2_EDIT_FIELDS_FORBIDDEN"
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
+def test_v2_agent_updates_revise_still_rejects_selected_update_refs() -> None:
+    api = RecordingApi(responses=[agent_updates_artifact()])
+
+    with pytest.raises(CliInputError) as caught:
+        artifacts.revise(
+            runtime(api),
+            payload(
+                artifactId="updates-1",
+                engineVersion=2,
+                expectedRevision=4,
+                clientRequestId="updates-revise-0001",
+                selectedUpdateRefs=[],
+                userMessage="请重新整理",
+            ),
+        )
+
+    assert caught.value.code == "V2_EDIT_FIELDS_FORBIDDEN"
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
+def test_v2_approve_and_revise_keep_prior_null_omission_outside_partial_apply() -> None:
+    approve_api = RecordingApi(
+        responses=[writing_artifact(), {"decision": "approve"}],
+    )
+    artifacts.approve(
+        runtime(approve_api),
+        payload(
+            artifactId="draft-1",
+            engineVersion=2,
+            expectedRevision=7,
+            clientRequestId="draft-null-selection-0001",
+            selectedUpdateRefs=None,
+        ),
+    )
+    assert "selectedUpdateRefs" not in approve_api.calls[-1][2]["json"]
+
+    revise_api = RecordingApi(
+        responses=[agent_updates_artifact(), {"decision": "revise"}],
+    )
+    artifacts.revise(
+        runtime(revise_api),
+        payload(
+            artifactId="updates-1",
+            engineVersion=2,
+            expectedRevision=4,
+            clientRequestId="updates-revise-null-0001",
+            selectedUpdateRefs=None,
+            userMessage="请重新整理",
+        ),
+    )
+    assert "selectedUpdateRefs" not in revise_api.calls[-1][2]["json"]
 
 
 @pytest.mark.parametrize("extra", [
@@ -416,6 +586,7 @@ def test_revise_requires_a_non_empty_user_message(user_message: object) -> None:
         {"editedContent": "正文"},
         {"editedContentFile": "edited.txt"},
         {"selectedUpdateRefs": [{"section": "正文"}]},
+        {"selectedUpdateRefs": None},
     ],
 )
 def test_discard_rejects_editing_fields_without_fetching_artifact(

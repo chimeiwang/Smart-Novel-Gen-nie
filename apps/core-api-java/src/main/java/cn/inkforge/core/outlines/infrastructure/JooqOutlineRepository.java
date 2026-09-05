@@ -304,12 +304,35 @@ public final class JooqOutlineRepository implements OutlineRepository {
     @Override
     public ForeshadowingResponse createForeshadowing(
             String novelId, String userId, ForeshadowingData data) {
+        return createForeshadowing(novelId, userId, null, data);
+    }
+
+    @Override
+    public ForeshadowingResponse createForeshadowing(
+            String novelId, String userId, String clientRequestId, ForeshadowingData data) {
         return database.dsl().transactionResult(configuration -> {
             DSLContext transaction = DSL.using(configuration);
             requireOwner(transaction, novelId, userId);
+            String resourceId = clientRequestId == null ? ids.next()
+                    : CommandResourceId.derive("foreshadowing", userId, novelId, clientRequestId);
+            if (clientRequestId != null) {
+                lockNovel(transaction, novelId, userId);
+                ForeshadowingRecord existing = transaction.selectFrom(FORESHADOWING)
+                        .where(FORESHADOWING.ID.eq(resourceId)).forUpdate().fetchOne();
+                if (existing != null) {
+                    if (novelId.equals(existing.getNovelid()) && existing.getCreatedat().equals(existing.getUpdatedat())
+                            && Objects.equals(existing.getName(), data.name())
+                            && Objects.equals(existing.getPlantedat(), data.plantedAt())
+                            && Objects.equals(existing.getPlantedcontent(), data.plantedContent())
+                            && Objects.equals(existing.getExpectedpayoff(), data.expectedPayoff())
+                            && Objects.equals(existing.getPayoffat(), data.payoffAt())
+                            && existing.getStatus().getLiteral().equals(data.status())) return foreshadowing(existing);
+                    throw new ApiException(409, "FORESHADOWING_CREATE_CONFLICT", "伏笔创建请求已被使用或初始版本已变化");
+                }
+            }
             LocalDateTime now = DatabaseTimestamp.now(clock);
             ForeshadowingRecord created = transaction.insertInto(FORESHADOWING)
-                    .set(FORESHADOWING.ID, ids.next())
+                    .set(FORESHADOWING.ID, resourceId)
                     .set(FORESHADOWING.NOVELID, novelId)
                     .set(FORESHADOWING.NAME, data.name())
                     .set(FORESHADOWING.PLANTEDAT, data.plantedAt())

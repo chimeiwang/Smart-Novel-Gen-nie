@@ -279,8 +279,11 @@ final class LongArtifactCommands {
     private static void addV2DecisionFields(
             ObjectNode body, ObjectNode payload, String decision, ObjectNode artifact) {
         TreeSet<String> forbidden = presentNonNullFields(payload, EDIT_FIELDS);
+        boolean agentUpdates = decision.equals("approve") && agentUpdatesArtifact(artifact);
         if (decision.equals("approve")) {
-            if (selectionArtifact(artifact)) {
+            if (agentUpdates) {
+                forbidden.remove("selectedUpdateRefs");
+            } else if (selectionArtifact(artifact)) {
                 forbidden.remove("editedReplacement");
                 forbidden.remove("editedReplacementFile");
             } else if (writingArtifact(artifact)) {
@@ -305,6 +308,24 @@ final class LongArtifactCommands {
         }
         String replacement = editedReplacement(payload);
         if (replacement != null) body.put("editedReplacement", replacement);
+        if (agentUpdates && payload.has("selectedUpdateRefs")) {
+            body.set(
+                    "selectedUpdateRefs",
+                    payload.get("selectedUpdateRefs").deepCopy());
+        }
+    }
+
+    private static boolean agentUpdatesArtifact(ObjectNode artifact) {
+        if (artifact == null
+                || !artifact.path("sourceBindingStatus").asText().equals("verified")
+                || !artifact.path("kind").asText().equals("agent_updates")) {
+            return false;
+        }
+        JsonNode payload = artifact.get("payload");
+        return payload != null
+                && payload.isObject()
+                && payload.path("kind").asText().equals("agent_updates")
+                && payload.path("updates").isObject();
     }
 
     private static int expectedRevision(ObjectNode payload) {

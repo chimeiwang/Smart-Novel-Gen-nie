@@ -15,6 +15,8 @@ import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader.ResourceK
 import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader.Source;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
 import cn.inkforge.core.reviews.application.AgentUpdatesFrozenSources;
+import cn.inkforge.core.reviews.application.AgentUpdatesMaterializer;
+import cn.inkforge.core.reviews.application.AgentUpdatesIdentity;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import java.time.Clock;
 import java.time.Instant;
@@ -288,6 +290,77 @@ class JooqAgentUpdatesApplierTest {
         database.dsl().execute("DELETE FROM public.\"Item\" WHERE id = ?", n + "-item");
         assertCode(() -> apply(n, Map.of("items", List.of(Map.of("action", "update", "id", n + "-item", "description", "不应复活"))),
                 null, frozen), "AGENT_UPDATES_SOURCE_CHANGED");
+    }
+
+    @Test
+    void 原始名称建议经过物化后实际写入且未选同名变化不改变目标() {
+        String n = fixture();
+        var frozen = freezeWithIndex(n, new Source(ResourceKind.CHARACTER, n + "-a"));
+        var output = Map.<String, Object>of("summary", "修改人物", "updates", Map.of("characters", List.of(
+                Map.of("action", "update", "name", "a", "background", "冻结目标的新原文"))));
+        var converted = AgentUpdatesMaterializer.materialize(n, n, n + "-artifact", 1, output, frozen);
+        database.dsl().execute("UPDATE public.\"Character\" SET name = 'a' WHERE id = ?", n + "-b");
+        assertThat(apply(n, updates(converted), null, frozen)).isEqualTo(1);
+        assertThat(field("Character", n + "-a", "background")).isEqualTo("冻结目标的新原文");
+        assertThat(field("Character", n + "-b", "background")).isEqualTo("人物原文");
+        assertThat(converted.diff().toString()).contains("人物原文", "冻结目标的新原文");
+    }
+
+    @Test
+    void 同候选创建人物随后按名修改并创建经历不需要伪造历史来源() {
+        String n = emptyNovel();
+        var frozen = freezeWithIndex(n);
+        var output = Map.<String, Object>of("summary", "创建并补充", "updates", Map.of("characters", List.of(
+                Map.of("action", "create", "name", "新人物"),
+                Map.of("action", "update", "name", "新人物", "background", "新人物经历背景")),
+                "characterExperiences", List.of(Map.of("action", "create", "characterName", "新人物", "content", "第一件事"))));
+        var converted = AgentUpdatesMaterializer.materialize(n, n, n + "-artifact", 1, output, frozen);
+        assertThat(apply(n, updates(converted), null, frozen)).isEqualTo(3);
+        String character = AgentUpdatesIdentity.resourceId(n, n, n + "-artifact", 1, "characters", 0);
+        assertThat(field("Character", character, "background")).isEqualTo("新人物经历背景");
+        assertThat(database.dsl().fetchValue("SELECT \"order\" FROM public.\"CharacterExperience\" WHERE \"characterId\" = ?", character)).isEqualTo(0);
+    }
+
+    @Test
+    void 未选创建人物时不会自动补选也不会留下孤立经历() {
+        String n = emptyNovel();
+        var frozen = freezeWithIndex(n);
+        var output = Map.<String, Object>of("summary", "关联新建", "updates", Map.of("characters", List.of(
+                Map.of("action", "create", "name", "新人物")), "characterExperiences", List.of(
+                Map.of("action", "create", "characterName", "新人物", "content", "不应单独写入"))));
+        var converted = AgentUpdatesMaterializer.materialize(n, n, n + "-artifact", 1, output, frozen);
+        assertThatThrownBy(() -> apply(n, updates(converted), List.of(new ArtifactSelectionRef("characterExperiences")), frozen)).isInstanceOf(ApiException.class);
+        assertThat(database.dsl().fetch("SELECT id FROM public.\"Character\" WHERE \"novelId\" = ?", n)).isEmpty();
+    }
+
+    @Test
+    void 大纲和伏笔稳定创建身份可供同组后项修改() {
+        String n = emptyNovel();
+        var frozen = freezeWithIndex(n);
+        var output = Map.<String, Object>of("summary", "关联新建", "updates", Map.of("outlineAdjustments", List.of(
+                Map.of("action", "create", "kind", "stage", "title", "初始阶段", "clientKey", "parent"),
+                Map.of("action", "update", "nodeTitle", "初始阶段", "content", "补齐阶段原文")),
+                "foreshadowing", List.of(Map.of("action", "create", "name", "埋下暗号"),
+                Map.of("action", "payoff", "name", "埋下暗号", "payoffAt", "最终揭晓"))));
+        var converted = AgentUpdatesMaterializer.materialize(n, n, n + "-artifact", 1, output, frozen);
+        assertThat(apply(n, updates(converted), null, frozen)).isEqualTo(4);
+        assertThat(field("OutlineNode", AgentUpdatesIdentity.resourceId(n, n, n + "-artifact", 1, "outlineAdjustments", 0), "content"))
+                .isEqualTo("补齐阶段原文");
+        assertThat(field("Foreshadowing", AgentUpdatesIdentity.resourceId(n, n, n + "-artifact", 1, "foreshadowing", 0), "status"))
+                .isEqualTo("paid_off");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> updates(AgentUpdatesMaterializer.Materialized value) {
+        return (Map<String, Object>) value.payload().get("updates");
+    }
+
+    private static AgentUpdatesFrozenSources freezeWithIndex(String novel, Source... sources) {
+        return database.transactionResult(tx -> {
+            List<WorkflowEvidenceItemPlan> evidence = new ArrayList<>(reader.capture(tx, novel, List.of(sources)));
+            evidence.add(reader.captureIndex(tx, novel));
+            return new AgentUpdatesFrozenSources(novel, evidence);
+        });
     }
 
     private static int apply(String novel, Map<String, Object> updates, List<ArtifactSelectionRef> refs, AgentUpdatesFrozenSources frozen) {

@@ -9,4 +9,10 @@ public interface FormalArtifactWriter {
             String userId,
             ReviewArtifactState artifact,
             ReviewArtifactDecisionRequest request);
+
+    /** V2 结构化草案必须携带从权威 Evidence 重建的来源，不能降级为 V1 无来源写入。 */
+    default int applyAgentUpdates(String userId, ReviewArtifactState artifact,
+            ReviewArtifactDecisionRequest request, AgentUpdatesFrozenSources sources) {
+        throw new UnsupportedOperationException("结构化草案采用适配尚未装配");
+    }
 }

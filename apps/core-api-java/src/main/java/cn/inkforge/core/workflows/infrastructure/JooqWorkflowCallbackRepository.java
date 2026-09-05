@@ -18,6 +18,7 @@ import cn.inkforge.core.workflows.application.WorkflowCallbackResources;
 import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
+import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
@@ -28,6 +29,7 @@ import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
+import cn.inkforge.core.workflows.domain.DurableAgentUpdatesArtifact;
 import cn.inkforge.core.workflows.domain.ChapterDraftPatches;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetDimension;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
@@ -49,6 +51,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Objects;
 import org.jooq.DSLContext;
 import org.jooq.Record;
@@ -72,6 +75,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final WorkflowBillingCoordinator billing;
     private final WorkflowExecutionContextReader contexts;
     private final java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation;
+    private final java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -88,6 +92,14 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
             WorkflowExecutionContextReader contexts,
             java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation) {
+        this(database, ids, clock, json, registry, leaseDuration, contexts, businessPreparation, () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
+            java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -102,6 +114,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.billing = new WorkflowBillingCoordinator(ids, json, requiredRegistry, contexts);
         this.contexts = Objects.requireNonNull(contexts);
         this.businessPreparation = Objects.requireNonNull(businessPreparation);
+        this.structuredCandidates = Objects.requireNonNull(structuredCandidates);
     }
 
     @Override
@@ -684,6 +697,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case CHAPTER_DRAFT_REVIEW_ARTIFACT -> completeSelectionGeneration(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case AGENT_UPDATES_REVIEW_ARTIFACT -> completeSelectionGeneration(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
         }
     }
 
@@ -698,8 +713,10 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             LocalDateTime now) {
         boolean beatPlan = "long_serial.plan_chapter".equals(executionPlan.operation().key());
         boolean chapterDraft = isChapterDraft(executionPlan);
-        if (!beatPlan && !chapterDraft) validateSelectionGenerationOutput(frozenStep.outputSchema(), output);
-        Artifact artifact = chapterDraft ? materializeChapterDraft(
+        boolean structured = isAgentUpdates(executionPlan);
+        if (!beatPlan && !chapterDraft && !structured) validateSelectionGenerationOutput(frozenStep.outputSchema(), output);
+        Artifact artifact = structured ? materializeAgentUpdates(transaction, locked, executionPlan, output, body.getResultHash(), now)
+                : chapterDraft ? materializeChapterDraft(
                 transaction, locked, executionPlan, output, body.getResultHash(), now) : beatPlan ? materializeBeatPlan(
                 transaction, locked, executionPlan, output, body.getResultHash(), now) : materializeSelection(
                 transaction,
@@ -717,7 +734,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 locked,
                 body.getResultHash(),
                 usage,
-                canonicalJson(beatPlan || chapterDraft ? Map.of("artifactId", artifact.id(),
+                canonicalJson(structured ? Map.of("artifactId", artifact.id(), "artifactRevision", artifact.revision(), "updatesSha256", output.get("updatesSha256"))
+                        : beatPlan || chapterDraft ? Map.of("artifactId", artifact.id(),
                         "artifactRevision", artifact.revision(), "contentSha256", output.get("contentSha256")) : output),
                 frozenArtifactId == null ? artifact.id() : frozenArtifactId,
                 frozenArtifactRevision == null ? artifact.revision() : frozenArtifactRevision,
@@ -1192,6 +1210,31 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 string(output, "summary"), stored.payload(), stored.diff(), now);
     }
 
+    private static boolean isAgentUpdates(ExecutionPlanSnapshot plan) {
+        return "apply.agent_updates.v1".equals(plan.operation().applyHandler()) && Set.of(
+                "create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing")
+                .contains(plan.operation().operation());
+    }
+
+    private Artifact materializeAgentUpdates(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+            Map<String, Object> output, String resultHash, LocalDateTime now) {
+        DurableAgentUpdatesArtifact.validateOutput(output, plan.generator().outputSchema().jsonSchema());
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        Record bundle = tx.fetchOne("SELECT \"manifestSha256\" FROM public.\"WorkflowEvidenceBundle\" WHERE id = ? AND \"runId\" = ?",
+                bundleId, locked.run().get("id", String.class));
+        if (bundle == null) throw invalid("结构化候选缺少冻结 Evidence");
+        var stored = DurableAgentUpdatesArtifact.create(plan.operation().operation(), bundleId,
+                bundle.get("manifestSha256", String.class), locked.run().get("novelId", String.class), output,
+                locked.step().get("id", String.class), resultHash, plan.generator().outputSchema().jsonSchema());
+        Artifact artifact = persistCandidate(tx, locked, "agent_updates", "结构化资料修改建议", string(output, "summary"),
+                stored.payload(), stored.diff(), now);
+        WorkflowStructuredCandidatePreparation preparation = structuredCandidates.get();
+        if (preparation == null) throw invalid("结构化候选业务物化器尚未装配");
+        preparation.validate(tx, locked.run().get("userId", String.class), locked.run().get("novelId", String.class),
+                locked.run().get("id", String.class), bundleId, artifact.id(), artifact.revision(), output);
+        return artifact;
+    }
+
     private Artifact materializeChapterDraft(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
             Map<String, Object> output, String resultHash, LocalDateTime now) {
         try {
@@ -1362,6 +1405,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         }
         if ("long_serial.plan_chapter".equals(executionPlan.operation().key())
                 || isChapterDraft(executionPlan)
+                || isAgentUpdates(executionPlan)
                 || "long_serial.rewrite_outline_selection".equals(executionPlan.operation().key())) {
             Map<String, Object> generationInput = readObject(locked.step().get("input", String.class));
             if (REVIEW.equals(locked.step().get("purpose", String.class))) {

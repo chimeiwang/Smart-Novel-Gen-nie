@@ -48,6 +48,8 @@ import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
+import cn.inkforge.core.workflows.domain.DurableAgentUpdatesArtifact;
+import cn.inkforge.core.reviews.application.AgentUpdatesMaterializer;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -689,8 +691,8 @@ final class JooqReviewRepository implements ReviewRepository {
             result.setTitle((String) plan.get("title"));
             result.setSummary((String) plan.get("summary"));
         }
-        if (durable != null && Set.of("write_chapter", "rewrite_scene")
-                .contains(payload.get("operation"))) {
+        if (durable != null && ("agent_updates".equals(payload.get("kind")) || Set.of("write_chapter", "rewrite_scene")
+                .contains(payload.get("operation")))) {
             result.setSummary((String) payload.get("summary"));
         }
         result.setPayload(payload);
@@ -765,6 +767,15 @@ final class JooqReviewRepository implements ReviewRepository {
                     "待审核草案 head 与精确修订事实不一致");
         }
         String bundleId = requiredStoredText(storedPayload, "evidenceBundleId");
+        if (DurableAgentUpdatesArtifact.isStored(storedPayload)) {
+            String operation = executionContext.effectiveOperation();
+            var evidence = DurableAgentUpdatesReviewEvidence.read(context, json, artifact.getWorkflowrunid(),
+                    artifact.getNovelid(), artifact.getId(), revision, operation, storedPayload, storedDiff,
+                    executionContext.requireBusinessPlan().generator().outputSchema().jsonSchema());
+            var materialized = AgentUpdatesMaterializer.materialize(evidence.userId(), artifact.getNovelid(),
+                    artifact.getId(), revision, evidence.output(), evidence.sources());
+            return new DurableDetail(materialized.payload(), materialized.diff(), evidence.sourceBindings());
+        }
         if (DurableChapterDraftArtifact.isStored(storedPayload)) {
             String operation = requiredStoredText(storedPayload, "operation");
             if (!Set.of("write_chapter", "rewrite_scene").contains(operation)
@@ -1327,6 +1338,6 @@ final class JooqReviewRepository implements ReviewRepository {
     private record SourceView(List<SourceBinding> bindings, String status) {}
 
     private record DurableDetail(
-            Map<String, Object> payload, Map<String, Object> diff,
+            Map<String, Object> payload, Object diff,
             List<SourceBinding> sourceBindings) {}
 }

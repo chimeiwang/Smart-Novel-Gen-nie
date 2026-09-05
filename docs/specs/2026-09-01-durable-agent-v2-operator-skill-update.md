@@ -204,9 +204,11 @@ Python CLI 继续作为兼容对照，不回到已安装 Skill 的运行链。
 | 章节规划 `beat_plan` | 无 | 用 `long.artifact.revise` 提交修改要求，不能把计划当正文编辑 |
 | 已有选区草案 | `editedReplacement` 或 `editedReplacementFile`，至多一个 | 只提交选区替换文本，不接受 editedContent；本行不扩大 Skill 启动权限 |
 
-所有 V2 决定继续禁止 `selectedUpdateRefs`；`revise/discard` 不接受编辑字段。省略全部编辑字段的 approve
-采用原候选；编辑批准会先形成用户编辑 revision，再由 Core 在同一事务采用。文件内容必须完整按 UTF-8 读取，
-保留换行、首尾空格及 Unicode 字符，不 trim、摘要、分块代替全文或截断。文件路径只是 CLI 本地输入，不发给 Core。
+在 2026-09-04 正文阶段，所有 V2 决定都禁止 `selectedUpdateRefs`；这是当时只覆盖规划、正文和选区候选的
+历史规则。2026-09-05 起，只有下节所述 `agent_updates` 批准允许该字段，其他 V2 候选以及 `revise/discard`
+仍保持原限制。省略全部编辑字段的 approve 采用原候选；编辑批准会先形成用户编辑 revision，再由 Core 在同一
+事务采用。文件内容必须完整按 UTF-8 读取，保留换行、首尾空格及 Unicode 字符，不 trim、摘要、分块代替全文
+或截断。文件路径只是 CLI 本地输入，不发给 Core。
 
 正文文件编辑批准示例（ID、revision 与路径必须替换为已确认的实际值）：
 
@@ -240,6 +242,44 @@ requestId；新修改要求或新 revision 不能复用旧请求内容，也不�
 - 本轮只更新 Application Support 下的固定运行包和配置，没有修改已安装 `~/.codex/skills` 说明或脚本文件，
   没有执行生产部署。新包安装与
   目标 Core/Agent 实际部署、V2 路由和业务验收是不同事实，后者完成前不得宣称生产正文 V2 已开放。
+
+## 2026-09-05 结构化资料 V2 部分采用
+
+本节只记录当前分支的 CLI 消费者候选。Operation Catalog 仍为 7/21；`create_lore`、`revise_lore`、
+`create_outline`、`revise_outline`、`manage_foreshadowing` 五项仍为 `v2Enabled=false`，不能因 Core 已接通
+`agent_updates` 候选和决定事务便宣称五项已经可运行。普通 Java/Python CLI 仍为 125 个命令；两份 Operator
+仍为 45 个命令，`long.agent.start` 仍只允许 `plan_chapter`、`write_chapter`、`review_chapter` 三种 Operation。
+本节没有增加命令、启动参数或 Skill 白名单。
+
+当前源码中的 Java CLI 与 Python 对照 CLI 已允许 `agent_updates` 的 V2 approve 原样携带已有
+`selectedUpdateRefs` 字段。这项源码变化已经完成构建和最终 Maven 门禁，但尚未安装到两份 Skill 的固定 JAR，
+也没有修改活动 Skill。
+仓库源码、构建产物、固定安装包、活动 Skill 和服务器部署是五个不同状态；后续安装时须重新记录固定 JAR 来源与
+SHA-256 并完成两份入口回归，不能沿用上节旧 JAR 的验收结论。
+
+### 精确候选与决定规则
+
+1. 调用方先从 Run 取得 `artifactId/artifactRevision`，再用 `long.artifact.get` 精确读取该 revision 并完整展示
+   候选、Diff 和来源。`long.artifact.approve` 还会再次 GET 相同 revision，并继续核对既有的
+   `id/revision/engineVersion=2` 与 `sourceBindingStatus=verified`。只有调用方提交非 null
+   `selectedUpdateRefs`、要求进入结构化部分采用分支时，详情还必须同时满足顶层 `kind=agent_updates`、
+   `payload.kind=agent_updates`，且 `payload.updates` 为 JSON 对象；这组结构条件不满足时拒绝选择字段且不发送决定
+   POST。它不为省略选择字段或沿既有语义被忽略的 null 新增 Artifact 类型门禁，其他合法 V2 approve 仍按原规则处理。
+2. 只有上述候选的 approve 才可携带调用方 JSON 中已经存在的 `selectedUpdateRefs`。CLI 不重排、不重编号、
+   不补默认 section/index，也不增加新的命令参数：字段省略就保持省略，显式 `null` 原样发送并由 Core 解释为
+   全选，空数组原样发送并保持“没有选中项”，非空数组保持原始 section/index。
+3. `agent_updates` approve 不接受 `editedContent`、`editedContentFile`、`editedReplacement` 或
+   `editedReplacementFile`。其他 V2 候选仍拒绝非 null 的 `selectedUpdateRefs`；V2 revise 仍不接受非 null
+   选择字段，显式 null 沿用既有“按省略处理”的行为；discard 仍拒绝任何已出现的编辑字段，包括显式 null。
+4. Core 以精确 Artifact revision 和原数组 section/index 物化选择，在同一事务内复验被选项的冻结来源并应用。
+   被选目标或必要依赖已变化时返回冲突，CLI/Skill 必须重新读取、重新展示、重新确认，不能自动覆盖或换 ID
+   猜测重试；未选资料的变化不得被 CLI 扩大成整作品 CAS。网络结果不确定时只对账或重放完全相同的
+   `clientRequestId`、revision 和选择正文。
+
+Agent 仍没有 CLI 直连入口。链路保持
+`Skill scripts/run.sh → Java Operator/CLI → Core /api/v1/** → Agent`，候选生成、来源复验、事务采用和最终状态均由
+Core 负责；CLI 透传选择不等于自行写资料。五项真正启用、固定 JAR/Skill 更新、服务器部署和生产验收继续留待各自
+后续门禁，不能由本节替代。
 
 ## 观察与结果恢复
 

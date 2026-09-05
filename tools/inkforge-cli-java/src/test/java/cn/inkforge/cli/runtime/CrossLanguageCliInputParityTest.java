@@ -69,7 +69,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 三十条代表成功链路的输出与公共请求映射必须和Python一致() throws Exception {
+    void 三十一条代表成功链路的输出与公共请求映射必须和Python一致() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-success-cases.json")) {
@@ -79,7 +79,7 @@ class CrossLanguageCliInputParityTest {
         assertThat(fixture.get("schemaVersion").textValue())
                 .isEqualTo("inkforge-cli-parity-success/1.0");
         ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
-        assertThat(sourceCases.size()).isEqualTo(30);
+        assertThat(sourceCases.size()).isEqualTo(31);
 
         ArrayNode probeCases = json.createArrayNode();
         sourceCases.forEach(value -> {
@@ -130,7 +130,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void V2非法问答与观察响应的退出帧和API调用必须和Python一致() throws Exception {
+    void V2非法问答决定与观察响应的退出帧和API调用必须和Python一致() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-v2-contract-error-cases.json")) {
@@ -140,7 +140,7 @@ class CrossLanguageCliInputParityTest {
         assertThat(fixture.get("schemaVersion").textValue())
                 .isEqualTo("inkforge-cli-parity-v2-contract-errors/1.0");
         ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
-        assertThat(sourceCases.size()).isEqualTo(16);
+        assertThat(sourceCases.size()).isEqualTo(19);
 
         ArrayNode probeCases = json.createArrayNode();
         sourceCases.forEach(value -> {

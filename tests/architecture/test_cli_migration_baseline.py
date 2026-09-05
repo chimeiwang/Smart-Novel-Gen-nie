@@ -57,7 +57,7 @@ def test_cli_success_parity_fixture_is_language_neutral_and_registered() -> None
     names = [case["command"] for case in cases]
 
     assert fixture["schemaVersion"] == "inkforge-cli-parity-success/1.0"
-    assert len(cases) == 30
+    assert len(cases) == 31
     assert len(names) == len(set(names))
     assert set(names) <= registered
     assert {name.split(".", 1)[0] for name in names} == {"auth", "short", "long"}
@@ -69,6 +69,21 @@ def test_cli_success_parity_fixture_is_language_neutral_and_registered() -> None
     assert answer["payload"]["writingSessionId"] == "s1"
     assert answer["payload"]["target"] == {"type": "chapter", "id": "c1"}
     assert answer["payload"]["scope"] == {"kind": "chapter", "chapterId": "c1"}
+
+    partial = next(
+        case
+        for case in cases
+        if case.get("caseId") == "long-v2-agent-updates-partial-approve"
+    )
+    assert partial["command"] == "long.artifact.approve"
+    assert partial["payload"]["selectedUpdateRefs"] == [
+        {"section": "characters", "index": 0},
+        {"section": "worldSetting"},
+    ]
+    artifact = partial["responses"][0]
+    assert artifact["sourceBindingStatus"] == "verified"
+    assert artifact["kind"] == artifact["payload"]["kind"] == "agent_updates"
+    assert isinstance(artifact["payload"]["updates"], dict)
 
 
 def test_cli_watch_parity_fixture_covers_every_jsonl_command() -> None:
@@ -131,7 +146,7 @@ def test_cli_v2_contract_error_fixture_closes_cross_language_gaps() -> None:
         fixture["schemaVersion"]
         == "inkforge-cli-parity-v2-contract-errors/1.0"
     )
-    assert len(cases) == 16
+    assert len(cases) == 19
     assert len(by_id) == len(cases)
     assert all(case["mode"] == "scripted" for case in cases)
     assert all(case["captureCalls"] is True for case in cases)
@@ -203,6 +218,27 @@ def test_cli_v2_contract_error_fixture_closes_cross_language_gaps() -> None:
         "writingSessionId",
         "userInstruction",
     } == {"selectedAgents"}
+
+    artifact_ids = {
+        "artifact-selected-refs-other-v2",
+        "artifact-selected-refs-invalid-updates-shape",
+        "artifact-selected-refs-revise",
+    }
+    artifact_cases = [by_id[case_id] for case_id in sorted(artifact_ids)]
+    assert {case["command"] for case in artifact_cases} == {
+        "long.artifact.approve",
+        "long.artifact.revise",
+    }
+    assert all(case["expectedExitCode"] == 2 for case in artifact_cases)
+    assert all(
+        case["expectedErrorCode"] == "V2_EDIT_FIELDS_FORBIDDEN"
+        for case in artifact_cases
+    )
+    assert all(len(case["expectedCalls"]) == 1 for case in artifact_cases)
+    assert all(
+        case["expectedCalls"][0]["method"] == "GET"
+        for case in artifact_cases
+    )
 
     watcher_cases = [
         case for case in cases if case["command"] == "long.task.watch"

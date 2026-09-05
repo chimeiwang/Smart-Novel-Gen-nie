@@ -173,6 +173,109 @@
       "expectedCalls": []
     },
     {
+      "caseId": "artifact-selected-refs-other-v2",
+      "command": "long.artifact.approve",
+      "payload": {
+        "artifactId": "plan /1",
+        "clientRequestId": "plan-selected-invalid-0001",
+        "engineVersion": 2,
+        "expectedRevision": 3,
+        "selectedUpdateRefs": []
+      },
+      "responses": [
+        {
+          "id": "plan /1",
+          "engineVersion": 2,
+          "revision": 3,
+          "sourceBindingStatus": "verified",
+          "kind": "beat_plan",
+          "payload": {"kind": "beat_plan", "operation": "plan_chapter"}
+        }
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "V2_EDIT_FIELDS_FORBIDDEN",
+      "expectedCalls": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/v1/review-artifacts/plan%20%2F1",
+          "query": {"revision": ["3"]},
+          "body": null
+        }
+      ]
+    },
+    {
+      "caseId": "artifact-selected-refs-invalid-updates-shape",
+      "command": "long.artifact.approve",
+      "payload": {
+        "artifactId": "updates-1",
+        "clientRequestId": "updates-shape-invalid-0001",
+        "engineVersion": 2,
+        "expectedRevision": 4,
+        "selectedUpdateRefs": [{"section": "characters", "index": 0}]
+      },
+      "responses": [
+        {
+          "id": "updates-1",
+          "engineVersion": 2,
+          "revision": 4,
+          "sourceBindingStatus": "verified",
+          "kind": "agent_updates",
+          "payload": {"kind": "agent_updates", "updates": []}
+        }
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "V2_EDIT_FIELDS_FORBIDDEN",
+      "expectedCalls": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/v1/review-artifacts/updates-1",
+          "query": {"revision": ["4"]},
+          "body": null
+        }
+      ]
+    },
+    {
+      "caseId": "artifact-selected-refs-revise",
+      "command": "long.artifact.revise",
+      "payload": {
+        "artifactId": "updates-1",
+        "clientRequestId": "updates-revise-invalid-0001",
+        "engineVersion": 2,
+        "expectedRevision": 4,
+        "selectedUpdateRefs": [],
+        "userMessage": "请重新整理"
+      },
+      "responses": [
+        {
+          "id": "updates-1",
+          "engineVersion": 2,
+          "revision": 4,
+          "sourceBindingStatus": "verified",
+          "kind": "agent_updates",
+          "payload": {"kind": "agent_updates", "updates": {}}
+        }
+      ],
+      "mode": "scripted",
+      "captureCalls": true,
+      "expectedExitCode": 2,
+      "expectedErrorCode": "V2_EDIT_FIELDS_FORBIDDEN",
+      "expectedCalls": [
+        {
+          "kind": "request",
+          "method": "GET",
+          "path": "/api/v1/review-artifacts/updates-1",
+          "query": {"revision": ["4"]},
+          "body": null
+        }
+      ]
+    },
+    {
       "caseId": "watch-active-steps-missing",
       "command": "long.task.watch",
       "payload": {"taskId": "t/1"},

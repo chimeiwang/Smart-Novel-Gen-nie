@@ -27,6 +27,7 @@ import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
+import cn.inkforge.core.reviews.application.AgentUpdatesMaterializer;
 import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
 import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
 import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
@@ -138,7 +139,6 @@ final class JooqDurableReviewDecisionStore {
             String artifactId,
             ReviewArtifactDecisionRequest request,
             ReviewDecisionIdentity identity) {
-        requireV2RequestShape(request);
         // V1 Command、V2 Run 创建与 V2 决定共用用户级 clientRequestId 命名空间。
         if (globalIdempotency.resolve(
                         transaction,
@@ -155,24 +155,29 @@ final class JooqDurableReviewDecisionStore {
         WorkflowExecutionContext executionContext = executionContext(transaction, locked.run());
         ExecutionPlanSnapshot executionPlan = executionContext.requireBusinessPlan();
         requireSupported(locked, executionPlan);
+        boolean structuredUpdates = "agent_updates".equals(locked.kind());
+        requireV2RequestShape(request, structuredUpdates);
         boolean beatPlan = "beat_plan".equals(locked.kind());
         boolean chapterDraft = Set.of("write_chapter", "rewrite_scene")
                 .contains(executionContext.effectiveOperation());
-        if (((beatPlan || chapterDraft) && nullable(request.getEditedReplacement()) != null)
+        if (((beatPlan || chapterDraft || structuredUpdates) && nullable(request.getEditedReplacement()) != null)
                 || (!chapterDraft && nullable(request.getEditedContent()) != null)) {
             throw validation("编辑字段与 Core 权威草案类型不匹配");
         }
-        Source source = beatPlan || chapterDraft
+        Source source = beatPlan || chapterDraft || structuredUpdates
                 ? null
                 : lockAndVerifySource(transaction, locked, executionContext);
-        Revision revision = chapterDraft ? exactChapterRevision(transaction, locked) : beatPlan ? exactPlanRevision(transaction, locked) : exactRevision(locked, source);
+        DurableAgentUpdatesReviewEvidence structuredEvidence = structuredUpdates
+                ? structuredEvidence(transaction, locked, executionPlan) : null;
+        Revision revision = structuredUpdates ? structuredRevision(locked, structuredEvidence)
+                : chapterDraft ? exactChapterRevision(transaction, locked) : beatPlan ? exactPlanRevision(transaction, locked) : exactRevision(locked, source);
         LocalDateTime now = DatabaseTimestamp.now(clock);
         String decision = request.getDecision().getValue();
 
         if ("approve".equals(decision)) {
             String decisionStepId = ids.next();
             Revision applied = chapterDraft ? editedChapterRevision(transaction, locked, revision,
-                    nullable(request.getEditedContent()), decisionStepId, identity.fingerprint(), now) : beatPlan ? revision : editedRevision(
+                    nullable(request.getEditedContent()), decisionStepId, identity.fingerprint(), now) : beatPlan || structuredUpdates ? revision : editedRevision(
                     transaction,
                     locked,
                     revision,
@@ -192,9 +197,7 @@ final class JooqDurableReviewDecisionStore {
                     "decision:applying:" + decisionStepId,
                     now);
             transitionArtifact(transaction, artifactId, "awaiting_user", "applying", now, false);
-            formalWriter.apply(
-                    userId,
-                    new ReviewArtifactState(
+            ReviewArtifactState application = new ReviewArtifactState(
                             artifactId,
                             locked.novelId(),
                             locked.chapterId(),
@@ -202,8 +205,9 @@ final class JooqDurableReviewDecisionStore {
                             locked.artifactKey(),
                             locked.kind(),
                             applied.number(),
-                            beatPlan ? formalPlanPayload(applied.payload()) : applied.payload()),
-                    request);
+                            beatPlan ? formalPlanPayload(applied.payload()) : applied.payload());
+            if (structuredUpdates) formalWriter.applyAgentUpdates(userId, application, request, structuredEvidence.sources());
+            else formalWriter.apply(userId, application, request);
             transitionArtifact(transaction, artifactId, "applying", "applied", now, true);
             sequence = appendEvent(
                     transaction,
@@ -363,6 +367,11 @@ final class JooqDurableReviewDecisionStore {
                 && "outline_draft".equals(locked.kind())
                 && "long_serial.rewrite_outline_selection".equals(executionPlan.operation().key())
                 && "apply.outline_selection.v1".equals(executionPlan.operation().applyHandler());
+        operation |= "agent_updates".equals(locked.kind())
+                && Set.of("create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing")
+                        .contains(executionPlan.operation().operation())
+                && ("long_serial." + executionPlan.operation().operation()).equals(executionPlan.operation().key())
+                && "apply.agent_updates.v1".equals(executionPlan.operation().applyHandler());
         boolean supported = operation && "long_serial".equals(locked.run().get("workflow", String.class))
                 && locked.artifact().get("taskId", String.class) == null
                 && Objects.equals(
@@ -374,7 +383,11 @@ final class JooqDurableReviewDecisionStore {
         if (supported) {
             String targetType = locked.run().get("targetType", String.class);
             String targetId = locked.run().get("targetId", String.class);
-            if ("rewrite_outline_selection".equals(executionPlan.operation().operation())) {
+            if ("agent_updates".equals(locked.kind())) {
+                supported = "novel".equals(targetType) && locked.novelId().equals(targetId)
+                        || "outline_node".equals(targetType) && "revise_outline".equals(executionPlan.operation().operation()) && targetId != null
+                        || "chapter".equals(targetType) && locked.chapterId() != null && locked.chapterId().equals(targetId);
+            } else if ("rewrite_outline_selection".equals(executionPlan.operation().operation())) {
                 supported = Set.of("outline_content", "outline_node_content").contains(targetType)
                         && targetId != null;
             } else if ("rewrite_chapter_selection".equals(
@@ -495,6 +508,24 @@ final class JooqDurableReviewDecisionStore {
                     .fetchOne();
         }
         return null;
+    }
+
+    private DurableAgentUpdatesReviewEvidence structuredEvidence(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan) {
+        Map<String, Object> payload = readObject(locked.revision().get("payloadJson", String.class));
+        Map<String, Object> diff = readObject(locked.revision().get("diffJson", String.class));
+        requireHeadMatches(locked, payload, diff);
+        return DurableAgentUpdatesReviewEvidence.read(tx, json, locked.runId(), locked.novelId(), locked.artifactId(),
+                locked.revision().get("revision", Integer.class), plan.operation().operation(), payload, diff,
+                plan.generator().outputSchema().jsonSchema());
+    }
+
+    private Revision structuredRevision(Locked locked, DurableAgentUpdatesReviewEvidence evidence) {
+        int revision = locked.revision().get("revision", Integer.class);
+        var materialized = AgentUpdatesMaterializer.materialize(evidence.userId(), locked.novelId(), locked.artifactId(),
+                revision, evidence.output(), evidence.sources());
+        Map<String, Object> storedDiff = readObject(locked.revision().get("diffJson", String.class));
+        return new Revision(revision, materialized.payload(), storedDiff,
+                readObject(locked.revision().get("payloadJson", String.class)), storedDiff);
     }
 
     private Revision exactChapterRevision(DSLContext tx, Locked locked) {
@@ -923,6 +954,9 @@ final class JooqDurableReviewDecisionStore {
         } else if ("beat_plan".equals(locked.kind())) {
             input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
                     "artifactRevision", revision.number(), "payload", DurableBeatPlanArtifact.output(revision.storedPayload())));
+        } else if ("agent_updates".equals(locked.kind())) {
+            input.put("previousCandidate", Map.of("artifactId", locked.artifactId(), "artifactRevision", revision.number(),
+                    "summary", revision.storedPayload().get("summary"), "updates", revision.storedPayload().get("updates")));
         } else {
             input.put("previousCandidate", Map.of(
                     "artifactId", locked.artifactId(),
@@ -1299,12 +1333,13 @@ final class JooqDurableReviewDecisionStore {
         return value;
     }
 
-    private static void requireV2RequestShape(ReviewArtifactDecisionRequest request) {
+    private static void requireV2RequestShape(ReviewArtifactDecisionRequest request, boolean structuredUpdates) {
         if (request.getEngineVersion() != ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2) {
             throw new IllegalArgumentException("V2 决定必须显式声明 engineVersion=2");
         }
-        if (nullable(request.getSelectedUpdateRefs()) != null) {
-            throw validation("V2 草案决定不允许 selectedUpdateRefs");
+        if (nullable(request.getSelectedUpdateRefs()) != null
+                && !(structuredUpdates && request.getDecision() == ReviewArtifactDecisionRequest.DecisionEnum.APPROVE)) {
+            throw validation("只有 V2 结构化草案 approve 允许 selectedUpdateRefs");
         }
         String replacement = nullable(request.getEditedReplacement());
         String content = nullable(request.getEditedContent());

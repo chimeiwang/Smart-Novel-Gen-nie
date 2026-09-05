@@ -18,6 +18,7 @@ import cn.inkforge.core.workflows.application.WorkflowExecutionCanceller;
 import cn.inkforge.core.workflows.application.WorkflowExecutionSubmitter;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
+import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -83,14 +84,15 @@ class WorkflowConfiguration {
             ObjectMapper objectMapper,
             ExecutionRegistry workflowExecutionRegistry,
             WorkflowExecutionContextReader contexts,
-            ObjectProvider<WorkflowIntentBusinessPreparation> preparations) {
+            ObjectProvider<WorkflowIntentBusinessPreparation> preparations,
+            ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
                 coreClock,
                 objectMapper,
                 workflowExecutionRegistry,
-                Duration.ofSeconds(30), contexts, preparations::getIfAvailable);
+                Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable);
     }
 
     @Bean

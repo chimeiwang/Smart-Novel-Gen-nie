@@ -62,7 +62,8 @@ public final class AgentUpdatesFrozenSources {
             Map.entry("outline_delete_children", new CollectionSpec(
                     ResourceKind.OUTLINE_NODE.wireName(), Set.of(List.of("delete_impact")), null, false)),
             Map.entry("outline_tree_membership", new CollectionSpec(
-                    "novel", Set.of(List.of("delete_impact")), null, true)));
+                    "novel", Set.of(List.of("delete_impact")), null, true)),
+            Map.entry("agent_updates_index", new CollectionSpec("novel", Set.of(List.of("index")), null, false)));
 
     private final Map<SourceKey, Snapshot> sources;
     private final Map<CollectionKey, List<Map<String, Object>>> collections;
@@ -186,7 +187,7 @@ public final class AgentUpdatesFrozenSources {
             throw invalid("具名资料集合必须是无顶层时间戳的完整 JSON 快照");
         }
         requireMetadata(item, specification.targetType(), item.resourceId(), null);
-        if (specification.membership() && !novelId.equals(item.resourceId())) {
+        if ("novel".equals(specification.targetType()) && !novelId.equals(item.resourceId())) {
             throw invalid("大纲树成员集合必须绑定当前小说");
         }
         List<String> roles = requireRoles(item.metadata(), null);

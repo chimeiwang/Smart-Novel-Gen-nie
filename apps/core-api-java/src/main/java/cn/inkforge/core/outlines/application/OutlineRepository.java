@@ -55,6 +55,12 @@ public interface OutlineRepository {
     ForeshadowingResponse createForeshadowing(
             String novelId, String userId, ForeshadowingData data);
 
+    /** V2 草案采用使用稳定创建请求；不改变既有公共创建接口。 */
+    default ForeshadowingResponse createForeshadowing(
+            String novelId, String userId, String clientRequestId, ForeshadowingData data) {
+        throw new UnsupportedOperationException("该仓储尚未实现确定性伏笔创建");
+    }
+
     ForeshadowingResponse updateForeshadowing(
             String novelId,
             String userId,

@@ -64,6 +64,38 @@
       }
     },
     {
+      "caseId": "long-v2-agent-updates-partial-approve",
+      "command": "long.artifact.approve",
+      "payload": {
+        "artifactId": "updates /1",
+        "clientRequestId": "updates-approve-0001",
+        "engineVersion": 2,
+        "expectedRevision": 4,
+        "selectedUpdateRefs": [
+          {"section": "characters", "index": 0},
+          {"section": "worldSetting"}
+        ]
+      },
+      "responses": [
+        {
+          "id": "updates /1",
+          "engineVersion": 2,
+          "revision": 4,
+          "sourceBindingStatus": "verified",
+          "kind": "agent_updates",
+          "payload": {
+            "kind": "agent_updates",
+            "summary": "更新人物和世界设定",
+            "updates": {
+              "characters": [{"action": "create", "name": "林舟"}],
+              "worldSetting": "雨城仍在封锁中。"
+            }
+          }
+        },
+        {"artifactId": "updates /1", "revision": 4, "decision": "approve"}
+      ]
+    },
+    {
       "command": "long.artifact.discard",
       "payload": {"artifactId": "a/1", "clientRequestId": "artifact-discard-01", "expectedRevision": 1}
     },

@@ -25,6 +25,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
+import cn.inkforge.core.reviews.application.AgentUpdatesFrozenSources;
 import cn.inkforge.core.reviews.application.ReviewArtifactState;
 import cn.inkforge.core.reviews.domain.ReviewArtifactRules;
 import java.time.Clock;
@@ -77,6 +78,18 @@ final class JooqFormalArtifactWriter implements FormalArtifactWriter {
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.agentUpdates = agentUpdates;
+    }
+
+    @Override
+    public int applyAgentUpdates(String userId, ReviewArtifactState artifact,
+            ReviewArtifactDecisionRequest request, AgentUpdatesFrozenSources sources) {
+        if (agentUpdates == null) throw new ApiException(503, "REVIEW_APPLIER_UNAVAILABLE", "审核正式写入服务暂时不可用");
+        if (!"agent_updates".equals(artifact.kind()) || !(artifact.payload().get("updates") instanceof Map<?, ?> updates)) {
+            throw new IllegalArgumentException("结构化草案采用类型不匹配");
+        }
+        return new JooqAgentUpdatesApplier(database, new JooqAgentUpdatesEvidenceReader(json), agentUpdates).apply(
+                artifact.novelId(), userId, artifact.id(), artifact.revision(), stringMap(updates),
+                nullable(request.getSelectedUpdateRefs()), sources);
     }
 
     @Override

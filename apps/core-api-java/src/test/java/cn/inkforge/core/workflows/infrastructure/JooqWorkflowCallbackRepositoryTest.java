@@ -113,6 +113,57 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
+    void 结构化生成回调到真实复审详情与采用链路保存唯一原始候选() {
+        Fixture f = fixture("structured-live-callback");
+        var resolved = cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.operation(registry, json, "create_lore");
+        var reader = new cn.inkforge.core.reviews.infrastructure.JooqAgentUpdatesEvidenceReader(json);
+        Map<String, Object> input = Map.of("userInstruction", "创建资料", "target", Map.of("type", "novel", "id", f.novelId()), "scope", Map.of("kind", "novel"));
+        WorkflowEvidenceItemPlan indexEvidence = database.transactionResult(tx -> reader.captureIndex(tx, f.novelId()));
+        var plan = new WorkflowStartPlan(f.userId(), "structured-live-callback-request-0001", sha256("structured-live-callback-request-0001"),
+                "long_serial", "create_lore", registry.catalogVersion(), "chapter_generation", f.novelId(), f.chapterId(), f.sessionId(),
+                "novel", f.novelId(), input, resolved.operation().evidencePolicy(), List.of(indexEvidence),
+                resolved.operation().runBudget(), ExecutionPlanSnapshot.freeze(registry.catalogVersion(), registry.manifestFingerprint(), resolved),
+                new WorkflowInitialStepPlan("generation", resolved.operation().lane(), input, resolved.generatorProfile(), resolved.generatorStepBudget(), resolved.outputSchema()));
+        var started = starts.start(plan);
+        var realCallbacks = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, registry, Duration.ofSeconds(30),
+                new JooqWorkflowExecutionContextReader(json), () -> null,
+                () -> cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.preparation(json));
+        ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+        assertThat(request.getRunId()).isEqualTo(started.runId());
+        accept(request);
+        realCallbacks.progress(progress(request, unknownUsage()));
+        Map<String, Object> updates = Map.of("characters", List.of(Map.of("action", "create", "name", "回调新人物", "background", "完整原始资料")));
+        Map<String, Object> output = Map.of("summary", "完整原始说明", "updates", updates, "updatesSha256", ExecutionCanonicalJson.sha256(updates));
+        ExecutionStepResult generation = outputResult(request, "占位后立即替换为严格结构化结果").output(output);
+        generation.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(generation)));
+        assertThat(realCallbacks.result(generation).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
+        assertThat(realCallbacks.result(generation).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        String artifact = database.dsl().fetchOne("SELECT id FROM public.\"ReviewArtifact\" WHERE \"workflowRunId\" = ?", started.runId()).get(0, String.class);
+        assertThat(database.dsl().fetchOne("SELECT output FROM public.\"WorkflowStep\" WHERE id = ?", request.getStepId()).get(0, String.class))
+                .contains("updatesSha256").doesNotContain("完整原始资料");
+        for (int index = 0; index < resolved.reviewers().size(); index++) {
+            var reviewer = dispatches.claimNext().orElseThrow();
+            assertThat(reviewer.getRunId()).isEqualTo(started.runId());
+            assertThat(reviewer.getInput().get("candidate")).isEqualTo(output);
+            accept(reviewer);
+            realCallbacks.progress(progress(reviewer, unknownUsage()));
+            realCallbacks.result(reviewResult(reviewer));
+        }
+        var reviewRepository = cn.inkforge.core.reviews.infrastructure.AgentUpdatesReviewTestSupport.repository(database, new CuidV1Generator(CLOCK), CLOCK, json, registry);
+        var detail = reviewRepository.getDetail(f.userId(), artifact, 1, null).response();
+        assertThat(detail.getSummary()).isEqualTo("完整原始说明");
+        assertThat(json.writeValueAsString(detail.getDiff().orElse(null))).contains("完整原始资料");
+        assertThat(count("SELECT count(*) FROM public.\"Character\" WHERE \"novelId\" = ?", f.novelId())).isZero();
+        var decision = new cn.inkforge.contracts.api.ReviewArtifactDecisionRequest("structured-live-callback-approve-0001",
+                cn.inkforge.contracts.api.ReviewArtifactDecisionRequest.DecisionEnum.APPROVE, 1)
+                .engineVersion(cn.inkforge.contracts.api.ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2);
+        var completed = reviewRepository.decide(f.userId(), artifact, decision);
+        assertThat(json.valueToTree(completed).path("status").asText()).isEqualTo("completed");
+        assertThat(count("SELECT count(*) FROM public.\"Character\" WHERE \"novelId\" = ? AND name = '回调新人物'", f.novelId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", started.runId())).isEqualTo(resolved.reviewers().size() + 2);
+    }
+
+    @Test
     void 审阅完整报告有无会话均只完成一次且不写正式数据或草案() {
         for (boolean withSession : List.of(true, false)) {
             Flow flow = runningChapterReviewFlow("chapter-report-" + withSession, withSession);

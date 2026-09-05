@@ -7,6 +7,9 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.references.application.ReferenceRepository;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
+import cn.inkforge.core.reviews.application.AgentUpdatesMaterializer;
+import cn.inkforge.core.reviews.application.AgentUpdatesEvidenceReader;
+import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
 import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
@@ -23,6 +26,17 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class ReviewConfiguration {
+
+    @Bean
+    AgentUpdatesEvidenceReader agentUpdatesEvidenceReader(ObjectMapper json) {
+        return new JooqAgentUpdatesEvidenceReader(json);
+    }
+
+    @Bean
+    WorkflowStructuredCandidatePreparation structuredCandidatePreparation(ObjectMapper json) {
+        return (tx, user, novel, run, bundle, artifact, revision, output) -> AgentUpdatesMaterializer.materialize(
+                user, novel, artifact, revision, output, DurableAgentUpdatesReviewEvidence.readSources(tx, json, run, bundle, novel));
+    }
 
     @Bean
     ChapterPlanEvidenceReader chapterPlanEvidenceReader(ObjectMapper objectMapper) {

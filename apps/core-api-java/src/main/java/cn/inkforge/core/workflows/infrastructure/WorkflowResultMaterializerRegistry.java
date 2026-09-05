@@ -9,7 +9,10 @@ import java.util.Set;
 /** 按 Run 已冻结的 Operation Catalog key 选择 Core 结果物化器。 */
 final class WorkflowResultMaterializerRegistry {
 
-    private static final Map<String, Binding> BINDINGS = Map.of(
+    private static final Map<String, Binding> BINDINGS = bindings();
+
+    private static Map<String, Binding> bindings() {
+        Map<String, Binding> result = new java.util.LinkedHashMap<>(Map.of(
             "long_serial.answer_question",
             new Binding("apply.chat_answer.v1", Materializer.CHAT_ANSWER),
             "long_serial.plan_chapter",
@@ -25,7 +28,12 @@ final class WorkflowResultMaterializerRegistry {
             "long_serial.rewrite_chapter_selection",
             new Binding(
                     "apply.chapter_selection.v1",
-                    Materializer.CHAPTER_SELECTION_REVIEW_ARTIFACT));
+                    Materializer.CHAPTER_SELECTION_REVIEW_ARTIFACT)));
+        for (String operation : Set.of("create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing")) {
+            result.put("long_serial." + operation, new Binding("apply.agent_updates.v1", Materializer.AGENT_UPDATES_REVIEW_ARTIFACT));
+        }
+        return Map.copyOf(result);
+    }
 
     private WorkflowResultMaterializerRegistry() {}
 
@@ -61,7 +69,8 @@ final class WorkflowResultMaterializerRegistry {
         BEAT_PLAN_REVIEW_ARTIFACT,
         CHAPTER_DRAFT_REVIEW_ARTIFACT,
         CHAPTER_SELECTION_REVIEW_ARTIFACT,
-        OUTLINE_SELECTION_REVIEW_ARTIFACT
+        OUTLINE_SELECTION_REVIEW_ARTIFACT,
+        AGENT_UPDATES_REVIEW_ARTIFACT
     }
 
     private record Binding(String applyHandler, Materializer materializer) {}

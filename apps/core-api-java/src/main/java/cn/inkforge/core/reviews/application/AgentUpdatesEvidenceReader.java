@@ -13,6 +13,9 @@ public interface AgentUpdatesEvidenceReader {
     /** 仅整树替换需要：冻结全部删除目标与显式成员集，空树也必须留下来源事实。 */
     List<WorkflowEvidenceItemPlan> captureOutlineTree(DSLContext transaction, String novelId);
 
+    /** 同小说最小身份名录用于冻结名称定位和默认顺序，不包含资料正文。 */
+    WorkflowEvidenceItemPlan captureIndex(DSLContext transaction, String novelId);
+
     enum ResourceKind {
         CHARACTER("character"), LOCATION("location"), ITEM("item"), FACTION("faction"),
         GLOSSARY("glossary"), CHARACTER_EXPERIENCE("character_experience"), OUTLINE_NODE("outline_node"),

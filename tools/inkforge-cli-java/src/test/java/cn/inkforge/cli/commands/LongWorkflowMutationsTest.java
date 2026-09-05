@@ -433,6 +433,101 @@ class LongWorkflowMutationsTest {
     }
 
     @Test
+    void V2结构化资料批准原样透传选择且不接受正文或返工选择() {
+        for (String selected : List.of(
+                "null",
+                "[]",
+                "[{\"section\":\"characters\",\"index\":0},{\"section\":\"worldSetting\"}]")) {
+            RecordingApi api = new RecordingApi(json);
+            api.nextGet = agentUpdatesArtifact();
+            Result result = run(application(api), "long.artifact.approve",
+                    "{\"artifactId\":\"updates-1\",\"engineVersion\":2,\"expectedRevision\":4,"
+                            + "\"clientRequestId\":\"updates-approve-0001\","
+                            + "\"selectedUpdateRefs\":" + selected + "}");
+            assertThat(result.exit()).as(result.stdout()).isZero();
+            assertThat(api.calls).hasSize(2);
+            assertThat(api.calls.getFirst().query()).isEqualTo(Map.of("revision", List.of("4")));
+            assertThat(api.calls.getLast().body().has("selectedUpdateRefs")).isTrue();
+            assertThat(api.calls.getLast().body().get("selectedUpdateRefs"))
+                    .isEqualTo(json.readTree(selected));
+        }
+
+        for (String edited : List.of(
+                "\"editedContent\":\"不允许结构化全文编辑\"",
+                "\"editedReplacement\":\"不允许结构化选区编辑\"")) {
+            RecordingApi api = new RecordingApi(json);
+            api.nextGet = agentUpdatesArtifact();
+            Result result = run(application(api), "long.artifact.approve",
+                    "{\"artifactId\":\"updates-1\",\"engineVersion\":2,\"expectedRevision\":4,"
+                            + "\"clientRequestId\":\"updates-no-text-0001\"," + edited + "}");
+            assertThat(result.exit()).as(result.stdout()).isEqualTo(2);
+            assertThat(result.stdout()).contains("V2_EDIT_FIELDS_FORBIDDEN");
+            assertThat(api.calls).hasSize(1);
+        }
+
+        RecordingApi reviseApi = new RecordingApi(json);
+        reviseApi.nextGet = agentUpdatesArtifact();
+        Result revise = run(application(reviseApi), "long.artifact.revise",
+                "{\"artifactId\":\"updates-1\",\"engineVersion\":2,\"expectedRevision\":4,"
+                        + "\"clientRequestId\":\"updates-revise-0001\",\"selectedUpdateRefs\":[],"
+                        + "\"userMessage\":\"请重新整理\"}");
+        assertThat(revise.exit()).as(revise.stdout()).isEqualTo(2);
+        assertThat(revise.stdout()).contains("V2_EDIT_FIELDS_FORBIDDEN");
+        assertThat(reviseApi.calls).hasSize(1);
+
+        RecordingApi reviseNullApi = new RecordingApi(json);
+        reviseNullApi.nextGet = agentUpdatesArtifact();
+        Result reviseNull = run(application(reviseNullApi), "long.artifact.revise",
+                "{\"artifactId\":\"updates-1\",\"engineVersion\":2,\"expectedRevision\":4,"
+                        + "\"clientRequestId\":\"updates-revise-null-0001\",\"selectedUpdateRefs\":null,"
+                        + "\"userMessage\":\"请重新整理\"}");
+        assertThat(reviseNull.exit()).as(reviseNull.stdout()).isZero();
+        assertThat(reviseNullApi.calls.getLast().body().has("selectedUpdateRefs")).isFalse();
+
+        RecordingApi discardApi = new RecordingApi(json);
+        Result discard = run(application(discardApi), "long.artifact.discard",
+                "{\"artifactId\":\"updates-1\",\"engineVersion\":2,\"expectedRevision\":4,"
+                        + "\"clientRequestId\":\"updates-discard-null-0001\",\"selectedUpdateRefs\":null}");
+        assertThat(discard.exit()).as(discard.stdout()).isEqualTo(2);
+        assertThat(discard.stdout()).contains("DISCARD_EDIT_FIELDS_FORBIDDEN");
+        assertThat(discardApi.calls).isEmpty();
+    }
+
+    @Test
+    void V2选择只对精确结构化资料候选开放() {
+        for (JsonNode invalid : List.of(
+                json.readTree("""
+                        {"engineVersion":2,"id":"updates-1","revision":4,
+                         "sourceBindingStatus":"verified","kind":"beat_plan",
+                         "payload":{"kind":"agent_updates","updates":{}}}
+                        """),
+                json.readTree("""
+                        {"engineVersion":2,"id":"updates-1","revision":4,
+                         "sourceBindingStatus":"verified","kind":"agent_updates",
+                         "payload":{"kind":"beat_plan","updates":{}}}
+                        """),
+                json.readTree("""
+                        {"engineVersion":2,"id":"updates-1","revision":4,
+                         "sourceBindingStatus":"verified","kind":"agent_updates",
+                         "payload":{"kind":"agent_updates"}}
+                        """),
+                json.readTree("""
+                        {"engineVersion":2,"id":"updates-1","revision":4,
+                         "sourceBindingStatus":"verified","kind":"agent_updates",
+                         "payload":{"kind":"agent_updates","updates":[]}}
+                        """))) {
+            RecordingApi api = new RecordingApi(json);
+            api.nextGet = invalid;
+            Result result = run(application(api), "long.artifact.approve",
+                    "{\"artifactId\":\"updates-1\",\"engineVersion\":2,\"expectedRevision\":4,"
+                            + "\"clientRequestId\":\"updates-invalid-0001\",\"selectedUpdateRefs\":[]}");
+            assertThat(result.exit()).as(result.stdout()).isEqualTo(2);
+            assertThat(result.stdout()).contains("V2_EDIT_FIELDS_FORBIDDEN");
+            assertThat(api.calls).hasSize(1);
+        }
+    }
+
+    @Test
     void V2正文规划和选区分别限制编辑类型且空白正文不能批准() {
         for (String extra : List.of(
                 "\"editedReplacement\":\"选区\"",
@@ -446,6 +541,13 @@ class LongWorkflowMutationsTest {
             assertThat(result.exit()).as(result.stdout()).isEqualTo(2);
             assertThat(api.calls).hasSize(1);
         }
+        RecordingApi nullSelectionApi = new RecordingApi(json);
+        nullSelectionApi.nextGet = writingArtifact();
+        Result nullSelection = run(application(nullSelectionApi), "long.artifact.approve",
+                "{\"artifactId\":\"draft-1\",\"engineVersion\":2,\"expectedRevision\":7,"
+                        + "\"clientRequestId\":\"draft-null-selection-0001\",\"selectedUpdateRefs\":null}");
+        assertThat(nullSelection.exit()).as(nullSelection.stdout()).isZero();
+        assertThat(nullSelectionApi.calls.getLast().body().has("selectedUpdateRefs")).isFalse();
         for (String field : List.of("editedContent", "editedReplacement")) {
             RecordingApi api = new RecordingApi(json);
             api.nextGet = json.readTree("""
@@ -466,6 +568,16 @@ class LongWorkflowMutationsTest {
                 {"engineVersion":2,"id":"draft-1","revision":7,"sourceBindingStatus":"verified",
                  "kind":"chapter_draft","payload":{"kind":"chapter_draft","operation":"write_chapter",
                  "target":{"mode":"existing_chapter","chapterId":"c1"},"content":"初始草案"}}
+                """);
+    }
+
+    private JsonNode agentUpdatesArtifact() {
+        return json.readTree("""
+                {"engineVersion":2,"id":"updates-1","revision":4,
+                 "sourceBindingStatus":"verified","kind":"agent_updates",
+                 "payload":{"kind":"agent_updates","summary":"更新人物和世界设定",
+                 "updates":{"characters":[{"action":"create","name":"林舟"}],
+                 "worldSetting":"雨城仍在封锁中。"}}}
                 """);
     }
 
