@@ -81,6 +81,18 @@ public final class AgentUpdatesExecutor {
             List<ArtifactSelectionRef> selectedRefs,
             OffsetDateTime expectedOutlineUpdatedAt,
             Map<String, OffsetDateTime> expectedLoreUpdatedAt) {
+        return apply(novelId, userId, rawUpdates, selectedRefs, expectedOutlineUpdatedAt, expectedLoreUpdatedAt, false);
+    }
+
+    /** V2 输入的历史目标已物化；无 ID 的大纲名称只能指向本组前面刚新建的节点。 */
+    public int applyMaterialized(String novelId, String userId, Map<String, Object> updates,
+            OffsetDateTime expectedOutlineUpdatedAt, Map<String, OffsetDateTime> expectedLoreUpdatedAt) {
+        return apply(novelId, userId, updates, null, expectedOutlineUpdatedAt, expectedLoreUpdatedAt, true);
+    }
+
+    private int apply(String novelId, String userId, Map<String, Object> rawUpdates,
+            List<ArtifactSelectionRef> selectedRefs, OffsetDateTime expectedOutlineUpdatedAt,
+            Map<String, OffsetDateTime> expectedLoreUpdatedAt, boolean historicalTargetsResolved) {
         Map<String, Object> updates = filter(rawUpdates, selectedRefs);
         if (updates.isEmpty()) throw new IllegalArgumentException("没有选择任何可应用更新");
         // 以下调用都加入审核决定已经开启的 CoreDatabase 事务，不能改成异步或逐分区提交。
@@ -95,7 +107,7 @@ public final class AgentUpdatesExecutor {
             lore.applyExperienceMutations(novelId, userId, experiences);
             count += experiences.size();
         }
-        count += applyOutlineUpdates(novelId, userId, updates);
+        count += applyOutlineUpdates(novelId, userId, updates, historicalTargetsResolved);
         count += applyForeshadowings(novelId, userId, updates);
         count += applyReferences(novelId, userId, updates);
         if (updates.containsKey("outlineContent")) {
@@ -267,7 +279,7 @@ public final class AgentUpdatesExecutor {
     }
 
     private int applyOutlineUpdates(
-            String novelId, String userId, Map<String, Object> updates) {
+            String novelId, String userId, Map<String, Object> updates, boolean historicalTargetsResolved) {
         int count = 0;
         if (updates.get("outline") instanceof List<?> rawStatuses) {
             for (Map<String, Object> item : objectList(rawStatuses, "outline 必须是数组")) {
@@ -303,9 +315,11 @@ public final class AgentUpdatesExecutor {
         }
         List<OutlineNodeResponse> existing = new ArrayList<>(outlines.listNodes(novelId, userId));
         Map<String, String> clientIds = new HashMap<>();
+        Set<String> createdIds = new LinkedHashSet<>();
         for (Map<String, Object> item : adjustments) {
             MutationAction action = action(item, "outlineAdjustments");
-            String nodeId = resolveNodeId(item, existing);
+            String nodeId = resolveNodeId(item, historicalTargetsResolved && optionalNonEmptyString(item.get("nodeId")) == null
+                    ? existing.stream().filter(node -> createdIds.contains(node.getId())).toList() : existing);
             Map<String, Object> fields = outlineFields(item, clientIds);
             if (action == MutationAction.CREATE) {
                 var mutation = outlines.createNode(
@@ -316,6 +330,7 @@ public final class AgentUpdatesExecutor {
                 OutlineNodeResponse created =
                         node(outlines.listNodes(novelId, userId), mutation.getId());
                 existing.add(created);
+                createdIds.add(created.getId());
                 String clientKey = optionalNonEmptyString(item.get("clientKey"));
                 if (clientKey != null) clientIds.put(clientKey, created.getId());
             } else if (action == MutationAction.UPDATE && nodeId != null) {

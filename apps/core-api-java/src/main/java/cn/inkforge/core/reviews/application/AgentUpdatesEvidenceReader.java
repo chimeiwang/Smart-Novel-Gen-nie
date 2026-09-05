@@ -10,6 +10,9 @@ public interface AgentUpdatesEvidenceReader {
 
     List<WorkflowEvidenceItemPlan> capture(DSLContext transaction, String novelId, List<Source> sources);
 
+    /** 仅整树替换需要：冻结全部删除目标与显式成员集，空树也必须留下来源事实。 */
+    List<WorkflowEvidenceItemPlan> captureOutlineTree(DSLContext transaction, String novelId);
+
     enum ResourceKind {
         CHARACTER("character"), LOCATION("location"), ITEM("item"), FACTION("faction"),
         GLOSSARY("glossary"), CHARACTER_EXPERIENCE("character_experience"), OUTLINE_NODE("outline_node"),

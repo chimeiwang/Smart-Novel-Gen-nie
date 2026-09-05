@@ -1,7 +1,7 @@
 # Durable Agent V2 设定、大纲与伏笔迁移
 
-日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 定向来源读取及不可变候选校验已通过本地门禁；
-正式 writer payload/完整 Diff 物化、采用校验及 Core/Agent 业务接线尚未完成，五项尚未启用。
+日期：2026-09-05。状态：共享模型、语言中立 Schema、Core 定向来源读取、不可变候选校验及所选项采用
+事务适配已通过本地验证；正式 writer payload/完整 Diff 物化及 Core/Agent 业务接线尚未完成，五项尚未启用。
 
 ## 范围复核结论
 
@@ -310,3 +310,48 @@ Catalog 仍为 7/21，Profile/Deployment、公共 API、CLI 和 Web 未变化；
 后续事务适配必须保留原数组索引来派生稳定 create 请求键，不能按过滤后的新下标重编号；大纲中引用同一
 候选前面新建的节点也不能被误当成缺失的历史数据库节点。仍须先复用现有 filter，再只读取所选动作的必要
 冻结来源来构造采用门禁，不将未选资料的 Head 变化或独立值对象校验当作完整业务闭环。
+
+## 所选建议的事务适配
+
+本轮复用 AgentUpdatesExecutor.filter 和现有领域写入器，不新增公共采用参数、整小说来源 CAS 或发布设施。
+冻结来源索引按真实业务 ID 收录完整目标和直接引用；Reader 的十二种具名集合均可按名称取出，只有
+character_experiences、outline_children 的完整行允许额外作为目标来源，删除依赖的结构投影不能冒充完整行。
+仅整树替换另冻结 outline_tree_membership（按 ID 排序的成员列表），包括显式空集；不能从“没有节点
+Evidence”推断“已冻结空树”。它不参与普通节点 patch、人物或其他资料的采用门禁。
+
+采用适配输入为 Core 已物化、已解析历史目标 ID 的建议，不直接接受 Provider 输出；名称解析和完整 Diff
+仍属于采用前的物化步骤。先按作者原 section/index 过滤，仅核验实际写入目标及明确依赖；目标完整快照
+（含时间）必须一致，不能仅凭 updatedAt。使用既有 Novel 行锁、advisory 锁顺序，全部写入加入同一
+CoreDatabase 事务。连续修改同一目标时，只在写入前核验一次冻结来源，后续 writer CAS 使用本事务前项
+写入产生的时间，不能把外部新版本当成原始来源。大纲调整仍整组交给现有 writer，保留 parentKey 和合法
+replace 子集语义。稳定新建请求键绑定 Artifact/revision/原始 section/index，不使用过滤后的数组位置。
+
+隔离 PostgreSQL 验证必须包含：未选目标变化不阻塞、所选目标同时间异内容冲突、只读引用无关字段变化不
+阻塞、重复修改、后项失败回滚前项、外层审核事务回滚、单例缺席竞争和 replace 子集。基础类通过不代表
+五个业务入口已启用；生成、复审、返工、物化、采用与消费者仍须逐项接通后才能改变 Catalog。
+
+实现已落在 AgentUpdatesFrozenSources、JooqAgentUpdatesApplier 和现有 AgentUpdatesExecutor 的显式
+applyMaterialized 路径。旧 apply 路径保持原行为；物化路径的无 ID 大纲名称只在本组刚新建的节点内解析，
+不按当前数据库名称重新定位历史目标。普通历史目标及经历所属人物未解析成 ID 时不能绕过冻结来源。
+同一真实行在多个目标/直接引用中完全一致时去重，只有冲突快照拒绝。整树来源只读取每个节点一次完整行
+及显式成员清单，不为每个节点重复展开整组兄弟信息。所选目标冻结后被删除明确报告 SOURCE_CHANGED。
+
+此适配仍由测试直接构造，尚未装配进 JooqDurableReviewDecisionStore。调用方必须从权威候选及其冻结
+Evidence 物化输入并在同一审核事务记录 Artifact/Run 终态；不能让调用方自报 updates/来源代替这条链。
+名称唯一解析、默认 order 的冻结派生、同候选新建人物与经历等跨项身份映射、完整 Diff 以及生成 Step
+来源链尚待完成。当前仅支持已物化输入的验证结果不能被解读为原始 Provider 建议已能直接采用。
+
+本轮验证结果：
+
+- 新增来源索引 8 项和隔离 PostgreSQL 采用测试 18 项全部通过；包括只采用原下标、未选来源变化、
+  同时间字段/FK 改变、只读引用变化、人物/参考资料连续修改、单例缺席、稳定创建键、replace 合法子集、
+  缺父项回滚旧树、显式空树、批内同名节点和已删除来源。跨领域回滚测试在第二次真实仓储调用前读取到
+  第一次写入，再验证后项失败后第一项恢复；外层审核事务失败和锁生命周期另有独立测试。
+- `./mvnw verify` 五个 reactor 全部成功：服务身份 11、服务契约 5、Core 967（3 skipped）、CLI 127，
+  无失败或错误。日志 `/tmp/inkforge-agent-updates-applier-maven-full.log`。
+- `uv run pytest -q`：4793 passed、3 skipped，仅既有 Starlette 弃用警告；日志
+  `/tmp/inkforge-agent-updates-applier-python-full.log`。全仓 Ruff、四个服务/共享目录 Mypy（281 文件）、
+  api:check、执行 manifest --check 和 git diff --check 通过。
+- 未修改 Web 源码，未重复 Web 构建；测试仅使用隔离 PostgreSQL/Redis，Testcontainers 清单已为空。
+  公共接口、CLI 命令和执行资产未变化，Catalog 仍为 7/21，无须更新活动 Skills；没有推送、部署、
+  真实库变更、真实模型调用或安装包更新。

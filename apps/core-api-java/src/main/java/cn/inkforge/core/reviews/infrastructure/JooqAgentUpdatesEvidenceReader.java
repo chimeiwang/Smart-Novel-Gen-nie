@@ -42,7 +42,7 @@ public final class JooqAgentUpdatesEvidenceReader implements AgentUpdatesEvidenc
         List<WorkflowEvidenceItemPlan> result = new ArrayList<>();
         for (Source source : unique.values().stream()
                 .sorted(Comparator.comparing((Source value) -> value.kind().wireName()).thenComparing(Source::id)).toList()) {
-            Map<String, Object> row = read(tx, novelId, source.kind(), source.id());
+            Map<String, Object> row = readTarget(tx, novelId, source.kind(), source.id());
             result.add(item(source.kind().wireName(), source.id(), row, source, "target"));
             if (row == null) continue;
             directReferences(tx, novelId, source, row, result);
@@ -51,7 +51,32 @@ public final class JooqAgentUpdatesEvidenceReader implements AgentUpdatesEvidenc
         return List.copyOf(result);
     }
 
-    private Map<String, Object> read(DSLContext tx, String novelId, ResourceKind kind, String id) {
+    @Override
+    public List<WorkflowEvidenceItemPlan> captureOutlineTree(DSLContext tx, String novelId) {
+        if (tx.fetchOne("SELECT id FROM public.\"Novel\" WHERE id = ?", novelId) == null) throw invalid("小说不存在");
+        List<Map<String, Object>> members = outlineTreeMembers(tx, novelId);
+        List<WorkflowEvidenceItemPlan> result = new ArrayList<>();
+        for (Map<String, Object> member : members) {
+            String id = (String) member.get("id");
+            Source target = new Source(ResourceKind.OUTLINE_NODE, id, true);
+            result.add(item(ResourceKind.OUTLINE_NODE.wireName(), id,
+                    readTarget(tx, novelId, ResourceKind.OUTLINE_NODE, id), target, "target"));
+        }
+        result.add(new WorkflowEvidenceItemPlan("outline_tree_membership", novelId, true, null, null,
+                null, Map.of("items", members), null, null,
+                Map.of("targetType", "novel", "targetId", novelId, "roles", List.of("delete_impact"))));
+        return List.copyOf(result);
+    }
+
+    List<Map<String, Object>> outlineTreeMembers(DSLContext tx, String novelId) {
+        return rows(tx, """
+                SELECT jsonb_build_object('id', id)::text AS snapshot FROM public."OutlineNode"
+                WHERE "novelId" = ? ORDER BY id FOR UPDATE
+                """, novelId);
+    }
+
+    // 采用普通更新时只读取实际目标，不扩展无关关系集合或引用正文。
+    Map<String, Object> readTarget(DSLContext tx, String novelId, ResourceKind kind, String id) {
         boolean singleton = switch (kind) {
             case OUTLINE_CONTENT, WORLD_SETTING, STORY_BACKGROUND -> true;
             default -> false;
@@ -194,7 +219,7 @@ public final class JooqAgentUpdatesEvidenceReader implements AgentUpdatesEvidenc
             ResourceKind kind, List<WorkflowEvidenceItemPlan> output) {
         if (row.get(field) instanceof String id) {
             output.add(item(kind.wireName() + "_reference", target.kind().wireName() + ":" + target.id() + ":" + field,
-                    read(tx, novel, kind, id), target, "direct_reference"));
+                    readTarget(tx, novel, kind, id), target, "direct_reference"));
         }
     }
 
