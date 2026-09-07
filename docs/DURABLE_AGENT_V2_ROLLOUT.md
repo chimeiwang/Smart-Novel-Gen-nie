@@ -1,6 +1,8 @@
 # 耐久 Agent V2 数据库迁移与分阶段发布 Runbook
 
-状态：个人项目人工迁移与 canary 手册；尚未执行服务器开发库、正式库迁移或生产部署
+状态：个人项目人工迁移与 canary 手册。2026-09-07 已在真实服务器开发库完成两次 forward、
+空 V2 rollback 和再次 forward，完成结构导出／复验及小说成果保全验证；正式库尚未迁移，业务 canary 尚未通过。
+运行配置与完整现场记录见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。
 
 权威规格：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
 
@@ -26,7 +28,7 @@
 schema 表存在当作 V2 canary 成功。数据库目标必须显式为 `novelwriterdev` 或 `novelwriter`，不能使用别名。
 
 所有服务器动作都必须在本地全量门禁、隔离 PostgreSQL 14 + pgvector 验证、发布清单和维护窗口准备完成后执行。
-当前仓库中的脚本与测试不代表任何远程数据库已迁移。
+仅仓内脚本与测试不代表远程数据库已迁移；实际进展以本页状态与带日期的现场审计为准。
 
 ## 2. 固定工具与输出
 
@@ -59,7 +61,7 @@ stderr 和迁移元数据不得出现数据库密码。
 
 ```text
 scripts/durable-agent-v2-rollout-gate.sh \
-  <pre-contract|post-contract-route-off|schema-ready-route-off|initialize-drain-indexes|allowlist|drain-status|verify-drain|route-off-drain|ddl-rollback> \
+  <pre-contract|post-contract-route-off|schema-ready-route-off|initialize-drain-indexes|allowlist|all|drain-status|verify-drain|route-off-drain|ddl-rollback> \
   <novelwriterdev|novelwriter>
 ```
 
@@ -327,10 +329,28 @@ discard、一次 approve、一次 cancel、SSE 重连和唯一用量。内部接
 观察至少 30～60 分钟或足量样本。任何协议错误、重复产物/计费、不可恢复 Step、终态缺失、manifest 漂移或
 SLO 硬失败立即停止新建路由。
 
-当前 `scripts/deploy-production.sh` 明确拒绝 `route=all`，防止绕过本 Runbook 直接全量。canary 验收并不自动
-授权全量；后续全量切换必须完成规格中的所有 Operation 迁移、V1 drain 和独立放量审批后，再修改这道代码门禁。
 allowlist 门禁同时从当前发布检出计算预期 fingerprint，并让正在运行的 Agent 离线输出实际值；任一不一致都必须
 先退回 route-off，不能依赖 readiness 缓存或部署失败后的旧 Agent 自动兜底。
+
+### 8.1 canary 后的全量切换
+
+2026-09-07 用户确认历史聊天／执行不要求续跑兼容，小说成果必须保全，并允许主动完成服务器配置。
+按 `docs/specs/2026-09-07-durable-release-preserve-novel-assets.md`，在 21 项 Operation 已迁移、旧执行退出、
+原设定／大纲／正文／版本兼容验收与指定账号真实 canary 通过后，可启用：
+
+```dotenv
+DURABLE_AGENT_EXECUTION_SCHEMA_READY=true
+DURABLE_AGENT_EXECUTION_ROUTE_MODE=all
+V1_FRESH_AGENT_STARTS_ENABLED=false
+```
+
+全量不需要继续维护用户／小说白名单，但不会绕过归属、Agent readiness、计费和生产视频关闭规则。
+同一既有幂等身份仍读回原 Run，不把历史 V1 改写为 V2。首次全量前记录公共 CLI 的真实结果与观察结论；
+`migrated-with-v2` 只证明存在 V2 事实，不证明业务 canary 成功。
+
+部署脚本要求新结构、已存在 V2 事实、V1 新建入口关闭，以及与当前 manifest 一致的 V2-aware 回滚镜像。
+部署后用 `sh scripts/durable-agent-v2-rollout-gate.sh all novelwriter` 复验实时配置、contract、readiness、
+journal 和 drain 索引。失败先退回 `route=off、V1 fresh=false`，保留原数据和 V2 收敛路径。
 
 ## 9. 应用 route-off、回滚与 DDL rollback
 

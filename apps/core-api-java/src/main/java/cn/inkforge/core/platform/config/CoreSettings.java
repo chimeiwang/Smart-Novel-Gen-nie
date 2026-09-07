@@ -28,7 +28,8 @@ public final class CoreSettings {
 
     public enum DurableAgentRouteMode {
         OFF,
-        ALLOWLIST
+        ALLOWLIST,
+        ALL
     }
 
     private final EnvironmentName environment;
@@ -283,20 +284,24 @@ public final class CoreSettings {
 
     /** 开关只决定新 Run 的路由；既有 V2 Run 必须继续由 V2 引擎收敛。 */
     public boolean routesNewDurableAgentRun(String userId, String novelId) {
-        if (!durableAgentExecutionSchemaReady) return false;
+        if (!durableAgentExecutionSchemaReady || userId == null || userId.isBlank()
+                || novelId == null || novelId.isBlank()) return false;
         return switch (durableAgentRouteMode) {
             case OFF -> false;
             case ALLOWLIST -> durableAgentUserAllowlist.contains(userId)
-                    && novelId != null
                     && durableAgentNovelAllowlist.contains(novelId);
+            case ALL -> true;
         };
     }
 
     /** 用户私有资产没有小说归属；只用于显式用户级入口，不放宽既有小说级双 allowlist。 */
     public boolean routesNewUserScopedDurableAgentRun(String userId) {
-        return durableAgentExecutionSchemaReady
-                && durableAgentRouteMode == DurableAgentRouteMode.ALLOWLIST
-                && userId != null && durableAgentUserAllowlist.contains(userId);
+        if (!durableAgentExecutionSchemaReady || userId == null || userId.isBlank()) return false;
+        return switch (durableAgentRouteMode) {
+            case OFF -> false;
+            case ALLOWLIST -> durableAgentUserAllowlist.contains(userId);
+            case ALL -> true;
+        };
     }
 
     public Path uploadsRoot() {
@@ -415,6 +420,9 @@ public final class CoreSettings {
             throw new IllegalArgumentException(
                     "耐久 Agent 数据库结构未就绪时，新建路由必须保持 off");
         }
+        if (durableAgentRouteMode == DurableAgentRouteMode.ALL && v1FreshAgentStartsEnabled) {
+            throw new IllegalArgumentException("耐久 Agent 全量路由必须关闭 V1 新建入口");
+        }
         if (environment != EnvironmentName.PRODUCTION) {
             return;
         }
@@ -462,8 +470,9 @@ public final class CoreSettings {
         return switch (normalized) {
             case "off" -> DurableAgentRouteMode.OFF;
             case "allowlist" -> DurableAgentRouteMode.ALLOWLIST;
+            case "all" -> DurableAgentRouteMode.ALL;
             default -> throw new IllegalArgumentException(
-                    "DURABLE_AGENT_EXECUTION_ROUTE_MODE 必须是 off 或 allowlist");
+                    "DURABLE_AGENT_EXECUTION_ROUTE_MODE 必须是 off、allowlist 或 all");
         };
     }
 

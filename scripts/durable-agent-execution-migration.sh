@@ -509,15 +509,53 @@ blockers(metric, id, "createdAt") AS (
   FROM public."WritingEventOutbox"
   WHERE "deliveryState" IN ('pending', 'delivering', 'blocked')
   UNION ALL
-  SELECT 'v1ArtifactsAwaitingUser', id, "createdAt"
-  FROM public."ReviewArtifact"
-  WHERE "taskId" IS NOT NULL AND "workflowRunId" IS NULL
-    AND status::text = 'awaiting_user'
+  SELECT 'v1ArtifactsAwaitingUser', artifact.id, artifact."createdAt"
+  FROM public."ReviewArtifact" AS artifact
+  WHERE artifact."taskId" IS NOT NULL AND artifact."workflowRunId" IS NULL
+    AND artifact.status::text = 'awaiting_user'
+    -- 终态旧 Task 的静态候选是保留成果；只豁免归属完整且无活动命令的记录。
+    AND NOT EXISTS (
+      SELECT 1 FROM public."WritingTask" AS task
+      JOIN public."Chapter" AS chapter
+        ON chapter.id = task."chapterId" AND chapter."novelId" = task."novelId"
+      WHERE task.id = artifact."taskId"
+        AND task."novelId" = artifact."novelId"
+        AND (artifact."chapterId" IS NULL OR EXISTS (
+          SELECT 1 FROM public."Chapter" AS artifact_chapter
+          WHERE artifact_chapter.id = artifact."chapterId"
+            AND artifact_chapter."novelId" = artifact."novelId"
+        ))
+        AND task.phase::text IN ('completed', 'error')
+        AND NOT EXISTS (
+          SELECT 1 FROM public."WritingRunCommand" AS command
+          WHERE command."taskId" = task.id
+            AND command.status IN ('pending', 'submitted', 'processing')
+        )
+    )
   UNION ALL
-  SELECT 'v1ArtifactsRecoverable', id, "createdAt"
-  FROM public."ReviewArtifact"
-  WHERE "taskId" IS NOT NULL AND "workflowRunId" IS NULL
-    AND status::text IN ('draft', 'under_review', 'applying')
+  SELECT 'v1ArtifactsRecoverable', artifact.id, artifact."createdAt"
+  FROM public."ReviewArtifact" AS artifact
+  WHERE artifact."taskId" IS NOT NULL AND artifact."workflowRunId" IS NULL
+    AND artifact.status::text IN ('draft', 'under_review', 'applying')
+    -- applying 仍是正式内容写入中的阻断事实，不能被旧 Task 归档掩盖。
+    AND (artifact.status::text = 'applying' OR NOT EXISTS (
+      SELECT 1 FROM public."WritingTask" AS task
+      JOIN public."Chapter" AS chapter
+        ON chapter.id = task."chapterId" AND chapter."novelId" = task."novelId"
+      WHERE task.id = artifact."taskId"
+        AND task."novelId" = artifact."novelId"
+        AND (artifact."chapterId" IS NULL OR EXISTS (
+          SELECT 1 FROM public."Chapter" AS artifact_chapter
+          WHERE artifact_chapter.id = artifact."chapterId"
+            AND artifact_chapter."novelId" = artifact."novelId"
+        ))
+        AND task.phase::text IN ('completed', 'error')
+        AND NOT EXISTS (
+          SELECT 1 FROM public."WritingRunCommand" AS command
+          WHERE command."taskId" = task.id
+            AND command.status IN ('pending', 'submitted', 'processing')
+        )
+    ))
   UNION ALL
   SELECT 'v2RunsActive', id, "createdAt"
   FROM public."WorkflowRun"
@@ -615,15 +653,53 @@ blockers(metric, id, "createdAt") AS (
   FROM public."WritingEventOutbox"
   WHERE "deliveryState" IN ('pending', 'delivering', 'blocked')
   UNION ALL
-  SELECT 'v1ArtifactsAwaitingUser', id, "createdAt"
-  FROM public."ReviewArtifact"
-  WHERE "taskId" IS NOT NULL AND "workflowRunId" IS NULL
-    AND status::text = 'awaiting_user'
+  SELECT 'v1ArtifactsAwaitingUser', artifact.id, artifact."createdAt"
+  FROM public."ReviewArtifact" AS artifact
+  WHERE artifact."taskId" IS NOT NULL AND artifact."workflowRunId" IS NULL
+    AND artifact.status::text = 'awaiting_user'
+    -- 终态旧 Task 的静态候选是保留成果；只豁免归属完整且无活动命令的记录。
+    AND NOT EXISTS (
+      SELECT 1 FROM public."WritingTask" AS task
+      JOIN public."Chapter" AS chapter
+        ON chapter.id = task."chapterId" AND chapter."novelId" = task."novelId"
+      WHERE task.id = artifact."taskId"
+        AND task."novelId" = artifact."novelId"
+        AND (artifact."chapterId" IS NULL OR EXISTS (
+          SELECT 1 FROM public."Chapter" AS artifact_chapter
+          WHERE artifact_chapter.id = artifact."chapterId"
+            AND artifact_chapter."novelId" = artifact."novelId"
+        ))
+        AND task.phase::text IN ('completed', 'error')
+        AND NOT EXISTS (
+          SELECT 1 FROM public."WritingRunCommand" AS command
+          WHERE command."taskId" = task.id
+            AND command.status IN ('pending', 'submitted', 'processing')
+        )
+    )
   UNION ALL
-  SELECT 'v1ArtifactsRecoverable', id, "createdAt"
-  FROM public."ReviewArtifact"
-  WHERE "taskId" IS NOT NULL AND "workflowRunId" IS NULL
-    AND status::text IN ('draft', 'under_review', 'applying')
+  SELECT 'v1ArtifactsRecoverable', artifact.id, artifact."createdAt"
+  FROM public."ReviewArtifact" AS artifact
+  WHERE artifact."taskId" IS NOT NULL AND artifact."workflowRunId" IS NULL
+    AND artifact.status::text IN ('draft', 'under_review', 'applying')
+    -- applying 仍是正式内容写入中的阻断事实，不能被旧 Task 归档掩盖。
+    AND (artifact.status::text = 'applying' OR NOT EXISTS (
+      SELECT 1 FROM public."WritingTask" AS task
+      JOIN public."Chapter" AS chapter
+        ON chapter.id = task."chapterId" AND chapter."novelId" = task."novelId"
+      WHERE task.id = artifact."taskId"
+        AND task."novelId" = artifact."novelId"
+        AND (artifact."chapterId" IS NULL OR EXISTS (
+          SELECT 1 FROM public."Chapter" AS artifact_chapter
+          WHERE artifact_chapter.id = artifact."chapterId"
+            AND artifact_chapter."novelId" = artifact."novelId"
+        ))
+        AND task.phase::text IN ('completed', 'error')
+        AND NOT EXISTS (
+          SELECT 1 FROM public."WritingRunCommand" AS command
+          WHERE command."taskId" = task.id
+            AND command.status IN ('pending', 'submitted', 'processing')
+        )
+    ))
 ),
 metric_json AS (
   SELECT names.name, COALESCE((
@@ -991,7 +1067,7 @@ joint_drain_report() {
   current_state="$(query_schema_state)"
   case "$current_state" in
     migrated-empty-v2|migrated-with-v2) ;;
-    unmigrated) echo "联合 drain 状态要求完整 V2 迁移结构" >&2; return 1 ;;
+    unmigrated) pre_migration_execution_report; return $? ;;
     partial) echo "schema-state:partial" >&2; return 1 ;;
     *) echo "schema-state:invalid-result" >&2; return 1 ;;
   esac
@@ -1030,6 +1106,28 @@ joint_drain_report() {
     --execution-redis "$temp_dir/drain-v2-redis.json" \
     --postgres-after "$temp_dir/drain-postgres-after.json" \
     --runtime-after "$temp_dir/drain-runtime-after.json"
+}
+
+pre_migration_execution_report() {
+  # 只为具名旧执行退出解开前置依赖；不写 Redis marker，不替代 forward 的全空检查。
+  require_pre_migration_route_off
+  require_joint_drain_assets
+  read_core_schema_profile >/dev/null || return 1
+  write_runtime_topology "$temp_dir/drain-runtime-before.json" || return 1
+  query_pre_contract_drain_postgres > "$temp_dir/drain-postgres-before.json" || return 1
+  require_joint_drain_redis_health
+  read_pre_ddl_v1_redis "$temp_dir/drain-v1-redis.json" || return 1
+  read_pre_ddl_v2_redis "$temp_dir/drain-v2-redis.json" || return 1
+  query_pre_contract_drain_postgres > "$temp_dir/drain-postgres-after.json" || return 1
+  write_runtime_topology "$temp_dir/drain-runtime-after.json" || return 1
+  [ "$(query_schema_state)" = "unmigrated" ] || {
+    echo "迁移前快照期间数据库结构已变化" >&2
+    return 1
+  }
+  python3 "$app_dir/scripts/durable_agent_pre_migration_drain.py" "$target_database" \
+    "$temp_dir/drain-runtime-before.json" "$temp_dir/drain-postgres-before.json" \
+    "$temp_dir/drain-v1-redis.json" "$temp_dir/drain-v2-redis.json" \
+    "$temp_dir/drain-postgres-after.json" "$temp_dir/drain-runtime-after.json"
 }
 
 read_pre_ddl_v1_redis() {
@@ -1151,8 +1249,10 @@ require_pre_ddl_joint_drain() {
 import json
 import re
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+UTC = timezone.utc  # noqa: UP017 - 运维入口必须兼容服务器 Python 3.10。
 
 
 def unique(pairs):

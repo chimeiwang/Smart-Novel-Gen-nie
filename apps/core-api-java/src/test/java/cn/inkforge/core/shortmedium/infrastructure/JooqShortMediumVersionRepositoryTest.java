@@ -346,6 +346,53 @@ class JooqShortMediumVersionRepositoryTest {
         return repository.requireVersion(owner, novelId, response.getId());
     }
 
+    @Test
+    void 旧Task退出终态后原候选仍可列出预览采用并从历史恢复() {
+        String owner = user("retired-source-owner");
+        Project project = project("retired-source-novel", owner, true, "原有大纲😀完整尾部", "原有正文");
+        ShortMediumVersion base = submitOutline(owner, project.novelId());
+        String taskId = "retired-source-task";
+        writingTask(taskId, project, owner);
+        ShortMediumVersion candidate = agentCandidate(owner, project,
+                new VersionDocumentBinding("outline", null), base,
+                "原候选全文😀不可丢失", null, taskId, "retired-source-job");
+        var originalArtifact = database.dsl().selectFrom(REVIEWARTIFACT)
+                .where(REVIEWARTIFACT.ID.eq(candidate.id())).fetchSingle();
+        var originalOutline = database.dsl().selectFrom(OUTLINE)
+                .where(OUTLINE.NOVELID.eq(project.novelId())).fetchSingle();
+
+        // 模拟具名维护允许的唯一状态变化，不删除来源，不改候选或工作稿。
+        database.dsl().update(WRITINGTASK).set(WRITINGTASK.PHASE, Writingtaskphase.error)
+                .set(WRITINGTASK.UPDATEDAT, LocalDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC))
+                .where(WRITINGTASK.ID.eq(taskId)).execute();
+        assertThat(service.list(owner, project.novelId(), DocumentType.OUTLINE, null))
+                .extracting(value -> value.getId()).containsExactly(candidate.id(), base.id());
+        var detail = service.get(owner, project.novelId(), candidate.id());
+        assertThat(detail.getContent()).isEqualTo(candidate.content());
+        assertThat(detail.getTaskId()).isEqualTo(taskId);
+        assertThat(service.preview(owner, project.novelId(),
+                new VersionPreviewRequest(DocumentType.OUTLINE).baseVersionId(base.id())).getDirty()).isFalse();
+        assertThat(database.dsl().selectFrom(REVIEWARTIFACT)
+                .where(REVIEWARTIFACT.ID.eq(candidate.id())).fetchSingle()).isEqualTo(originalArtifact);
+        assertThat(database.dsl().selectFrom(OUTLINE)
+                .where(OUTLINE.NOVELID.eq(project.novelId())).fetchSingle()).isEqualTo(originalOutline);
+
+        // 此后是隔离数据库中的作者显式采用／恢复，不是维护脚本自动改成果。
+        service.adopt(owner, project.novelId(), candidate.id(),
+                new VersionActionRequest("retired-source-adopt", detail.getDiff().getConfirmationHash(),
+                        DocumentType.OUTLINE).baseVersionId(base.id()));
+        var diff = service.diffVersions(owner, project.novelId(), candidate.id(), base.id());
+        var restored = service.restore(owner, project.novelId(), base.id(),
+                new VersionActionRequest("retired-source-restore", diff.getConfirmationHash(),
+                        DocumentType.OUTLINE).baseVersionId(candidate.id()));
+        assertThat(restored.getId()).isNotEqualTo(base.id()).isNotEqualTo(candidate.id());
+        assertThat(restored.getContent()).isEqualTo(base.content());
+        assertThat(service.get(owner, project.novelId(), candidate.id()).getContent())
+                .isEqualTo(candidate.content());
+        assertThat(database.dsl().select(CHAPTER.CONTENT).from(CHAPTER)
+                .where(CHAPTER.ID.eq(project.chapterId())).fetchSingle(CHAPTER.CONTENT)).isEqualTo("原有正文");
+    }
+
     private ShortMediumVersion submitManuscript(
             String owner, Project project, String expectedOutlineId) {
         var preview = service.preview(

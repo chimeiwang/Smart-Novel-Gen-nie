@@ -9,8 +9,8 @@ expected_manifest_fingerprint="${3:-}"
   exit 2
 }
 case "$component" in
-  core|agent) ;;
-  *) echo "V2-aware 镜像检查组件必须是 core 或 agent" >&2; exit 2 ;;
+  core|core-all|agent) ;;
+  *) echo "V2-aware 镜像检查组件必须是 core、core-all 或 agent" >&2; exit 2 ;;
 esac
 case "$image" in
   inkforge-core-api:*|inkforge-agent-service:*|sha256:*) ;;
@@ -20,7 +20,7 @@ command -v docker >/dev/null 2>&1 || { echo "缺少 docker" >&2; exit 1; }
 docker image inspect "$image" >/dev/null 2>&1 || { echo "待检查镜像不存在" >&2; exit 1; }
 
 case "$component" in
-  core)
+  core|core-all)
     [ -z "$expected_manifest_fingerprint" ] || {
       echo "Core 镜像检查不接受 execution manifest 指纹" >&2
       exit 2
@@ -38,6 +38,17 @@ case "$component" in
         echo "Core 镜像不是耐久 Agent V2-aware 镜像" >&2
         exit 1
       }
+    if [ "$component" = "core-all" ]; then
+      all_capability="$(docker image inspect --format \
+        '{{eq (index .Config.Labels "cn.inkforge.durable-route-all") "true"}}' "$image")" || {
+          echo "无法读取 Core 镜像全量路由能力" >&2
+          exit 1
+        }
+      [ "$all_capability" = "true" ] || {
+        echo "Core 镜像未声明支持 all 全量路由配置" >&2
+        exit 1
+      }
+    fi
     ;;
   agent)
     if [ -n "$expected_manifest_fingerprint" ]; then
@@ -85,5 +96,5 @@ esac
 if [ "$component" = "agent" ]; then
   printf 'v2-aware-image-ok:agent:%s\n' "$actual_manifest_fingerprint"
 else
-  printf 'v2-aware-image-ok:core\n'
+  printf 'v2-aware-image-ok:%s\n' "$component"
 fi

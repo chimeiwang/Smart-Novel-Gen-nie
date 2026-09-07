@@ -12,7 +12,7 @@ image_verifier="$app_dir/scripts/verify-durable-agent-v2-image.sh"
 execution_manifest_path="$app_dir/contracts/agent-execution/manifest.json"
 
 case "$stage" in
-  pre-contract|post-contract-route-off|schema-ready-route-off|initialize-drain-indexes|allowlist|drain-status|verify-drain|route-off-drain|ddl-rollback) ;;
+  pre-contract|post-contract-route-off|schema-ready-route-off|initialize-drain-indexes|allowlist|all|drain-status|verify-drain|route-off-drain|ddl-rollback) ;;
   *) echo "耐久 Agent 发布门禁阶段无效" >&2; exit 2 ;;
 esac
 case "$target_database" in
@@ -282,7 +282,7 @@ require_release_execution_manifest() {
   load_release_execution_manifest
   [ "$current_agent_manifest_fingerprint" = \
     "$expected_execution_manifest_fingerprint" ] || {
-      echo "allowlist Agent 与当前发布冻结 execution manifest 不一致" >&2
+      echo "新建 V2 路由的 Agent 与当前发布冻结 execution manifest 不一致" >&2
       exit 1
     }
 }
@@ -431,6 +431,24 @@ case "$stage" in
       echo "allowlist 阶段必须同时配置用户与隔离小说 ID" >&2
       exit 1
     }
+    require_v2_aware_images
+    require_release_execution_manifest
+    require_exact_contract
+    require_services_ready
+    require_execution_journal_ready
+    require_drain_indexes_ready
+    ;;
+  all)
+    [ "$migration_state" = "migrated-with-v2" ] || {
+      echo "全量阶段必须先有 V2 canary 事实，不能直接从空 V2 开启" >&2
+      exit 1
+    }
+    require_config true all false
+    compose exec -T core-api /bin/sh -ec \
+      'test "${DURABLE_AGENT_EXECUTION_SCHEMA_READY:-}" = true && test "${DURABLE_AGENT_EXECUTION_ROUTE_MODE:-}" = all && test "${V1_FRESH_AGENT_STARTS_ENABLED:-}" = false' || {
+        echo "当前运行 Core 尚未启用全量 V2 或仍开放 V1 新建入口" >&2
+        exit 1
+      }
     require_v2_aware_images
     require_release_execution_manifest
     require_exact_contract

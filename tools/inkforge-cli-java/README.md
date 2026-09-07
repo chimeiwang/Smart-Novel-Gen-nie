@@ -21,6 +21,12 @@ printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.w
 
 ## macOS Skill 实际入口
 
+最新实际状态（2026-09-07）：两份固定运行包已同步到本轮验证产物，SHA-256 均为
+`1f650645711bf2c5c17d9aeb5824f250f90a85136da0c95371f0449501da0995`；原绑定与45命令／3操作不变，
+旧包及配置有成对备份。详见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
+文末安装记录。下面历次日期、旧包哈希和“当轮尚未安装”保留为历史记录，不代表最新安装状态。
+本机安装仍不代表服务器已切换，Skill 不因普通 CLI 的新能力自动扩大允许范围。
+
 2026-09-04，本机两份 Skill 已安装 shell 启动器与固定 Java JAR，配置已升为 schemaVersion 5，旧 Python
 入口和测试已迁出到可恢复备份。实际入口的帮助、端点拒绝及隔离安装检查通过；完整 Maven 验证、CLI 回归、
 Skill 结构检查和独立文档验收已通过，具体结果见

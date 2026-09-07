@@ -411,7 +411,6 @@ esac
 # 此版部署入口只接受同时理解迁移前/后 contract 且能收敛既有 V2 Run/Step 的三服务组合。
 # Agent 探针还必须完整加载镜像内全部版本化 execution 资产，并与本次发布源码精确同指纹。
 # 检查过程无网络、不挂载卷、不注入环境变量，不能靠 runtime=java 标签冒充 V2-aware。
-sh "$durable_image_verifier" core "inkforge-core-api:$INKFORGE_IMAGE_TAG" >/dev/null
 sh "$durable_image_verifier" agent "inkforge-agent-service:$INKFORGE_IMAGE_TAG" \
   "$expected_execution_manifest_fingerprint" >/dev/null
 
@@ -466,10 +465,17 @@ durable_route_mode="$(printf '%s\n' "$durable_rollout_config" | sed -n '2p')"
 durable_user_allowlist="$(printf '%s\n' "$durable_rollout_config" | sed -n '3p')"
 durable_novel_allowlist="$(printf '%s\n' "$durable_rollout_config" | sed -n '4p')"
 durable_v1_fresh_starts="$(printf '%s\n' "$durable_rollout_config" | sed -n '5p')"
-[ "$durable_route_mode" != "all" ] || {
-  echo "当前耐久 Agent 发布 Runbook 只授权 route-off 或交集 allowlist，禁止直接全量" >&2
-  exit 1
-}
+durable_core_probe="core"
+if [ "$durable_route_mode" = "all" ]; then
+  [ "$durable_schema_ready" = "true" ] && [ "$durable_v1_fresh_starts" = "false" ] || {
+    echo "耐久 Agent 全量必须 schemaReady=true 且关闭 V1 新建入口" >&2
+    exit 1
+  }
+  durable_core_probe="core-all"
+fi
+# 只加严 all；目标与回滚 Core 必须能解析本次保留的同一份路由配置。
+sh "$durable_image_verifier" "$durable_core_probe" \
+  "inkforge-core-api:$INKFORGE_IMAGE_TAG" >/dev/null
 if [ "$durable_route_mode" = "allowlist" ]; then
   [ "$durable_user_allowlist" = "present" ] \
     && [ "$durable_novel_allowlist" = "present" ] \
@@ -483,6 +489,10 @@ durable_migration_state="$(
   APP_DIR="$APP_DIR" DURABLE_AGENT_MIGRATION_ENV_FILE="$APP_DIR/.env" \
     sh "$durable_migration_helper" status novelwriter
 )" || { echo "无法读取耐久 Agent 数据库状态" >&2; exit 1; }
+if [ "$durable_route_mode" = "all" ] && [ "$durable_migration_state" != "migrated-with-v2" ]; then
+  echo "全量前必须先完成 V2 canary，空 V2 或未迁移结构禁止直接全量" >&2
+  exit 1
+fi
 case "$durable_migration_state" in
   unmigrated)
     [ "$durable_schema_ready" = "false" ] \
@@ -560,14 +570,14 @@ else
       echo "迁移后结构禁止把 V1-only Python Core 保留为自动回滚目标" >&2
       exit 1
     }
-    sh "$durable_image_verifier" core "$core_image_id" >/dev/null || {
-      echo "迁移后结构的上一 Core 镜像不是 V2-aware，停止部署" >&2
+    sh "$durable_image_verifier" "$durable_core_probe" "$core_image_id" >/dev/null || {
+      echo "迁移后结构的上一 Core 镜像不兼容当前耐久路由配置，停止部署" >&2
       exit 1
     }
-    if [ "$durable_route_mode" = "allowlist" ]; then
+    if [ "$durable_route_mode" != "off" ]; then
       sh "$durable_image_verifier" agent "$agent_image_id" \
         "$expected_execution_manifest_fingerprint" >/dev/null || {
-          echo "allowlist 的上一 Agent 回滚镜像与冻结 execution manifest 不兼容，停止部署" >&2
+          echo "新建 V2 路由的上一 Agent 回滚镜像与冻结 execution manifest 不兼容，停止部署" >&2
           exit 1
         }
     else
@@ -612,8 +622,8 @@ else
   echo "已冻结当前生产三服务精确回滚快照：${previous_tag}（${previous_core_runtime}）"
 fi
 
-if [ "$durable_route_mode" = "allowlist" ] && [ -z "$previous_tag" ]; then
-  echo "allowlist canary 必须先冻结与当前 execution manifest 完全兼容的回滚镜像" >&2
+if [ "$durable_route_mode" != "off" ] && [ -z "$previous_tag" ]; then
+  echo "allowlist canary 或全量必须先冻结与当前 execution manifest 完全兼容的回滚镜像" >&2
   exit 1
 fi
 

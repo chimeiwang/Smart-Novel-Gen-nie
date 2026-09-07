@@ -56,6 +56,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.openapitools.jackson.nullable.JsonNullableJackson3Module;
 import org.testcontainers.containers.Container.ExecResult;
 import org.testcontainers.junit.jupiter.Container;
@@ -560,10 +561,11 @@ class RoutingWritingRunStarterTest {
         return id;
     }
 
-    @Test
-    void V2路由冻结完整来源且开关关闭后仍幂等重放原引擎() {
-        Fixture fixture = fixture("route-v2");
-        RoutingWritingRunStarter all = router(fixture, "allowlist");
+    @ParameterizedTest
+    @ValueSource(strings = {"allowlist", "all"})
+    void V2路由冻结完整来源且开关关闭后仍幂等重放原引擎(String mode) {
+        Fixture fixture = fixture("route-v2-" + mode);
+        RoutingWritingRunStarter all = router(fixture, mode, !"all".equals(mode), () -> true);
         ParsedWritingRunStartRequest request = request(
                 fixture, "request-route-v2-0001", "请让这句话更有压迫感");
         LocalDateTime sessionUpdatedBefore = sessionUpdatedAt(fixture.sessionId());

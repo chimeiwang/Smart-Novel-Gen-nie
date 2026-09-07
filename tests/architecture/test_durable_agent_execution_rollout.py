@@ -1470,6 +1470,7 @@ def _run_rollout_gate(
     (app_dir / "contracts" / "agent-execution").mkdir(parents=True)
     bin_dir.mkdir()
     drain_stage = stage in {
+        "all",
         "initialize-drain-indexes",
         "drain-status",
         "verify-drain",
@@ -1520,6 +1521,9 @@ def _run_rollout_gate(
         "  *' compose '*' ps -q core-api '*) printf '%064d\\n' 1 ;;\n"
         '  *" exec -T core-api /bin/sh -ec "*"V1FreshAgentStartGate.class"*)\n'
         '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "off" ] '
+        '&& [ "$FAKE_RUNNING_CORE_V1_FRESH_STARTS" = "false" ] ;;\n'
+        '  *" exec -T core-api /bin/sh -ec "*" = all"*)\n'
+        '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "all" ] '
         '&& [ "$FAKE_RUNNING_CORE_V1_FRESH_STARTS" = "false" ] ;;\n'
         '  *" exec -T core-api /bin/sh -ec "*"DURABLE_AGENT_EXECUTION_ROUTE_MODE"*)\n'
         '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "off" ] ;;\n'
@@ -1653,6 +1657,39 @@ def test_rollout_gate_exposes_separate_drain_status_and_verify_actions(
     assert json.loads(verified_off.stdout)["v2Converged"] is True
     assert rejected_allowlist.returncode != 0
     assert "schemaReady/route" in rejected_allowlist.stderr
+
+
+def test_rollout_all_requires_existing_v2_closed_v1_and_exact_manifest(tmp_path: Path) -> None:
+    expected = _execution_manifest_fingerprint(
+        ROOT / "contracts" / "agent-execution" / "manifest.json"
+    )
+    accepted = _run_rollout_gate(
+        tmp_path / "accepted", stage="all", route_mode="all",
+        migration_state="migrated-with-v2", agent_manifest_fingerprint=expected,
+        running_core_route_mode="all",
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert "gate-ok:all:migrated-with-v2" in accepted.stdout
+    empty = _run_rollout_gate(
+        tmp_path / "empty", stage="all", route_mode="all",
+        agent_manifest_fingerprint=expected, running_core_route_mode="all",
+    )
+    assert empty.returncode != 0
+    assert "不能直接从空 V2 开启" in empty.stderr
+    open_v1 = _run_rollout_gate(
+        tmp_path / "v1-open", stage="all", route_mode="all",
+        migration_state="migrated-with-v2", agent_manifest_fingerprint=expected,
+        running_core_route_mode="all", running_core_v1_fresh_starts="true",
+    )
+    assert open_v1.returncode != 0
+    assert "仍开放 V1 新建入口" in open_v1.stderr
+    mismatch = _run_rollout_gate(
+        tmp_path / "mismatch", stage="all", route_mode="all",
+        migration_state="migrated-with-v2", agent_manifest_fingerprint="b" * 64,
+        running_core_route_mode="all",
+    )
+    assert mismatch.returncode != 0
+    assert "冻结 execution manifest 不一致" in mismatch.stderr
 
 
 def test_rollout_gate_freezes_the_staged_route_matrix() -> None:

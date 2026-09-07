@@ -43,6 +43,8 @@ COPY --chown=10001:10001 infra/docker/inkforge-schema-guard \
 RUN chmod 0555 /usr/local/bin/inkforge-schema-guard
 
 LABEL cn.inkforge.core.runtime="java"
+# 与 CoreSettings 的 all 配置回归一同维护，部署用它拒绝不支持全量配置的回滚镜像。
+LABEL cn.inkforge.durable-route-all="true"
 
 USER 10001:10001
 EXPOSE 8000

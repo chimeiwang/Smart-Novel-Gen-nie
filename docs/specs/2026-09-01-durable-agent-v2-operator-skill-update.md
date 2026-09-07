@@ -3,14 +3,19 @@
 ## 状态与适用边界
 
 - 日期：2026-09-01
-- 最近更新：2026-09-05；结构化五项、中短篇四项与一致性终检均已仓内接通，加入文风画像后 Catalog 当前为 18/21。
+- 最近更新：2026-09-07；结构化五项、中短篇四项、一致性终检、文风、资料索引与视频两项均已仓内接通，
+  Catalog 为 21/21（视频仍仅开发环境开放）。
   中短篇和一致性终检完成本地独立 Core/Agent、受控 Fake Provider 验收及全仓门禁；
   文风画像也已完成全仓和隔离重启验收，不新增 CLI 命令，详见本文末专节。
-  真实供应商、固定包/活动 Skills 与生产另行验收。
+  真实供应商与生产仍另行验收；2026-09-07 两份本机固定 CLI 包已同步，见文末实际安装记录。
 - 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
+- 本轮新增的 `route=all` 只改变服务器新任务路由配置，不新增 CLI 命令或 Python 依赖；普通 CLI 仍为125项，
+  Operator 仍为45项，只调用 Core 公共 API。旧任务维护脚本及 rollout gate 的 `all` 阶段是运维入口，
+  不得加入 Operator 白名单。服务器真实 canary／全量验收完成前，活动 Skills 不因源码或本机固定包
+  已支持新能力而提前宣称生产生效。历史聊天／执行可不续跑，设定、大纲、正文及旧文档版本必须继续完整可读。
 - 问答阶段只扩展现有 `long.agent.start` 的一个显式 Operation；2026-09-04 正文写作阶段另扩展既有
   `long.artifact.approve` 的 V2 全文编辑语义，见下文专节，两阶段均不新增命令名。
 - macOS 两份 Skill 已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机实际入口切换与离线验收，
@@ -562,3 +567,20 @@ CLI 调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary �
 - Seedance 渲染、关键帧和整集导出不是本次模型迁移范围，不得把其恢复、收费或完成状态类推为已验证。
 
 Skill 维护者只需同步任务观察、恢复与作者确认说明；如将来申请视频能力，仍需另行确定允许范围。
+
+## 2026-09-07：本机固定运行包实际同步
+
+本轮完整 Maven verify（CLI135项）与双环境真实启动器离线验收通过后，两份 macOS Operator 已通过
+原 `configure.sh` 同步到新 JAR，SHA-256 均为
+`1f650645711bf2c5c17d9aeb5824f250f90a85136da0c95371f0449501da0995`，与本轮构建产物一致。
+安装记录如实保存来源 `43e6943852a295e3b8d83cdbc43bce5fb10d8a73` 和 `repositoryDirty=true`。
+旧 `config.json + runtime` 成对备份在 `output/operator-runtime-backup.ufPjom/` 的 local／production 压缩包中。
+
+- 本地仍为 `http://127.0.0.1:8000 / default`，预期用户名仍为未绑定；生产仍为
+  `https://inkforge.cn / production / nie`。没有通过升级换账号、端点或 profile。
+- 两个 configure 均不读取或改写 Keychain；未重新提交密码、导出令牌或改用明文凭据。
+- Skill 脚本与仓内模板原本一致，故没有重写 SKILL.md 或启动器。新旧45命令和
+  `plan_chapter/write_chapter/review_chapter` 三操作集合逐项一致；问答、自然入口、结构化写和视频没有
+  因安装自动开放给 Operator。普通 CLI 仍125命令，只访问 Core 公共 API，不直接暴露 Agent。
+- 两份实际入口 help 与三份 JAR 哈希读回一致。真实账号与写作验收仍是后续步骤；本机包更新不等于
+  生产服务器已部署或 V2 已全量启用。

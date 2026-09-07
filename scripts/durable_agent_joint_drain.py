@@ -8,9 +8,11 @@ import hashlib
 import json
 import re
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
+
+UTC = timezone.utc  # noqa: UP017 - 服务器运维入口兼容 Python 3.10。
 
 SCHEMA = "inkforge.durable-agent-joint-drain"
 SCHEMA_VERSION = "2"

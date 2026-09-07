@@ -136,7 +136,7 @@ class CoreSettingsTest {
     }
 
     @Test
-    void 耐久Agent新建路由只支持关闭和精确白名单() {
+    void 耐久Agent关闭与精确白名单仍保持原范围() {
         CoreSettings allowlist = CoreSettings.from(Map.of(
                 "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
                 "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
@@ -158,8 +158,8 @@ class CoreSettingsTest {
                 .isFalse();
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
-                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
-                .hasMessageContaining("off 或 allowlist");
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "unknown")))
+                .hasMessageContaining("off、allowlist 或 all");
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist")))
@@ -176,12 +176,33 @@ class CoreSettingsTest {
                 .hasMessageContaining("无效 ID");
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
-                .hasMessageContaining("off 或 allowlist");
+                .hasMessageContaining("数据库结构未就绪");
         assertThatThrownBy(() -> CoreSettings.from(Map.of(
                         "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
                         "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1",
                         "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "novel-1")))
                 .hasMessageContaining("数据库结构未就绪");
+    }
+
+    @Test
+    void 耐久Agent全量要求新结构和关闭V1且不路由无归属请求() {
+        CoreSettings all = CoreSettings.from(Map.of(
+                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all",
+                "V1_FRESH_AGENT_STARTS_ENABLED", "false"));
+        assertThat(all.routesNewDurableAgentRun("user-new", "novel-old")).isTrue();
+        assertThat(all.routesNewUserScopedDurableAgentRun("user-new")).isTrue();
+        assertThat(all.routesNewDurableAgentRun(null, "novel-old")).isFalse();
+        assertThat(all.routesNewDurableAgentRun(" ", "novel-old")).isFalse();
+        assertThat(all.routesNewDurableAgentRun("user-new", null)).isFalse();
+        assertThat(all.routesNewDurableAgentRun("user-new", " ")).isFalse();
+        assertThat(all.routesNewUserScopedDurableAgentRun(null)).isFalse();
+        assertThat(all.routesNewUserScopedDurableAgentRun(" ")).isFalse();
+        assertThat(all.v1FreshAgentStartsEnabled()).isFalse();
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
+                .hasMessageContaining("必须关闭 V1 新建入口");
     }
 
     @Test

@@ -482,6 +482,8 @@ def _run_deploy(
     execution_redis_config: str = "EXECUTION_REDIS_URL=redis://execution-redis:6379/0",
     v1_fresh_starts: bool | None = None,
     core_v2_aware_status: int = 0,
+    target_core_all_capable: bool = True,
+    rollback_core_all_capable: bool = True,
     agent_v2_aware_status: int = 0,
     target_agent_manifest_fingerprint: str | None = None,
     rollback_agent_manifest_fingerprint: str | None = None,
@@ -589,6 +591,13 @@ def _run_deploy(
         '>> "$FAKE_DOCKER_LOG"\n'
         'case "$1" in\n'
         '  core) exit "${FAKE_CORE_V2_AWARE_STATUS:-0}" ;;\n'
+        '  core-all)\n'
+        '    [ "${FAKE_CORE_V2_AWARE_STATUS:-0}" -eq 0 ] || exit "$FAKE_CORE_V2_AWARE_STATUS"\n'
+        '    case "$2" in\n'
+        '      inkforge-core-api:"$FAKE_NEW_TAG") '
+        '        [ "$FAKE_TARGET_CORE_ALL_CAPABLE" = true ] ;;\n'
+        '      *) [ "$FAKE_ROLLBACK_CORE_ALL_CAPABLE" = true ] ;;\n'
+        '    esac ;;\n'
         "  agent)\n"
         '    [ "${FAKE_AGENT_V2_AWARE_STATUS:-0}" -eq 0 ] '
         '      || exit "$FAKE_AGENT_V2_AWARE_STATUS"\n'
@@ -667,6 +676,8 @@ def _run_deploy(
         "FAKE_MIGRATION_DOWN_STATUS": str(migration_down_status),
         "FAKE_DURABLE_MIGRATION_STATE": durable_migration_state,
         "FAKE_CORE_V2_AWARE_STATUS": str(core_v2_aware_status),
+        "FAKE_TARGET_CORE_ALL_CAPABLE": str(target_core_all_capable).lower(),
+        "FAKE_ROLLBACK_CORE_ALL_CAPABLE": str(rollback_core_all_capable).lower(),
         "FAKE_AGENT_V2_AWARE_STATUS": str(agent_v2_aware_status),
         "FAKE_TARGET_AGENT_MANIFEST_FINGERPRINT": target_agent_manifest_fingerprint,
         "FAKE_ROLLBACK_AGENT_MANIFEST_FINGERPRINT": rollback_agent_manifest_fingerprint,
@@ -1284,6 +1295,84 @@ def test_deploy_cannot_skip_allowlist_and_enable_all_routes(tmp_path: Path) -> N
     assert _full_stack_up_lines(log) == []
 
 
+def test_deploy_all_routes_requires_closed_v1_and_compatible_rollback(tmp_path: Path) -> None:
+    accepted, accepted_log = _run_deploy(
+        tmp_path / "accepted",
+        previous_state="valid",
+        previous_core_runtime="java",
+        durable_migration_state="migrated-with-v2",
+        durable_schema_ready=True,
+        durable_route_mode="all",
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert len(_full_stack_up_lines(accepted_log)) == 1
+    assert "v2-image core-all inkforge-core-api:new-tag" in accepted_log
+    assert f"v2-image core-all sha256:{'5' * 64}" in accepted_log
+    rejected, rejected_log = _run_deploy(
+        tmp_path / "v1-open",
+        previous_state="valid",
+        previous_core_runtime="java",
+        durable_migration_state="migrated-with-v2",
+        durable_schema_ready=True,
+        durable_route_mode="all",
+        v1_fresh_starts=True,
+    )
+    assert rejected.returncode != 0
+    assert "关闭 V1 新建入口" in rejected.stderr
+    assert _full_stack_up_lines(rejected_log) == []
+    mismatch, mismatch_log = _run_deploy(
+        tmp_path / "manifest-mismatch",
+        previous_state="valid",
+        previous_core_runtime="java",
+        durable_migration_state="migrated-with-v2",
+        durable_schema_ready=True,
+        durable_route_mode="all",
+        rollback_agent_manifest_fingerprint="b" * 64,
+    )
+    assert mismatch.returncode != 0
+    assert "回滚镜像与冻结 execution manifest 不兼容" in mismatch.stderr
+    assert _full_stack_up_lines(mismatch_log) == []
+
+
+@pytest.mark.parametrize("missing", ["target", "rollback"])
+def test_all_route_rejects_core_without_all_capability_before_switch(
+    tmp_path: Path, missing: str
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        previous_core_runtime="java",
+        durable_migration_state="migrated-with-v2",
+        durable_schema_ready=True,
+        durable_route_mode="all",
+        target_core_all_capable=missing != "target",
+        rollback_core_all_capable=missing != "rollback",
+    )
+    assert result.returncode != 0
+    assert "v2-image core-all inkforge-core-api:new-tag" in log
+    if missing == "rollback":
+        assert f"v2-image core-all sha256:{'5' * 64}" in log
+    assert _full_stack_up_lines(log) == []
+
+
+@pytest.mark.parametrize("mode", ["off", "allowlist"])
+def test_old_route_modes_do_not_require_new_all_capability(tmp_path: Path, mode: str) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        previous_core_runtime="java",
+        durable_migration_state="migrated-with-v2",
+        durable_schema_ready=True,
+        durable_route_mode=mode,
+        durable_user_allowlist="user-canary",
+        durable_novel_allowlist="novel-canary",
+        target_core_all_capable=False,
+        rollback_core_all_capable=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "v2-image core-all" not in log
+
+
 def test_deploy_allows_only_complete_user_and_novel_intersection_allowlist(
     tmp_path: Path,
 ) -> None:
@@ -1353,7 +1442,7 @@ def test_allowlist_requires_a_complete_compatible_rollback_snapshot(
     )
 
     assert result.returncode != 0
-    assert "allowlist canary 必须先冻结" in result.stderr
+    assert "allowlist canary 或全量必须先冻结" in result.stderr
     assert _full_stack_up_lines(log) == []
 
 
