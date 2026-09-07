@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from types import MappingProxyType
@@ -16,6 +17,7 @@ from inkforge_agents.execution.executor import (
 )
 from inkforge_agents.execution.registry import load_execution_registry
 from inkforge_agents.providers.base import (
+    ModelStructuredOutputDiagnostic,
     ModelStructuredOutputRoute,
     ModelTurnRequest,
     ModelTurnResult,
@@ -25,6 +27,7 @@ from inkforge_agents.providers.base import (
 )
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.runtime.model_runtime import ModelRuntime
+from inkforge_contracts.execution import canonical_execution_sha256
 
 from .support import (
     answer_question_request,
@@ -100,6 +103,87 @@ def _executor(model: RecordingModel) -> StatelessExecutionStepExecutor:
         max_output_tokens=10_000,
         retry_base_seconds=0,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "keyword", "expected_code", "expected_keyword"),
+    [
+        ("empty_output", "content", "empty_output", "content"),
+        ("json_decode_error", "json", "json_decode_error", "json"),
+        ("not_object", "type", "not_object", "type"),
+        ("schema_violation", "additionalProperties", "schema_violation", "additionalProperties"),
+        ("schema_violation", "pattern", "schema_violation", "pattern"),
+        ("unexpected_output", "toolCalls", "unexpected_output", "toolCalls"),
+        ("schema_violation", "secret-provider-key", "schema_violation", "unknown"),
+        (None, None, "missing_output", "content"),
+    ],
+)
+async def test_结构化失败仅记录具名固定诊断且不改变终态或模型调用(
+    code, keyword, expected_code, expected_keyword, caplog
+) -> None:
+    registry = load_execution_registry(environment="test")
+    request = rehash_request(answer_question_request(registry).model_copy(update={
+        "input": {"userInstruction": "原小说正文 secret-input，请完整审阅"},
+    }))
+    diagnostic = (
+        None if code is None else ModelStructuredOutputDiagnostic(
+            code=code, jsonPointer="/private-field-secret/原小说正文", keyword=keyword)
+    )
+    result = ModelTurnResult(
+        content="" if diagnostic is not None else "供应商私密正文 secret-provider-response",
+        toolCalls=[],
+        structuredOutput=None,
+        structuredOutputDiagnostic=diagnostic,
+        usage=ModelUsage(promptTokens=100, cachedTokens=0, completionTokens=20, totalTokens=120),
+        diagnostics=ModelUsageDiagnostics(promptCacheMissTokens=100, reasoningTokens=0),
+        providerResponseId="secret-provider-response-id",
+        finishReason="stop",
+    )
+    model = RecordingModel(result=result)
+    executor = _executor(model)
+    resolved = executor.resolve(request, registry)
+    with caplog.at_level(logging.WARNING, logger="inkforge_agents.execution.executor"):
+        outcome = await executor.call_provider(
+            request,
+            executor.build_model_request(request, resolved),
+            begin_attempt=_one_attempt,
+            cancel_event=asyncio.Event(),
+        )
+        terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    assert terminal.errorCode == "MODEL_STRUCTURED_OUTPUT_INVALID"
+    assert terminal.errorCategory == "protocol"
+    assert terminal.outcomeUnknown is False
+    assert terminal.retryable is False
+    assert terminal.usage.providerAttempts == 1
+    assert terminal.usage.protocolCorrections == 0
+    assert terminal.usage.inputTokens == 100
+    assert terminal.usage.completionTokens == 20
+    assert len(model.requests) == 1
+    assert terminal.resultHash == canonical_execution_sha256({
+        "errorCategory": "protocol",
+        "errorCode": "MODEL_STRUCTURED_OUTPUT_INVALID",
+        "outcomeUnknown": False,
+        "retryable": False,
+        "resolvedModel": resolved.resolved_model.model_dump(mode="json", exclude_none=True),
+        "usage": terminal.usage.model_dump(mode="json", exclude_none=True),
+    })
+    records = [record for record in caplog.records
+               if record.name == "inkforge_agents.execution.executor"]
+    assert len(records) == 1
+    record = records[0]
+    assert record.levelno == logging.WARNING
+    assert record.getMessage() == (
+        "V2 结构化输出未通过本地验收 "
+        f"run_id={request.runId} step_id={request.stepId} "
+        f"output_schema={request.outputSchema.name} code={expected_code} "
+        f"keyword={expected_keyword}"
+    )
+    assert record.exc_info is None
+    for secret in ("secret", "原小说正文", "供应商私密正文", "private-field", "jsonPointer"):
+        assert secret not in caplog.text
+        assert secret not in repr(record.__dict__)
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -102,6 +103,17 @@ from .video import (
     materialize_video_output,
     video_context,
 )
+
+_LOGGER = logging.getLogger(__name__)
+_STRUCTURED_DIAGNOSTIC_KEYWORDS = frozenset({
+    "additionalItems", "additionalProperties", "allOf", "anyOf", "const", "contains", "content",
+    "dependentRequired", "dependentSchemas", "enum", "exclusiveMaximum", "exclusiveMinimum",
+    "falseSchema", "format", "items", "json", "maxContains", "maxItems", "maxLength",
+    "maxProperties", "maximum", "minContains", "minItems", "minLength", "minProperties",
+    "minimum", "multipleOf", "not", "oneOf", "pattern", "patternProperties", "prefixItems",
+    "propertyNames", "required", "toolCalls", "type", "unevaluatedItems", "unevaluatedProperties",
+    "uniqueItems", "unknown",
+})
 
 ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]
 FailureCategory = Literal[
@@ -1256,6 +1268,18 @@ class StatelessExecutionStepExecutor:
             result = result.model_copy(update={"structuredOutput": {"content": result.content}})
         failure = _validate_provider_result(request, result, usage)
         if failure is not None:
+            if failure[1] == "MODEL_STRUCTURED_OUTPUT_INVALID":
+                diagnostic = result.structuredOutputDiagnostic
+                keyword = diagnostic.keyword if diagnostic is not None else "content"
+                _LOGGER.warning(
+                    "V2 结构化输出未通过本地验收 "
+                    "run_id=%s step_id=%s output_schema=%s code=%s keyword=%s",
+                    request.runId,
+                    request.stepId,
+                    request.outputSchema.name,
+                    diagnostic.code if diagnostic is not None else "missing_output",
+                    keyword if keyword in _STRUCTURED_DIAGNOSTIC_KEYWORDS else "unknown",
+                )
             return _failure(
                 request,
                 resolved.resolved_model,
