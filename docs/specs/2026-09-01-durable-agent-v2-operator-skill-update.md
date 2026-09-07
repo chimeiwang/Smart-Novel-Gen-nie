@@ -3,27 +3,28 @@
 ## 状态与适用边界
 
 - 日期：2026-09-01
-- 最近更新：2026-09-07；结构化五项、中短篇四项、一致性终检、文风、资料索引与视频两项均已仓内接通，
+- 最近更新：2026-09-08；结构化五项、中短篇四项、一致性终检、文风、资料索引与视频两项均已仓内接通，
   Catalog 为 21/21（视频仍仅开发环境开放）。
   中短篇和一致性终检完成本地独立 Core/Agent、受控 Fake Provider 验收及全仓门禁；
   文风画像也已完成全仓和隔离重启验收，不新增 CLI 命令，详见本文末专节。
-  真实供应商与生产仍另行验收；2026-09-07 两份本机固定 CLI 包已同步，见文末实际安装记录。
-- 状态：CLI 与共享契约代码已完成本地验证，但尚未进入 `main`、尚未部署生产。Production Skill 只能在目标提交
-  实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
-  user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
+  2026-09-07 两份本机固定 CLI 包已同步，生产真实供应商 canary 与最终全量门禁均已通过，见文末记录。
+- 状态：正式库已完成 V2 迁移并已有 Run，生产已部署 `8a1324c`，当前为
+  `schemaReady=true / route=all / V1 fresh=false`，用户／小说 allowlist 已清空；已开放业务的新请求全量使用 V2，
+  生产视频仍关闭。两份活动 Operator 的45命令／三种 Operation 不变，不因服务器全量而自动开放 `answer_question`；
+  后续扩展仍须按本文件同步对应环境的说明与允许集合。
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
 - 本轮新增的 `route=all` 只改变服务器新任务路由配置，不新增 CLI 命令或 Python 依赖；随后真实验收补齐
   `long.session.create`，普通 CLI从125增为126项，具体输入与后续安装事实见文末；
   Operator 仍为45项，只调用 Core 公共 API。旧任务维护脚本及 rollout gate 的 `all` 阶段是运维入口，
-  不得加入 Operator 白名单。服务器真实 canary／全量验收完成前，活动 Skills 不因源码或本机固定包
-  已支持新能力而提前宣称生产生效。历史聊天／执行可不续跑，设定、大纲、正文及旧文档版本必须继续完整可读。
+  不得加入 Operator 白名单。服务器全量发布与活动 Skills 的允许范围是独立事实，本次没有扩大后者。
+  历史聊天／执行可不续跑，设定、大纲、正文及旧文档版本必须继续完整可读。
 - 问答阶段只扩展现有 `long.agent.start` 的一个显式 Operation；2026-09-04 正文写作阶段另扩展既有
   `long.artifact.approve` 的 V2 全文编辑语义，见下文专节，两阶段均不新增命令名。
 - macOS 两份 Skill 已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机实际入口切换与离线验收，
-  执行链为 `scripts/run.sh → Java Operator → Java CLI`。新版生产入口已于 2026-09-04 用既有 Keychain 会话通过
-  指定账号的 `auth.whoami`，真实写作业务与 Windows 实机尚未验收，服务器部署状态不随本机切换变化。
+  执行链为 `scripts/run.sh → Java Operator → Java CLI → Core 公共 API`。生产账号登录与 `auth.whoami` 已通过，
+  生产隔离小说业务 canary 已通过；Windows 实机仍未验收，服务器部署状态不随本机切换变化。
   该入口变更不开放问答；Python CLI
-  保留为契约对照，问答生产开放前仍须证明 Python/Java 两端对本契约全绿。
+  保留为契约对照，Operator 问答开放前仍须证明 Python/Java 两端对本契约全绿。
 
 ### 当前本地验证证据
 
@@ -43,8 +44,9 @@
 此前两个 Python Skill wrapper 已经单独完成一项不扩大业务能力的凭据诊断收紧：macOS
 Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成稳定的
 `SECURE_CREDENTIAL_BACKEND_REQUIRED`，不再把它吞成泛化 `UNEXPECTED_ERROR`。该变化没有增加命令白名单、
-不会读取或打印密码，也没有明文、环境变量或文件凭据回退。更新者必须在目标发布提交进入 `main`、本节测试由该提交
-复跑、下文对应环境启用门禁满足后，才按“Skill 文件更新清单”开放问答；不得直接从当前工作树复制未发布业务行为。
+不会读取或打印密码，也没有明文、环境变量或文件凭据回退。更新者必须在目标版本实际部署、固定包来源及兼容契约
+可追溯且相关测试通过、下文对应环境启用门禁满足后，才按“Skill 文件更新清单”开放问答；不得直接从当前工作树
+复制未发布业务行为。是否合并到 `main` 不替代真实部署和验收证据。
 
 ### 凭据后端诊断契约
 
@@ -498,20 +500,24 @@ GitHub evidence 和文件型 release guard 已删除；不存在可供 Skill 调
 
 ## 生产启用门禁
 
-只有当 Python CLI、Java CLI、Core 与 Agent 来自同一已部署提交，两种 CLI 的同契约与跨语言差异门禁全绿，
-开发库迁移与真实 provider canary 已通过、生产 route-off 迁移完成，并且生产路由已经能保证该 Skill 接受的每个
-`answer_question` 都创建 V2 Run 时，Production Skill 才能同时更新 `SKILL.md` 与 wrapper Operation 允许集合。
+Python 对照 CLI、实际安装的 Java CLI、Core 与 Agent 的源码和构建来源必须可追溯，两种 CLI 的同契约与跨语言
+差异门禁全绿，并证明与部署版本的公共／共享契约兼容。固定 JAR 记录真实哈希及安装来源；Core/Web 只有在完整
+构建输入与目标提交零差异时才复用不可变镜像，保留原 `ociRevision`，另记复用目标，不伪造所有组件同一 revision。
+在此前提下，开发库迁移与真实 provider canary 已通过、生产 route-off 迁移完成，并且生产路由已经能保证该 Skill
+接受的每个 `answer_question` 都创建 V2 Run 时，Production Skill 才能同时更新 `SKILL.md` 与 wrapper Operation 允许集合。
 
-单用户与单小说交集 allowlist 只授权维护者做 canary，不足以更新通用生产 Skill：allowlist 外小说当前可能
+单用户与单小说交集 allowlist 只授权维护者做 canary，不足以更新通用生产 Skill：在该阶段，allowlist 外小说可能
 回落到 V1，而 V1 的 outcome/消息身份不是本契约。canary 必须使用维护者明确配置 userId/novelId 后的公共
 CLI 调用；通用生产 Skill 继续拒绝 `answer_question`。只有 canary 通过并切到能覆盖该 Skill 全部目标的 V2 路由后，
 才按本文件更新 Production Skill。Local Skill 也只能在其固定本地运行副本、Core 配置以及该 Skill 可操作的全部
 用户/小说目标都保证 fresh 问答创建 V2 Run，并完成对应本地 canary 后开放；单一 allowlist canary 或代码存在都
 不足以修改 Local wrapper 允许集合。
 
-当前提交尚未部署，且 `route=all` 也未开放，所以当前时点两份已安装 Skill 都必须继续拒绝
-`answer_question`。任何一步失败都保持 route-off 或回滚兼容镜像，不用 SSH、数据库、内部 API 或自拼 HTTP
-绕过公共 CLI。
+当前生产 `8a1324c` 的 canary 与 `all` 门禁均已通过，已开放业务的新请求全量使用 V2；两份已安装 Skill 仍保持
+45命令／三种 Operation，拒绝 `answer_question`，本次不改活动 Skill 或白名单。本地临时开发验收服务已停止，
+不能据生产全量宣称本地服务仍运行或已全量。正式库已有 V2 Run，任何失败只允许保持 `schemaReady=true`、关闭
+新建路由并使用 V2-aware 兼容镜像收敛；禁止 DDL rollback 或 V1-only Python Core 回滚。不用 SSH、数据库、内部
+API 或自拼 HTTP 绕过公共 CLI。
 
 ## 文风画像耐久迁移（2026-09-05）
 
@@ -615,4 +621,15 @@ Skill 维护者只需同步任务观察、恢复与作者确认说明；如将�
 安装来源如实记录 `8da04a502c707e8fb4709740fddb20ad85917812` 与 `repositoryDirty=true`；
 原账号／origin／profile和Java路径保留。配置与旧包成对备份于
 `output/operator-session-backup.nUv3ML/local.tar.gz` 和 `production.tar.gz`，不含Keychain。
-本地已用新固定包实际创建唯一验收会话并复验身份；生产固定包更新不代表生产登录、业务或Agent部署已通过。
+本地与生产均已用新固定包创建隔离小说的验收会话并复验身份。生产部署另行完成至 `8a1324c`，不是由安装 JAR
+自动完成。生产问答与同请求重放、整章审阅、规划候选弃用／采用、取消，以及真实 PTY 中断退出130后的 SSE 重连
+均已通过；8个 Run 为4个 completed、3个 failed、1个 cancelled，11次模型调用共82.10684积分，全部结算，
+原失败事实保留。小说成果保全；其余74表原行按既定仅豁免指定 User 余额／更新时间的投影核验通过，剩余旧
+Outbox 原行无差异。仅精确9条已 published 的历史通知在采样窗口内满7天，已由原备份／原基线完整行哈希和
+到期时间独立核对，不宣称原10824行全部仍在。
+
+最终生产配置为 `schemaReady=true / route=all / V1 fresh=false`、空 allowlist，三个视频开关保持关闭；
+`gate-ok:all:migrated-with-v2` 与六服务健康均已验证。完整发布及保全证据见
+`docs/audits/2026-09-06-durable-agent-release-preflight.md`。本地临时验收服务已停止，Windows 实机仍未验收。
+普通 CLI 为126命令，Operator 保持45命令／三种 Operation；不自动开放问答或修改活动 Skill。
+CLI 仍只访问 Core 公共 API，Agent 没有新增直连入口。

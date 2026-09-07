@@ -17,16 +17,20 @@
 ## 当前架构事实
 
 - Next.js 只负责页面、SSR/SEO 和浏览器交互。
-- Java Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE；FastAPI Core 只保留回滚镜像。
+- Java Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE；FastAPI Core 仅保留历史镜像与公共契约来源。
 - FastAPI Agent Service 负责 LangGraph、模型和工具执行，不连接数据库。
 - macOS 本地、生产两份 Operator Skill 已完成实际 Java 入口切换与离线验收，由 shell 启动固定安装的 JAR，
-  不运行 Python 或 uv。CLI 只访问 Core 公共 API，Python CLI 保留为契约对照；2026-09-04 已用既有 Keychain
-  会话通过生产账号 `auth.whoami`，真实写作业务与 Windows 实机尚未验收，服务器部署状态不随本机入口切换。
-- Java Core 单体已于 2026-08-26 完成生产切换并处于观察期；生产不得双 Core 或双写，Python Core 只按
-  已冻结流程用于整镜像回滚。
+  不运行 Python 或 uv。普通 CLI 为126命令，Operator 保持45命令／三种 Operation，二者只访问 Core 公共 API；
+  Python CLI 保留为契约对照。生产账号登录、`auth.whoami` 与隔离小说 canary 已通过；Windows 实机
+  仍未验收，服务器部署状态不随本机入口切换。
+- Java Core 单体已于 2026-08-26 完成生产切换；生产不得双 Core 或双写。当前正式库已迁移并存在 V2 Run，
+  永久禁止 DDL rollback 和 V1-only Python Core 回滚，只允许保留 V2 收敛能力的兼容镜像恢复。
+- 耐久 Agent 生产 `8a1324c` 已完成 canary 和最终全量门禁，已开放业务的新请求使用 V2；配置为
+  `schemaReady=true / route=all / V1 fresh=false`，allowlist 已清空，视频仍关闭。小说成果保全，9条满7天的
+  旧已发布通知单列核验，完整证据见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。活动 Skill 白名单不变。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 自然入口、同 Run 澄清及 Web/CLI 适配以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准；
-  本轮只更新仓内源码与契约，不自动更新固定安装包或扩大 Operator 允许范围，不能据此声称生产生效。
+  源码、固定安装包和生产路由分别核对，不自动扩大 Operator 允许范围；当前现场进度以发布审计为准。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口；普通 Redis 承担可重建队列/认证事实，独立 AOF
   execution Redis 只承担当次模型调用边界和未送达终态 journal。
 - 生产继续使用个人项目既有的 `.github/workflows/build.yml` 和 `scripts/deploy-production.sh`：CI 通过后由

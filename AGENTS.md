@@ -52,7 +52,8 @@
   BillingReservation 表及规格列、约束和索引；BillingReservation 只用于模型调用前的积分预留、幂等结算和
   未知用量对账，不得成为第二份作品或工作流状态。不授权修改正式作品内容、回填历史 Graph、删除旧任务表、
   启用生产视频或跳过生产 canary。
-  一旦正式库存在 V2 Run，DDL rollback 禁止执行；应用回滚必须继续读取或隔离 V2 记录。
+  当前正式库已存在 V2 Run，DDL rollback 永久禁止执行；应用回滚必须保留 V2 查询与收敛能力，
+  不得使用 V1-only Python Core 或不兼容的旧 Agent 镜像。
   用户于 2026-09-07 进一步授权按 `docs/specs/2026-09-07-durable-release-preserve-novel-assets.md`
   退出具名旧执行历史并主动完成服务器配置；聊天／旧执行恢复可不兼容，但设定、大纲、正文和版本成果必须
   保全。不得物理删除会断开成果来源的 Task／Command 或候选；先备份、锁定精确清单，只退出旧执行状态，
@@ -82,13 +83,18 @@
   启动固定安装的 Java CLI。新入口不依赖 Python 或 uv，仍只访问 Core 公共 API；2026-09-07 为新小说问答补齐
   现有公共会话创建接口的 `long.session.create`，普通 CLI 共126命令，Skill仍只允许原45命令。
   该补齐不增加 Core API 或数据库结构；Java 使用 macOS Keychain 或 Windows Credential Manager，不允许明文回退；Windows 实机验收
-  尚未完成；2026-09-04 已通过既有 Keychain 会话的生产账号 `auth.whoami`，真实写作业务仍待验收，
-  服务器部署状态不随本机切换变化。Python CLI 保留为契约对照。
+  尚未完成；生产账号登录、`auth.whoami` 与隔离小说业务 canary 已通过。
+  服务器部署状态不随本机切换变化。Python CLI 保留为契约对照，活动 Skill 白名单本次不变。
   若接口、命令或结构发生获批变化，必须重新计算并同步产品基线，
   不能机械维护旧数字。
-- Java Core 已于 2026-08-26 单切生产并处于观察期：生产始终只有一个 Core，不双 Core、不双写；Python
-  Core 只保留整镜像回滚，Python Agent 保留，Web 继续遵守 Next.js 现有边界。手机号认证已在切换后另立
-  spec 实施；开发库与正式库具名迁移、备份、契约复验和生产启用均已完成，生产仍须保持旧密码登录回退，且不得
+- 耐久 Agent 正式库迁移、`8a1324c` 部署、生产 canary 与全量门禁均已完成；配置为
+  `schemaReady=true / route=all / V1 fresh=false`，allowlist 已清空，已开放业务的新请求全量使用 V2，视频仍关闭。
+  小说成果保全；精确9条满7天的旧已发布通知另行核验，不宣称全部旧行未变。证据见
+  `docs/audits/2026-09-06-durable-agent-release-preflight.md`。本地临时开发验收服务已停止，不代表本地服务全量开放。
+- Java Core 已于 2026-08-26 单切生产：生产始终只有一个 Core，不双 Core、不双写；Python Core 仅保留
+  历史镜像与契约来源，不再是现正式库回滚目标。Python Agent 保留，Web 继续遵守 Next.js 现有边界。
+  手机号认证已在切换后另立 spec 实施；开发库与正式库具名迁移、备份、契约复验和生产启用均已完成，
+  生产仍须保持旧密码登录回退，且不得
   因手机号开放而启用任何视频能力。
 
 ## 当前架构
@@ -103,7 +109,7 @@
 
 - `apps/web`：Next.js 16，仅页面、SSR/SEO、浏览器交互和生成客户端，不得包含业务 API、Server Actions、数据库客户端或模型运行时。
 - `apps/core-api-java`：当前生产 Core，独占 PostgreSQL 访问、浏览器认证、归属校验、业务规则、ReviewArtifact、计费和 SSE。
-- `apps/core-api`：FastAPI Core 回滚镜像与公共契约来源，不与 Java Core 并行运行。
+- `apps/core-api`：FastAPI Core 历史镜像与公共契约来源，不与 Java Core 并行运行，不用于现有 V2 正式库回滚。
 - `apps/agent-service`：FastAPI 智能体服务，负责 LangGraph、模型、工具循环和运行队列；V2 单 Step 执行边界使用
   独立持久 execution Redis，普通队列/认证 Redis 仍可重建。禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。
 - `packages/service-contracts`：Core 与 Agent 的版本化 Pydantic 契约。

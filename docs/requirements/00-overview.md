@@ -2,7 +2,7 @@
 
 状态：当前产品事实
 
-核对日期：2026-08-27；Agent 迁移与 CLI 相关段落更新于 2026-09-07
+核对日期：2026-08-27；Agent 迁移与 CLI 相关段落更新于 2026-09-08
 
 代码基线：当前工作树；Java 等价迁移历史基线仍为 `c9afc95`
 
@@ -20,6 +20,11 @@
 
 本文档不代表某次生产部署已经验收成功。除代码明确强制的生产开关外，是否已经发布到线上仍应以当次
 部署记录和真实环境验收为准。发生冲突时，按 `DOCS.md` 的项目事实优先级处理。
+
+当前耐久 Agent 生产已完成 V2 迁移、`8a1324c` 部署、真实 canary 与最终全量门禁，已开放业务的新请求全量使用 V2。
+配置为 `schemaReady=true / route=all / V1 fresh=false`，用户／小说 allowlist 已清空，生产视频仍关闭。
+小说成果保全，9条满7天的旧已发布通知单列核验；不把仓内21项操作全数解释为生产开放，也不宣称全部旧行未变。
+现场证据见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。
 
 当前可量化基线：
 
@@ -730,8 +735,8 @@ CLI 的产品规则：
 
 中短篇 `short.agent.watch` 已适配 V1/V2：V2 事件只用于观察，断流或终态后 GET 同一 Run，生成成功按精确
 `candidateVersionId` 进入原版本确认流程，检查成功读取完整 `checkReport.text`。命令、启动参数和 Operator
-允许范围未变；本批没有更新固定 JAR、活动 Skills 或服务器，后续 Skills 更新契约见
-`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的中短篇专节。
+允许范围未变；该实现阶段当时没有更新固定 JAR、活动 Skills 或服务器，后续安装及生产状态以本文当前进度和
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 为准，其中短篇专节保留对应观察语义。
 
 CLI 当前不是 152 个公共 API 的逐接口镜像，明确缺口包括：
 
@@ -752,8 +757,9 @@ schemaVersion 5，并保留固定 origin/profile、绑定用户名和既有 Keyc
 
 Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回退到明文；Windows 实机验收不属于
 本次 macOS 入口切换，Linux 仍不是受支持的生产凭据平台。Python CLI 源码及跨语言测试继续保留为契约对照，
-不作为新版 macOS Skill 的业务入口。2026-09-04 已用新版生产入口和既有 Keychain 会话通过指定账号的
-`auth.whoami`，没有导出令牌；真实写作业务仍待验收。本机入口切换不代表服务器 Agent V2 已部署或生产问答已开放。
+不作为新版 macOS Skill 的业务入口。生产账号登录与 `auth.whoami` 已通过，没有导出令牌；新固定包已用于
+指定隔离小说 canary。生产 `8a1324c` 已完成验收与 `route=all` 切换；本机入口切换不自动部署服务器，也不扩大
+Operator 的45命令／三种 Operation。当前本地临时开发验收服务已停止，不宣称本地服务全量开放。
 生产 Operator 当前只支持无认证 HTTP 代理；TLS、SOCKS 或带认证代理明确拒绝，不会自动改为直连，
 具体环境变量规则见 Java CLI 文档。本地回环始终直连。
 
@@ -766,7 +772,7 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 2026-09-05 分支继续接入只读章节审阅、完整场景改写、总纲/节点精确选区改写。审阅完成结果由
 `long.task.get/watch` 的 reviewReport 完整读取，显式调用无会话也可用；两类改写仍须确认候选后采用。
 自然入口新增审阅和场景改写，大纲选区必须显式冻结来源。仓内验证进度见
-`docs/specs/2026-09-05-durable-review-and-rewrites.md`；本阶段未更新本机固定包或部署服务器。
+`docs/specs/2026-09-05-durable-review-and-rewrites.md`；该实现阶段当时未更新本机固定包或部署服务器，当前状态见本文开头。
 
 同日结构化接线又使普通 Java/Python 对照 CLI 的 `long.agent.start` 接受 create_lore、revise_lore、
 create_outline、revise_outline、manage_foreshadowing，并补回此前遗漏的 rewrite_scene 显式白名单；新增的是
@@ -782,8 +788,8 @@ create_outline、revise_outline、manage_foreshadowing，并补回此前遗漏�
 `inputMode=clarification`，不新增命令。Web 普通新消息新建 Run，澄清只回答同一 Run 的当前问题，
 草案返工仍走带候选 revision 的决定接口；旧 V1 恢复保留为明确动作。澄清 watcher 输出完整问题和
 `decisionStepId/revision`，不虚构 Artifact。两份受限 Operator 继续拒绝这两种输入模式，45 命令及三种显式
-Operation 不变；本轮未更新已安装固定 JAR 或 Skill，也未部署服务器。源码、完整跨进程验收与生产开放
-必须分别判断，实施状态以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准。
+Operation 不变；该实现阶段当时未更新已安装固定 JAR 或 Skill，也未部署服务器。后续安装与生产进度见本文开头；
+源码、完整跨进程验收与生产开放必须分别判断，实施状态以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准。
 
 ## 11. 接口与数据追溯
 
@@ -863,7 +869,8 @@ Operation 不变；本轮未更新已安装固定 JAR 或 Skill，也未部署�
 - 只有 Nginx 对外发布端口，Agent 不发布宿主机端口；
 - 2 核 2 GB 是当前默认部署预算，每个 Python 服务一个 worker；
 - 发布在 Runner 预构建镜像，服务器不现场构建；
-- 发布失败时按经验证的上一标签恢复 Web、Core 和 Agent，回滚成功仍表示本次发布失败；
+- 发布失败时按经验证的上一组不可变镜像恢复 Web、Core 和 Agent，回滚成功仍表示本次发布失败；当前正式库
+  已有 V2 Run，只允许 V2-aware 兼容组合，禁止 DDL rollback 和 V1-only Python Core 镜像回滚；
 - 应用启动不自动建表、删表或迁移；schema guard 只读核对结构；
 - 只有用户明确批准的具名迁移可以在备份、隔离验证和门禁下执行。
 
@@ -929,8 +936,8 @@ Operation 不变；本轮未更新已安装固定 JAR 或 Skill，也未部署�
 ### 14.5 自动化与平台
 
 - CLI 不是公共 API 全量镜像；
-- macOS Operator Skill 的 Java 实际入口已切换并完成离线验收，生产既有会话的 `auth.whoami` 已通过；
-  Python CLI 保留为契约对照，真实写作业务和 Windows 实机尚未验收；
+- macOS Operator Skill 的 Java 实际入口已切换并完成离线验收，生产登录与 `auth.whoami` 已通过；
+  Python CLI 保留为契约对照，生产隔离 canary 与全量门禁已通过，Windows 实机仍未验收；
 - 生产是单机 2 核 2 GB 预算，不是多地域、高可用或水平扩展架构；
 - PostgreSQL schema 默认冻结，应用不能自动迁移；
 - 当前没有公开 Webhook、第三方插件市场或外部开发者 API 产品。
@@ -947,7 +954,8 @@ Java 重写的第一目标是行为等价，不是顺便增加功能。完成迁
 - CreativeOperation、ReviewArtifact、部分应用、选区来源绑定、SSE 恢复和任务对账一致；
 - 视频在生产继续关闭，不能因迁移意外启用；开发环境的拆镜、视觉、提示词、Take 和后期版本语义一致；
 - schema 指纹守卫、无自动 DDL、受控文件存储和服务身份边界一致；
-- Python Core 回滚镜像退役前，Java 对当前功能和限制的 TDD/差异测试全部通过。
+- Java 单切时要求对当前功能和限制的 TDD/差异测试全部通过；现正式库已有 V2 事实，Python Core 镜像仅历史
+  留存，不再具有现正式库回滚资格。
 
 手机号登录已在 Core 完整切换后通过 `docs/specs/2026-08-27-aliyun-phone-auth.md` 独立实施，仍受迁移和
 生产开关门禁；在线支付和其他商业功能继续要求另立规格。

@@ -1,7 +1,8 @@
 # Durable Agent 发布前现场检查
 
 首份快照：2026-09-06 07:52（北京时间）；下列首段保留当时事实，后续变化见文末日期分节。
-当前发布尚未完成；用户已授权保全成果并退出旧执行，生产账号仍需恢复有效登录。
+当前发布已完成：生产 `8a1324c` 已通过真实canary、小说成果保全、账务和最终all门禁，已开放业务新请求全量走V2。
+V1 fresh与生产视频保持关闭；8条验收Run中的3次失败及真实费用完整记录。下文历史阻塞不代表当前状态。
 
 ## 已证明的状态
 
@@ -282,3 +283,112 @@ canary前原75表10824行的真实PK／完整行hash基线已保存在服务器�
 本节直接证据在 `output/release-d737de4/` 与 `output/release-924c857/`，完整业务回执受0700目录／0600文件保护，
 无密码、Cookie、Token、私钥或数据库URL入文档。仓外不可变controller／OIDC未实现；个人项目规格已退役该外部门禁，
 不得把本次仓内与服务器验收冒充完成了外部信任根，也不再因此另建发布控制面。
+
+## 2026-09-07：审阅格式兼容修复及再次真实验收
+
+第二次同指令审阅 `cmtrb3j1th15cu521pla8qt1u` 仍以 `MODEL_STRUCTURED_OUTPUT_INVALID` 终止；
+新增安全日志明确为 `output.chapter_review_text.v1 / json_decode_error / json`。1次模型调用、4.981积分已唯一结算，
+原失败保留且未重放。此时四Run（2completed／2failed）共5次调用、26.77124积分，全部终态且账务与Redis活动索引收敛。
+这条诊断只证明JSON解码失败，不能据此倒推原输出一定含未转义换行。
+
+`8a1324c18356b8b7cb325e9352582c33aa94ab01` 增加一次有界、无损的JSON字符串LF／CR／tab转义恢复，
+恢复后仍经过原严格JSON与完整Schema验收；不放宽Schema、不截断输出、不增加模型重试。301项定向、
+完整Agent1741项、全仓Ruff、294文件Mypy及diff-check通过；独立代码复核未发现正文丢失、额外调用或计费问题。
+生产精确镜像组合为：
+
+| 服务 | 实际镜像ID | 来源 |
+| --- | --- | --- |
+| Core | `sha256:822d1c0c522e6912523f9615900b3ef2cfef4f2cb141951e5fedb887ee6564de` | 构建输入与87dfc73零差异，复用原ID／OCI来源 |
+| Agent | `sha256:9c3a67c0600965cad42ca20a8c9ced3fb2076f36c753a9d2d3fe683551fcf178` | 8a1324c真实重建 |
+| Web | `sha256:95c863115fd5202ad4f39ebf86b278abeb55256cd1dd808334260e3c8bd05cd2` | 构建输入与87dfc73零差异，复用原ID／OCI来源 |
+
+三服务部署标签均为完整8a1324c，linux/amd64；不伪造复用镜像的OCI revision。原部署脚本退出0，六服务healthy、
+精确schema守卫、编排冒烟和重新启用交集allowlist门禁全部通过；execution manifest仍为
+`920ca5f4a4b98e078bdf620dcc4f1b2e943d2290029718aa3aa749277ad15b75`。
+
+第三次审阅 `cmtrc8bvbz6ywrgpaamft69g4` 复用完全相同指令，仅使用新建且已授权的 `review-003` 请求身份，
+已completed、error=null、activeSteps为空。公共CLI完整回读550字报告，哈希为
+`a378fc0ea2b8517d718c44174497a5dd6b20c0773cf7c075e147b8051035a6cb`；章节正文／标题／updatedAt与问答前基线完全一致。
+本次成功证明新版本的真实审阅链路通过，不证明前两次坏输出的具体字符原因，也不把随机一次成功解释为模型永不出错。
+直接证据：`output/release-8a1324c/production-json-recovery-deploy.log`、
+`production-json-recovery-allowlist.log`，以及 `output/release-d737de4/production-canary/review-third-check-5ba61866795847c39ee34fe6b95df21b/`。
+
+规划采用 `cmtrcahnwz6zhrgpay6bsxnxt` 已completed，Artifact `cmtrcbg54z703rgpagwp0wzes` rev1已applied，
+正式两场景BeatPlan为 `cmtrccniez70prgpaah38lsyn`；完整候选与Diff保留，章节正文／标题不变。
+运行中的真实PTY watcher按Ctrl-C退出130，同一watch请求重连同Run，未重发start或cancel。
+独立末次读取最初漏传revision，被公共API以 `ARTIFACT_REVISION_REQUIRED` 正确拒绝；只修验收脚本参数后用新回执
+复验成功，原失败回执保留，没有重复采用或修改产品代码。
+
+取消样本 `cmtrcflavz70trgpas17bp5mv` 未进入waiting_user，在生成Step以 `STEP_BUDGET_EXCEEDED` 终止，
+因此没有发送cancel，也不计作取消验收通过。正式库冻结预算与实际usage的独立对照确认唯一越界维度为
+reasoningTokens 7999 > maxReasoningTokens 6000；completionTokens为7999（上限8000）、visibleOutputTokens为0，
+耗时65.675秒（上限180秒）、1次调用、0次格式纠正。`bounded → thinking enabled/high` 是原有创作策略，
+未发现本次映射缺陷；供应商总输出上限不保证给可见正文预留token，系统依原预算正确终止，不扩大预算或偷偷重试。
+本次19.79912积分已唯一settled；七Run共9次模型调用、68.2946积分，4completed／3failed，账务全部匹配、无未知用量。
+正文和先前已采用BeatPlan不变；恢复route-off后的17项正式联合drain全零。
+完整回执为 `production-canary-seven-runs-budget-failure-audit.json`、`production-plan-cancel-failed-step-budget.json`，
+以及 `output/release-8a1324c/production-cancel-budget-route-off-drain.log`。旧失败完整保留，后续仅补一条具名取消样本，
+不以无限新建任务凑成功率；该受控错误不伪装成模型调用成功或用户取消。
+
+## 2026-09-07：最终业务、账务与小说成果验收
+
+唯一补充取消样本 `cmtrcvbchpigjbnudrgpmt4gc` 已先进入waiting_user，经完整读取精确rev1候选后显式cancel，
+回读为cancelled／error=null／无活动Step。Artifact `cmtrcvubspih3bnudrn4mk5n5` 保留awaiting_user状态及完整payload／diff，
+Run不再可操作；此前已采用BeatPlan `cmtrccniez70prgpaah38lsyn`、正文和标题均不变。
+原预算失败样本未被改为成功或取消，没有继续新增第三个取消样本。
+
+最终精确8个Run（4completed／3failed／1cancelled）全部纳入审计，而非只抽取成功样本：
+
+| Run | 实际结果 | 模型调用 | 积分 |
+| --- | --- | ---: | ---: |
+| `cmtr71lss3fckr0be0dcxszrd` | 问答完成，同请求重放不重复产物或计费 | 1 | 1.091 |
+| `cmtr75du53fd5r0besvklv1s5` | 第一次审阅结构错误，原失败保留 | 1 | 6.082 |
+| `cmtr76w9u3fdor0bez0zeqojb` | 规划生成、复审、用户弃用完成 | 2 | 14.61724 |
+| `cmtrb3j1th15cu521pla8qt1u` | 第二次审阅JSON解码错误，原失败保留 | 1 | 4.981 |
+| `cmtrc8bvbz6ywrgpaamft69g4` | 第三次审阅完成，550字报告 | 1 | 4.686 |
+| `cmtrcahnwz6zhrgpay6bsxnxt` | 规划采用完成，真实PTY退出130并重连同Run | 2 | 17.03824 |
+| `cmtrcflavz70trgpas17bp5mv` | 思考预算超限，未发cancel | 1 | 19.79912 |
+| `cmtrcvbchpigjbnudrgpmt4gc` | 待确认阶段显式取消，候选保留 | 2 | 13.81224 |
+
+共11次模型调用、11份TokenUsage、11份唯一结算账务／Reservation，合计82.10684积分；无重复计费、未知用量或
+未结算预留。指定账号余额从42160928440降为42078821600微积分，差额恰为82106840；用户决定Step不伪造模型用量。
+正式route-off／V1 fresh=false后的联合drain17项全部为0，V1/V2索引版本均为1。
+
+原75表10824行基线保持不变。首次严格核验发现9条WritingEventOutbox旧行缺失，未直接忽略或重取基线；从具名原备份
+只解析该表的COPY数据，在只读事务中按真实行类型重建hash，9行完整hash与原基线逐项相同。它们均为published，
+publishedAt为2026-08-31 12:30:16.335～13:44:00.231 UTC，7天到期时刻严格处于本次采样窗口内，符合未改动的原有终态
+事件保留规则。没有具体删除日志，故结论是“与既有自动过期规则一致”，不伪称证明了某个清理线程的执行。
+Outbox不是作品来源表，没有指向它的入向外键；其余74表和Outbox剩余旧行均逐值保全，小说正文、设定、大纲、版本、候选
+及来源没有因本次发布损坏。指定User只按原约定排除余额／updatedAt，并已独立对平费用。
+
+最终保全回执明确 `allPreexistingRowsPreserved=false`、`allProtectedPreexistingRowsPreserved=true`、
+`expiredHistoricalOutboxRows=9`，不宣称10824行全部仍在；没有恢复备份、修改基线或手工清理数据库／Redis。
+证据为 `output/release-d737de4/production-canary-final-eight-runs-audit.json`、
+`production-canary-outbox-expiry-evidence.json`、`production-canary-preservation-verify.json`，以及
+`output/release-8a1324c/production-final-canary-route-off-drain.log`。本轮四个具名临时开发容器已停止，数据卷与备份保留。
+
+## 最终生产状态
+
+全量配置经原具名helper备份后写入，同一8a1324c镜像只重建Core并reload Nginx，
+`durable-agent-v2-rollout-gate.sh all novelwriter` 真实退出0，输出 `gate-ok:all:migrated-with-v2`；六服务均healthy，
+服务器源码HEAD为 `8a1324c18356b8b7cb325e9352582c33aa94ab01`，三服务镜像ID与前述部署清单相同。
+当前配置：
+
+```dotenv
+DURABLE_AGENT_EXECUTION_SCHEMA_READY=true
+DURABLE_AGENT_EXECUTION_ROUTE_MODE=all
+V1_FRESH_AGENT_STARTS_ENABLED=false
+DURABLE_AGENT_EXECUTION_USER_ALLOWLIST=
+DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST=
+VIDEO_PREVIEW_ENABLED=false
+VIDEO_DISPATCH_ENABLED=false
+SEEDANCE_ENABLED=false
+```
+
+全量只指已开放业务的新Agent执行，不表示生产视频、所有CLI操作或Windows凭据平台同时开放。
+后续故障只能保留schemaReady并关闭新建路由，使用V2-aware兼容镜像收敛；禁止DDL rollback或V1-only旧镜像。
+本次沿用当前工作分支和原源码bundle发布，没有向GitHub main合并或推送；末次文档收口不另造业务镜像。
+全量直接证据为 `output/release-8a1324c/production-final-all-gate.log` 与
+`output/release-87dfc73/production-config-all.json`。仓外controller／OIDC未实现，已依个人项目规格退役，不属于本次上线结论。
+2026-09-08 00:58（北京时间）完成切换后的公共HTTPS身份／同一取消Run／章节回读，正文、标题与已采用BeatPlan仍一致，
+没有新模型调用；回执为 `output/release-d737de4/production-canary/final-all-readback/summary.json`。

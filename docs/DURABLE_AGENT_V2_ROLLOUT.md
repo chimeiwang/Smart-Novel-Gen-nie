@@ -2,7 +2,11 @@
 
 状态：个人项目人工迁移与 canary 手册。2026-09-07 已在真实服务器开发库完成两次 forward、
 空 V2 rollback 和再次 forward，完成结构导出／复验及小说成果保全验证；真实开发canary和取消修复后全零drain已通过。
-正式库尚未迁移，生产身份授权、canary和全量切换尚未完成。
+正式库已完成48条旧执行保全退出、两次幂等forward及75表contract复验，并已存在V2事实。
+生产身份、8a1324c部署、指定账号／隔离小说canary及最终all门禁已全部通过；当前为
+`schemaReady=true / route=all / V1 fresh=false`，用户与小说allowlist已清空，生产视频仍关闭。
+问答、审阅、规划弃用／采用、真实CLI中断重连和取消均已验证；原小说成果保全，失败用量及9条过期旧通知单列在现场审计。
+本正式库不得重跑首次索引初始化、执行DDL rollback或使用V1-only镜像。
 运行配置与完整现场记录见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。
 
 权威规格：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
@@ -14,8 +18,9 @@
 普通应用发布继续由 `.github/workflows/build.yml` 构建并上传精确提交的三张镜像和源码 bundle，再调用
 `scripts/deploy-production.sh` 完成服务器切换。普通发布不执行 Durable Agent V2 DDL。本手册只描述由单一可信维护者
 在明确维护窗口中执行的迁移、contract 复验、联合 drain 和 canary；这些动作不能由普通 `main` push 隐式触发。
-正常 `route=off` 发布仍允许 `V1_FRESH_AGENT_STARTS_ENABLED=true` 继续提供 V1 写作；只有进入本手册的迁移或
-联合 drain 阶段才必须显式关闭 V1 fresh start。
+首次兼容部署阶段可用 `route=off / V1_FRESH_AGENT_STARTS_ENABLED=true` 保留旧写作入口；进入迁移或
+联合 drain 阶段必须关闭 V1 fresh start。当前正式库已进入V2切换流程，按2026-09-07规格不再为旧聊天续跑开放V1新建；
+后续全量或故障route-off均保持 `V1_FRESH_AGENT_STARTS_ENABLED=false`。
 
 公共业务 canary 只能使用固定环境的公共 CLI；Operator Skill 必须等 canary 与其目标范围门禁通过后才能开放。
 迁移、Compose、数据库和服务器脚本不得加入 Skill wrapper 白名单。
@@ -398,7 +403,8 @@ fingerprint 不同时还必须先证明当前运行 Core 的实际 route 为 off
 - 禁止把旧 contract 当回滚目标；
 - 只能 route-off 后由 V2-aware 镜像排空和修复。
 
-DDL rollback 只服务“刚完成结构迁移、尚无任何 V2 事实”的短窗口。先切回：
+DDL rollback 只服务“刚完成结构迁移、尚无任何 V2 事实”的短窗口。以下示例仅适用于仍满足该条件的
+其他首次迁移环境，2026-09-07已存在V2事实的当前正式库不适用。符合条件时先切回：
 
 ```dotenv
 DURABLE_AGENT_EXECUTION_SCHEMA_READY=false
