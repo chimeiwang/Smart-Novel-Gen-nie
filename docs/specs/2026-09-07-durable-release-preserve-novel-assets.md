@@ -144,6 +144,25 @@ Prompt、Schema、registry、重试策略或模型调用数，也不回放已失
 测试验证具名关联、原终态及哈希不变、单次模型调用不变，以及正文、字段路径和 secret 不泄漏。
 仅经明确授权的新 canary 可用新增日志观察真实细分原因，本改动不放宽结构化输出验收。
 
+### JSON 字符串控制字符的有界无损恢复
+
+第二次生产整章审阅安全日志已证明 `json_decode_error/json`，尚未证明是未转义 LF、CR 或 tab。
+本次只增加可离线证明无损的解析兼容，不把该假设写成已查明的生产根因。
+
+严格 JSON 解析首先照常执行；只有 `JSONDecodeError` 明确属于非法控制字符时，才允许一次线性扫描。
+扫描只把 JSON 字符串内部的真实 LF／CR／tab 编码为对应转义，字符串外原有空白不变；反斜杠转义与
+引号边界必须正确识别，任何其他原始 U+0000～U+001F 控制符直接拒绝。禁止 `strict=False`、全局替换、
+补引号／容器、删字段、拼接多个对象或截断正文。候选必须再次经过原严格解析、重复键与 NaN／Infinity
+拒绝钩子及完整原 Schema；任何一步失败仍按原类别和错误码终止。合法转义字符及恢复后的真实正文逐字符保留。
+
+一次恢复不新增模型调用或 HTTP 重试，沿现有 `escape_json_string_controls` 方法码记录，使用既有
+`structuredOutputCorrectionCount=1`／`StepUsage.protocolCorrections=1` 及冻结预算，不新增计费请求。
+DeepSeek 可通过既有安全恢复 logger 记录固定方法、Schema 标识和用量，不保留原始响应。仍失败时只输出
+固定 keyword：`json_control_character`、`json_syntax`、`json_duplicate_key` 或 `json_constant`；
+不保存异常 msg、字符、字段名或原文，Executor 只新增这四项日志白名单。
+不修改 Prompt、registry、共享回调、Java、CLI 或自动重试；本地测试必须覆盖字符无损、反斜杠／引号、
+重复键／常量／多对象／坏转义／其他控制符拒绝、Schema 复验、日志脱敏、一次调用与一次纠正计数。
+
 本次实际结果、测试计数、备份位置、开发结构指纹及生产未执行事项统一见
 `docs/audits/2026-09-06-durable-agent-release-preflight.md` 的2026-09-07分节；CLI 实际安装哈希与
 Skills 更新说明见 `docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 文末。

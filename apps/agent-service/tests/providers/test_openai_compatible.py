@@ -13,6 +13,7 @@ import jsonschema_rs
 import pytest
 from inkforge_agents.config import Settings
 from inkforge_agents.providers.base import (
+    ModelStructuredOutputRequest,
     ModelTool,
     ModelTurnResult,
     ModelUsage,
@@ -45,6 +46,92 @@ class ModelTurnRequest(BaseModelTurnRequest):
     def __init__(self, **data: Any) -> None:
         data.setdefault("policy", LEGACY_PROVIDER_DEFAULT)
         super().__init__(**data)
+
+
+def _parse_json_control_fixture(raw_text: str, *, max_length: int | None = None):
+    report_schema: dict[str, Any] = {"type": "string", "minLength": 1}
+    if max_length is not None:
+        report_schema["maxLength"] = max_length
+    schema = {
+        "type": "object", "properties": {"report": report_schema},
+        "required": ["report"], "additionalProperties": False,
+    }
+    return provider_module._parse_and_validate_structured_output(
+        raw_text=raw_text,
+        structured_output=ModelStructuredOutputRequest(
+            route="chat_json_output_v1", name="output_chapter_review_text_v1", jsonSchema=schema),
+        validator=jsonschema_rs.validator_for(schema),
+    )
+
+
+@pytest.mark.parametrize("value", [
+    "首行__LF__末行", "首行__CR____LF__末行", "列一__TAB__列二", "引号\"__LF__反斜杠\\目录",
+    "原有字面量\\n__LF__真实换行", "原有转义空字符\x00__TAB__制表",
+    "emoji😀__CR__组合e\u0301", "__LF__" * 2000,
+])
+def test_JSON字符串内LFCRtab一次无损恢复保留其他转义(value):
+    raw = json.dumps({"report": value}, ensure_ascii=False)
+    expected = value
+    for marker, character in (("__LF__", "\n"), ("__CR__", "\r"), ("__TAB__", "\t")):
+        raw = raw.replace(marker, character)
+        expected = expected.replace(marker, character)
+    parsed, diagnostic, recovery = _parse_json_control_fixture(raw)
+    assert parsed == {"report": expected}
+    assert diagnostic is None
+    assert recovery == "escape_json_string_controls"
+    assert parsed["report"].encode("utf-8") == expected.encode("utf-8")
+
+
+@pytest.mark.parametrize("control", [
+    chr(value) for value in range(32) if value not in (9, 10, 13)
+])
+def test_JSON其他原始控制符即使位于换行之后也拒绝(control):
+    parsed, diagnostic, recovery = _parse_json_control_fixture(
+        '{"report":"首行\n' + control + '私密正文"}')
+    assert parsed is None
+    assert diagnostic is not None
+    assert diagnostic.code == "json_decode_error"
+    assert diagnostic.keyword == "json_control_character"
+    assert recovery is None
+    assert "私密正文" not in diagnostic.model_dump_json()
+
+
+@pytest.mark.parametrize(("raw", "keyword"), [
+    ('{"report":"首行\n末行","report":"重复"}', "json_duplicate_key"),
+    ('{"report":"首行\n末行","extra":NaN}', "json_constant"),
+    ('{"report":"首行\n末行","extra":Infinity}', "json_constant"),
+    ('{"report":"首行\n末行","extra":-Infinity}', "json_constant"),
+    ('{"report":"首行\n末行"}{"report":"第二个"}', "json_syntax"),
+    ('{"report":"首行\n末行\\x"}', "json_syntax"),
+    ('{"report":"首行\\\n末行"}', "json_syntax"),
+    ('{"report":"首行\n末行', "json_syntax"),
+    ('{"report":"首行\n末行",}', "json_syntax"),
+    ('{"report":"重复","report":"重复"}', "json_duplicate_key"),
+    ('{"report":NaN}', "json_constant"),
+    ('{"report":"不完整"', "json_syntax"),
+])
+def test_JSON恢复不能放过其他语法问题且诊断只含固定分类(raw, keyword):
+    parsed, diagnostic, recovery = _parse_json_control_fixture(raw)
+    assert parsed is None
+    assert diagnostic is not None
+    assert diagnostic.code == "json_decode_error"
+    assert diagnostic.keyword == keyword
+    assert diagnostic.jsonPointer == ""
+    assert recovery is None
+
+
+def test_JSON已合法转义或字符串外空白不记恢复且原Schema仍完整复验():
+    parsed, diagnostic, recovery = _parse_json_control_fixture(' \n{"report":"完整\\n报告"}\r\t')
+    assert parsed == {"report": "完整\n报告"}
+    assert diagnostic is None
+    assert recovery is None
+    parsed, diagnostic, recovery = _parse_json_control_fixture(
+        '{"report":"首行\n末行"}', max_length=2)
+    assert parsed is None
+    assert diagnostic is not None
+    assert diagnostic.code == "schema_violation"
+    assert diagnostic.keyword == "maxLength"
+    assert recovery == "escape_json_string_controls"
 
 
 def assert_exception_chain_is_sanitized(
@@ -2558,7 +2645,8 @@ async def test_single_json_fence_is_unwrapped_and_fully_validated(
     recovery_records = [
         record
         for record in caplog.records
-        if record.message == "供应商结构化输出已执行确定性恢复 code=unwrap_single_json_fence"
+        if record.message.startswith(
+            "供应商结构化输出已执行确定性恢复 code=unwrap_single_json_fence schema=")
     ]
     assert len(recovery_records) == 1
     recovery = recovery_records[0]
@@ -2620,8 +2708,8 @@ async def test_structured_output_rejects_ambiguous_or_incomplete_json_envelopes(
     assert result.structuredOutputDiagnostic is not None
     assert result.structuredOutputDiagnostic.code == "json_decode_error"
     assert result.structuredOutputDiagnostic.jsonPointer == ""
-    assert result.structuredOutputDiagnostic.keyword == "json"
-    assert 'code=json_decode_error pointer="" keyword=json' in caplog.text
+    assert result.structuredOutputDiagnostic.keyword == "json_syntax"
+    assert 'code=json_decode_error pointer="" keyword=json_syntax' in caplog.text
     assert "供应商结构化输出已执行确定性恢复" not in caplog.text
     assert "SECRET_BODY" not in result.model_dump_json()
     assert "SECRET_BODY" not in caplog.text
@@ -2679,5 +2767,5 @@ async def test_structured_output_invalid_json_never_returns_partial_draft(
     assert result.structuredOutputDiagnostic is not None
     assert result.structuredOutputDiagnostic.code == "json_decode_error"
     assert result.structuredOutputDiagnostic.jsonPointer == ""
-    assert result.structuredOutputDiagnostic.keyword == "json"
+    assert result.structuredOutputDiagnostic.keyword == "json_syntax"
     assert "private unfinished value" not in result.model_dump_json()

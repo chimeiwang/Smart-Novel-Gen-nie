@@ -248,3 +248,37 @@ production严格readiness与首次lifespan的组合。最小修复规格已追�
 日志／回放和独立真实Redis48项通过，完整Agent1666项通过，无跳过。Ruff、294文件Mypy和差异检查通过。
 空库仍不创建marker，生产accept仍拒绝新执行；任一孤儿、索引、quarantine、错误marker或其他key仍失败。
 Core／Web构建输入未变，下一冻结提交按不可变镜像ID复用，并明确记录原构建提交，避免伪改OCI来源标签。
+
+## 2026-09-07：正式迁移、成果保全与生产 canary
+
+正式兼容部署 `d737de4` 已成功。旧任务首份清单精确为48条（idle 7、awaiting_user_review 41），
+备份后仅 phase／updatedAt 退出为 error；原70表其余字段逐值一致。生产 Python 3.10 对6条短小数秒
+时间戳不兼容，已以 `fceac69` 无损规范化修复；47项清单／真实PG测试及真实Python3.10的49项检查通过。
+原应用角色对25张关闭视频表只有读取权限，原事务取锁失败且零变更。固定helper SHA的具名本机postgres包装器
+只执行原apply事务，随后用应用角色独立verify成功；没有修改权限、所有者、候选或成果内容。
+
+正式联合备份为 `/srv/smart-novel-gen/.durable-agent-execution-backups/novelwriter/inkforge-20260907T115651Z`。
+具名forward执行两次，每次原兼容实例不重启通过post-contract-route-off。真实75表contract已导出和独立复验，
+指纹 `ea1df9ad015cd8d811d6ab250a7098870aa2befcf0afa3273b845255a0ac11b2`；证据在
+`/srv/inkforge-durable-maintenance-20260907/contract-final`。除两张获准演进的执行表外，原68表逐值一致。
+canary前原75表10824行的真实PK／完整行hash基线已保存在服务器受保护目录；不得用canary合法新增行否定维护阶段保全。
+
+已同镜像启用schemaReady并初始化双drain marker，首次17项联合指标全零。旧成果通过原生产Operator完成30次
+公共读取，包含旧长篇正文／设定／规划／大纲、中短篇蓝图／正文和已保存／历史恢复产生的版本及完整preview。
+本次不执行旧作品restore／adopt；版本抽样不冒充覆盖所有带旧Task的Agent候选。
+
+生产唯一新测试小说为 `cmtr6uta5jw2i7k3q6zjsm1vc`，章节 `cmtr6uta7jw2j7k3qm7aoxu60`，
+会话 `cmtr6uvp1jw2n7k3qyim1iznd`；正式CLI创建、写入177字合成章、启动模型和候选决定均只在此范围。
+首条问答completed且同请求重放前后PG事实完全相同，1调用／1.091积分；规划生成／编辑审核／弃用完成且正文不变。
+另有一次独立审阅以 `MODEL_STRUCTURED_OUTPUT_INVALID` 失败，outcomeUnknown=false，1调用／6.082积分已唯一结算。
+原失败诊断细分类未被旧代码保留，不能倒推模型原文或把它说成已修复的特定供应商故障。
+
+遇到该协议失败后已关闭新建路由；三Run均终态、4个模型调用合计21.79024积分、17项联合指标全零。
+`924c857` 仅补Executor具名安全诊断日志，不改Prompt、Schema、registry、计费、哈希或重试。
+120项定向、完整Agent1674项、Ruff、294文件Mypy通过。只有Agent重建，Core/Web复用原87dfc73镜像ID，
+原OCI revision保持不变。上传首次SSH断线未部署，原上传器重试同一镜像成功；正式部署和编排冒烟已通过。
+补丁部署前后原三Run/Step/用量/账务事实SHA完全相同。生产后续canary及最终all结果另据下文更新，不能仅据此节报全量成功。
+
+本节直接证据在 `output/release-d737de4/` 与 `output/release-924c857/`，完整业务回执受0700目录／0600文件保护，
+无密码、Cookie、Token、私钥或数据库URL入文档。仓外不可变controller／OIDC未实现；个人项目规格已退役该外部门禁，
+不得把本次仓内与服务器验收冒充完成了外部信任根，也不再因此另建发布控制面。

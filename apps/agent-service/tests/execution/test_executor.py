@@ -9,7 +9,9 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Literal
 
+import httpx
 import pytest
+from inkforge_agents.config import Settings
 from inkforge_agents.execution.executor import (
     ExecutionCapabilityError,
     StatelessExecutionStepExecutor,
@@ -25,6 +27,7 @@ from inkforge_agents.providers.base import (
     ModelUsageDiagnostics,
     ProviderTransportError,
 )
+from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_contracts.execution import canonical_execution_sha256
@@ -111,6 +114,13 @@ def _executor(model: RecordingModel) -> StatelessExecutionStepExecutor:
     [
         ("empty_output", "content", "empty_output", "content"),
         ("json_decode_error", "json", "json_decode_error", "json"),
+        (
+            "json_decode_error", "json_control_character",
+            "json_decode_error", "json_control_character",
+        ),
+        ("json_decode_error", "json_syntax", "json_decode_error", "json_syntax"),
+        ("json_decode_error", "json_duplicate_key", "json_decode_error", "json_duplicate_key"),
+        ("json_decode_error", "json_constant", "json_decode_error", "json_constant"),
         ("not_object", "type", "not_object", "type"),
         ("schema_violation", "additionalProperties", "schema_violation", "additionalProperties"),
         ("schema_violation", "pattern", "schema_violation", "pattern"),
@@ -184,6 +194,62 @@ async def test_结构化失败仅记录具名固定诊断且不改变终态或�
     for secret in ("secret", "原小说正文", "供应商私密正文", "private-field", "jsonPointer"):
         assert secret not in caplog.text
         assert secret not in repr(record.__dict__)
+
+
+@pytest.mark.asyncio
+async def test_真实DeepSeek适配到V2审阅恢复原字符且只记一次HTTP和纠正(caplog) -> None:
+    from .test_review_rewrites import _request as chapter_review_request
+
+    registry = load_execution_registry(environment="test")
+    request = chapter_review_request("review_chapter", {"userInstruction": "完整审阅"})
+    text = '原文"引号"和\\反斜杠\r\n下一行\t尾行'
+    raw = json.dumps({"report": text}, ensure_ascii=False)
+    raw = raw.replace("\\r", "\r").replace("\\n", "\n").replace("\\t", "\t")
+    calls = []
+
+    async def respond(http_request: httpx.Request) -> httpx.Response:
+        calls.append(http_request)
+        payload = json.loads(http_request.content)
+        assert payload["response_format"] == {"type": "json_object"}
+        assert payload["thinking"] == {"type": "disabled"}
+        return httpx.Response(200, json={
+            "id": "private-response-id",
+            "choices": [{"message": {"content": raw}, "finish_reason": "stop"}],
+            "usage": {
+                "prompt_tokens": 100, "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+                "completion_tokens_details": {"reasoning_tokens": 0},
+            },
+        })
+
+    settings = Settings.model_validate({
+        "environment": "test", "model_provider": "openai_compatible",
+        "openai_compatibility_profile": "deepseek_v4", "openai_api_key": "private-api-secret",
+        "openai_base_url": "https://api.deepseek.com", "openai_model": "deepseek-v4-flash",
+    })
+    with caplog.at_level(logging.WARNING):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+            provider = DeepSeekV4Provider(settings, client=http)
+            executor = StatelessExecutionStepExecutor(
+                ModelRuntime(provider), max_output_tokens=20_000)
+            resolved = executor.resolve(request, registry)
+            outcome = await executor.call_provider(
+                request, executor.build_model_request(request, resolved),
+                begin_attempt=_one_attempt, cancel_event=asyncio.Event(),
+            )
+            terminal = executor.terminal_from_outcome(request, resolved, outcome)
+    assert request.budget.maxProtocolCorrections == 1
+    assert terminal.output == {"report": text}
+    assert terminal.output["report"].encode("utf-8") == text.encode("utf-8")
+    assert terminal.usage.protocolCorrections == 1
+    assert terminal.usage.providerAttempts == 1
+    assert terminal.usage.inputTokens == 100
+    assert terminal.usage.completionTokens == 20
+    assert len(calls) == 1
+    assert "code=escape_json_string_controls schema=output_chapter_review_text_v1" in caplog.text
+    assert "schema_sha256=" in caplog.text
+    for secret in ("private-", text, "jsonPointer"):
+        assert secret not in caplog.text
 
 
 @pytest.mark.asyncio

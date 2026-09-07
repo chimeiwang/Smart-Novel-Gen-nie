@@ -113,6 +113,7 @@ _STRUCTURED_DIAGNOSTIC_KEYWORDS = frozenset({
     "minimum", "multipleOf", "not", "oneOf", "pattern", "patternProperties", "prefixItems",
     "propertyNames", "required", "toolCalls", "type", "unevaluatedItems", "unevaluatedProperties",
     "uniqueItems", "unknown",
+    "json_control_character", "json_syntax", "json_duplicate_key", "json_constant",
 })
 
 ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]

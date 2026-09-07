@@ -26,8 +26,10 @@ from .base import (
     ProviderTransportError,
 )
 from .openai_compatible import (
+    StructuredOutputRecoveryCode,
     _append_missing_container_closers,
     _is_official_deepseek_endpoint,
+    _log_structured_output_recovery,
     _parse_and_validate_structured_output,
     _resolve_deepseek_strict_base_url,
     normalize_finish_reason,
@@ -229,7 +231,7 @@ class DeepSeekV4Provider:
             )
             parsed: dict[str, Any] | None
             diagnostic: ModelStructuredOutputDiagnostic | None
-            recovery_code: str | None
+            recovery_code: StructuredOutputRecoveryCode | None
             if unexpected_tool_output:
                 parsed = None
                 recovery_code = None
@@ -243,6 +245,13 @@ class DeepSeekV4Provider:
                     raw_text=result.content,
                     structured_output=structured_output,
                     validator=structured_validator,
+                )
+            if recovery_code == "escape_json_string_controls":
+                _log_structured_output_recovery(
+                    model_name=self.model_name,
+                    structured_output=structured_output,
+                    recovery_code=recovery_code,
+                    usage=result.usage,
                 )
             result = ModelTurnResult.model_validate(
                 result.model_dump(mode="python")

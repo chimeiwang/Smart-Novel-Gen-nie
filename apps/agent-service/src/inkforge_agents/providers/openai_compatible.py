@@ -67,6 +67,7 @@ _SCENE_ASSET_SERVER_OWNED_FIELDS = frozenset(
 )
 StructuredOutputRecoveryCode = Literal[
     "unwrap_single_json_fence",
+    "escape_json_string_controls",
     "normalize_scene_asset_source_redundancy",
     "normalize_cinematography_azimuth",
     "normalize_cinematography_lighting_inheritance",
@@ -453,11 +454,19 @@ def _safe_validation_diagnostic(
     )
 
 
+class _NonstandardJsonConstantError(ValueError):
+    """非标准 JSON 常量；不携带供应商字段值。"""
+
+
+class _DuplicateJsonKeyError(ValueError):
+    """重复 JSON 键；不携带供应商字段名。"""
+
+
 def _reject_nonstandard_json_constant(value: str) -> None:
     """拒绝 NaN/Infinity 等 Python json 默认接受但 JSON 标准不允许的常量。"""
 
     del value
-    raise ValueError("结构化输出包含非标准 JSON 常量")
+    raise _NonstandardJsonConstantError("结构化输出包含非标准 JSON 常量")
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -466,9 +475,55 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     parsed: dict[str, Any] = {}
     for key, value in pairs:
         if key in parsed:
-            raise ValueError("结构化输出包含重复 JSON 键")
+            raise _DuplicateJsonKeyError("结构化输出包含重复 JSON 键")
         parsed[key] = value
     return parsed
+
+
+def _json_decode_keyword(error: ValueError) -> str:
+    """只返回固定分类，不转发解码器 msg、字符、位置路径或原文。"""
+
+    if isinstance(error, _DuplicateJsonKeyError):
+        return "json_duplicate_key"
+    if isinstance(error, _NonstandardJsonConstantError):
+        return "json_constant"
+    if (
+        isinstance(error, json.JSONDecodeError)
+        and error.msg.startswith("Invalid control character")
+    ):
+        return "json_control_character"
+    return "json_syntax"
+
+
+def _escape_json_string_controls(value: str) -> str | None:
+    """只扫描一次，将字符串内真实 LF/CR/tab 编码；不修改任何其他字符或语法。"""
+
+    encoded: list[str] = []
+    in_string = False
+    escaped = False
+    changed = False
+    replacements = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    for character in value:
+        if ord(character) < 32:
+            if character not in replacements:
+                return None
+            if in_string:
+                if escaped:
+                    return None
+                encoded.append(replacements[character])
+                changed = True
+                continue
+        encoded.append(character)
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+    return "".join(encoded) if changed else None
 
 
 def _unwrap_single_json_fence(
@@ -879,16 +934,34 @@ def _parse_and_validate_structured_output(
             parse_constant=_reject_nonstandard_json_constant,
             object_pairs_hook=_reject_duplicate_json_keys,
         )
-    except (json.JSONDecodeError, ValueError):
-        return (
-            None,
-            ModelStructuredOutputDiagnostic(
-                code="json_decode_error",
-                jsonPointer="",
-                keyword="json",
-            ),
-            recovery_code,
+    except ValueError as error:
+        keyword: str | None = _json_decode_keyword(error)
+        repaired = (
+            _escape_json_string_controls(json_text)
+            if keyword == "json_control_character" else None
         )
+        if repaired is not None:
+            try:
+                parsed = json.loads(
+                    repaired,
+                    parse_constant=_reject_nonstandard_json_constant,
+                    object_pairs_hook=_reject_duplicate_json_keys,
+                )
+            except ValueError as repaired_error:
+                keyword = _json_decode_keyword(repaired_error)
+            else:
+                keyword = None
+                recovery_code = "escape_json_string_controls"
+        if keyword is not None:
+            return (
+                None,
+                ModelStructuredOutputDiagnostic(
+                    code="json_decode_error",
+                    jsonPointer="",
+                    keyword=keyword,
+                ),
+                recovery_code,
+            )
     if not isinstance(parsed, dict):
         return (
             None,
@@ -1098,16 +1171,19 @@ def _log_structured_output_recovery(
     recovery_code: StructuredOutputRecoveryCode,
     usage: ModelUsage,
 ) -> None:
-    """记录确定性围栏解包；只暴露固定恢复码与安全审计元数据。"""
+    """记录确定性解析恢复；只暴露固定恢复码与安全审计元数据。"""
 
+    schema_audit = _structured_schema_audit_fields(structured_output)
     logger.warning(
-        "供应商结构化输出已执行确定性恢复 code=%s",
+        "供应商结构化输出已执行确定性恢复 code=%s schema=%s schema_sha256=%s",
         recovery_code,
+        structured_output.name,
+        schema_audit["validation_schema_sha256"],
         extra={
             "model_name": model_name,
             "structured_route": structured_output.route,
             "structured_recovery_code": recovery_code,
-            **_structured_schema_audit_fields(structured_output),
+            **schema_audit,
             "prompt_tokens": usage.promptTokens,
             "cached_tokens": usage.cachedTokens,
             "completion_tokens": usage.completionTokens,

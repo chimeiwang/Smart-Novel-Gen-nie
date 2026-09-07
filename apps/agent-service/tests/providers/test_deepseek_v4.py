@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -127,6 +129,204 @@ def _provider(
         requests,
         client,
     )
+
+
+def _structured_report_request() -> ModelTurnRequest:
+    return ModelTurnRequest(
+        messages=[{"role": "user", "content": "请用 JSON 返回完整审阅报告。"}],
+        tools=[],
+        maxOutputTokens=256,
+        policy=REVIEWER_NO_THINKING,
+        structuredOutput={
+            "route": "chat_json_output_v1",
+            "name": "chapter_review_report_v1",
+            "jsonSchema": {
+                "type": "object",
+                "properties": {"report": {"type": "string", "minLength": 3}},
+                "required": ["report"],
+                "additionalProperties": False,
+            },
+        },
+    )
+
+
+def _structured_report_response(content: str) -> dict[str, Any]:
+    response = _response_with_usage(
+        {
+            "prompt_tokens": 40,
+            "prompt_cache_hit_tokens": 10,
+            "prompt_cache_miss_tokens": 30,
+            "completion_tokens": 20,
+            "total_tokens": 60,
+            "completion_tokens_details": {"reasoning_tokens": 0},
+        }
+    )
+    response["choices"][0]["message"]["content"] = content
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("control", ["\n", "\r", "\t"], ids=["lf", "cr", "tab"])
+async def test_structured_report_recovers_string_controls_losslessly_with_one_http(
+    control: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    report = f"不得写入日志的报告 SECRET_BODY{control}完整尾部"
+    provider, requests, client = _provider(
+        response=_structured_report_response('{"report":"' + report + '"}')
+    )
+    request = _structured_report_request()
+    source = request.model_dump(mode="json")
+    caplog.set_level(logging.WARNING)
+    try:
+        result = await provider.complete_turn(request)
+    finally:
+        await client.aclose()
+
+    assert len(requests) == 1
+    wire = json.loads(requests[0].content)
+    assert wire["response_format"] == {"type": "json_object"}
+    assert "tools" not in wire
+    assert request.model_dump(mode="json") == source
+    assert result.structuredOutput == {"report": report}
+    assert result.structuredOutputDiagnostic is None
+    assert result.structuredOutputCorrectionCount == 1
+    assert result.content == ""
+    assert result.toolCalls == []
+    assert result.usage.model_dump() == {
+        "promptTokens": 40,
+        "cachedTokens": 10,
+        "completionTokens": 20,
+        "totalTokens": 60,
+    }
+    assert result.diagnostics.promptCacheMissTokens == 30
+    assert result.diagnostics.reasoningTokens == 0
+    assert result.finishReason == "stop"
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("供应商结构化输出已执行确定性恢复")
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.structured_recovery_code == "escape_json_string_controls"  # type: ignore[attr-defined]
+    assert record.structured_route == "chat_json_output_v1"  # type: ignore[attr-defined]
+    assert request.structuredOutput is not None
+    schema_hash = hashlib.sha256(
+        json.dumps(
+            request.structuredOutput.jsonSchema,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    assert record.getMessage() == (
+        "供应商结构化输出已执行确定性恢复 code=escape_json_string_controls "
+        f"schema={request.structuredOutput.name} schema_sha256={schema_hash}"
+    )
+    assert record.schema_sha256 == schema_hash  # type: ignore[attr-defined]
+    assert record.prompt_tokens == 40  # type: ignore[attr-defined]
+    assert record.cached_tokens == 10  # type: ignore[attr-defined]
+    assert record.completion_tokens == 20  # type: ignore[attr-defined]
+    assert record.total_tokens == 60  # type: ignore[attr-defined]
+    assert "SECRET_BODY" not in caplog.text
+    assert "不得写入日志的报告" not in repr(record.__dict__)
+
+
+@pytest.mark.asyncio
+async def test_structured_report_control_recovery_preserves_escapes_and_outside_whitespace(
+) -> None:
+    report = '完整前文\\路径和"引号"，字面\\n，转义退格\b，换行\n回车\r制表\t完整末尾'
+    raw = json.dumps({"report": report}, ensure_ascii=False)
+    # 只在已编码的字符串内加入真实控制符，保留已有反斜杠和引号转义。
+    raw = raw.replace("换行\\n", "换行\n").replace("回车\\r", "回车\r")
+    raw = raw.replace("制表\\t", "制表\t")
+    provider, requests, client = _provider(
+        response=_structured_report_response("\n\r\t " + raw + " \t\r\n")
+    )
+    try:
+        result = await provider.complete_turn(_structured_report_request())
+    finally:
+        await client.aclose()
+
+    assert len(requests) == 1
+    assert result.structuredOutput == {"report": report}
+    assert result.structuredOutputDiagnostic is None
+    assert result.structuredOutputCorrectionCount == 1
+    assert result.usage.totalTokens == 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw", "keyword"),
+    [
+        ('{"report":"SECRET_BODY\n\x00末尾"}', "json_control_character"),
+        ('{"report":"SECRET_BODY\n首项","report":"重复项"}', "json_duplicate_key"),
+        ('{"report":"SECRET_BODY\n完整报告","number":NaN}', "json_constant"),
+        ('{"report":"SECRET_BODY\n完整报告"}{"report":"第二对象"}', "json_syntax"),
+        ('{"report":"SECRET_BODY\n坏转义\\q"}', "json_syntax"),
+        ('{"report":"SECRET_BODY\n未闭合"', "json_syntax"),
+    ],
+    ids=["other_control", "duplicate_key", "nan", "multiple_objects", "bad_escape", "unclosed"],
+)
+async def test_structured_report_control_recovery_rejects_other_json_errors(
+    raw: str,
+    keyword: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    provider, requests, client = _provider(response=_structured_report_response(raw))
+    caplog.set_level(logging.WARNING)
+    try:
+        result = await provider.complete_turn(_structured_report_request())
+    finally:
+        await client.aclose()
+
+    assert len(requests) == 1
+    assert result.structuredOutput is None
+    assert result.structuredOutputDiagnostic is not None
+    assert result.structuredOutputDiagnostic.code == "json_decode_error"
+    assert result.structuredOutputDiagnostic.keyword == keyword
+    assert result.content == ""
+    assert result.toolCalls == []
+    assert result.usage.totalTokens == 60
+    assert "SECRET_BODY" not in caplog.text
+    assert all("SECRET_BODY" not in repr(record.__dict__) for record in caplog.records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw", "keyword"),
+    [
+        ('{"report":"字\n"}', "minLength"),
+        ('{"report":"SECRET_BODY\n完整报告","private_extra":"保密值"}', "additionalProperties"),
+    ],
+    ids=["original_length_constraint", "original_closed_object_constraint"],
+)
+async def test_structured_report_control_recovery_revalidates_original_schema(
+    raw: str,
+    keyword: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    provider, requests, client = _provider(response=_structured_report_response(raw))
+    request = _structured_report_request()
+    original = request.model_dump(mode="json")
+    caplog.set_level(logging.WARNING)
+    try:
+        result = await provider.complete_turn(request)
+    finally:
+        await client.aclose()
+
+    assert len(requests) == 1
+    assert request.model_dump(mode="json") == original
+    assert result.structuredOutput is None
+    assert result.structuredOutputDiagnostic is not None
+    assert result.structuredOutputDiagnostic.code == "schema_violation"
+    assert result.structuredOutputDiagnostic.keyword == keyword
+    assert result.content == ""
+    assert result.usage.totalTokens == 60
+    assert "SECRET_BODY" not in caplog.text
+    assert "private_extra" not in caplog.text
+    assert "保密值" not in caplog.text
 
 
 @pytest.mark.asyncio
