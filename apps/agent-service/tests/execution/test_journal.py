@@ -102,6 +102,43 @@ def _journal() -> RedisExecutionJournal:
 
 
 @pytest.mark.asyncio
+async def test_empty_uninitialized_execution_database_allows_readonly_callback_poll() -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    journal = RedisExecutionJournal(cast(AsyncJournalRedis, redis), prefix="test:empty-poll")
+    assert await redis.dbsize() == 0
+    assert await journal.claim_due_callbacks() == ()
+    assert await redis.dbsize() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "orphan", "active", "pending", "leased", "rejected", "quarantine",
+        "invalid_marker", "foreign_key",
+    ],
+)
+async def test_uninitialized_callback_poll_never_hides_any_existing_data(kind: str) -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    prefix = "test:empty-poll"
+    journal = RedisExecutionJournal(cast(AsyncJournalRedis, redis), prefix=prefix)
+    if kind == "orphan":
+        await redis.hset(f"{prefix}:step-1", mapping={"state": "accepted"})
+    elif kind in {"active", "pending", "leased", "rejected"}:
+        suffix = "drain:active" if kind == "active" else f"callbacks:{kind}"
+        await redis.zadd(f"{prefix}:{suffix}", {f"{prefix}:step-1": 0})
+    elif kind == "quarantine":
+        await redis.set(f"{prefix}:restore:quarantine", "restore-epoch")
+    elif kind == "invalid_marker":
+        await redis.set(f"{prefix}:drain:index-version", "2")
+    else:
+        await redis.set("other-namespace", "must-not-be-ignored")
+    with pytest.raises(ExecutionJournalError, match="drain 索引"):
+        await journal.claim_due_callbacks()
+    assert await redis.dbsize() == 1
+
+
+@pytest.mark.asyncio
 async def test_same_request_hash_reuses_frozen_resolved_model() -> None:
     journal = _journal()
     request = execution_request()

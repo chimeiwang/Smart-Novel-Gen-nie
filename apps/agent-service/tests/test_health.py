@@ -1,17 +1,32 @@
 import asyncio
 import re
+import time
 from datetime import timedelta
 from pathlib import Path
+from typing import Any, cast
 
+import fakeredis
+import fakeredis.aioredis
 import inkforge_agents.app as app_module
 import pytest
 from fastapi.testclient import TestClient
 from inkforge_agents.app import create_app
 from inkforge_agents.config import Settings
-from inkforge_agents.execution.service import ExecutionServiceHealth
+from inkforge_agents.execution.callbacks import ExecutionCallbackClient
+from inkforge_agents.execution.executor import StatelessExecutionStepExecutor
+from inkforge_agents.execution.journal import (
+    AsyncJournalRedis,
+    ExecutionJournalError,
+    RedisExecutionJournal,
+)
+from inkforge_agents.execution.registry import load_execution_registry
+from inkforge_agents.execution.service import ExecutionService, ExecutionServiceHealth
+from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import RedisRunCancellation
 from inkforge_agents.queue.consumer import QueueConsumer
+from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.supervision import CoroutineSupervisor
+from inkforge_contracts.execution import ExecutionStepRequest
 from redis.exceptions import ResponseError
 
 
@@ -81,6 +96,174 @@ def test_app_lifespan_starts_and_stops_single_queue_consumer() -> None:
         assert consumer.started is True
 
     assert consumer.stopped is True
+
+
+class StrictHealthRedis(fakeredis.aioredis.FakeRedis):
+    """仅替代外部 Redis 的配置元数据；journal、Lua 与生产健康计算保持真实。"""
+
+    async def info(self, section: str | None = None, **kwargs: Any) -> dict[str, object]:
+        del kwargs
+        return {
+            "persistence": {"aof_enabled": 1, "aof_last_write_status": "ok"},
+            "memory": {"used_memory": 1024},
+            "stats": {"evicted_keys": 0},
+        }.get(section or "", {})
+
+    async def config_get(self, *args: Any, **kwargs: Any) -> dict[str, str]:
+        del args, kwargs
+        return {
+            "appendonly": "yes", "appendfsync": "always", "aof-load-truncated": "no",
+            "maxmemory-policy": "noeviction", "maxmemory": "33554432",
+            "hash-max-listpack-value": "4096", "hash-max-listpack-entries": "64",
+        }
+
+
+class PollObservedJournal(RedisExecutionJournal):
+    def __init__(self, redis: AsyncJournalRedis) -> None:
+        super().__init__(redis, require_durability=True)
+        self.poll_attempts = 0
+        self.two_polls = asyncio.Event()
+
+    async def claim_due_callbacks(self, **kwargs: Any) -> Any:
+        try:
+            return await super().claim_due_callbacks(**kwargs)
+        finally:
+            self.poll_attempts += 1
+            if self.poll_attempts >= 2:
+                self.two_polls.set()
+
+
+class NoCallProvider(FakeModelProvider):
+    calls = 0
+
+    async def complete_turn(self, request: Any) -> Any:
+        self.calls += 1
+        raise AssertionError("迁移前空 journal 待机不得调用模型")
+
+
+class NoCallCallbacks:
+    calls = 0
+
+    async def send_progress(self, callback: Any) -> Any:
+        self.calls += 1
+        raise AssertionError("迁移前空 journal 待机不得发出回调")
+
+    send_result = send_progress
+    send_failure = send_progress
+
+
+def _production_journal_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from redis.asyncio import Redis
+
+    server = fakeredis.FakeServer()
+    redis = StrictHealthRedis(server=server)
+    state = fakeredis.FakeRedis(server=server)
+    ordinary = fakeredis.aioredis.FakeRedis()
+    monkeypatch.setattr(Redis, "from_url", lambda *args, **kwargs: ordinary)
+    journal = PollObservedJournal(cast(AsyncJournalRedis, redis))
+    provider = NoCallProvider()
+    callbacks = NoCallCallbacks()
+    execution = ExecutionService(
+        journal=journal,
+        registry=load_execution_registry(environment="production"),
+        executor=StatelessExecutionStepExecutor(ModelRuntime(provider), max_output_tokens=10_000),
+        callbacks=cast(ExecutionCallbackClient, callbacks),
+    )
+    settings = Settings.model_validate({
+        "environment": "production", "model_provider": "fake",
+        "redis_url": "redis://ordinary.invalid:6379/0",
+        "execution_redis_url": "redis://execution.invalid:6379/0",
+        "workflow_human_log_dir": str(tmp_path),
+    })
+    app = create_app(
+        testing=False,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=Consumer(),
+        execution_service=execution,
+        execution_redis=cast(AsyncJournalRedis, redis),
+    )
+    app.state.core_client = object()
+    assert app.state.runtime_error is None
+    return app, journal, state, provider, callbacks
+
+
+def test_production_lifespan_empty_uninitialized_journal_is_readonly_ready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    app, journal, state, provider, callbacks = _production_journal_app(monkeypatch, tmp_path)
+    assert state.dbsize() == 0
+    with TestClient(app) as client:
+        assert client.portal is not None
+
+        async def wait_for_two_polls() -> None:
+            await asyncio.wait_for(journal.two_polls.wait(), timeout=3)
+            await asyncio.sleep(0)
+
+        client.portal.call(wait_for_two_polls)
+        response = client.get("/internal/v1/health/ready")
+        assert response.status_code == 200, response.json()
+        checks = response.json()["checks"]
+        assert checks["execution_callback_replayer"] == "ok"
+        assert checks["execution_journal"] == "ok"
+        assert checks["execution_journal_persistence"] == "ok"
+        assert checks["execution_redis"] == "ok"
+        assert checks["redis"] == "ok"
+        assert app.state.execution_replayer_supervisor.is_ready()
+
+        async def cannot_accept_before_named_initialization() -> None:
+            # 这里只探测 journal 的原子准入门，不构造或派发模型业务请求。
+            request = ExecutionStepRequest.model_construct(
+                stepId="step-before-initialization", runId="run-before-initialization",
+                jobId="job-before-initialization", novelId="novel-before-initialization",
+                requestHash="a" * 64, inputHash="b" * 64, fencingToken=1,
+                idempotencyKey="request-before-initialization",
+            )
+            with pytest.raises(ExecutionJournalError):
+                await journal.accept(request, {"provider": "fake"})
+
+        client.portal.call(cannot_accept_before_named_initialization)
+        assert state.dbsize() == 0
+        assert state.get("inkforge:executions:drain:index-version") is None
+        assert provider.calls == callbacks.calls == 0
+    assert not app.state.execution_replayer_supervisor.is_ready()
+
+
+@pytest.mark.parametrize("damage", [
+    "orphan", "drain:active", "callbacks:pending", "callbacks:leased", "callbacks:rejected",
+    "invalid_marker", "restore:quarantine", "other",
+])
+def test_production_lifespan_nonempty_uninitialized_journal_stays_unready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, damage: str,
+) -> None:
+    app, journal, state, provider, callbacks = _production_journal_app(monkeypatch, tmp_path)
+    prefix = "inkforge:executions:"
+    if damage == "orphan":
+        state.hset(prefix + "orphan", mapping={"state": "accepted"})
+    elif damage == "invalid_marker":
+        state.set(prefix + "drain:index-version", "2")
+    elif damage.startswith(("drain:", "callbacks:")):
+        state.zadd(prefix + damage, {prefix + "orphan": 1})
+    else:
+        state.set(prefix + damage, "synthetic-test-fact")
+    before = {key: state.dump(key) for key in state.scan_iter()}
+
+    with TestClient(app) as client:
+        assert client.portal is not None
+
+        deadline = time.monotonic() + 1
+        while (
+            app.state.execution_replayer_supervisor.error_code != "BACKGROUND_TASK_BACKOFF"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.001)
+        response = client.get("/internal/v1/health/ready")
+        assert response.status_code == 503
+        assert response.json()["checks"]["execution_callback_replayer"] == "failed"
+        assert not app.state.execution_replayer_supervisor.is_ready()
+        assert {key: state.dump(key) for key in state.scan_iter()} == before
+        assert provider.calls == callbacks.calls == 0
 
 
 def test_readiness_fails_when_terminal_callback_replayer_crashes() -> None:

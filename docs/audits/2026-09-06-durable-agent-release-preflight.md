@@ -224,3 +224,27 @@ Run `cmtr3lrwte3uy5j3lp5u55zhd` 启动、取消和独立GET成功；无模型调
 公共CLI再次读取章节，完整data与采用测试后的回执一致。入口已关闭回route=off／V1 fresh=false，
 `canary-final-verify-drain.log` 明确v1DrainZero=true／v2Converged=true，全部指标为0。
 这些结果闭环真实开发canary，不代表正式库已迁移或生产服务已生效；生产Keychain授权尚未完成。
+
+## 2026-09-07：生产身份完成、首次兼容部署回滚
+
+生产钥匙串权限随后放行，旧会话返回服务端UNAUTHENTICATED。按用户明确授权通过原生产Operator隐藏TTY
+重新登录成功，auth.whoami确认账号nie／userId cmq6p5nlm0000txq43itjnypt。没有保存密码文件或导出令牌。
+固定提交87dfc73a44e56a8aff062287cc37074a661c2fb0的三张linux/amd64镜像和源码bundle已构建、校验并上传；
+上传前后六个运行服务完全未变。构建清单、旧镜像与上传证据位于output/release-87dfc73。
+
+正式.env先完整备份，只补齐具名迁移阶段配置：schemaReady=false、route=off、V1 fresh=false，白名单为空，
+视频与Seedance明确关闭；其他原行、UID0／GID1000／0640保持。随后使用原部署脚本尝试兼容切换，
+新Agent因readiness失败而未通过依赖启动；脚本自动回滚旧三镜像，六服务healthy，结构守卫和smoke通过。
+服务器Git检出已为87dfc73，但实际运行的是旧镜像的rollback-87dfc73别名，不能把源码检出当成运行生效。
+正式库未迁移，旧48条任务未退出，未创建生产小说或调用模型。
+
+原新镜像的受限只读探针复现：独立execution Redis整库keyCount=0，AOF／noeviction／listpack健康均满足，
+取消候选查询返回空，但原claim_due_callbacks报“drain索引缺失或损坏”；探针后keyCount仍0、未创建marker。
+根因为迁移前空journal无marker时，回放监督器仍执行严格claim并反复失败；开发验收已有marker，未覆盖
+production严格readiness与首次lifespan的组合。最小修复规格已追加到取消收尾spec；不提前写marker，
+不把生产改为dev、不跳过健康检查，不执行尚未获准通过的正式库后续步骤。
+
+空库待机的最小Lua修复已通过：production真实lifespan红测1失败／8负例通过，修复后整个健康文件26项通过；
+日志／回放和独立真实Redis48项通过，完整Agent1666项通过，无跳过。Ruff、294文件Mypy和差异检查通过。
+空库仍不创建marker，生产accept仍拒绝新执行；任一孤儿、索引、quarantine、错误marker或其他key仍失败。
+Core／Web构建输入未变，下一冻结提交按不可变镜像ID复用，并明确记录原构建提交，避免伪改OCI来源标签。

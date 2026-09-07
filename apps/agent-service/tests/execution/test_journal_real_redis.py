@@ -90,6 +90,8 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
         )
         assert (await journal.health()).ready is True
         assert await journal.cancelled_before_provider() == ()
+        assert await journal.claim_due_callbacks() == ()
+        assert await redis.dbsize() == 0
         request = execution_request()
         with pytest.raises(ExecutionJournalError, match="drain 索引"):
             await journal.accept(request, {"provider": "fake"})
@@ -100,6 +102,8 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
         )
         orphan_key = "inkforge:executions:orphan-without-marker"
         await redis.hset(orphan_key, mapping={"state": "accepted"})
+        with pytest.raises(ExecutionJournalError, match="drain 索引"):
+            await journal.claim_due_callbacks()
         with pytest.raises(ExecutionJournalError, match="drain 索引"):
             await nonproduction_journal.accept(request, {"provider": "fake"})
         assert await redis.exists("inkforge:executions:drain:index-version") == 0

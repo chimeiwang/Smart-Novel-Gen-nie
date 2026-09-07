@@ -1186,7 +1186,10 @@ return 1
 """
 
 _CLAIM_DUE_CALLBACKS_SCRIPT = """
-if redis.call('GET', KEYS[5]) ~= '1' then return {-1} end
+local version = redis.call('GET', KEYS[5])
+-- 首次迁移前只能让完全空的独立执行库只读待机；不创建索引或接纳执行。
+if not version and redis.call('DBSIZE') == 0 then return {} end
+if version ~= '1' then return {-1} end
 if redis.call('EXISTS', KEYS[3]) == 1 then return {} end
 local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
 for _, key in ipairs(expired) do

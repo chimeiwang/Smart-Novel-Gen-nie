@@ -2,6 +2,24 @@
 
 状态：修复、Agent全套测试、真实开发原记录恢复及再次CLI取消验收完成；生产未切换。
 
+## 生产兼容启动补充
+
+首次生产兼容部署的Agent readiness失败，部署脚本已自动恢复旧三服务并通过smoke；正式库未迁移。
+代码核实：新取消候选查询允许空journal无marker待机，但紧随的原claim_due_callbacks仍直接拒绝缺marker。
+production lifespan启动回放监督器并严格检查其健康；开发canary已经有marker，未覆盖这一迁移前状态。
+
+只允许在原claim Lua中为“marker不存在且独立execution Redis整库为空”增加只读空轮询返回。
+空库判定与轮询必须在同一Lua原子执行中，不创建marker、不接纳Step、不允许provider，也不修改production
+readiness或设置为dev。错误marker、任何孤儿journal、active／pending／leased／rejected／quarantine或其他key
+均不得沿空库豁免；existing marker路径的claim/lease/CAS保持原样。执行Redis生产独立DB约束不变。
+验收新增无marker空库、孤儿和各索引拒绝、错误marker、production真实lifespan／严格健康组合以及真实Redis；
+修复后从冻结提交重建Agent并重做兼容部署，不能用提前写marker或跳过健康检查让首次迁移通过。
+
+最小Lua修复已完成：新增的production／testing=False真实lifespan用例先稳定复现503，修复后健康测试26项、
+日志／回放／真实Redis48项、完整Agent1666项通过；Ruff和294文件Mypy通过。真实生产只读探针也确认
+原镜像仅在claim处拒绝空库，AOF与连接本身健康，探针前后整库保持零key。Core与Web构建输入未改变，
+后续发布可在精确差异核验后复用已验证的不可变镜像，原builtRevision保持不变；Agent必须重建。
+
 ## 现场与根因
 
 2026-09-07，隔离验收Run `cmtr2hc2v1knfcxvaszyyza3a` 被公共CLI取消后，Core已为cancelled，
