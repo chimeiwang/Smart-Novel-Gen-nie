@@ -17,6 +17,83 @@ from inkforge_agents.execution.journal import (
 from .support import execution_cancel, execution_request, execution_result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [False, True])
+async def test_cancelled_before_provider_reads_only_exact_zero_attempt_candidates(
+    started: bool,
+) -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    journal = RedisExecutionJournal(cast(AsyncJournalRedis, redis), prefix="test:recover")
+    assert await journal.cancelled_before_provider() == ()
+    assert await redis.get("test:recover:drain:index-version") is None
+    request = execution_request()
+    await journal.accept(request, {"provider": "fake"})
+    if started:
+        await journal.mark_started(request)
+    assert await journal.cancelled_before_provider() == ()
+    await journal.request_cancel(execution_cancel(request))
+    before = await redis.hgetall("test:recover:step-1")
+
+    candidates = await journal.cancelled_before_provider()
+
+    assert len(candidates) == 1
+    assert candidates[0] == await journal.require(request.stepId)
+    assert candidates[0].provider_attempts == 0
+    assert await redis.hgetall("test:recover:step-1") == before
+    assert await redis.zcard("test:recover:drain:active") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["attempt", "provider_timestamp", "terminal"])
+async def test_cancelled_before_provider_does_not_recover_ambiguous_or_terminal(
+    kind: str,
+) -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    journal = RedisExecutionJournal(cast(AsyncJournalRedis, redis), prefix="test:recover")
+    request = execution_request()
+    await journal.accept(request, {"provider": "fake"})
+    if kind == "terminal":
+        await journal.record_terminal(request, execution_result(request))
+    elif kind == "attempt":
+        await journal.mark_started(request)
+        await journal.begin_provider_attempt(request)
+    else:
+        await redis.hset("test:recover:step-1", "provider_started_ms", "1")
+    await journal.request_cancel(execution_cancel(request))
+    assert await journal.cancelled_before_provider() == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "damage",
+    ["missing_marker", "invalid_marker", "overflow", "binding", "score", "state", "attempts"],
+)
+async def test_cancelled_before_provider_rejects_damaged_or_unbounded_index(
+    damage: str,
+) -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    journal = RedisExecutionJournal(cast(AsyncJournalRedis, redis), prefix="test:recover")
+    request = execution_request()
+    await journal.accept(request, {"provider": "fake"})
+    await journal.request_cancel(execution_cancel(request))
+    if damage == "missing_marker":
+        await redis.delete("test:recover:drain:index-version")
+    elif damage == "invalid_marker":
+        await redis.set("test:recover:drain:index-version", "2")
+    elif damage == "overflow":
+        await redis.zadd("test:recover:drain:active", {f"key-{i}": i for i in range(256)})
+    elif damage == "binding":
+        await redis.hset("test:recover:step-1", "step_id", "other")
+    elif damage == "score":
+        await redis.zadd("test:recover:drain:active", {"test:recover:step-1": 1})
+    elif damage == "state":
+        await redis.hset("test:recover:step-1", "state", "unknown")
+    else:
+        await redis.hdel("test:recover:step-1", "provider_attempts")
+    with pytest.raises(ExecutionJournalError):
+        await journal.cancelled_before_provider()
+
+
 def _journal() -> RedisExecutionJournal:
     return RedisExecutionJournal(
         cast(AsyncJournalRedis, fakeredis.aioredis.FakeRedis()),

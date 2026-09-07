@@ -511,6 +511,36 @@ class RedisExecutionJournal:
             callback_rejected=int(rejected),
         )
 
+    async def cancelled_before_provider(self) -> tuple[JournalEntry, ...]:
+        """只读既有有界索引，找到取消已落盘但尚未调用模型的未终态记录。"""
+
+        try:
+            step_ids = await self._redis.eval(
+                _CANCELLED_BEFORE_PROVIDER_SCRIPT,
+                2,
+                self._drain_active,
+                self._drain_index_version,
+                f"{self._prefix}:",
+                EXECUTION_DRAIN_INDEX_VERSION,
+            )
+        except Exception:
+            raise ExecutionJournalError("V2 execution 取消恢复索引读取失败") from None
+        if not isinstance(step_ids, (list, tuple)):
+            raise ExecutionJournalError("V2 execution 取消恢复索引缺失、损坏或超界")
+        entries: list[JournalEntry] = []
+        for step_id in step_ids:
+            entry = await self.require(_text(step_id))
+            # Lua 返回到回读之间可能已有原执行或另一个恢复者完成收尾。
+            # 真正的终态提交仍须使用 journal 的完整身份 CAS。
+            if (
+                entry.state in {"accepted", "started"}
+                and entry.cancel_request_id
+                and entry.provider_attempts == 0
+                and entry.provider_started_at is None
+            ):
+                entries.append(entry)
+        return tuple(entries)
+
     async def health(self) -> JournalHealth:
         try:
             connected = bool(await self._redis.ping())
@@ -677,6 +707,38 @@ class RedisExecutionJournal:
     @property
     def _drain_index_version(self) -> str:
         return f"{self._prefix}:drain:index-version"
+
+
+_CANCELLED_BEFORE_PROVIDER_SCRIPT = """
+local count = redis.call('ZCARD', KEYS[1])
+local version = redis.call('GET', KEYS[2])
+-- 迁移前的空 journal 不初始化索引，也不能阻断已有服务启动。
+if not version and count == 0 then return {} end
+if version ~= ARGV[2] or count > 256 then return -1 end
+local members = redis.call('ZRANGE', KEYS[1], 0, -1, 'WITHSCORES')
+local candidates = {}
+for offset = 1, #members, 2 do
+  local member = members[offset]
+  if string.sub(member, 1, string.len(ARGV[1])) ~= ARGV[1] then return -1 end
+  local values = redis.call('HMGET', member,
+    'step_id', 'accepted_ms', 'state', 'provider_attempts',
+    'cancel_request_id', 'provider_started_ms')
+  local step_id, accepted_ms, state = values[1], values[2], values[3]
+  if not step_id or member ~= ARGV[1] .. step_id
+      or not accepted_ms or not string.match(accepted_ms, '^%d+$')
+      or tonumber(members[offset + 1]) ~= tonumber(accepted_ms) then return -1 end
+  if state == 'accepted' or state == 'started' then
+    if not values[4] or not string.match(values[4], '^%d+$') then return -1 end
+    if tonumber(values[4]) == 0 and values[5] and values[5] ~= ''
+        and (not values[6] or values[6] == '') then
+      table.insert(candidates, step_id)
+    end
+  elseif state ~= 'result' and state ~= 'failure' then
+    return -1
+  end
+end
+return candidates
+"""
 
 
 def _parse_entry(values: Mapping[str, str]) -> JournalEntry:

@@ -23,7 +23,7 @@ def test_cli_command_registry_baseline_is_complete() -> None:
     names = [command["name"] for command in commands]
 
     assert document["schemaVersion"] == "inkforge-cli-command-registry/1.0"
-    assert len(commands) == 125
+    assert len(commands) == 126
     assert len(names) == len(set(names))
     assert names[0] == "auth.login"
     assert names[-1] == "long.video.export.download"
@@ -31,7 +31,14 @@ def test_cli_command_registry_baseline_is_complete() -> None:
     assert sum(
         command["name"].startswith("long.") and command["mutation"]
         for command in commands
-    ) == 74
+    ) == 75
+    session_create = next(
+        command for command in commands if command["name"] == "long.session.create"
+    )
+    assert session_create["inputMode"] == session_create["outputMode"] == "json"
+    assert session_create["mutation"] is True
+    assert session_create["requiresIdentity"] is True
+    assert session_create["requiresClientRequestId"] is False
     assert all("/internal/" not in command["name"] for command in commands)
 
 
@@ -58,12 +65,18 @@ def test_cli_success_parity_fixture_is_language_neutral_and_registered() -> None
     names = [case["command"] for case in cases]
 
     assert fixture["schemaVersion"] == "inkforge-cli-parity-success/1.0"
-    assert len(cases) == 31
+    assert len(cases) == 32
     assert len(names) == len(set(names))
     assert set(names) <= registered
     assert {name.split(".", 1)[0] for name in names} == {"auth", "short", "long"}
     assert any(name.startswith("long.video.") for name in names)
     assert all(isinstance(case.get("payload", {}), dict) for case in cases)
+
+    session = next(case for case in cases if case["command"] == "long.session.create")
+    assert set(session["payload"]) == {"novelId", "chapterId", "title"}
+    assert session["payload"]["title"] == "  隔离验收😀\r\n完整标题  "
+    assert session["responses"][0]["title"] == session["payload"]["title"]
+    assert session["responses"][0]["phase"] == "idle"
 
     answer = next(case for case in cases if case["command"] == "long.agent.start")
     assert answer["payload"]["operation"] == "answer_question"

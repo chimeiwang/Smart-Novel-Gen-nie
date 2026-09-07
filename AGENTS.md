@@ -79,8 +79,9 @@
   在此基础上增加 2 个受配置门禁的手机号认证操作、1 个有界审核摘要操作和 1 个耐久澄清回答操作，共 152 个；当前内部 Core 另增加 3 个 V2 耐久
   Workflow Step 回调和 1 个受审计计费对账入口，共 34 个。CLI 不是公共 API 全量镜像；macOS 两份 Operator Skill
   已按 `docs/specs/2026-09-04-java-cli-operator-cutover.md` 完成本机入口切换与离线验收，由 `scripts/run.sh`
-  启动固定安装的 Java CLI。新入口不依赖 Python 或 uv，仍只访问 Core 公共 API；125 个 CLI 命令与 Skill 的 45 个
-  允许命令不变。Java 使用 macOS Keychain 或 Windows Credential Manager，不允许明文回退；Windows 实机验收
+  启动固定安装的 Java CLI。新入口不依赖 Python 或 uv，仍只访问 Core 公共 API；2026-09-07 为新小说问答补齐
+  现有公共会话创建接口的 `long.session.create`，普通 CLI 共126命令，Skill仍只允许原45命令。
+  该补齐不增加 Core API 或数据库结构；Java 使用 macOS Keychain 或 Windows Credential Manager，不允许明文回退；Windows 实机验收
   尚未完成；2026-09-04 已通过既有 Keychain 会话的生产账号 `auth.whoami`，真实写作业务仍待验收，
   服务器部署状态不随本机切换变化。Python CLI 保留为契约对照。
   若接口、命令或结构发生获批变化，必须重新计算并同步产品基线，

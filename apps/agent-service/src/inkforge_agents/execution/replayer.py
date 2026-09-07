@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -33,6 +34,7 @@ class TerminalCallbackReplayer:
         poll_interval_seconds: float = 0.5,
         retry_base_seconds: float = 0.5,
         retry_max_seconds: float = 30.0,
+        before_poll: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if not 1 <= batch_size <= 100:
             raise ValueError("terminal callback replay 批大小必须为 1..100")
@@ -51,6 +53,7 @@ class TerminalCallbackReplayer:
         self._poll_interval_seconds = poll_interval_seconds
         self._retry_base_seconds = retry_base_seconds
         self._retry_max_seconds = retry_max_seconds
+        self._before_poll = before_poll
         self._stop_event = asyncio.Event()
         self._wake_event = asyncio.Event()
         self._running = False
@@ -72,6 +75,8 @@ class TerminalCallbackReplayer:
         self._running = True
         try:
             while not self._stop_event.is_set():
+                if self._before_poll is not None:
+                    await self._before_poll()
                 claims = await self._journal.claim_due_callbacks(
                     limit=self._batch_size,
                     lease=self._claim_lease,

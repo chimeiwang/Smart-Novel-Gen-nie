@@ -47,9 +47,9 @@ class CrossLanguageCliInputParityTest {
     private Path temporaryDirectory;
 
     @Test
-    void 全部一百二十五个命令的最小输入与错误边界必须和Python一致() throws Exception {
+    void 全部一百二十六个命令的最小输入与错误边界必须和Python一致() throws Exception {
         List<String> commands = commandNames();
-        assertThat(commands).hasSize(125);
+        assertThat(commands).hasSize(126);
 
         ArrayNode cases = json.createArrayNode();
         commands.forEach(command -> {
@@ -69,7 +69,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 三十一条代表成功链路的输出与公共请求映射必须和Python一致() throws Exception {
+    void 三十二条代表成功链路的输出与公共请求映射必须和Python一致() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-success-cases.json")) {
@@ -79,7 +79,7 @@ class CrossLanguageCliInputParityTest {
         assertThat(fixture.get("schemaVersion").textValue())
                 .isEqualTo("inkforge-cli-parity-success/1.0");
         ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
-        assertThat(sourceCases.size()).isEqualTo(31);
+        assertThat(sourceCases.size()).isEqualTo(32);
 
         ArrayNode probeCases = json.createArrayNode();
         sourceCases.forEach(value -> {
@@ -95,8 +95,112 @@ class CrossLanguageCliInputParityTest {
         for (int index = 0; index < probeCases.size(); index++) {
             ObjectNode item = (ObjectNode) probeCases.get(index);
             String command = item.get("command").textValue();
-            assertThat(runJavaCase(item)).as(command).isEqualTo(python.get(index));
+            ObjectNode actual = runJavaCase(item);
+            assertThat(actual).as(command).isEqualTo(python.get(index));
+            if (command.equals("long.session.create")) {
+                assertSessionCreateSuccess(actual, (ObjectNode) item.get("payload"));
+                assertThat(actual.at("/frames/0/data")).isEqualTo(item.at("/responses/0"));
+            }
         }
+    }
+
+    @Test
+    void 会话创建省略空值空白与Unicode码点上界必须和Python一致() throws Exception {
+        List<ObjectNode> payloads = List.of(
+                sessionCreatePayload(),
+                sessionCreatePayload().putNull("title"),
+                json.createObjectNode().put("novelId", " ").put("chapterId", "\t").put("title", " "),
+                json.createObjectNode()
+                        .put("novelId", "😀".repeat(256))
+                        .put("chapterId", "章😀".repeat(128))
+                        .put("title", "😀".repeat(500)),
+                sessionCreatePayload().put("profile", "default").put("title", "  原样😀\r\n尾行  "));
+        for (ObjectNode payload : payloads) {
+            ObjectNode item = sessionCreateCase(payload);
+            // 成功边界回显完整请求，逐例读取避免探针管道被批量大 Unicode 响应填满。
+            JsonNode python = runPythonProbe(json.createArrayNode().add(item));
+            ObjectNode actual = runJavaCase(item);
+            assertThat(actual).isEqualTo(python.get(0));
+            assertSessionCreateSuccess(actual, payload);
+        }
+    }
+
+    @Test
+    void 会话创建非法字段与Unicode越界必须在联网前与Python一致() throws Exception {
+        ArrayNode cases = json.createArrayNode();
+        cases.add(sessionCreateErrorCase(json.createObjectNode(), "FIELD_REQUIRED"));
+        for (String field : List.of("novelId", "chapterId")) {
+            ObjectNode missing = sessionCreatePayload();
+            missing.remove(field);
+            cases.add(sessionCreateErrorCase(missing, "FIELD_REQUIRED"));
+            for (JsonNode value : List.of(
+                    json.getNodeFactory().nullNode(), json.getNodeFactory().booleanNode(true),
+                    json.getNodeFactory().numberNode(1), json.createObjectNode(), json.createArrayNode(),
+                    json.getNodeFactory().textNode(""), json.getNodeFactory().textNode("字".repeat(257)),
+                    json.getNodeFactory().textNode("😀".repeat(257)))) {
+                ObjectNode payload = sessionCreatePayload();
+                payload.set(field, value);
+                cases.add(sessionCreateErrorCase(payload, "INVALID_FIELD"));
+            }
+        }
+        for (JsonNode value : List.of(
+                json.getNodeFactory().booleanNode(false), json.getNodeFactory().numberNode(1),
+                json.createObjectNode(), json.createArrayNode(), json.getNodeFactory().textNode(""),
+                json.getNodeFactory().textNode("字".repeat(501)),
+                json.getNodeFactory().textNode("😀".repeat(501)))) {
+            ObjectNode payload = sessionCreatePayload();
+            payload.set("title", value);
+            cases.add(sessionCreateErrorCase(payload, "INVALID_FIELD"));
+        }
+        for (String field : List.of("clientRequestId", "origin", "token", "unexpected")) {
+            cases.add(sessionCreateErrorCase(
+                    sessionCreatePayload().put(field, "不接受的测试字段"), "UNEXPECTED_FIELDS"));
+        }
+        JsonNode python = runPythonProbe(cases);
+        assertThat(python.size()).isEqualTo(cases.size());
+        for (int index = 0; index < cases.size(); index++) {
+            ObjectNode item = (ObjectNode) cases.get(index);
+            ObjectNode actual = runJavaCase(item);
+            assertThat(actual).as("会话创建非法输入 %s", index).isEqualTo(python.get(index));
+            assertThat(actual.path("exitCode").intValue()).isEqualTo(2);
+            assertThat(actual.path("frames").size()).isEqualTo(1);
+            assertThat(actual.at("/frames/0/error/code")).isEqualTo(item.get("expectedErrorCode"));
+            assertThat(actual.path("calls").size()).isZero();
+            assertThat(actual.path("stderr").textValue()).isEmpty();
+        }
+    }
+
+    private ObjectNode sessionCreatePayload() {
+        return json.createObjectNode().put("novelId", "n1").put("chapterId", "c1");
+    }
+
+    private ObjectNode sessionCreateCase(ObjectNode payload) {
+        ObjectNode item = json.createObjectNode();
+        item.put("command", "long.session.create");
+        item.put("mode", "scripted");
+        item.put("captureCalls", true);
+        item.set("payload", payload);
+        return item;
+    }
+
+    private ObjectNode sessionCreateErrorCase(ObjectNode payload, String errorCode) {
+        return sessionCreateCase(payload).put("expectedErrorCode", errorCode);
+    }
+
+    private void assertSessionCreateSuccess(ObjectNode actual, ObjectNode payload) {
+        assertThat(actual.path("exitCode").intValue()).isZero();
+        assertThat(actual.path("frames").size()).isEqualTo(1);
+        assertThat(actual.at("/frames/0/ok").booleanValue()).isTrue();
+        assertThat(actual.path("stderr").textValue()).isEmpty();
+        assertThat(actual.path("calls").size()).isEqualTo(1);
+        JsonNode call = actual.at("/calls/0");
+        assertThat(call.path("kind").textValue()).isEqualTo("request");
+        assertThat(call.path("method").textValue()).isEqualTo("POST");
+        assertThat(call.path("path").textValue()).isEqualTo("/api/v1/writing/sessions");
+        assertThat(call.path("query")).isEqualTo(json.createObjectNode());
+        ObjectNode expectedBody = payload.deepCopy();
+        expectedBody.remove("profile");
+        assertThat(call.path("body")).isEqualTo(expectedBody);
     }
 
     @Test

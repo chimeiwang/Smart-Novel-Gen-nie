@@ -99,6 +99,47 @@ async def _terminal(journal: RedisExecutionJournal) -> ExecutionStepResult:
 
 
 @pytest.mark.asyncio
+async def test_before_poll_prepares_terminal_before_claiming_callbacks() -> None:
+    journal = _journal("test:replayer:prepare")
+    callbacks = ScriptedCallbacks(["superseded"])
+    prepared: list[ExecutionStepResult] = []
+
+    async def prepare() -> None:
+        if not prepared:
+            prepared.append(await _terminal(journal))
+
+    replayer = TerminalCallbackReplayer(
+        journal, cast(ExecutionCallbackClient, callbacks), before_poll=prepare,
+    )
+    task = asyncio.create_task(replayer.run())
+    try:
+        await asyncio.wait_for(callbacks.delivered.wait(), timeout=1)
+    finally:
+        replayer.request_stop()
+        await asyncio.wait_for(task, timeout=1)
+    assert len(prepared) == 1
+    assert callbacks.result_hashes == [prepared[0].resultHash]
+    assert (await journal.require(prepared[0].stepId)).callback_delivery == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_before_poll_failure_propagates_to_existing_supervisor() -> None:
+    journal = _journal("test:replayer:prepare-error")
+    callbacks = ScriptedCallbacks([])
+
+    async def prepare() -> None:
+        raise RuntimeError("取消恢复索引不可读")
+
+    replayer = TerminalCallbackReplayer(
+        journal, cast(ExecutionCallbackClient, callbacks), before_poll=prepare,
+    )
+    with pytest.raises(RuntimeError, match="取消恢复索引不可读"):
+        await replayer.run()
+    assert replayer.is_running is False
+    assert callbacks.result_hashes == []
+
+
+@pytest.mark.asyncio
 async def test_core_committed_but_receipt_lost_replays_same_result_hash() -> None:
     journal = _journal("test:replayer:lost-receipt")
     result = await _terminal(journal)

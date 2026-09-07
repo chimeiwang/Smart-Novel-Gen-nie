@@ -135,12 +135,27 @@ class OperatorMainTest {
     @Test
     void 精确四十五命令拒绝其他写入口() {
         assertThat(OperatorMain.ALLOWED_COMMANDS).hasSize(45);
-        for (String command : List.of("long.novel.create", "long.video.project.create", "deploy", "configure-any")) {
+        for (String command : List.of("long.novel.create", "long.session.create", "long.video.project.create", "deploy", "configure-any")) {
             Result result = invoke(command, "{}");
             assertThat(result.exit()).isEqualTo(2);
             assertThat(result.error()).contains("OPERATOR_COMMAND_NOT_ALLOWED");
         }
         assertThat(calls).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"local", "production"})
+    void 新公共会话创建入口不得进入Operator允许集合(String environment) throws Exception {
+        install(environment, "作者");
+        backendLoadFailure = true;
+        Result result = invoke("long.session.create",
+                "{\"novelId\":\"n1\",\"chapterId\":\"c1\",\"title\":\"隔离验收\"}");
+        assertThat(OperatorMain.ALLOWED_COMMANDS).hasSize(45).doesNotContain("long.session.create");
+        assertThat(result.exit()).isEqualTo(2);
+        assertThat(result.error()).contains("OPERATOR_COMMAND_NOT_ALLOWED");
+        assertThat(result.output()).isEmpty();
+        assertThat(calls).isEmpty();
+        assertThat(passwordPrompts).isZero();
     }
 
     @ParameterizedTest

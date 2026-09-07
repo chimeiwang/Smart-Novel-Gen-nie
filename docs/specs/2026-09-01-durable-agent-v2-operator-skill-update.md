@@ -12,7 +12,8 @@
   实际部署、真实 canary 通过，且该 Skill 可操作的全部目标都会创建 V2 Run 后开放 `answer_question`；单个
   user/novel allowlist 只用于 canary，不能代表通用 Skill 已经可用。
 - 适用 Skill：`inkforge-short-story-operator`、`inkforge-production-short-story-operator`。
-- 本轮新增的 `route=all` 只改变服务器新任务路由配置，不新增 CLI 命令或 Python 依赖；普通 CLI 仍为125项，
+- 本轮新增的 `route=all` 只改变服务器新任务路由配置，不新增 CLI 命令或 Python 依赖；随后真实验收补齐
+  `long.session.create`，普通 CLI从125增为126项，具体输入与后续安装事实见文末；
   Operator 仍为45项，只调用 Core 公共 API。旧任务维护脚本及 rollout gate 的 `all` 阶段是运维入口，
   不得加入 Operator 白名单。服务器真实 canary／全量验收完成前，活动 Skills 不因源码或本机固定包
   已支持新能力而提前宣称生产生效。历史聊天／执行可不续跑，设定、大纲、正文及旧文档版本必须继续完整可读。
@@ -584,3 +585,34 @@ Skill 维护者只需同步任务观察、恢复与作者确认说明；如将�
   因安装自动开放给 Operator。普通 CLI 仍125命令，只访问 Core 公共 API，不直接暴露 Agent。
 - 两份实际入口 help 与三份 JAR 哈希读回一致。真实账号与写作验收仍是后续步骤；本机包更新不等于
   生产服务器已部署或 V2 已全量启用。
+
+## 2026-09-07：补齐新小说会话创建入口
+
+真实开发验收发现，新建小说没有 WritingSession，而原125个公共 CLI命令只有会话list/get；
+问答要求 writingSessionId，无法单靠 CLI启动新小说的首次问答。此处只补 `long.session.create`，
+普通 Java CLI及Python契约对照增为126命令，Core公共152／内部34操作及数据库结构不变。
+
+输入：
+
+```json
+{"novelId":"<小说ID>","chapterId":"<章节ID>","title":"发布验收会话"}
+```
+
+- 先通过同一profile的auth.whoami；两个ID为1～256个Unicode码点，title可省略或null，
+  非null时为1～500个码点。profile是可选本地字段，未知字段拒绝，不接受origin或token。
+- 只POST现有 `/api/v1/writing/sessions`；返回的id用于后续writingSessionId。
+  不调用Agent、模型或内部API，不写小说正文、设定、大纲。
+- 原接口不支持clientRequestId；网络结果不确定时先按同小说／章节及具名标题list/get核对，
+  不自动重试创建，不把查询结果为空当作有强幂等保证。
+- 两份日常Operator继续拒绝该命令，仍是45命令／三操作。不得仅为canary修改SKILL.md或允许集合；
+  维护者按Runbook使用完整公共CLI。将来更新Skill时，必须区分“底层126命令”和“Operator45命令”。
+- 前节JAR哈希属于此次新增命令前的真实安装记录，账号会话继续保存在原系统钥匙串。
+
+新增命令已完成Java模块143项、Python CLI及迁移基线712项、Mypy42文件与Ruff；
+根Maven verify为身份11、契约5、Core1208（3项既有跳过）、CLI143，全部成功。
+双环境真实JAR／shell离线测试通过后，两份固定包实际同步为
+`132b5429a5a38b0f742403e093df847195090d645f84a200ad3a0a8037c7e0f6`；与构建产物逐字节哈希一致。
+安装来源如实记录 `8da04a502c707e8fb4709740fddb20ad85917812` 与 `repositoryDirty=true`；
+原账号／origin／profile和Java路径保留。配置与旧包成对备份于
+`output/operator-session-backup.nUv3ML/local.tar.gz` 和 `production.tar.gz`，不含Keychain。
+本地已用新固定包实际创建唯一验收会话并复验身份；生产固定包更新不代表生产登录、业务或Agent部署已通过。

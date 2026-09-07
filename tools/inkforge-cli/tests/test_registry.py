@@ -135,6 +135,7 @@ EXPECTED_COMMANDS = {
     "long.chapter.progress.save",
     "long.session.list",
     "long.session.get",
+    "long.session.create",
     "long.planning.get",
     "long.lore.get",
     "long.resources.get",
@@ -194,6 +195,7 @@ EXPECTED_COMMANDS = {
 } | VIDEO_COMMANDS
 
 EXPECTED_LONG_MUTATIONS = {
+    "long.session.create",
     "long.novel.create",
     "long.novel.summary.save",
     "long.chapter.create",
@@ -248,6 +250,7 @@ EXPECTED_LONG_MUTATIONS = {
 } | VIDEO_MUTATIONS
 
 EXPECTED_STRUCTURED_WRITES = EXPECTED_LONG_MUTATIONS - {
+    "long.session.create",
     "long.novel.create",
     "long.novel.summary.save",
     "long.chapter.create",
@@ -337,11 +340,11 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 125
+    assert len(registry) == 126
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 74
+    ) == 75
     assert len(EXPECTED_STRUCTURED_WRITES) == 36
     assert "long.novel.create" not in EXPECTED_STRUCTURED_WRITES
     assert "long.novel.summary.save" not in EXPECTED_STRUCTURED_WRITES

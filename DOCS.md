@@ -120,4 +120,5 @@
 - 运行中 Core 的结构探针进程隔离：`docs/specs/2026-09-06-schema-probe-memory-isolation.md`
 - Durable Agent 发布前现场检查：`docs/audits/2026-09-06-durable-agent-release-preflight.md`
 - 保全小说成果并退出旧执行：`docs/specs/2026-09-07-durable-release-preserve-novel-assets.md`
+- 模型调用前取消的耐久收尾：`docs/specs/2026-09-07-durable-cancel-before-provider-convergence.md`
 - Durable Agent V2 人工迁移与 canary：`docs/DURABLE_AGENT_V2_ROLLOUT.md`

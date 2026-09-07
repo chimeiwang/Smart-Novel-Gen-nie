@@ -102,6 +102,7 @@ def _default_specs() -> list[CommandSpec]:
         list_novels as list_long_novels,
     )
     from .commands.long.references import REFERENCE_COMMAND_SPECS
+    from .commands.long.sessions import create_session
     from .commands.long.styles import STYLE_COMMAND_SPECS
     from .commands.long.task_mutations import TASK_MUTATION_COMMAND_SPECS
     from .commands.long.tasks import get_task, list_tasks
@@ -342,6 +343,16 @@ def _default_specs() -> list[CommandSpec]:
         long_read_spec("long.chapter.get", get_chapter, primary_content),
         long_read_spec("long.session.list", list_sessions),
         long_read_spec("long.session.get", get_session),
+        CommandSpec(
+            name="long.session.create",
+            handler=create_session,
+            inputMode="json",
+            outputMode="json",
+            fileOutput=no_file,
+            mutation=True,
+            requiresIdentity=True,
+            requiresClientRequestId=False,
+        ),
         long_read_spec("long.planning.get", get_planning),
         long_read_spec("long.lore.get", get_lore),
         long_read_spec("long.resources.get", get_resources),

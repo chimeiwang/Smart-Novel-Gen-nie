@@ -2,7 +2,7 @@
 
 状态：当前产品事实
 
-核对日期：2026-08-27；Agent 迁移与 CLI 相关段落更新于 2026-09-05
+核对日期：2026-08-27；Agent 迁移与 CLI 相关段落更新于 2026-09-07
 
 代码基线：当前工作树；Java 等价迁移历史基线仍为 `c9afc95`
 
@@ -28,7 +28,7 @@
 | Web 路由页面 | 9 | Next.js `page.tsx`；另有 1 个根布局 |
 | Core 公共 API | 119 个路径、152 个操作 | 运行时 OpenAPI；含受配置门禁的 2 个手机号认证操作、有界审核摘要查询与耐久澄清回答 |
 | Core 内部操作 | 34 | 不进入公共 OpenAPI 的 `/internal/v1/**`；含 3 个耐久 Workflow 回调和受审计 V2 计费对账 |
-| CLI 命令 | 125 | CLI 注册表中的具体命令 |
+| CLI 命令 | 126 | 原125命令加现有公共接口的会话创建命令 |
 | 长篇核心 Agent | 5 | 设定、剧情、写作、校验、编辑 |
 | 长篇 CreativeOperation | 10 | 不含只为历史解析保留的 `sync_lore` |
 | 中短篇显式 Agent 操作 | 4 | 蓝图、正文、选区、全文检查 |
@@ -702,7 +702,7 @@ Core 和 Agent 草案链支持伏笔列表、创建、更新和删除。当前 W
 
 ## 10. CLI 与自动化能力
 
-CLI 当前注册 125 个具体命令：
+CLI 当前注册 126 个具体命令：
 
 | 命令域 | 数量 | 覆盖 |
 | --- | ---: | --- |
@@ -710,7 +710,7 @@ CLI 当前注册 125 个具体命令：
 | `short.*` | 13 | 中短篇创建、拉取、工作稿、版本和 Agent。 |
 | `long.novel.*` / `long.chapter.*` | 10 | 长篇小说和章节读写。 |
 | 长篇资料多前缀 | 41 | 规划、设定、大纲节点、关系、经历、参考资料和文风应用。 |
-| 长篇任务审核多前缀 | 17 | 会话、任务、Agent、草案和质量检查。 |
+| 长篇任务审核多前缀 | 18 | 会话创建／查询、任务、Agent、草案和质量检查。 |
 | `long.video.*` | 41 | 视频项目至整集导出的当前主链。 |
 
 CLI 的产品规则：
@@ -722,6 +722,11 @@ CLI 的产品规则：
 - 远程地址必须使用 HTTPS，本地 HTTP 只允许回环地址；
 - CLI 不绕过归属、Diff 确认、ReviewArtifact、CAS、素材权利或视频开关；
 - 停止 watcher 只停止本地观察，不取消服务端任务。
+
+2026-09-07 新小说验收发现会话创建入口缺失，补齐 `long.session.create`，调用既有
+`POST /api/v1/writing/sessions`，只创建指定小说／章节的写作会话，不调用模型或修改小说成果。
+输入为 `novelId/chapterId` 和可选 `title/profile`；网络结果不确定时先 list/get 核对，不自动重试。
+普通命令由125增为126，公共 Core仍152操作、内部34操作；两份 Operator仍45命令且不开放该新命令。
 
 中短篇 `short.agent.watch` 已适配 V1/V2：V2 事件只用于观察，断流或终态后 GET 同一 Run，生成成功按精确
 `candidateVersionId` 进入原版本确认流程，检查成功读取完整 `checkReport.text`。命令、启动参数和 Operator
@@ -767,10 +772,10 @@ Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回�
 create_outline、revise_outline、manage_foreshadowing，并补回此前遗漏的 rewrite_scene 显式白名单；新增的是
 六个可选 operation 值，不是命令或参数。设定两项/创建大纲显式 scope 为 novel，修改大纲另许 outline_node，
 伏笔另许当前 chapter；场景改写仍为当前 chapter。结构化候选保留 selectedUpdateRefs 部分采用，自动返工不
-替代作者确认。公共 API 仍为 152、普通 CLI 为 125、Operator 为 45 命令/三操作；本批未更新固定 JAR、
+替代作者确认。该阶段公共 API 为152、普通 CLI 为125、Operator为45命令／三操作；本批未更新固定 JAR、
 活动 Skills 或服务器。范围、自然十项和后续 Skills 更新要求见结构化资料规格与 Operator Skill 更新契约。
 
-完整 125 命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
+完整126命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
 `tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。
 
 自然入口在当前分支复用 `long.agent.start` 的 `inputMode=natural` 和 `long.task.resume` 的
@@ -936,7 +941,7 @@ Java 重写的第一目标是行为等价，不是顺便增加功能。完成迁
 
 - 两种创作模式、原等价基线 148 个公共操作和 Agent 所需 30 个 Core 内部操作保持契约语义；后续新增的
   2 个手机号认证操作不得改变原接口行为；
-- 125 个 CLI 命令在迁移方案确定的 Java CLI 中保持或经明确产品决策替代；
+- 原迁移基线125个 CLI 命令在 Java CLI 中保持；后续会话创建补齐按当前126命令契约验证；
 - 登录 Cookie、资源归属、积分预授权与扣费结果一致；
 - 章节自动保存、状态门禁、质量失效规则和完整字数统计一致；
 - CreativeOperation、ReviewArtifact、部分应用、选区来源绑定、SSE 恢复和任务对账一致；
@@ -954,6 +959,6 @@ Java 重写的第一目标是行为等价，不是顺便增加功能。完成迁
 - `docs/requirements/03-ai-writing-and-agents.md`：Agent、CreativeOperation、SSE、工具和视频模型工作流；
 - `docs/requirements/04-review-quality-and-workflow.md`：ReviewArtifact、版本、复审、质量和视频人工确认；
 - `docs/requirements/05-auth-billing-and-ops.md`：认证、计费、恢复、迁移、日志和部署；
-- `tools/inkforge-cli/README.md`：125 个 CLI 命令及输入输出；
+- `tools/inkforge-cli/README.md`：126个 CLI 命令及输入输出；
 - `tools/inkforge-cli-java/README.md`：Java CLI 构建与 macOS Skill 实际入口；
 - `docs/plans/2026-08-24-core-java-tdd-replacement.md`：Java Core TDD 替换计划。

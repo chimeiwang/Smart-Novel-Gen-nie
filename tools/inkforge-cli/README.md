@@ -5,12 +5,12 @@
 
 ## 当前入口与本地启动
 
-本文件保留完整 125 命令的共享契约。macOS 本地与生产两份 Operator Skill 已完成实际入口切换及离线验收，
+本文件保留完整126命令的共享契约（原125命令及2026-09-07补齐的会话创建）。macOS 本地与生产两份 Operator Skill 已完成实际入口切换及离线验收，
 执行链为 `scripts/run.sh → Java Operator → Java CLI → Core 公共 API`；新版 Skill 不再运行
 Python 或 uv。构建、安装及真实 Skill 入口见 `tools/inkforge-cli-java/README.md`，本次切换规格见
 `docs/specs/2026-09-04-java-cli-operator-cutover.md`。
 
-Java CLI 实现同一注册表中的 125 个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包只携带独立
+Java CLI 实现同一注册表中的126个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包只携带独立
 CLI 运行时，不依赖 Spring Core、数据库驱动或 Agent。直接 CLI 的构建和本地运行方式如下：
 
 ```bash
@@ -81,6 +81,25 @@ Skills 和服务器未随源码更新。后续 Skill 说明更新见 `docs/specs
 的“中短篇四操作观察”专节，完整验收见中短篇迁移规格。普通 CLI 125、Operator 45 命令及三种长篇操作范围不变。
 
 ## 长篇写作边界
+
+### 新作品创建写作会话（2026-09-07）
+
+新建长篇不会自动创建写作会话。普通公共 CLI 用 `long.session.create` 创建首个会话，然后把响应的 `id`
+作为 `long.agent.start` 的 `writingSessionId`。输入示例：
+
+```json
+{"novelId":"<小说ID>","chapterId":"<章节ID>","title":"章节问答"}
+```
+
+`novelId/chapterId` 为1～256个Unicode码点，`title` 可省略或为 null，非 null 时为1～500个码点；
+可选 `profile` 仍只选本地已登录配置，其他字段拒绝。命令只调用现有 `POST /api/v1/writing/sessions`，
+由 Core校验归属，不写正文、设定或大纲，不调用模型。原接口没有请求幂等字段；创建响应不确定时先
+用 `long.session.list/get` 按小说／章节／具名标题核对，不自动再次创建，也不伪造 clientRequestId 支持。
+
+此命令属于完整公共 CLI，不加入两份日常 Operator的45命令白名单。以下历次迁移段落中的125命令是
+对应日期的历史计数，当前命令总数以注册表126为准。
+
+### 运行与候选
 
 `long.agent.start` 的 `rewrite_chapter_selection`/`rewrite_outline_selection` 必须携带 `selectionTarget`（资源身份、`baseUpdatedAt`、正文 hash、Unicode 码点范围和选区 hash）。CLI 不接受 `selectedText`，也不把选区正文作为权威输入；正文由 Core 按来源绑定冻结。选区操作仍走 proposal → ReviewArtifact → 用户确认 → Core 应用。
 
@@ -370,6 +389,7 @@ long.chapter.list
 long.chapter.get
 long.session.list
 long.session.get
+long.session.create
 long.planning.get
 long.lore.get
 long.resources.get

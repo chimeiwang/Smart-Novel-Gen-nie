@@ -149,3 +149,78 @@ Docker 的命令。恢复后重新核对测试卷为空，已精确清理本次�
 无凭据回执为 `output/execution-redis-bootstrap/server-env-result.json`，记录
 `originalBytesPreserved=true、ownerAndModePreserved=true、servicesUnchanged=true`。
 这只完成未来应用切换所需的连接配置；现有 Agent 尚未使用它，正式库和生产业务代码仍未切换。
+
+## 2026-09-07：指定账号登录与真实开发 canary
+
+用户进一步明确授权代为登录。通过原 Java CLI 隐藏终端输入完成本地账号 `nie` 登录，并由
+Operator与普通公共Java CLI分别 `auth.whoami` 成功复验；凭据仍只由系统钥匙串保存，没有密码文件、
+环境变量密码或令牌导出。生产身份探针触发macOS钥匙串授权，系统不允许执行者操作该安全弹窗，
+已请用户只处理系统授权，不要求重复输入InkForge账号密码；生产身份尚未核验成功。
+
+维护者通过公共CLI新建唯一开发隔离作品“耐久Agent发布验收-20260907-dev”：
+novelId为 `cmtr1lfakisj9mlmx52uwkmc0`，首章为 `cmtr1lfamisjamlmx9m2rr6yx`。
+只在该章写入175字合成验收文本，既有作品没有执行写入。新小说的 `long.session.list` 返回空数组；
+代码核实原125命令没有创建WritingSession的入口，问答因而无法独立开始。最小补齐范围见9月7日spec，
+不使用内部API、数据库直写或临时HTTP绕过公共CLI。
+
+本机四服务随后复用已有开发模型配置，仅导入七个明确模型项；服务身份和JWT保持独立。
+原镜像在指定用户／隔离小说交集下通过 `gate-ok:allowlist:migrated-empty-v2`，
+运行态为 `schemaReady=true/route=allowlist/V1 fresh=true`，两Redis未重建。
+配置备份和完整容器身份见受保护输出目录内 `provider-allowlist-result.md`。
+
+一次真实 `review_chapter` 已经完成：Run `cmtr1uzaf1kjzcxvailok8kul`、
+Step `cmtr1uzag1kk1cxva97kgks27`。公共watch和独立GET均返回 `engineVersion=2/status=completed`、
+完整reviewReport且Artifact为空；再次读取章节，正文与updatedAt保持提交合成文本后的原值。
+该结果证明一次真实只读审阅链路，不替代尚待完成的问答、候选决定、取消与重连完整canary。
+开发库从此已有V2事实，不得再执行DDL rollback；此前84表逐值不变是旧执行维护／结构迁移阶段的证据，
+不能套用到合法新增隔离作品、执行记录和计费用量的canary阶段。
+
+## 2026-09-07：真实问答、候选决定与取消现场
+
+CLI 会话缺口已最小补齐：新增 `long.session.create` 映射既有公共会话创建接口，普通 CLI 为126命令，
+Operator仍45命令／3种Operation，没有新增Core接口或直连Agent入口。Java CLI143项、Python CLI与
+迁移基线712项通过；完整Maven verify为身份11、契约5、Core1208（3项既有跳过）、CLI143，全部成功。
+Ruff、Mypy、注册表生成复验和两环境启动器离线测试通过。两份实际固定JAR均已安装为
+`132b5429a5a38b0f742403e093df847195090d645f84a200ad3a0a8037c7e0f6`；来源如实记为
+`8da04a5` 加未提交变更，不将安装称作生产服务已切换。成对备份为
+`output/operator-session-backup.nUv3ML`，仅含配置与runtime，不包含钥匙串内容。
+
+在上述唯一隔离小说中，新会话 `cmtr26ppc1kkhcxvav42rykdj` 由新公共CLI命令创建。
+真实问答Run `cmtr279zu1kkicxvazw2w15hg` 完成，Agent消息的V2 source身份精确匹配；原请求重放
+仍为同Run、同一消息，原问答消息字节哈希一致，没有重复模型调用或扣费。
+规划Run `cmtr29ati1kl2cxvaag4qapud` 经完整候选读取后弃用；规划Run
+`cmtr2d7db1km5cxva5urgxvoc` 的第二份候选经完整审阅后采用。两次均通过内置复审，最终分别为
+Artifact draft与applied。仅隔离章节新增已采用BeatPlan `cmtr2g4nk1knbcxvazasrsv1q` 与两SceneBeat，
+175字测试正文和其updatedAt保持不变，未修改任何既有小说。V2待审候选读取显式提供revision=1。
+直接Java watcher的Ctrl-C实际退出130；重连同Run从权威snapshot继续，Step attemptCount仍1，未重新执行。
+
+取消Run `cmtr2hc2v1knfcxvaszyyza3a` 的Core状态为cancelled，Step为skipped／RUN_CANCELLED，
+watch退出5符合取消协议，未产生模型调用、预留或费用。但Agent journal仍为accepted，已有持久取消，
+providerAttempts=0且无provider开始时间；联合drain唯一非零项为v2ExecutionsActive=1。
+此为真实未闭环问题，不用删除Redis记录或修改数据库制造全零。开发入口已关闭为
+schemaReady=true／route=off／V1 fresh=false，只重建Core，保留Agent与双Redis现场。
+最小修复及验收依据为 `docs/specs/2026-09-07-durable-cancel-before-provider-convergence.md`。
+
+五Run的独立只读审计确认：六次真实模型调用、六笔唯一用量、六笔唯一扣费，六个预留均settled，
+总37.876积分；全部关联限定在新隔离小说。该审计发生于取消修复前，不能作为最终排空成功证据。
+生产账号的Java钥匙串授权仍未得到结果；正式库48条历史任务、V2迁移、业务代码切换与生产canary尚未执行。
+
+## 2026-09-07：取消修复与真实开发验收收口
+
+取消修复未改Core、共享协议、数据库或Operation manifest，只改Agent日志候选读取、原回放循环准备钩子、
+执行器取消收尾与测试。先有确定性失败再修复；执行器56项、日志／回放38项、独立真实Redis Lua测试通过。
+完整Agent测试1648项通过（仅一条既有Starlette弃用提示，无跳过）；全仓Ruff、294文件Mypy和差异检查通过。
+此前523通过后被精确中断的一轮不计作全套成功。镜像从冻结后的本轮源码构建，不宣称ARM开发镜像可直接用于x86生产。
+
+仅Agent重建为 `sha256:22d8b604e111383c2bad04ba055ecbf1f6dad4c8f786b15bc129cfb18eec8934` 后，
+原取消Step自动成为failure／delivered，保留原取消身份、providerAttempts=0，正常移出active和callback索引。
+没有手工DEL／ZREM、重提模型或改数据库。恢复前后五Run的PostgreSQL审计除采样时间外逐值相同；
+全部六笔用量、扣费、已结算预留和候选状态完全不变。证据为
+`canary-recovered-scope-audit.json`、`cancel-recovery-verify-drain.log` 与前后容器身份记录。
+
+随后在同一隔离小说短暂重开交集allowlist，公共CLI复验新的
+Run `cmtr3lrwte3uy5j3lp5u55zhd` 启动、取消和独立GET成功；无模型调用、费用或新候选。
+六Run最终审计 `canary-final-six-scope-audit.json` 确认4completed／2cancelled，账务仍唯一且总37.876积分；
+公共CLI再次读取章节，完整data与采用测试后的回执一致。入口已关闭回route=off／V1 fresh=false，
+`canary-final-verify-drain.log` 明确v1DrainZero=true／v2Converged=true，全部指标为0。
+这些结果闭环真实开发canary，不代表正式库已迁移或生产服务已生效；生产Keychain授权尚未完成。

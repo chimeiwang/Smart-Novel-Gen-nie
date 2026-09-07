@@ -19,6 +19,7 @@ from inkforge_agents.execution.executor import (
 from inkforge_agents.execution.journal import (
     AcceptDecision,
     AsyncJournalRedis,
+    ExecutionJournalConflictError,
     ExecutionJournalError,
     JournalEntry,
     RedisExecutionJournal,
@@ -82,9 +83,7 @@ class RecordingModel:
 
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
         expected = (
-            "responses_json_schema_v1"
-            if self.provider_name == "fake"
-            else "chat_json_output_v1"
+            "responses_json_schema_v1" if self.provider_name == "fake" else "chat_json_output_v1"
         )
         return route == expected
 
@@ -255,6 +254,31 @@ class RejectedPreparingCallbacks(RecordingCallbacks):
         raise ExecutionCallbackError("EXECUTION_CALLBACK_REJECTED", retryable=False)
 
 
+class CancelledPreparingCallbacks(RecordingCallbacks):
+    def __init__(self, *, phase: str = "preparing", outcome: str = "stale") -> None:
+        super().__init__()
+        self.phase = phase
+        self.outcome = outcome
+        self.preparing_entered = asyncio.Event()
+        self.release_preparing = asyncio.Event()
+
+    async def send_progress(
+        self,
+        progress: ExecutionStepProgress,
+    ) -> ExecutionCallbackReceipt:
+        self.progress.append(progress)
+        if progress.phase == self.phase:
+            self.preparing_entered.set()
+            await self.release_preparing.wait()
+            if self.outcome != "stale":
+                raise ExecutionCallbackError(
+                    "EXECUTION_CALLBACK_UNAVAILABLE",
+                    retryable=self.outcome == "retry_exhausted",
+                )
+            return _receipt(progress, status="stale")
+        return _receipt(progress)
+
+
 class RetryableProgressCallbacks(RecordingCallbacks):
     def __init__(self, *, phase: str, accept_first: int = 0) -> None:
         super().__init__()
@@ -354,9 +378,7 @@ def _service(
         journal=journal,
         registry=load_execution_registry(environment="test"),
         executor=executor
-        or StatelessExecutionStepExecutor(
-            model, max_output_tokens=10_000, retry_base_seconds=0
-        ),
+        or StatelessExecutionStepExecutor(model, max_output_tokens=10_000, retry_base_seconds=0),
         callbacks=cast(ExecutionCallbackClient, callbacks),
         progress_interval_seconds=progress_interval_seconds,
         callback_retry_base_seconds=0,
@@ -419,8 +441,9 @@ async def test_answer_question_runs_through_journal_progress_and_terminal_callba
 
 
 @pytest.mark.asyncio
-async def test_saturation_rejects_only_new_work_without_journal_but_allows_replay_and_cancel(
-) -> None:
+async def test_saturation_rejects_only_new_work_without_journal_but_allows_replay_and_cancel() -> (
+    None
+):
     journal = _journal(prefix="test:service:admission")
     model = RecordingModel(block=True)
     callbacks = RecordingCallbacks()
@@ -724,9 +747,7 @@ async def test_unsafe_started_recovery_never_repeats_model(
     drop_provider_key: bool,
 ) -> None:
     journal = _journal(
-        journal_type=(
-            MissingProviderKeyJournal if drop_provider_key else RedisExecutionJournal
-        ),
+        journal_type=(MissingProviderKeyJournal if drop_provider_key else RedisExecutionJournal),
         prefix=f"test:service:unsafe:{supports_idempotency}",
     )
     model = RecordingModel(supports_idempotency=supports_idempotency)
@@ -963,6 +984,391 @@ async def test_delivered_terminal_refence_uses_compact_tombstone_without_replay(
     assert compact.callback_delivery == "delivered"
     assert compact.terminal is None
     assert compact.job_id == "job-2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["preparing", "waiting_provider"])
+@pytest.mark.parametrize("outcome", ["stale", "rejected", "retry_exhausted"])
+async def test_cancel_during_preparing_stale_receipt_persists_zero_attempt_terminal(
+    phase: str,
+    outcome: str,
+) -> None:
+    journal = _journal(prefix="test:service:cancel-preparing-stale")
+    model = RecordingModel()
+    callbacks = CancelledPreparingCallbacks(phase=phase, outcome=outcome)
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    request = execution_request()
+
+    await service.submit(request)
+    await asyncio.wait_for(callbacks.preparing_entered.wait(), timeout=1)
+    before_cancel = await journal.require(request.stepId)
+    assert before_cancel.state == ("accepted" if phase == "preparing" else "started")
+    assert before_cancel.cancel_request_id is None
+    accepted = await service.cancel(execution_cancel(request))
+    assert accepted.status == "accepted"
+    assert (await journal.require(request.stepId)).cancel_request_id == "cancel-1"
+    callbacks.release_preparing.set()
+    await service.wait_idle()
+
+    entry = await journal.require(request.stepId)
+    health = await service.health()
+    redis = cast(Any, journal._redis)
+    assert model.requests == []
+    assert entry.provider_attempts == 0
+    assert entry.provider_started_at is None
+    assert {
+        "state": entry.state,
+        "callback_delivery": entry.callback_delivery,
+        "active": await redis.zcard(journal._drain_active),
+        "background_error": health.error_code,
+    } == {
+        "state": "failure",
+        "callback_delivery": "delivered",
+        "active": 0,
+        "background_error": None,
+    }
+    assert len(callbacks.failures) == 1
+    assert callbacks.failures[0].errorCode == "RUN_CANCELLED"
+    assert callbacks.failures[0].cancelRequestId == "cancel-1"
+    assert callbacks.failures[0].outcomeUnknown is False
+    assert callbacks.failures[0].usage.providerAttempts == 0
+
+
+@pytest.mark.asyncio
+async def test_duplicate_cancel_recovers_accepted_cancel_without_active_task() -> None:
+    journal = _journal(prefix="test:service:cancel-orphan-accepted")
+    request = execution_request()
+    resolved = execution_result(request).resolvedModel
+    await journal.accept(request, resolved.model_dump(mode="json"))
+    original = await journal.request_cancel(execution_cancel(request))
+    assert original.status == "accepted"
+    model = RecordingModel()
+    callbacks = RecordingCallbacks()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+
+    replayed = await service.cancel(execution_cancel(request))
+    assert replayed.status == "already_cancelled"
+    await service.wait_idle()
+
+    entry = await journal.require(request.stepId)
+    assert model.requests == []
+    assert entry.provider_attempts == 0
+    assert entry.provider_started_at is None
+    assert entry.state == "failure"
+    assert entry.callback_delivery == "delivered"
+    assert await cast(Any, journal._redis).zcard(journal._drain_active) == 0
+    assert len(callbacks.failures) == 1
+    assert callbacks.failures[0].errorCode == "RUN_CANCELLED"
+    assert callbacks.failures[0].cancelRequestId == "cancel-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize("novel_id", ["novel-1", None])
+async def test_replayer_recovers_cancelled_zero_attempt_after_service_restart(
+    started: bool,
+    novel_id: str | None,
+) -> None:
+    journal = _journal(prefix=f"test:service:cancel-restart:{started}")
+    request = rehash_request(execution_request().model_copy(update={"novelId": novel_id}))
+    await journal.accept(request, execution_result(request).resolvedModel.model_dump(mode="json"))
+    if started:
+        await journal.mark_started(request)
+    await journal.request_cancel(execution_cancel(request))
+
+    class NotifyingCallbacks(RecordingCallbacks):
+        delivered = asyncio.Event()
+
+        async def send_failure(self, failure: ExecutionStepFailure) -> ExecutionCallbackReceipt:
+            receipt = await super().send_failure(failure)
+            self.delivered.set()
+            return receipt
+
+    model = RecordingModel()
+    callbacks = NotifyingCallbacks()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    replay_task = asyncio.create_task(service.callback_replayer.run())
+    try:
+        await asyncio.wait_for(callbacks.delivered.wait(), timeout=1)
+        await asyncio.wait_for(service.wait_idle(), timeout=1)
+    finally:
+        service.callback_replayer.request_stop()
+        await asyncio.wait_for(replay_task, timeout=1)
+        await service.close()
+    entry = await journal.require(request.stepId)
+    assert entry.state == "failure"
+    assert entry.callback_delivery == "delivered"
+    assert await cast(Any, journal._redis).zcard(journal._drain_active) == 0
+    assert model.requests == []
+    assert len(callbacks.failures) == 1
+    assert callbacks.failures[0].usage.providerAttempts == 0
+    assert callbacks.failures[0].novelId == novel_id
+
+
+@pytest.mark.asyncio
+async def test_cancel_recovery_skips_active_task_quarantine_and_nonzero_attempts() -> None:
+    prefix = "test:service:cancel-recovery-exclusions"
+    journal = _journal(prefix=prefix)
+    request = execution_request()
+    model = RecordingModel()
+    callbacks = CancelledPreparingCallbacks()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    await service.submit(request)
+    await callbacks.preparing_entered.wait()
+    await service.cancel(execution_cancel(request))
+    await service._recover_pending_cancellations()
+    assert (await journal.require(request.stepId)).state == "accepted"
+    assert callbacks.failures == []
+    # 模拟旧进程在已收到取消后停止；新实例不能穿过 restore quarantine。
+    await service.close()
+    redis = cast(Any, journal._redis)
+    await redis.set(f"{prefix}:restore:quarantine", "test-restore")
+    recovered = _service(journal=journal, model=model, callbacks=RecordingCallbacks())
+    await recovered._recover_pending_cancellations()
+    await recovered.wait_idle()
+    assert (await journal.require(request.stepId)).state == "accepted"
+    await redis.delete(f"{prefix}:restore:quarantine")
+    await recovered._recover_pending_cancellations()
+    await recovered.wait_idle()
+    assert (await journal.require(request.stepId)).callback_delivery == "delivered"
+
+    called = rehash_request(
+        request.model_copy(
+            update={
+                "stepId": "step-called",
+                "jobId": "job-called",
+                "idempotencyKey": "idem-called",
+            }
+        )
+    )
+    await journal.accept(called, execution_result(called).resolvedModel.model_dump(mode="json"))
+    await journal.mark_started(called)
+    await journal.begin_provider_attempt(called)
+    await journal.request_cancel(execution_cancel(called))
+    before = await journal.require(called.stepId)
+    await recovered._recover_pending_cancellations()
+    await recovered.wait_idle()
+    assert await journal.require(called.stepId) == before
+    assert model.requests == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cancel_recovery_delivers_one_terminal_and_preserves_existing_result() -> (
+    None
+):
+    journal = _journal(prefix="test:service:cancel-recovery-concurrent")
+    request = execution_request()
+    await journal.accept(request, execution_result(request).resolvedModel.model_dump(mode="json"))
+    await journal.request_cancel(execution_cancel(request))
+    model = RecordingModel()
+    callbacks = RecordingCallbacks()
+    first = _service(journal=journal, model=model, callbacks=callbacks)
+    second = _service(journal=journal, model=model, callbacks=callbacks)
+    await asyncio.gather(
+        first._recover_pending_cancellations(), second._recover_pending_cancellations()
+    )
+    await asyncio.gather(first.wait_idle(), second.wait_idle())
+    assert len(callbacks.failures) == 1
+    assert (await journal.require(request.stepId)).callback_delivery == "delivered"
+    assert (await first.health()).error_code is None
+    assert (await second.health()).error_code is None
+    assert model.requests == []
+
+    complete = rehash_request(
+        request.model_copy(
+            update={
+                "stepId": "step-complete",
+                "jobId": "job-complete",
+                "idempotencyKey": "idem-complete",
+            }
+        )
+    )
+    result = execution_result(complete)
+    await journal.accept(complete, result.resolvedModel.model_dump(mode="json"))
+    await journal.record_terminal(complete, result)
+    before = await journal.require(complete.stepId)
+    cancellation = await first.cancel(execution_cancel(complete))
+    assert cancellation.status == "already_terminal"
+    await first._recover_pending_cancellations()
+    await first.wait_idle()
+    assert await journal.require(complete.stepId) == before
+    assert len(callbacks.failures) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_recovery_rechecks_fence_after_reading_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal = _journal(prefix="test:service:cancel-recovery-fence")
+    request = execution_request()
+    resolved = execution_result(request).resolvedModel.model_dump(mode="json")
+    await journal.accept(request, resolved)
+    await journal.request_cancel(execution_cancel(request))
+    candidate = await journal.require(request.stepId)
+    new_request = request.model_copy(update={"jobId": "job-new", "fencingToken": 2})
+
+    async def stale_candidates() -> tuple[JournalEntry, ...]:
+        await journal.accept(new_request, resolved)
+        return (candidate,)
+
+    monkeypatch.setattr(journal, "cancelled_before_provider", stale_candidates)
+    callbacks = RecordingCallbacks()
+    service = _service(journal=journal, model=RecordingModel(), callbacks=callbacks)
+    await service._recover_pending_cancellations()
+    await service.wait_idle()
+    latest = await journal.require(request.stepId)
+    assert latest.fencing_token == 2
+    assert latest.job_id == "job-new"
+    assert latest.state == "accepted"
+    assert callbacks.failures == []
+    assert (await service.health()).error_code is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["request_hash", "input_hash", "run_id", "novel_id", "job_id"])
+async def test_cancel_recovery_rejects_logical_identity_corruption(
+    field: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal = _journal(prefix="test:service:cancel-corrupt-identity")
+    request = execution_request()
+    await journal.accept(request, execution_result(request).resolvedModel.model_dump(mode="json"))
+    await journal.request_cancel(execution_cancel(request))
+    candidate = await journal.require(request.stepId)
+
+    async def stale_candidates() -> tuple[JournalEntry, ...]:
+        await cast(Any, journal._redis).hset(
+            journal._key(request.stepId),
+            field,
+            "b" * 64 if field.endswith("hash") else "changed",
+        )
+        return (candidate,)
+
+    monkeypatch.setattr(journal, "cancelled_before_provider", stale_candidates)
+    callbacks = RecordingCallbacks()
+    model = RecordingModel()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    with pytest.raises(ExecutionJournalConflictError):
+        await service._recover_pending_cancellations()
+    assert callbacks.failures == []
+    assert model.requests == []
+
+
+@pytest.mark.asyncio
+async def test_old_cancel_never_interrupts_newer_fence_active_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal = _journal(prefix="test:service:cancel-new-owner")
+    cancel_entered = asyncio.Event()
+    release_cancel = asyncio.Event()
+    newer_terminal_entered = asyncio.Event()
+    release_newer_terminal = asyncio.Event()
+    original_cancel = journal.request_cancel
+
+    async def delayed_cancel(request: Any) -> Any:
+        decision = await original_cancel(request)
+        cancel_entered.set()
+        await release_cancel.wait()
+        return decision
+
+    class BlockedNewerCallbacks(CancelledPreparingCallbacks):
+        async def send_failure(self, failure: ExecutionStepFailure) -> ExecutionCallbackReceipt:
+            if failure.fencingToken == 2:
+                newer_terminal_entered.set()
+                await release_newer_terminal.wait()
+            return await super().send_failure(failure)
+
+    callbacks = BlockedNewerCallbacks()
+    model = RecordingModel()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    request = execution_request()
+    await service.submit(request)
+    await asyncio.wait_for(callbacks.preparing_entered.wait(), timeout=1)
+    monkeypatch.setattr(journal, "request_cancel", delayed_cancel)
+    old_cancel = asyncio.create_task(service.cancel(execution_cancel(request)))
+    try:
+        await asyncio.wait_for(cancel_entered.wait(), timeout=1)
+        newer = request.model_copy(update={"jobId": "job-newer", "fencingToken": 2})
+        await service.submit(newer)
+        await asyncio.wait_for(newer_terminal_entered.wait(), timeout=1)
+        newer_task = service._active[request.stepId].task
+        release_cancel.set()
+        assert (await asyncio.wait_for(old_cancel, timeout=1)).status == "accepted"
+        assert service._active[request.stepId].task is newer_task
+        assert not newer_task.done()
+        release_newer_terminal.set()
+        await asyncio.wait_for(service.wait_idle(), timeout=1)
+        assert (await journal.require(request.stepId)).callback_delivery == "delivered"
+        assert (await service.health()).error_code is None
+        assert model.requests == []
+    finally:
+        release_cancel.set()
+        release_newer_terminal.set()
+        await old_cancel
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_duplicate_cancel_preserves_nonzero_attempt_unknown_usage() -> None:
+    journal = _journal(prefix="test:service:cancel-called-explicit")
+    request = execution_request()
+    await journal.accept(request, execution_result(request).resolvedModel.model_dump(mode="json"))
+    await journal.mark_started(request)
+    await journal.begin_provider_attempt(request)
+    await journal.request_cancel(execution_cancel(request))
+    model = RecordingModel()
+    callbacks = RecordingCallbacks()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    assert (await service.cancel(execution_cancel(request))).status == "already_cancelled"
+    await service.wait_idle()
+    assert model.requests == []
+    assert len(callbacks.failures) == 1
+    failure = callbacks.failures[0]
+    assert failure.errorCategory == "cancelled"
+    assert failure.outcomeUnknown is False
+    assert failure.usage.usageStatus == "unknown"
+    assert failure.usage.providerAttempts == 1
+    assert failure.usage.inputTokens is None
+    assert failure.usage.completionTokens is None
+    assert failure.usage.costMicros is None
+    assert (await journal.require(request.stepId)).provider_attempts == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unknown_recovery", [False, True])
+async def test_cancel_between_terminal_read_and_cas_preserves_unknown_usage(
+    unknown_recovery: bool,
+) -> None:
+    class CancelAtTerminalJournal(RedisExecutionJournal):
+        async def record_terminal(
+            self,
+            request: ExecutionStepRequest,
+            terminal: ExecutionStepResult | ExecutionStepFailure,
+        ) -> JournalEntry:
+            if isinstance(terminal, ExecutionStepFailure) and terminal.cancelRequestId is None:
+                await self.request_cancel(execution_cancel(request))
+            return await super().record_terminal(request, terminal)
+
+    journal = _journal(
+        journal_type=CancelAtTerminalJournal, prefix="test:service:cancel-terminal-cas"
+    )
+    model = RecordingModel()
+    callbacks = RejectedPreparingCallbacks()
+    service = _service(journal=journal, model=model, callbacks=callbacks)
+    request = execution_request(dispatch_mode="running_recovery" if unknown_recovery else "initial")
+    await service.submit(request)
+    await service.wait_idle()
+    assert model.requests == []
+    assert len(callbacks.failures) == 1
+    failure = callbacks.failures[0]
+    assert failure.errorCode == "RUN_CANCELLED"
+    assert failure.cancelRequestId == "cancel-1"
+    assert failure.outcomeUnknown is False
+    assert failure.usage.usageStatus == "unknown"
+    assert failure.usage.inputTokens is None
+    assert failure.usage.costMicros is None
+    assert (await journal.require(request.stepId)).callback_delivery == "delivered"
+    assert (await service.health()).error_code is None
 
 
 @pytest.mark.asyncio
@@ -1242,9 +1648,7 @@ async def test_replayer_supervisor_backoff_blocks_new_provider_work() -> None:
         await service.submit(execution_request())
 
     assert model.requests == []
-    assert (await service.health()).error_code == (
-        "EXECUTION_CALLBACK_REPLAYER_UNHEALTHY"
-    )
+    assert (await service.health()).error_code == ("EXECUTION_CALLBACK_REPLAYER_UNHEALTHY")
 
 
 @pytest.mark.asyncio

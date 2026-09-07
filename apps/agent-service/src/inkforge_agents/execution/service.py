@@ -36,6 +36,7 @@ from .journal import (
     ExecutionJournalCancelledError,
     ExecutionJournalConflictError,
     ExecutionJournalError,
+    ExecutionJournalStaleFenceError,
     JournalEntry,
     RedisExecutionJournal,
     TerminalPayload,
@@ -141,6 +142,7 @@ class ExecutionService:
             journal,
             callbacks,
             retry_base_seconds=callback_retry_base_seconds,
+            before_poll=self._recover_pending_cancellations,
         )
 
     @property
@@ -254,17 +256,25 @@ class ExecutionService:
         request: ExecutionCancelRequest,
     ) -> ExecutionCancelAccepted:
         decision = await self._journal.request_cancel(request)
-        if decision.status == "accepted" and decision.entry is not None:
+        if decision.status in {"accepted", "already_cancelled"} and decision.entry is not None:
             async with self._lock:
-                active = self._active.get(request.stepId)
-                if (
-                    active is not None
-                    and active.job_id == request.jobId
-                    and active.fencing_token == request.fencingToken
-                ):
-                    active.cancel_event.set()
-                else:
-                    self._spawn_cancel_terminal(request, decision.entry)
+                latest = await self._journal.require(request.stepId)
+                if _same_entry_identity(decision.entry, latest):
+                    active = self._active.get(request.stepId)
+                    if (
+                        active is not None
+                        and not active.task.done()
+                        and active.job_id == request.jobId
+                        and active.fencing_token == request.fencingToken
+                    ):
+                        active.cancel_event.set()
+                    elif (
+                        (active is None or active.task.done())
+                        and latest.state not in {"result", "failure"}
+                    ):
+                        self._spawn_cancel_terminal(request, latest)
+        if decision.entry is not None and decision.entry.state in {"result", "failure"}:
+            self._callback_replayer.wake()
         return ExecutionCancelAccepted(
             protocolVersion="2.0",
             cancelRequestId=request.cancelRequestId,
@@ -276,6 +286,21 @@ class ExecutionService:
             status=decision.status,
             acceptedAt=datetime.now(UTC),
         )
+
+    async def _recover_pending_cancellations(self) -> None:
+        if self._closed or await self._journal.is_restore_quarantined():
+            return
+        for candidate in await self._journal.cancelled_before_provider():
+            async with self._lock:
+                active = self._active.get(candidate.step_id)
+                if active is not None and not active.task.done():
+                    continue
+                latest = await self._journal.require(candidate.step_id)
+                if not _same_entry_identity(candidate, latest) or not _cancelled_before_provider(
+                    latest
+                ):
+                    continue
+                self._spawn_cancel_terminal(_cancel_from_entry(latest), latest)
 
     async def health(self) -> ExecutionServiceHealth:
         async with self._admission_lock:
@@ -334,6 +359,8 @@ class ExecutionService:
             if not tasks:
                 return
             await asyncio.gather(*tasks, return_exceptions=True)
+            # 全部任务已完成时 gather 可同步返回；让出一轮供原 done 清理释放索引与 admission。
+            await asyncio.sleep(0)
 
     async def close(self) -> None:
         self._closed = True
@@ -420,10 +447,9 @@ class ExecutionService:
         entry: JournalEntry,
     ) -> None:
         current = self._active.get(request.stepId)
+        if current is not None and not current.task.done():
+            return
         holds_admission = current.holds_admission if current is not None else False
-        if current is not None:
-            current.cancel_event.set()
-            current.task.cancel()
         task = asyncio.create_task(self._cancel_without_request(request, entry))
         active = _ActiveExecution(
             job_id=request.jobId,
@@ -486,8 +512,7 @@ class ExecutionService:
                 outcome_unknown=True,
                 usage=_entry_unknown_usage(entry),
             )
-            await self._journal.record_terminal(request, terminal)
-            await self._deliver_terminal(terminal)
+            await self._persist_before_provider_terminal(request, terminal)
             return
         if entry.cancel_request_id is not None:
             terminal = _failure_from_entry(
@@ -499,8 +524,7 @@ class ExecutionService:
                 usage=_entry_unknown_usage(entry),
                 cancel_request_id=entry.cancel_request_id,
             )
-            await self._journal.record_terminal(request, terminal)
-            await self._deliver_terminal(terminal)
+            await self._persist_before_provider_terminal(request, terminal)
             return
         if not _resolved_model_available(resolved, self._executor):
             outcome_unknown = entry.provider_attempts > 0
@@ -518,8 +542,7 @@ class ExecutionService:
                 outcome_unknown=outcome_unknown,
                 usage=_entry_unknown_usage(entry),
             )
-            await self._journal.record_terminal(request, terminal)
-            await self._deliver_terminal(terminal)
+            await self._persist_before_provider_terminal(request, terminal)
             return
 
         try:
@@ -535,8 +558,7 @@ class ExecutionService:
                 outcome_unknown=False,
                 usage=_entry_unknown_usage(entry),
             )
-            await self._journal.record_terminal(request, terminal)
-            await self._deliver_terminal(terminal)
+            await self._persist_before_provider_terminal(request, terminal)
             return
 
         sequence = _ProgressSequence()
@@ -554,6 +576,7 @@ class ExecutionService:
             return
         if preparing == "retry_exhausted":
             # journal 保持 accepted；Core lease 到期后会以同一逻辑请求和新 fence 重派。
+            await self._persist_cancellation_before_exit(request)
             return
         if preparing == "rejected":
             terminal = _failure_from_entry(
@@ -564,8 +587,7 @@ class ExecutionService:
                 outcome_unknown=False,
                 usage=_entry_unknown_usage(entry),
             )
-            await self._journal.record_terminal(request, terminal)
-            await self._deliver_terminal(terminal)
+            await self._persist_before_provider_terminal(request, terminal)
             return
         if not resume_started:
             try:
@@ -595,9 +617,10 @@ class ExecutionService:
                     outcome_unknown=False,
                     usage=_entry_unknown_usage(entry),
                 )
-                await self._journal.record_terminal(request, terminal)
-                await self._deliver_terminal(terminal)
+                await self._persist_before_provider_terminal(request, terminal)
             # retry_exhausted 保留 started/0-attempt；running_recovery 可安全首次尝试。
+            elif waiting == "retry_exhausted":
+                await self._persist_cancellation_before_exit(request)
             return
 
         cancel_event = await self._cancel_event(request.stepId)
@@ -633,6 +656,7 @@ class ExecutionService:
             except ExecutionProviderGateClosed:
                 # journal 保持 started；0 次尝试可安全首次恢复，已有尝试继续按
                 # 供应商幂等/结果未知矩阵由 Core 租约恢复，不伪造终态。
+                await self._persist_cancellation_before_exit(request)
                 return
         finally:
             heartbeat.cancel()
@@ -810,8 +834,7 @@ class ExecutionService:
             outcome_unknown=outcome_unknown,
             usage=_entry_unknown_usage(entry),
         )
-        await self._journal.record_terminal(request, terminal)
-        await self._deliver_terminal(terminal)
+        await self._persist_before_provider_terminal(request, terminal)
 
     async def _deliver_terminal(self, terminal: TerminalPayload) -> None:
         entry = await self._journal.require(terminal.stepId)
@@ -841,24 +864,16 @@ class ExecutionService:
         request: ExecutionCancelRequest,
         entry: JournalEntry,
     ) -> None:
-        resolved_model = ResolvedModelRef.model_validate(entry.resolved_model)
-        terminal = _failure_from_entry(
-            entry,
-            resolved_model,
-            category="cancelled",
-            code="RUN_CANCELLED",
-            outcome_unknown=False,
-            usage=_entry_unknown_usage(entry),
-            cancel_request_id=request.cancelRequestId,
-        )
-        stored = await self._journal.record_terminal(
-            _request_identity_from_cancel(request, entry),
-            terminal,
-        )
-        persisted_terminal = stored.terminal
-        if persisted_terminal is None:
-            raise ExecutionJournalConflictError("V2 journal 取消终态缺少 payload")
-        await self._deliver_terminal(persisted_terminal)
+        if await self._journal.is_restore_quarantined():
+            return
+        latest = await self._journal.require(request.stepId)
+        if not _same_entry_identity(entry, latest):
+            return
+        if latest.state in {"result", "failure"}:
+            if latest.terminal is not None:
+                await self._deliver_terminal(latest.terminal)
+            return
+        await self._persist_cancellation_before_exit(_request_identity_from_cancel(request, latest))
 
     async def _persist_cancelled(
         self,
@@ -875,8 +890,7 @@ class ExecutionService:
             usage=_entry_unknown_usage(entry),
             cancel_request_id=entry.cancel_request_id,
         )
-        await self._journal.record_terminal(request, terminal)
-        await self._deliver_terminal(terminal)
+        await self._persist_before_provider_terminal(request, terminal)
 
     async def _persist_stale_failure(
         self,
@@ -892,8 +906,48 @@ class ExecutionService:
             outcome_unknown=False,
             usage=_entry_unknown_usage(entry),
         )
-        await self._journal.record_terminal(request, terminal)
-        await self._deliver_terminal(terminal)
+        await self._persist_before_provider_terminal(request, terminal)
+
+    async def _persist_cancellation_before_exit(self, request: ExecutionStepRequest) -> None:
+        latest = await self._journal.require(request.stepId)
+        if latest.cancel_request_id is None or not _entry_matches_request(latest, request):
+            return
+        await self._persist_before_provider_terminal(request, _cancel_terminal(latest))
+
+    async def _persist_before_provider_terminal(
+        self,
+        request: ExecutionStepRequest,
+        terminal: ExecutionStepFailure,
+    ) -> None:
+        # 取消标记只能首次加入，最多重读一次即可覆盖读取后到 Lua CAS 前的竞态。
+        # 不重建业务请求、不重放模型；已有终态或新 fence 始终胜过旧执行的收尾。
+        for attempt in range(2):
+            latest = await self._journal.require(request.stepId)
+            if not _entry_matches_request(latest, request):
+                return
+            if latest.state in {"result", "failure"}:
+                if latest.terminal is not None:
+                    await self._deliver_terminal(latest.terminal)
+                return
+            current = _cancel_terminal(latest) if latest.cancel_request_id is not None else terminal
+            try:
+                stored = await self._journal.record_terminal(request, current)
+            except ExecutionJournalCancelledError:
+                if attempt == 0:
+                    continue
+                raise
+            except ExecutionJournalStaleFenceError:
+                return
+            except ExecutionJournalConflictError:
+                observed = await self._journal.require(request.stepId)
+                if not _entry_matches_request(observed, request):
+                    return
+                if observed.state not in {"result", "failure"}:
+                    raise
+                stored = observed
+            if stored.terminal is not None:
+                await self._deliver_terminal(stored.terminal)
+            return
 
     async def _cancel_event(self, step_id: str) -> asyncio.Event:
         async with self._lock:
@@ -962,6 +1016,77 @@ def _resolved_model_available(
     return executor.matches_resolved_model(
         resolved.resolved_model,
         resolved.profile,
+    )
+
+
+def _entry_matches_request(entry: JournalEntry, request: ExecutionStepRequest) -> bool:
+    if (
+        entry.step_id != request.stepId
+        or entry.run_id != request.runId
+        or entry.novel_id != request.novelId
+        or entry.request_hash != request.requestHash
+        or entry.input_hash != request.inputHash
+    ):
+        raise ExecutionJournalConflictError("V2 journal 终态逻辑身份发生冲突")
+    if entry.fencing_token > request.fencingToken:
+        return False
+    if entry.fencing_token != request.fencingToken or entry.job_id != request.jobId:
+        raise ExecutionJournalConflictError("V2 journal 终态执行身份发生冲突")
+    return True
+
+
+def _same_entry_identity(first: JournalEntry, second: JournalEntry) -> bool:
+    if (
+        first.step_id != second.step_id
+        or first.run_id != second.run_id
+        or first.novel_id != second.novel_id
+        or first.request_hash != second.request_hash
+        or first.input_hash != second.input_hash
+        or first.resolved_model != second.resolved_model
+    ):
+        raise ExecutionJournalConflictError("V2 journal 取消恢复逻辑身份发生冲突")
+    if second.fencing_token > first.fencing_token:
+        return False
+    if second.fencing_token != first.fencing_token or second.job_id != first.job_id:
+        raise ExecutionJournalConflictError("V2 journal 取消恢复执行身份发生冲突")
+    return True
+
+
+def _cancelled_before_provider(entry: JournalEntry) -> bool:
+    return (
+        entry.state in {"accepted", "started"}
+        and entry.cancel_request_id is not None
+        and entry.provider_attempts == 0
+        and entry.provider_started_at is None
+    )
+
+
+def _cancel_from_entry(entry: JournalEntry) -> ExecutionCancelRequest:
+    if entry.cancel_request_id is None:
+        raise ExecutionJournalConflictError("V2 journal 缺少持久取消身份")
+    # 仅供本机收尾和 journal CAS，不发送为取消请求，也不伪造历史 requestedAt。
+    return ExecutionCancelRequest.model_construct(
+        protocolVersion="2.0",
+        cancelRequestId=entry.cancel_request_id,
+        runId=entry.run_id,
+        novelId=entry.novel_id,
+        stepId=entry.step_id,
+        jobId=entry.job_id,
+        fencingToken=entry.fencing_token,
+        requestHash=entry.request_hash,
+    )
+
+
+def _cancel_terminal(entry: JournalEntry) -> ExecutionStepFailure:
+    return _failure_from_entry(
+        entry,
+        ResolvedModelRef.model_validate(entry.resolved_model),
+        category="cancelled",
+        code="RUN_CANCELLED",
+        # 取消是已知控制终态；供应商用量仍保持 unknown 和实际尝试数，不伪造零 token。
+        outcome_unknown=False,
+        usage=_entry_unknown_usage(entry),
+        cancel_request_id=entry.cancel_request_id,
     )
 
 

@@ -339,6 +339,20 @@
     {
       "fileOutput": {
         "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.session.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.sessions:create_session",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
         "kind": "data_json",
         "mediaType": null
       },

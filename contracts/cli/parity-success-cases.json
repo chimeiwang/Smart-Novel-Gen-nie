@@ -29,6 +29,24 @@
     },
     {"command": "long.chapter.create", "payload": {"novelId": "n/1"}},
     {
+      "caseId": "long-session-create-preserves-unicode",
+      "command": "long.session.create",
+      "payload": {
+        "novelId": "作品 /😀",
+        "chapterId": "章节 /😀",
+        "title": "  隔离验收😀\r\n完整标题  "
+      },
+      "responses": [{
+        "id": "会话 /😀",
+        "novelId": "作品 /😀",
+        "chapterId": "章节 /😀",
+        "title": "  隔离验收😀\r\n完整标题  ",
+        "phase": "idle",
+        "createdAt": "2026-09-07T00:00:00Z",
+        "updatedAt": "2026-09-07T00:00:00Z"
+      }]
+    },
+    {
       "command": "long.chapter.save",
       "payload": {
         "chapterId": "c/1",

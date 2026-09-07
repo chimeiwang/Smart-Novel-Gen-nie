@@ -172,8 +172,10 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - V2 execution journal 只使用独立 `EXECUTION_REDIS_URL`，生产必须与普通 `REDIS_URL` 分离。该 Redis 固定
   `appendonly yes + appendfsync always + aof-load-truncated no + noeviction`；普通队列 Redis 继续关闭 AOF。
   `accepted`、供应商尝试和未送达终态在 Core 回执前不设 TTL。独立 callback replayer 使用 Redis 原子
-  claim/lease 和到期时间重放同一 `resultHash`；合法 `accepted/duplicate/stale` 回执才进入保留期，确定性 4xx
-  隔离为 rejected 并阻断 readiness，网络、5xx 和损坏回执按稳定抖动退避。
+  claim/lease 和到期时间重放同一 `resultHash`；合法 `accepted/duplicate/superseded` 回执才进入保留期，
+  `stale` 继续保留终态等待新 fence 重绑。确定性 4xx 隔离为 rejected 并阻断 readiness，网络、5xx 和损坏回执按稳定抖动退避。
+  每轮回放前只从既有有界 active 索引恢复已持久取消、无本机活跃执行、providerAttempts=0且无provider开始时间的
+  accepted/started记录；使用原取消身份与终态CAS，不调用模型、不清空用量、不覆盖已有结果，继续尊重quarantine。
 - V2 journal 的每个 accept/start/provider-attempt/terminal/refence/cancel/callback claim/reschedule/reject/deliver
   Lua 必须同时校验版本为 `1` 的 drain marker，并原子维护包含全部 accepted/started 与未送达 terminal 的 active
   ZSET。生产缺 marker 时禁止开始 provider；只有 PostgreSQL 全部 V2 Run 为零且独立 Redis 无任何 key 时才允许

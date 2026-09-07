@@ -1,7 +1,8 @@
 # 耐久 Agent V2 数据库迁移与分阶段发布 Runbook
 
 状态：个人项目人工迁移与 canary 手册。2026-09-07 已在真实服务器开发库完成两次 forward、
-空 V2 rollback 和再次 forward，完成结构导出／复验及小说成果保全验证；正式库尚未迁移，业务 canary 尚未通过。
+空 V2 rollback 和再次 forward，完成结构导出／复验及小说成果保全验证；真实开发canary和取消修复后全零drain已通过。
+正式库尚未迁移，生产身份授权、canary和全量切换尚未完成。
 运行配置与完整现场记录见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。
 
 权威规格：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`

@@ -12,12 +12,15 @@ from typing import cast
 import pytest
 from inkforge_agents.execution.journal import (
     AsyncJournalRedis,
+    ExecutionJournalCancelledError,
     ExecutionJournalError,
     RedisExecutionJournal,
 )
+from inkforge_contracts.execution import ExecutionStepFailure, StepUsage, canonical_execution_sha256
 from redis.asyncio import Redis
 
 from .support import (
+    execution_cancel,
     execution_request,
     execution_result,
     rehash_request,
@@ -86,6 +89,7 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
             require_durability=True,
         )
         assert (await journal.health()).ready is True
+        assert await journal.cancelled_before_provider() == ()
         request = execution_request()
         with pytest.raises(ExecutionJournalError, match="drain 索引"):
             await journal.accept(request, {"provider": "fake"})
@@ -190,6 +194,52 @@ async def test_all_execution_journal_lua_runs_on_real_redis(tmp_path) -> None:
         assert rebound.terminal is None
         replay_claim = await journal.claim_callback(refenced.stepId)
         assert replay_claim is None
+
+        cancelled = rehash_request(
+            execution_request(job_id="cancel-job").model_copy(
+                update={"stepId": "cancel-step", "idempotencyKey": "cancel-idem"}
+            )
+        )
+        model = execution_result(cancelled).resolvedModel
+        await journal.accept(cancelled, model.model_dump(mode="json"))
+        await journal.mark_started(cancelled)
+        await journal.request_cancel(execution_cancel(cancelled))
+        candidates = await journal.cancelled_before_provider()
+        assert [entry.step_id for entry in candidates] == [cancelled.stepId]
+        with pytest.raises(ExecutionJournalCancelledError):
+            await journal.begin_provider_attempt(cancelled)
+        usage = StepUsage(
+            usageStatus="unknown", providerAttempts=0, protocolCorrections=0, wallTimeMillis=0,
+        )
+        payload = {
+            "errorCategory": "cancelled", "errorCode": "RUN_CANCELLED",
+            "outcomeUnknown": False, "retryable": False,
+            "cancelRequestId": candidates[0].cancel_request_id,
+            "resolvedModel": model.model_dump(mode="json", exclude_none=True),
+            "usage": usage.model_dump(mode="json", exclude_none=True),
+        }
+        failure = ExecutionStepFailure(
+            protocolVersion="2.0", jobId=cancelled.jobId, runId=cancelled.runId,
+            novelId=cancelled.novelId, stepId=cancelled.stepId,
+            fencingToken=cancelled.fencingToken, requestHash=cancelled.requestHash,
+            inputHash=cancelled.inputHash, resolvedModel=model, errorCategory="cancelled",
+            errorCode="RUN_CANCELLED", retryable=False, outcomeUnknown=False,
+            cancelRequestId=candidates[0].cancel_request_id,
+            resultHash=canonical_execution_sha256(payload), usage=usage,
+            failedAt=datetime.now(UTC),
+        )
+        await journal.record_terminal(cancelled, failure)
+        assert await journal.cancelled_before_provider() == ()
+        cancel_claim = await journal.claim_callback(cancelled.stepId)
+        assert cancel_claim is not None
+        await journal.mark_callback_delivered(
+            step_id=cancelled.stepId, request_hash=cancelled.requestHash,
+            result_hash=failure.resultHash, claim_token=cancel_claim.claim_token,
+        )
+        assert await redis.zscore(
+            "inkforge:executions:drain:active", f"inkforge:executions:{cancelled.stepId}",
+        ) is None
+        assert (await journal.require(cancelled.stepId)).provider_attempts == 0
 
         second = rehash_request(
             execution_request(job_id="job-3").model_copy(

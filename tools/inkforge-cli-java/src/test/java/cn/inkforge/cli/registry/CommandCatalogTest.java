@@ -10,15 +10,22 @@ import tools.jackson.databind.json.JsonMapper;
 class CommandCatalogTest {
 
     @Test
-    void Java命令目录必须逐项匹配冻结的125个Python命令() throws Exception {
+    void Java命令目录必须逐项匹配当前126个Python命令() throws Exception {
         try (InputStream source = getClass()
                 .getResourceAsStream("/cli-contracts/command-registry.json")) {
             assertThat(source).isNotNull();
             CommandCatalog catalog = CommandCatalog.load(
                     source, JsonMapper.builder().build());
 
-            assertThat(catalog.specs()).hasSize(125);
-            assertThat(catalog.specs().keySet()).hasSize(125);
+            assertThat(catalog.specs()).hasSize(126);
+            assertThat(catalog.specs().keySet()).hasSize(126);
+            assertThat(catalog.require("long.session.create").inputMode())
+                    .isEqualTo(CommandSpec.InputMode.JSON);
+            assertThat(catalog.require("long.session.create").outputMode())
+                    .isEqualTo(CommandSpec.OutputMode.JSON);
+            assertThat(catalog.require("long.session.create").mutation()).isTrue();
+            assertThat(catalog.require("long.session.create").requiresIdentity()).isTrue();
+            assertThat(catalog.require("long.session.create").requiresClientRequestId()).isFalse();
             assertThat(catalog.require("auth.login").inputMode())
                     .isEqualTo(CommandSpec.InputMode.ARGV_TTY);
             assertThat(catalog.require("long.task.watch").outputMode())

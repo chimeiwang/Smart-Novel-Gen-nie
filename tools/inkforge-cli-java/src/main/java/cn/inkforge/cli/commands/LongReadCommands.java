@@ -65,6 +65,7 @@ public final class LongReadCommands {
                 context, payload, "checkId", "/api/v1/quality-checks/"));
         LongNovelCommands.register(handlers);
         LongChapterCommands.register(handlers);
+        LongSessionCommands.register(handlers);
         LongPlanningCommands.register(handlers);
         LongOutlineNodeCommands.register(handlers);
         LongStyleCommands.register(handlers);
