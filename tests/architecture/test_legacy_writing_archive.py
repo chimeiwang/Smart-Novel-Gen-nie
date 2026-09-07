@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,58 @@ def _scope():
             "updatedAt": "2026-09-07T00:00:00.000Z",
         }],
     }
+
+
+@pytest.mark.parametrize("fraction", [
+    "55", "42", "09", "43", "7", "96", "123", "1234", "12345", "123456", "000001",
+])
+def test_时间戳小数秒无损补六位兼容生产Python310(fraction, monkeypatch) -> None:
+    archive = _module()
+    original = "2026-07-13T06:54:34." + fraction
+    expected = "2026-07-13T06:54:34." + fraction.ljust(6, "0")
+
+    class ExactFractionDatetime:
+        @staticmethod
+        def fromisoformat(value):
+            assert value == expected
+            return datetime.fromisoformat(value)
+
+    monkeypatch.setattr(archive, "datetime", ExactFractionDatetime)
+    assert archive.timestamp(original) == datetime.fromisoformat(expected)
+
+
+@pytest.mark.parametrize("value", [
+    "2026-07-13T06:54:34.55Z", "2026-07-13T06:54:34.550000+00:00",
+    "2026-07-13T14:54:34.55+08:00", "2026-07-13 01:24:34.55-05:30",
+])
+def test_时间戳保留时区对应的精确UTC时刻(value) -> None:
+    assert _module().timestamp(value) == datetime(2026, 7, 13, 6, 54, 34, 550000)
+
+
+def test_时间戳无小数秒且冻结微秒差异仍被拒绝() -> None:
+    archive = _module()
+    assert archive.timestamp("2026-07-13T06:54:34Z") == datetime(2026, 7, 13, 6, 54, 34)
+    scope = _scope()
+    scope["tasks"][0]["updatedAt"] = "2026-07-13T06:54:34.550000Z"
+    snapshot = {
+        "tasks": [{**scope["tasks"][0], "updatedAt": "2026-07-13T06:54:34.55"}],
+        "activeCommands": 0, "undeliveredOutbox": 0, "applyingArtifacts": 0,
+    }
+    archive.assert_original(snapshot, scope)
+    snapshot["tasks"][0]["updatedAt"] = "2026-07-13T06:54:34.550001"
+    with pytest.raises(archive.ArchiveError, match="冻结任务状态或更新时间已变化"):
+        archive.assert_original(snapshot, scope)
+
+
+@pytest.mark.parametrize("value", [
+    None, 123, "", "bad-secret-value", "2026-07-13", "2026-07-13T06:54:34.",
+    "2026-07-13T06:54:34.1234567", "2026-07-13T06:54:34.55bad-secret-value",
+    "2026-02-30T06:54:34.55", "2026-07-13T25:54:34.55", "2026-07-13T06:54:34.55+24:00",
+])
+def test_时间戳拒绝坏输入或超微秒精度且不暴露输入(value) -> None:
+    archive = _module()
+    with pytest.raises(archive.ArchiveError, match="^冻结更新时间无效$"):
+        archive.timestamp(value)
 
 
 def test_清单仅允许具名数据库和精确冻结任务() -> None:

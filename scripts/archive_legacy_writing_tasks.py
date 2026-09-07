@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -82,9 +83,23 @@ def save_json(path, value):
 def timestamp(value):
     if not isinstance(value, str):
         raise ArchiveError("冻结更新时间无效")
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    parts = re.fullmatch(
+        r"([0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2})"
+        r"(?:\.([0-9]{1,6}))?(Z|[+-][0-9]{2}:[0-9]{2})?", value,
+    )
+    if parts is None:
+        raise ArchiveError("冻结更新时间无效")
+    normalized = parts[1]
+    if parts[2] is not None:
+        # PostgreSQL 省略小数秒末尾零；补齐到 Python 3.10 可解析的微秒，不改变精度。
+        normalized += "." + parts[2].ljust(6, "0")
+    normalized += (parts[3] or "").replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    except (ValueError, OverflowError) as error:
+        raise ArchiveError("冻结更新时间无效") from error
     return parsed
 
 
