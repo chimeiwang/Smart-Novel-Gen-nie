@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "f554365c8c4b5bd358110a7e0bb7754ee98ca9ba5ee7d67e449f36d36379eebe"
+        "2faa340853bfe503c99569675dca481274d8c7d8b6594df83bc6fa52d981dd8b"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -161,10 +161,10 @@ def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     assert {
         profile: budget.key for profile, budget in draft.reviewer_step_budgets.items()
     } == {
-        "reviewer.chapter_draft_consistency.v1": (
+        "reviewer.chapter_draft_consistency.v2": (
             "step_budget.long_serial.write_chapter.reviewer_consistency.v3"
         ),
-        "reviewer.chapter_draft_editorial.v1": (
+        "reviewer.chapter_draft_editorial.v2": (
             "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
         ),
     }

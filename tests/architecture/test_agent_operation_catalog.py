@@ -142,6 +142,8 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
         "writer.short_medium_manuscript.v1",
         "writer.short_medium_selection.v1",
         "quality.short_medium_full_check.v1",
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
     }
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
@@ -1171,6 +1173,48 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
         )
 
 
+def test_chapter_draft_reviewer_v2_prompt_closes_verdict_and_nullable_fields() -> None:
+    profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
+    prompts = _keyed_items(PROMPT_PROFILE_REGISTRY_PATH, "prompts")
+    operations = {operation["key"]: operation for operation in _operations()}
+
+    for operation_key in ("long_serial.write_chapter", "long_serial.rewrite_scene"):
+        operation = operations[operation_key]
+        reviewer_profiles = operation["reviewPolicy"]["reviewerProfiles"]
+        assert reviewer_profiles == [
+            "reviewer.chapter_draft_consistency.v2",
+            "reviewer.chapter_draft_editorial.v2",
+        ]
+        assert set(operation["reviewPolicy"]["reviewerStepBudgetProfiles"]) == set(
+            reviewer_profiles
+        )
+
+    for profile_key in (
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
+    ):
+        profile = profiles[profile_key]
+        assert profile["version"] == 2
+        assert profile["supported"] is True
+        assert profile["deploymentProfileKey"] == "deployment." + profile_key.replace(
+            ".v2", ".v1"
+        )
+        prompt = prompts[profile["promptProfile"]]
+        text = prompt["systemPrompt"]
+        for required in (
+            "只要 findings 中存在任何 info、warning 或 error 问题",
+            "contentVerdict 必须为 issues_found",
+            "contentVerdict 为 pass 或 cannot_assess 时，findings 必须是空数组",
+            "candidateRange（对象",
+            "每个 evidence 必须包含 evidenceItemId、contentSha256 和 range",
+            "confidence（JSON 数字",
+            "不得自行计算或编造",
+            "没有 candidatePatch 时省略该字段，不要填 null",
+        ):
+            assert required in text
+        assert "不输出资源ID、revision、hash" not in text
+
+
 def test_system_step_budgets_fit_every_applicable_run_budget() -> None:
     operations = {operation["key"]: operation for operation in _operations()}
     profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
@@ -1243,7 +1287,7 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
 
 
 def test_video_migration_preserves_existing_operations_except_approved_writing_budget() -> None:
-    """仅归一化获批的正文 token 预算调整，其余非视频操作仍逐值冻结到 65ebacf。"""
+    """归一化获批的正文预算与复审 Profile 后，其余非视频操作仍冻结到基线。"""
     retained = [
         operation
         for operation in _operations()
@@ -1254,6 +1298,10 @@ def test_video_migration_preserves_existing_operations_except_approved_writing_b
         operation for operation in retained if operation["key"] == "long_serial.write_chapter"
     )
     writing["generatorStepBudgetProfile"] = "step_budget.long_serial.write_chapter.generator.v1"
+    writing["reviewPolicy"]["reviewerProfiles"] = [
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+    ]
     writing["reviewPolicy"]["reviewerStepBudgetProfiles"] = {
         "reviewer.chapter_draft_consistency.v1": (
             "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
@@ -1270,6 +1318,21 @@ def test_video_migration_preserves_existing_operations_except_approved_writing_b
         maxReasoningTokens=16000,
         maxVisibleOutputTokens=24000,
     )
+    rewrite = next(
+        operation for operation in retained if operation["key"] == "long_serial.rewrite_scene"
+    )
+    rewrite["reviewPolicy"]["reviewerProfiles"] = [
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+    ]
+    rewrite["reviewPolicy"]["reviewerStepBudgetProfiles"] = {
+        "reviewer.chapter_draft_consistency.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
+        ),
+        "reviewer.chapter_draft_editorial.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+        ),
+    }
     assert hashlib.sha256(canonical_execution_json_bytes(retained)).hexdigest() == (
         "96afc59ca82841eeebbef5e3152c49e14902cfe1ae641501a06933a393642b12"
     )

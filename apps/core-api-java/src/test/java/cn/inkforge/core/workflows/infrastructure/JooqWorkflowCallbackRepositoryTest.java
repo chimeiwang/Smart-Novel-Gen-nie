@@ -1445,7 +1445,7 @@ class JooqWorkflowCallbackRepositoryTest {
         assertThat(callbacks.result(generated).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
         List<ExecutionStepRequest> reviewers = List.of(startNextPlanStep(flow), startNextPlanStep(flow));
         assertThat(reviewers).extracting(request -> request.getModelProfile().getProfile())
-                .containsExactlyInAnyOrder("reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1");
+                .containsExactlyInAnyOrder("reviewer.chapter_draft_consistency.v2", "reviewer.chapter_draft_editorial.v2");
         for (var reviewer : reviewers) {
             assertThat(reviewer.getInput().get("candidate")).isEqualTo(WorkflowCallbackValues.optional(generated.getOutput()));
             ExecutionStepResult result = chapterReviewResult(reviewer, "patch", "😀乙", "完整新段");

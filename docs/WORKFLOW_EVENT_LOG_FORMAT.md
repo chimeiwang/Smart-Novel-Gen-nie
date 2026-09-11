@@ -2,6 +2,10 @@
 
 当前实现位于 `apps/agent-service/src/inkforge_agents/observability/`。Agent Service 把日志写入 `/data/agent-logs`，Compose 使用 `agent_logs` 命名卷持久化；Core API 通过签名内部接口按用户归属读取，浏览器不能直接访问 Agent Service。
 
+V2 单 Step 不经过上述 V1 人工日志 observer。其结构化输出失败由 Executor 记录 run、step、输出
+Schema、诊断 code、keyword 和经过当前 Schema 白名单过滤的字段路径；不记录供应商原回复、
+未知字段名或字段值。该诊断仅帮助定位格式错误，不改变失败终态或触发模型纠正调用。
+
 ## 文件与追加规则
 
 文件名由运行标识的安全哈希生成，禁止把任务标识直接拼接为路径。同一任务首次执行和恢复运行追加到同一文件。没有模型调用或图状态变化的短路操作不创建空日志。

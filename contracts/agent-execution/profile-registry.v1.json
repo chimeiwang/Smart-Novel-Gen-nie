@@ -358,6 +358,24 @@
       "deploymentProfileKey": "deployment.reviewer.chapter_draft_editorial.v1"
     },
     {
+      "key": "reviewer.chapter_draft_consistency.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.chapter_draft_consistency.v2",
+      "deploymentProfileKey": "deployment.reviewer.chapter_draft_consistency.v1"
+    },
+    {
+      "key": "reviewer.chapter_draft_editorial.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.chapter_draft_editorial.v2",
+      "deploymentProfileKey": "deployment.reviewer.chapter_draft_editorial.v1"
+    },
+    {
       "key": "reviewer.outline_selection_editorial.v1",
       "version": 1,
       "supported": true,

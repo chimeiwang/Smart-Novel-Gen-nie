@@ -116,6 +116,83 @@ _STRUCTURED_DIAGNOSTIC_KEYWORDS = frozenset({
     "json_control_character", "json_syntax", "json_duplicate_key", "json_constant",
 })
 
+
+def _safe_structured_output_pointer(
+    pointer: object,
+    schema: Mapping[str, object],
+) -> str:
+    """只保留当前 Output Schema 声明的字段和数组下标，未知路径停在已知父节点。"""
+
+    if not isinstance(pointer, str) or len(pointer) > 512 or "\n" in pointer or "\r" in pointer:
+        return ""
+    if not pointer or not pointer.startswith("/"):
+        return ""
+
+    def decode_segment(value: str) -> str | None:
+        result: list[str] = []
+        index = 0
+        while index < len(value):
+            if value[index] != "~":
+                result.append(value[index])
+                index += 1
+                continue
+            if index + 1 >= len(value) or value[index + 1] not in {"0", "1"}:
+                return None
+            result.append("~" if value[index + 1] == "0" else "/")
+            index += 2
+        return "".join(result)
+
+    def schema_options(node: object, depth: int = 0) -> list[Mapping[str, object]]:
+        if not isinstance(node, Mapping):
+            return []
+        options: list[Mapping[str, object]] = [node]
+        if depth >= 8:
+            return options
+        for keyword in ("anyOf", "oneOf", "allOf"):
+            branches = node.get(keyword)
+            if isinstance(branches, list):
+                for branch in branches:
+                    options.extend(schema_options(branch, depth + 1))
+        return options
+
+    def escape_segment(value: str) -> str:
+        return value.replace("~", "~0").replace("/", "~1")
+
+    safe_segments: list[str] = []
+    current: list[Mapping[str, object]] = [schema]
+    for raw_segment in pointer[1:].split("/"):
+        segment = decode_segment(raw_segment)
+        if segment is None:
+            break
+        next_nodes: list[Mapping[str, object]] = []
+        for current_node in current:
+            for node in schema_options(current_node):
+                properties = node.get("properties")
+                if isinstance(properties, Mapping):
+                    child = properties.get(segment)
+                    if isinstance(child, Mapping):
+                        next_nodes.append(child)
+                        continue
+                if re.fullmatch(r"(?:0|[1-9][0-9]*)", segment):
+                    array_index = int(segment)
+                    prefix_items = node.get("prefixItems")
+                    if isinstance(prefix_items, list) and array_index < len(prefix_items):
+                        child = prefix_items[array_index]
+                        if isinstance(child, Mapping):
+                            next_nodes.append(child)
+                    else:
+                        items = node.get("items")
+                        if isinstance(items, Mapping):
+                            next_nodes.append(items)
+                        elif items is True:
+                            next_nodes.append({})
+        if not next_nodes:
+            break
+        safe_segments.append(segment)
+        current = next_nodes
+
+    return "".join(f"/{escape_segment(segment)}" for segment in safe_segments)
+
 ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]
 FailureCategory = Literal[
     "provider_transient",
@@ -423,6 +500,7 @@ class StatelessExecutionStepExecutor:
                 )
         elif request.purpose == "review":
             purpose = "review"
+            budget_profile_key = request.modelProfile.profile
             reviewer_profile = next(
                 (
                     candidate
@@ -431,6 +509,23 @@ class StatelessExecutionStepExecutor:
                 ),
                 None,
             )
+            if reviewer_profile is None and operation_key in {
+                ("long_serial", "write_chapter"),
+                ("long_serial", "rewrite_scene"),
+            }:
+                # 旧 Run 的零尝试 Step 仍按 initial 派发；只保留这两个已发布的 v1→v2 对应，
+                # 后续继续精确验证旧 Profile/Prompt/Schema 引用，不能把旧任务换成新提示词。
+                current_key = {
+                    "reviewer.chapter_draft_consistency.v1": (
+                        "reviewer.chapter_draft_consistency.v2"
+                    ),
+                    "reviewer.chapter_draft_editorial.v1": "reviewer.chapter_draft_editorial.v2",
+                }.get(request.modelProfile.profile)
+                if current_key is not None and any(
+                    candidate.key == current_key for candidate in operation.reviewer_profiles
+                ):
+                    reviewer_profile = registry.profiles.get(request.modelProfile.profile)
+                    budget_profile_key = current_key
             if reviewer_profile is None:
                 raise ExecutionCapabilityError("当前 Operation 未授权该 Reviewer Profile")
             profile = reviewer_profile
@@ -438,7 +533,7 @@ class StatelessExecutionStepExecutor:
             if reviewer_schema is None:
                 raise ExecutionCapabilityError("当前 Operation 未配置 Reviewer Output Schema")
             output_schema = reviewer_schema
-            budget = operation.reviewer_step_budgets[profile.key]
+            budget = operation.reviewer_step_budgets[budget_profile_key]
             if profile.purpose != "review" or output_schema.purpose != "evaluation":
                 raise ExecutionCapabilityError("review Step 的 Profile/Output 用途不一致")
             if request.artifactId is None or request.artifactRevision is None:
@@ -1273,13 +1368,18 @@ class StatelessExecutionStepExecutor:
             if failure[1] == "MODEL_STRUCTURED_OUTPUT_INVALID":
                 diagnostic = result.structuredOutputDiagnostic
                 keyword = diagnostic.keyword if diagnostic is not None else "content"
+                pointer = _safe_structured_output_pointer(
+                    diagnostic.jsonPointer if diagnostic is not None else "",
+                    request.outputSchema.jsonSchema,
+                )
                 _LOGGER.warning(
                     "V2 结构化输出未通过本地验收 "
-                    "run_id=%s step_id=%s output_schema=%s code=%s keyword=%s",
+                    "run_id=%s step_id=%s output_schema=%s code=%s pointer=%s keyword=%s",
                     request.runId,
                     request.stepId,
                     request.outputSchema.name,
                     diagnostic.code if diagnostic is not None else "missing_output",
+                    pointer,
                     keyword if keyword in _STRUCTURED_DIAGNOSTIC_KEYWORDS else "unknown",
                 )
             return _failure(

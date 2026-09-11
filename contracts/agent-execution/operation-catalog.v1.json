@@ -299,12 +299,12 @@
         "profile": "review.chapter_draft.v1",
         "mode": "parallel",
         "reviewerProfiles": [
-          "reviewer.chapter_draft_consistency.v1",
-          "reviewer.chapter_draft_editorial.v1"
+          "reviewer.chapter_draft_consistency.v2",
+          "reviewer.chapter_draft_editorial.v2"
         ],
         "reviewerStepBudgetProfiles": {
-          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v3",
-          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
+          "reviewer.chapter_draft_consistency.v2": "step_budget.long_serial.write_chapter.reviewer_consistency.v3",
+          "reviewer.chapter_draft_editorial.v2": "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
         },
         "reviewerOutputSchema": "output.chapter_draft_review_report.v1",
         "rubricVersion": "rubric.chapter_draft.review.v1",
@@ -349,10 +349,10 @@
       "reviewPolicy": {
         "profile": "review.parallel_chapter.v1",
         "mode": "parallel",
-        "reviewerProfiles": ["reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1"],
+        "reviewerProfiles": ["reviewer.chapter_draft_consistency.v2", "reviewer.chapter_draft_editorial.v2"],
         "reviewerStepBudgetProfiles": {
-          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
-          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+          "reviewer.chapter_draft_consistency.v2": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
+          "reviewer.chapter_draft_editorial.v2": "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
         },
         "reviewerOutputSchema": "output.chapter_draft_review_report.v1",
         "rubricVersion": "rubric.chapter_draft.review.v1",

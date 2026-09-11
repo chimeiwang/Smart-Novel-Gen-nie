@@ -3,7 +3,7 @@
   "catalogVersion": "1",
   "catalog": {
     "path": "operation-catalog.v1.json",
-    "sha256": "97a8821ed8cfed0286d92f209933eee7aa5164dbcce689ddf4ce708ffb872eb6"
+    "sha256": "81dc851b201b46124d0e0eaff3d03875c489d5ac28be564610dc02d24b2c5e68"
   },
   "schema": {
     "path": "operation-catalog.schema.json",
@@ -11,7 +11,7 @@
   },
   "profileRegistry": {
     "path": "profile-registry.v1.json",
-    "sha256": "e87c98fe299dbb94c9e318a26cd38018f921e8f0da5544ed7dafdc135fa254db"
+    "sha256": "d9c64832836d8eae628b14226be9db883602871282451e3a8b0dc7c8199461b7"
   },
   "profileRegistrySchema": {
     "path": "profile-registry.schema.json",
@@ -27,7 +27,7 @@
   },
   "promptProfileRegistry": {
     "path": "prompt-profile-registry.v1.json",
-    "sha256": "87a8b2188ab017993bb8bd3e4f1913042a15f4a5138576c3165422ae2c6d45b0"
+    "sha256": "635d1d5bd6d4212695643f10f6c9728b6e42e140f6959c6c587ccfe687b5a257"
   },
   "promptProfileRegistrySchema": {
     "path": "prompt-profile-registry.schema.json",

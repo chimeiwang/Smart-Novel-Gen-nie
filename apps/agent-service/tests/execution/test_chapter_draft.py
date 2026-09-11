@@ -181,22 +181,24 @@ def _budget_contract(key: str) -> StepBudget:
 
 
 def _freeze_v1_budget(request, *, reviewer: str | None = None):
+    reviewer_kind = reviewer.rsplit(".", 1)[0] if reviewer else None
     key = (
         "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
-        if reviewer == "reviewer.chapter_draft_consistency.v1"
+        if reviewer_kind == "reviewer.chapter_draft_consistency"
         else "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
-        if reviewer == "reviewer.chapter_draft_editorial.v1"
+        if reviewer_kind == "reviewer.chapter_draft_editorial"
         else "step_budget.long_serial.write_chapter.generator.v1"
     )
     return rehash_request(request.model_copy(update={"budget": _budget_contract(key)}))
 
 
 def _freeze_v2_budget(request, *, reviewer: str | None = None):
+    reviewer_kind = reviewer.rsplit(".", 1)[0] if reviewer else None
     key = (
         "step_budget.long_serial.write_chapter.reviewer_consistency.v2"
-        if reviewer == "reviewer.chapter_draft_consistency.v1"
+        if reviewer_kind == "reviewer.chapter_draft_consistency"
         else "step_budget.long_serial.write_chapter.reviewer_editorial.v2"
-        if reviewer == "reviewer.chapter_draft_editorial.v1"
+        if reviewer_kind == "reviewer.chapter_draft_editorial"
         else "step_budget.long_serial.write_chapter.generator.v2"
     )
     return rehash_request(request.model_copy(update={"budget": _budget_contract(key)}))
@@ -205,8 +207,8 @@ def _freeze_v2_budget(request, *, reviewer: str | None = None):
 def test_draft_catalog_has_six_cold_calls_and_dedicated_review_profiles():
     operation = load_execution_registry(environment="test").resolve("long_serial", "write_chapter")
     assert [p.key for p in operation.reviewer_profiles] == [
-        "reviewer.chapter_draft_consistency.v1",
-        "reviewer.chapter_draft_editorial.v1",
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
     ]
     assert (
         operation.operation.review_policy.merge_policy == "review.chapter_draft.patch_or_author.v1"
@@ -236,10 +238,10 @@ def test_draft_catalog_uses_v3_token_budgets_for_generator_reviewers_and_run():
     assert {
         profile: budget.key for profile, budget in operation.reviewer_step_budgets.items()
     } == {
-        "reviewer.chapter_draft_consistency.v1": (
+        "reviewer.chapter_draft_consistency.v2": (
             "step_budget.long_serial.write_chapter.reviewer_consistency.v3"
         ),
-        "reviewer.chapter_draft_editorial.v1": (
+        "reviewer.chapter_draft_editorial.v2": (
             "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
         ),
     }
@@ -273,8 +275,8 @@ async def test_scene_rewrite_reuses_complete_chapter_result_with_distinct_profil
     operation = load_execution_registry(environment="test").resolve("long_serial", "rewrite_scene")
     assert operation.generator_profile.key == "writer.scene_rewrite.v1"
     assert [profile.key for profile in operation.reviewer_profiles] == [
-        "reviewer.chapter_draft_consistency.v1",
-        "reviewer.chapter_draft_editorial.v1",
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
     ]
     model = RecordingModel(result=_result(_draft()))
     executor = _executor(model)
@@ -405,7 +407,7 @@ def test_draft_v3_output_caps_share_the_completion_total(
 
 
 @pytest.mark.parametrize(
-    "reviewer", ["reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1"]
+    "reviewer", ["reviewer.chapter_draft_consistency.v2", "reviewer.chapter_draft_editorial.v2"]
 )
 @pytest.mark.parametrize("patch", [None, {"kind": "text_replace", "find": "推开", "replace": ""}])
 def test_draft_reviews_keep_current_and_original_instruction_and_optional_structured_patch(
@@ -545,7 +547,7 @@ async def test_draft_real_fake_cold_context_generates_then_both_reviewers_consum
     assert generated.resultKind == "output"
     assert 30_000 < generated.usage.promptCacheMissTokens < 100_000
     for role in ("consistency", "editorial"):
-        review = _with_evidence(_request(reviewer=f"reviewer.chapter_draft_{role}.v1"), items)
+        review = _with_evidence(_request(reviewer=f"reviewer.chapter_draft_{role}.v2"), items)
         review = rehash_request(
             review.model_copy(update={"input": review.input | {"candidate": generated.output}})
         )
@@ -577,8 +579,8 @@ async def test_draft_real_fake_cold_context_generates_then_both_reviewers_consum
     "reviewer",
     [
         None,
-        "reviewer.chapter_draft_consistency.v1",
-        "reviewer.chapter_draft_editorial.v1",
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
     ],
 )
 def test_draft_large_complete_input_over_budget_is_rejected_without_call_or_truncation(reviewer):
@@ -610,11 +612,11 @@ def test_draft_large_complete_input_over_budget_is_rejected_without_call_or_trun
     [
         (None, "step_budget.long_serial.write_chapter.generator.v1"),
         (
-            "reviewer.chapter_draft_consistency.v1",
+            "reviewer.chapter_draft_consistency.v2",
             "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
         ),
         (
-            "reviewer.chapter_draft_editorial.v1",
+            "reviewer.chapter_draft_editorial.v2",
             "step_budget.long_serial.write_chapter.reviewer_editorial.v1",
         ),
     ],
@@ -655,11 +657,11 @@ def test_draft_v1_frozen_input_over_budget_is_rejected_without_truncation(
     [
         (None, "step_budget.long_serial.write_chapter.generator.v1"),
         (
-            "reviewer.chapter_draft_consistency.v1",
+            "reviewer.chapter_draft_consistency.v2",
             "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
         ),
         (
-            "reviewer.chapter_draft_editorial.v1",
+            "reviewer.chapter_draft_editorial.v2",
             "step_budget.long_serial.write_chapter.reviewer_editorial.v1",
         ),
     ],
@@ -688,11 +690,11 @@ def test_draft_v1_frozen_budget_remains_compatible_for_new_or_retained_steps(
     [
         (None, "step_budget.long_serial.write_chapter.generator.v2"),
         (
-            "reviewer.chapter_draft_consistency.v1",
+            "reviewer.chapter_draft_consistency.v2",
             "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
         ),
         (
-            "reviewer.chapter_draft_editorial.v1",
+            "reviewer.chapter_draft_editorial.v2",
             "step_budget.long_serial.write_chapter.reviewer_editorial.v2",
         ),
     ],

@@ -401,6 +401,11 @@ approve 必须复验同一来源和当前 revision，编辑批准先形成新的
 双角色复审、零模型局部 patch、一次自动完整返工和逐 Step 计费遵循
 `docs/specs/2026-09-04-durable-chapter-writing.md`；本分支实现不表示生产已启用。
 
+正文候选复审的 contentVerdict/findings 必须一致：任何 info/warning/error 问题都对应 issues_found；
+pass 和 cannot_assess 对应空列表。模型的格式错误仍按执行失败处理，不能靠删除问题或改写结论放行。
+v2 Reviewer 提示词对齐这些既有约束；本次未新增格式纠正调用，见
+[正文复审输出格式故障修复](../specs/2026-09-11-chapter-review-output-contract.md)。
+
 ## WorkflowRun 与调试
 
 2026-09-04 共享 V2 快照已增加可选 clarification（问题原文、代码、decisionStepId），只能在未取消的

@@ -16,6 +16,7 @@ from inkforge_agents.execution.executor import (
     ExecutionCapabilityError,
     StatelessExecutionStepExecutor,
     _retry_delay_seconds,
+    _safe_structured_output_pointer,
 )
 from inkforge_agents.execution.registry import load_execution_registry
 from inkforge_agents.providers.base import (
@@ -110,27 +111,62 @@ def _executor(model: RecordingModel) -> StatelessExecutionStepExecutor:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("code", "keyword", "expected_code", "expected_keyword"),
+    (
+        "code",
+        "keyword",
+        "json_pointer",
+        "expected_code",
+        "expected_keyword",
+        "expected_pointer",
+    ),
     [
-        ("empty_output", "content", "empty_output", "content"),
-        ("json_decode_error", "json", "json_decode_error", "json"),
         (
-            "json_decode_error", "json_control_character",
-            "json_decode_error", "json_control_character",
+            "empty_output", "content", "/private-field-secret/原小说正文",
+            "empty_output", "content", "",
         ),
-        ("json_decode_error", "json_syntax", "json_decode_error", "json_syntax"),
-        ("json_decode_error", "json_duplicate_key", "json_decode_error", "json_duplicate_key"),
-        ("json_decode_error", "json_constant", "json_decode_error", "json_constant"),
-        ("not_object", "type", "not_object", "type"),
-        ("schema_violation", "additionalProperties", "schema_violation", "additionalProperties"),
-        ("schema_violation", "pattern", "schema_violation", "pattern"),
-        ("unexpected_output", "toolCalls", "unexpected_output", "toolCalls"),
-        ("schema_violation", "secret-provider-key", "schema_violation", "unknown"),
-        (None, None, "missing_output", "content"),
+        (
+            "json_decode_error", "json", "/private-field-secret/原小说正文",
+            "json_decode_error", "json", "",
+        ),
+        (
+            "json_decode_error", "json_control_character", "/private-field-secret/原小说正文",
+            "json_decode_error", "json_control_character", "",
+        ),
+        (
+            "json_decode_error", "json_syntax", "/private-field-secret/原小说正文",
+            "json_decode_error", "json_syntax", "",
+        ),
+        (
+            "json_decode_error", "json_duplicate_key", "/private-field-secret/原小说正文",
+            "json_decode_error", "json_duplicate_key", "",
+        ),
+        (
+            "json_decode_error", "json_constant", "/private-field-secret/原小说正文",
+            "json_decode_error", "json_constant", "",
+        ),
+        ("not_object", "type", "/private-field-secret/原小说正文", "not_object", "type", ""),
+        (
+            "schema_violation", "additionalProperties", "/private-field-secret/原小说正文",
+            "schema_violation", "additionalProperties", "",
+        ),
+        (
+            "schema_violation", "pattern", "/private-field-secret/原小说正文",
+            "schema_violation", "pattern", "",
+        ),
+        ("schema_violation", "type", "/answer", "schema_violation", "type", "/answer"),
+        (
+            "unexpected_output", "toolCalls", "/private-field-secret/原小说正文",
+            "unexpected_output", "toolCalls", "",
+        ),
+        (
+            "schema_violation", "secret-provider-key", "/private-field-secret/原小说正文",
+            "schema_violation", "unknown", "",
+        ),
+        (None, None, "", "missing_output", "content", ""),
     ],
 )
 async def test_结构化失败仅记录具名固定诊断且不改变终态或模型调用(
-    code, keyword, expected_code, expected_keyword, caplog
+    code, keyword, json_pointer, expected_code, expected_keyword, expected_pointer, caplog
 ) -> None:
     registry = load_execution_registry(environment="test")
     request = rehash_request(answer_question_request(registry).model_copy(update={
@@ -138,7 +174,7 @@ async def test_结构化失败仅记录具名固定诊断且不改变终态或�
     }))
     diagnostic = (
         None if code is None else ModelStructuredOutputDiagnostic(
-            code=code, jsonPointer="/private-field-secret/原小说正文", keyword=keyword)
+            code=code, jsonPointer=json_pointer, keyword=keyword)
     )
     result = ModelTurnResult(
         content="" if diagnostic is not None else "供应商私密正文 secret-provider-response",
@@ -188,12 +224,25 @@ async def test_结构化失败仅记录具名固定诊断且不改变终态或�
         "V2 结构化输出未通过本地验收 "
         f"run_id={request.runId} step_id={request.stepId} "
         f"output_schema={request.outputSchema.name} code={expected_code} "
-        f"keyword={expected_keyword}"
+        f"pointer={expected_pointer} keyword={expected_keyword}"
     )
     assert record.exc_info is None
     for secret in ("secret", "原小说正文", "供应商私密正文", "private-field", "jsonPointer"):
         assert secret not in caplog.text
         assert secret not in repr(record.__dict__)
+
+
+def test_结构化诊断路径只允许当前_schema字段和数组下标() -> None:
+    registry = load_execution_registry(environment="test")
+    schema = registry.output_schemas["output.chapter_draft_review_report.v1"].json_schema_value()
+
+    assert _safe_structured_output_pointer("/findings/0/candidatePatch", schema) == (
+        "/findings/0/candidatePatch"
+    )
+    assert _safe_structured_output_pointer(
+        "/findings/0/private-field-secret/原小说正文", schema
+    ) == "/findings/0"
+    assert _safe_structured_output_pointer("/private-field-secret/原小说正文", schema) == ""
 
 
 @pytest.mark.asyncio
