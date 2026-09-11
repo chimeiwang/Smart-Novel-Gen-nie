@@ -458,6 +458,7 @@ class StatelessExecutionStepExecutor:
         _validate_profile_ref(request, profile)
         _validate_prompt_profile_ref(request, profile.prompt_profile)
         _validate_output_schema_ref(request, output_schema)
+        budget = _resolve_initial_step_budget(request, budget, registry)
         _validate_step_budget(request, budget)
         if request.budget.maxCompletionTokens < 1:
             raise ExecutionCapabilityError("模型 Step 必须具有正 completion 预算")
@@ -1835,6 +1836,37 @@ def _validate_output_schema_ref(
     )
     if actual != expected:
         raise ExecutionCapabilityError("Execution Output Schema 与 Registry 不一致")
+
+
+_RETAINED_CHAPTER_WRITING_BUDGET_KEYS = {
+    "step_budget.long_serial.write_chapter.generator.v2": (
+        "step_budget.long_serial.write_chapter.generator.v1"
+    ),
+    "step_budget.long_serial.write_chapter.reviewer_consistency.v2": (
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
+    ),
+    "step_budget.long_serial.write_chapter.reviewer_editorial.v2": (
+        "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+    ),
+}
+
+
+def _resolve_initial_step_budget(
+    request: ExecutionStepRequest,
+    current: StepBudgetDefinition,
+    registry: ExecutionRegistry,
+) -> StepBudgetDefinition:
+    """旧 Run 后续新建的复审或返工仍是首次派发，只精确认可已保留的历史预算。"""
+    if (
+        request.workflow == "long_serial"
+        and request.operation == "write_chapter"
+        and not _step_budget_matches(request, current)
+    ):
+        retained_key = _RETAINED_CHAPTER_WRITING_BUDGET_KEYS.get(current.key)
+        retained = registry.step_budgets.get(retained_key) if retained_key is not None else None
+        if retained is not None and retained.supported and _step_budget_matches(request, retained):
+            return retained
+    return current
 
 
 def _validate_step_budget(

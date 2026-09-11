@@ -2,7 +2,7 @@ name: CI and Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/chapter-input-budget-release]
   pull_request:
     branches: [main]
 
@@ -132,7 +132,7 @@ jobs:
 
   deploy:
     needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/codex/chapter-input-budget-release')
     runs-on: ubuntu-latest
     environment: production
     concurrency:
@@ -199,7 +199,7 @@ jobs:
             -o TCPKeepAlive=yes \
             -i ~/.ssh/deploy_key \
             "${SERVER_USER}@${SERVER_HOST}" \
-            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='${{ github.sha }}' DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${{ github.sha }}.bundle' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
+            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='${{ github.ref_name }}' DEPLOY_SHA='${{ github.sha }}' DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${{ github.sha }}.bundle' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
             < scripts/deploy-production.sh 2>&1 | tee deploy.log
           deploy_status=${PIPESTATUS[0]}
           if [ "$deploy_status" -ne 0 ]; then

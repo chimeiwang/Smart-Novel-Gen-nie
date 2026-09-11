@@ -87,11 +87,20 @@
       }
     },
     {
-      "key": "step_budget.rag.embedding.generator.v2", "version": 2, "supported": true,
+      "key": "step_budget.rag.embedding.generator.v2",
+      "version": 2,
+      "supported": true,
       "budget": {
-        "maxModelCalls": 1, "maxInputTokens": 60000, "maxPromptCacheMissTokens": 60000,
-        "maxCompletionTokens": 0, "maxReasoningTokens": 0, "maxVisibleOutputTokens": 0,
-        "maxCostMicros": 500000, "maxWallClockSeconds": 180, "maxProviderRetries": 2, "maxProtocolCorrections": 0
+        "maxModelCalls": 1,
+        "maxInputTokens": 60000,
+        "maxPromptCacheMissTokens": 60000,
+        "maxCompletionTokens": 0,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 0,
+        "maxCostMicros": 500000,
+        "maxWallClockSeconds": 180,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
       }
     },
     {
@@ -316,6 +325,23 @@
       }
     },
     {
+      "key": "step_budget.long_serial.write_chapter.generator.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 100000,
+        "maxPromptCacheMissTokens": 100000,
+        "maxCompletionTokens": 16000,
+        "maxReasoningTokens": 8000,
+        "maxVisibleOutputTokens": 8000,
+        "maxCostMicros": 600000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
       "version": 1,
       "supported": true,
@@ -323,6 +349,23 @@
         "maxModelCalls": 1,
         "maxInputTokens": 30000,
         "maxPromptCacheMissTokens": 30000,
+        "maxCompletionTokens": 2000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 2000,
+        "maxCostMicros": 200000,
+        "maxWallClockSeconds": 75,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 100000,
+        "maxPromptCacheMissTokens": 100000,
         "maxCompletionTokens": 2000,
         "maxReasoningTokens": 0,
         "maxVisibleOutputTokens": 2000,
@@ -349,10 +392,91 @@
         "maxProtocolCorrections": 1
       }
     },
-    {"key":"step_budget.long_serial.review_chapter.generator.v1","version":1,"supported":true,"budget":{"maxModelCalls":1,"maxInputTokens":80000,"maxPromptCacheMissTokens":80000,"maxCompletionTokens":12000,"maxReasoningTokens":0,"maxVisibleOutputTokens":12000,"maxCostMicros":400000,"maxWallClockSeconds":180,"maxProviderRetries":2,"maxProtocolCorrections":1}},
-    {"key":"step_budget.long_serial.rewrite_scene.generator.v1","version":1,"supported":true,"budget":{"maxModelCalls":1,"maxInputTokens":30000,"maxPromptCacheMissTokens":30000,"maxCompletionTokens":16000,"maxReasoningTokens":8000,"maxVisibleOutputTokens":8000,"maxCostMicros":600000,"maxWallClockSeconds":300,"maxProviderRetries":2,"maxProtocolCorrections":1}},
-    {"key":"step_budget.long_serial.rewrite_outline_selection.generator.v1","version":1,"supported":true,"budget":{"maxModelCalls":1,"maxInputTokens":30000,"maxPromptCacheMissTokens":30000,"maxCompletionTokens":8000,"maxReasoningTokens":4000,"maxVisibleOutputTokens":4000,"maxCostMicros":300000,"maxWallClockSeconds":120,"maxProviderRetries":2,"maxProtocolCorrections":1}},
-    {"key":"step_budget.long_serial.rewrite_outline_selection.reviewer_editorial.v1","version":1,"supported":true,"budget":{"maxModelCalls":1,"maxInputTokens":15000,"maxPromptCacheMissTokens":15000,"maxCompletionTokens":1000,"maxReasoningTokens":0,"maxVisibleOutputTokens":1000,"maxCostMicros":100000,"maxWallClockSeconds":60,"maxProviderRetries":2,"maxProtocolCorrections":1}},
+    {
+      "key": "step_budget.long_serial.write_chapter.reviewer_editorial.v2",
+      "version": 2,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 100000,
+        "maxPromptCacheMissTokens": 100000,
+        "maxCompletionTokens": 2000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 2000,
+        "maxCostMicros": 200000,
+        "maxWallClockSeconds": 75,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.review_chapter.generator.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 80000,
+        "maxPromptCacheMissTokens": 80000,
+        "maxCompletionTokens": 12000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 12000,
+        "maxCostMicros": 400000,
+        "maxWallClockSeconds": 180,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.rewrite_scene.generator.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 30000,
+        "maxPromptCacheMissTokens": 30000,
+        "maxCompletionTokens": 16000,
+        "maxReasoningTokens": 8000,
+        "maxVisibleOutputTokens": 8000,
+        "maxCostMicros": 600000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.rewrite_outline_selection.generator.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 30000,
+        "maxPromptCacheMissTokens": 30000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 4000,
+        "maxVisibleOutputTokens": 4000,
+        "maxCostMicros": 300000,
+        "maxWallClockSeconds": 120,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.rewrite_outline_selection.reviewer_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 15000,
+        "maxPromptCacheMissTokens": 15000,
+        "maxCompletionTokens": 1000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 1000,
+        "maxCostMicros": 100000,
+        "maxWallClockSeconds": 60,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
     {
       "key": "step_budget.long_serial.agent_updates.generator.v1",
       "version": 1,
