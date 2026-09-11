@@ -409,7 +409,8 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
     assert set(profiles) == referenced_profiles
     assert set(output_schemas) == referenced_output_schemas
     assert set(step_budgets) == referenced_step_budgets | {
-        "step_budget.system.protocol_correction.v1"
+        "step_budget.system.protocol_correction.v1",
+        "step_budget.long_serial.write_chapter.generator.v1",
     }
     for profile in profiles.values():
         _assert_key_version(profile)
@@ -1254,7 +1255,9 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
 
     for key in CHAPTER_DRAFT_OPERATION_KEYS:
         budget = operations[key]["runBudgetProfile"]
-        if key in {"long_serial.write_chapter", "long_serial.rewrite_scene"}:
+        if key == "long_serial.write_chapter":
+            assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 600000
+        elif key == "long_serial.rewrite_scene":
             assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 180000
         else:
             assert budget["maxPromptCacheMissTokens"] <= 60000
@@ -1283,14 +1286,31 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
     assert operations["style.portrait"]["scopeKinds"] == ["user"]
 
 
-def test_video_migration_preserves_all_nineteen_existing_operation_values() -> None:
-    """冻结 65ebacf 的非视频 19 项完整 JSON，不只检查数量或 enabled 标记。"""
+def test_video_migration_preserves_existing_operations_except_approved_writing_budget() -> None:
+    """仅归一化获批的正文输入预算调整，其余非视频操作仍逐值冻结到 65ebacf。"""
     retained = [
         operation
         for operation in _operations()
         if operation["key"] not in DEVELOPMENT_ONLY_OPERATION_KEYS
     ]
     assert len(retained) == 19
+    writing = next(
+        operation for operation in retained if operation["key"] == "long_serial.write_chapter"
+    )
+    writing["generatorStepBudgetProfile"] = "step_budget.long_serial.write_chapter.generator.v1"
+    writing["reviewPolicy"]["reviewerStepBudgetProfiles"] = {
+        "reviewer.chapter_draft_consistency.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
+        ),
+        "reviewer.chapter_draft_editorial.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+        ),
+    }
+    writing["runBudgetProfile"].update(
+        profile="budget.long_serial.chapter_draft.v1",
+        maxInputTokens=180000,
+        maxPromptCacheMissTokens=180000,
+    )
     assert hashlib.sha256(canonical_execution_json_bytes(retained)).hexdigest() == (
         "96afc59ca82841eeebbef5e3152c49e14902cfe1ae641501a06933a393642b12"
     )

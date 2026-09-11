@@ -149,6 +149,35 @@ def _result(output, *, finish="stop", input_tokens=12_000):
     )
 
 
+def _budget_contract(key: str) -> StepBudget:
+    budget = load_execution_registry(environment="test").step_budgets[key]
+    return StepBudget.model_validate(
+        {
+            "maxModelCalls": budget.max_model_calls,
+            "maxInputTokens": budget.max_input_tokens,
+            "maxPromptCacheMissTokens": budget.max_prompt_cache_miss_tokens,
+            "maxCompletionTokens": budget.max_completion_tokens,
+            "maxReasoningTokens": budget.max_reasoning_tokens,
+            "maxVisibleOutputTokens": budget.max_visible_output_tokens,
+            "maxCostMicros": budget.max_cost_micros,
+            "maxWallClockSeconds": budget.max_wall_clock_seconds,
+            "maxProviderRetries": budget.max_provider_retries,
+            "maxProtocolCorrections": budget.max_protocol_corrections,
+        }
+    )
+
+
+def _freeze_v1_budget(request, *, reviewer: str | None = None):
+    key = (
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
+        if reviewer == "reviewer.chapter_draft_consistency.v1"
+        else "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+        if reviewer == "reviewer.chapter_draft_editorial.v1"
+        else "step_budget.long_serial.write_chapter.generator.v1"
+    )
+    return rehash_request(request.model_copy(update={"budget": _budget_contract(key)}))
+
+
 def test_draft_catalog_has_six_cold_calls_and_dedicated_review_profiles():
     operation = load_execution_registry(environment="test").resolve("long_serial", "write_chapter")
     assert [p.key for p in operation.reviewer_profiles] == [
@@ -159,7 +188,18 @@ def test_draft_catalog_has_six_cold_calls_and_dedicated_review_profiles():
         operation.operation.review_policy.merge_policy == "review.chapter_draft.patch_or_author.v1"
     )
     assert operation.operation.run_budget.max_model_calls == 6
-    assert operation.operation.run_budget.max_prompt_cache_miss_tokens == 180_000
+    assert operation.operation.run_budget.max_input_tokens == 600_000
+    assert operation.operation.run_budget.max_prompt_cache_miss_tokens == 600_000
+    assert operation.generator_step_budget.max_input_tokens == 100_000
+    assert operation.generator_step_budget.max_prompt_cache_miss_tokens == 100_000
+    assert all(
+        budget.max_input_tokens == 100_000
+        for budget in operation.reviewer_step_budgets.values()
+    )
+    assert all(
+        budget.max_prompt_cache_miss_tokens == 100_000
+        for budget in operation.reviewer_step_budgets.values()
+    )
     assert all("选区外" not in p.prompt_profile.system_prompt for p in operation.reviewer_profiles)
 
 
@@ -330,7 +370,7 @@ async def test_draft_real_fake_cold_context_generates_then_both_reviewers_consum
     context = {
         "schemaVersion": 1,
         "novelId": "novel-1",
-        "currentChapter": {"id": "chapter-1", "content": "冻结正文。" * 2200},
+        "currentChapter": {"id": "chapter-1", "content": "冻结正文。" * 8000},
     }
     items = [_context_item(resourceType="chapter_writing_context", contentJson=context)]
     model = RecordingModel()  # 未预设响应，真实调用 FakeModelProvider 及其计量。
@@ -349,7 +389,7 @@ async def test_draft_real_fake_cold_context_generates_then_both_reviewers_consum
         ),
     )
     assert generated.resultKind == "output"
-    assert 10_000 < generated.usage.promptCacheMissTokens < 30_000
+    assert 30_000 < generated.usage.promptCacheMissTokens < 100_000
     for role in ("consistency", "editorial"):
         review = _with_evidence(_request(reviewer=f"reviewer.chapter_draft_{role}.v1"), items)
         review = rehash_request(
@@ -369,7 +409,7 @@ async def test_draft_real_fake_cold_context_generates_then_both_reviewers_consum
         assert reviewed.resultKind == "evaluation"
         assert reviewed.evaluation.contentVerdict == "pass"
         assert reviewed.evaluation.evidenceBundleId == request.evidenceBundle.id
-        assert 10_000 < reviewed.usage.promptCacheMissTokens < 30_000
+        assert 30_000 < reviewed.usage.promptCacheMissTokens < 100_000
         assert reviewed.usage.cachedTokens == 0
         assert reviewed.usage.providerAttempts == 1
         assert (
@@ -379,9 +419,16 @@ async def test_draft_real_fake_cold_context_generates_then_both_reviewers_consum
     assert len(model.requests) == 3
 
 
-@pytest.mark.parametrize("reviewer", [None, "reviewer.chapter_draft_consistency.v1"])
+@pytest.mark.parametrize(
+    "reviewer",
+    [
+        None,
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+    ],
+)
 def test_draft_large_complete_input_over_budget_is_rejected_without_call_or_truncation(reviewer):
-    content = "原" * 30_001
+    content = "原" * 100_001
     request = _with_evidence(
         _request(reviewer=reviewer),
         [
@@ -402,6 +449,84 @@ def test_draft_large_complete_input_over_budget_is_rejected_without_call_or_trun
         executor.build_model_request(request, resolved)
     assert model.requests == []
     assert request.evidenceBundle.items[0].contentJson["currentChapter"]["content"] == content
+
+
+@pytest.mark.parametrize(
+    ("reviewer", "budget_key"),
+    [
+        (None, "step_budget.long_serial.write_chapter.generator.v1"),
+        (
+            "reviewer.chapter_draft_consistency.v1",
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
+        ),
+        (
+            "reviewer.chapter_draft_editorial.v1",
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v1",
+        ),
+    ],
+)
+@pytest.mark.parametrize("dispatch_mode", ["initial", "pending_recovery"])
+def test_draft_v1_frozen_input_over_budget_is_rejected_without_truncation(
+    reviewer, budget_key, dispatch_mode
+):
+    content = "原" * 40_000
+    request = _with_evidence(
+        _freeze_v1_budget(_request(reviewer=reviewer), reviewer=reviewer),
+        [
+            _context_item(
+                resourceType="chapter_writing_context",
+                contentJson={
+                    "schemaVersion": 1,
+                    "novelId": "novel-1",
+                    "currentChapter": {"id": "chapter-1", "content": content},
+                },
+            )
+        ],
+    ).model_copy(update={"dispatchMode": dispatch_mode})
+    model = RecordingModel()
+    executor = _executor(model)
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    if dispatch_mode == "initial":
+        assert resolved.budget.key == budget_key
+    assert resolved.budget.max_input_tokens == 30_000
+    assert resolved.budget.max_prompt_cache_miss_tokens == 30_000
+    with pytest.raises(ExecutionCapabilityError, match="完整模型输入超过"):
+        executor.build_model_request(request, resolved)
+    assert model.requests == []
+    assert request.evidenceBundle.items[0].contentJson["currentChapter"]["content"] == content
+
+
+@pytest.mark.parametrize(
+    ("reviewer", "budget_key"),
+    [
+        (None, "step_budget.long_serial.write_chapter.generator.v1"),
+        (
+            "reviewer.chapter_draft_consistency.v1",
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
+        ),
+        (
+            "reviewer.chapter_draft_editorial.v1",
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v1",
+        ),
+    ],
+)
+@pytest.mark.parametrize("dispatch_mode", ["initial", "pending_recovery"])
+def test_draft_v1_frozen_budget_remains_compatible_for_new_or_retained_steps(
+    reviewer, budget_key, dispatch_mode
+):
+    request = _freeze_v1_budget(_request(reviewer=reviewer), reviewer=reviewer).model_copy(
+        update={"dispatchMode": dispatch_mode}
+    )
+    model = RecordingModel()
+    executor = _executor(model)
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+
+    if dispatch_mode == "initial":
+        assert resolved.budget.key == budget_key
+    assert resolved.budget.max_input_tokens == 30_000
+    model_request = executor.build_model_request(request, resolved)
+    assert json.loads(model_request.messages[1].content)["input"] == request.input
+    assert model.requests == []
 
 
 @pytest.mark.asyncio

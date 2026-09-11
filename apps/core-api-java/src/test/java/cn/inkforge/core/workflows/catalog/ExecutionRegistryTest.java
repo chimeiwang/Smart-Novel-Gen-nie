@@ -258,11 +258,48 @@ class ExecutionRegistryTest {
                 .isEqualTo("review.chapter_draft.patch_or_author.v1");
         assertThat(draft.operation().reviewPolicy().maxAutomaticRevisions()).isEqualTo(1);
         assertThat(draft.operation().runBudget().maxModelCalls()).isEqualTo(6);
-        assertThat(draft.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(180_000);
+        assertThat(draft.operation().runBudget().profile()).isEqualTo("budget.long_serial.chapter_draft.v2");
+        assertThat(draft.operation().runBudget().maxInputTokens()).isEqualTo(600_000);
+        assertThat(draft.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(600_000);
+        assertThat(draft.generatorStepBudget().key())
+                .isEqualTo("step_budget.long_serial.write_chapter.generator.v2");
+        assertThat(draft.generatorStepBudget().budget().maxInputTokens()).isEqualTo(100_000);
+        assertThat(draft.generatorStepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(100_000);
         assertThat(draft.generatorStepBudget().budget().maxCompletionTokens()).isEqualTo(16_000);
+        assertThat(draft.reviewers())
+                .extracting(reviewer -> reviewer.stepBudget().key())
+                .containsExactly(
+                        "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+                        "step_budget.long_serial.write_chapter.reviewer_editorial.v2");
         assertThat(draft.reviewers()).allSatisfy(reviewer -> {
-            assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(30_000);
+            assertThat(reviewer.profile().key()).startsWith("reviewer.chapter_draft_").endsWith(".v1");
+            assertThat(reviewer.stepBudget().budget().maxInputTokens()).isEqualTo(100_000);
+            assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(100_000);
             assertThat(reviewer.stepBudget().budget().maxReasoningTokens()).isZero();
+        });
+    }
+
+    @Test
+    void 场景改写继续使用原有v1输入与运行预算() {
+        ExecutionRegistry registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        var rewrite = registry.resolve("long_serial.rewrite_scene", false);
+
+        assertThat(rewrite.generatorProfile().key()).isEqualTo("writer.scene_rewrite.v1");
+        assertThat(rewrite.generatorStepBudget().key())
+                .isEqualTo("step_budget.long_serial.rewrite_scene.generator.v1");
+        assertThat(rewrite.generatorStepBudget().budget().maxInputTokens()).isEqualTo(30_000);
+        assertThat(rewrite.generatorStepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(30_000);
+        assertThat(rewrite.operation().runBudget().profile()).isEqualTo("budget.long_serial.chapter_draft.v1");
+        assertThat(rewrite.operation().runBudget().maxInputTokens()).isEqualTo(180_000);
+        assertThat(rewrite.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(180_000);
+        assertThat(rewrite.reviewers())
+                .extracting(reviewer -> reviewer.stepBudget().key())
+                .containsExactly(
+                        "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
+                        "step_budget.long_serial.write_chapter.reviewer_editorial.v1");
+        assertThat(rewrite.reviewers()).allSatisfy(reviewer -> {
+            assertThat(reviewer.stepBudget().budget().maxInputTokens()).isEqualTo(30_000);
+            assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(30_000);
         });
     }
 

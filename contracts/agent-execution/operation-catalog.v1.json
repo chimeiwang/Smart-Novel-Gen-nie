@@ -373,8 +373,8 @@
           "reviewer.chapter_draft_editorial.v1"
         ],
         "reviewerStepBudgetProfiles": {
-          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
-          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v2"
         },
         "reviewerOutputSchema": "output.chapter_draft_review_report.v1",
         "rubricVersion": "rubric.chapter_draft.review.v1",
@@ -386,10 +386,10 @@
       },
       "applyHandler": "apply.chapter_draft.v1",
       "runBudgetProfile": {
-        "profile": "budget.long_serial.chapter_draft.v1",
+        "profile": "budget.long_serial.chapter_draft.v2",
         "maxModelCalls": 6,
-        "maxInputTokens": 180000,
-        "maxPromptCacheMissTokens": 180000,
+        "maxInputTokens": 600000,
+        "maxPromptCacheMissTokens": 600000,
         "maxCompletionTokens": 40000,
         "maxReasoningTokens": 16000,
         "maxVisibleOutputTokens": 24000,
@@ -399,7 +399,7 @@
         "maxProviderRetriesPerStep": 2
       },
       "lane": "creative",
-      "generatorStepBudgetProfile": "step_budget.long_serial.write_chapter.generator.v1"
+      "generatorStepBudgetProfile": "step_budget.long_serial.write_chapter.generator.v2"
     },
     {
       "key": "long_serial.rewrite_scene",
