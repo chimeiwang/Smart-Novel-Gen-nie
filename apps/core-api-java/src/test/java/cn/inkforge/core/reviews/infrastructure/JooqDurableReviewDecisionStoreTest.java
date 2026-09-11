@@ -295,30 +295,57 @@ class JooqDurableReviewDecisionStoreTest {
             Fixture fixture = waitingArtifact("draft-budget-" + dimension, true, false, true, true);
             var steps = database.dsl().fetch("SELECT id, ordinal, \"budgetJson\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? ORDER BY ordinal", fixture.runId());
             for (Record step : steps) {
-                boolean generator = step.get("ordinal", Integer.class) == 1;
                 Map<String, Object> frozenBudget = json.readValue(
                         step.get("budgetJson", String.class), new TypeReference<>() {});
-                long inputBudget = ((Number) ((Map<?, ?>) frozenBudget.get("budget"))
-                        .get("maxInputTokens")).longValue();
+                Map<?, ?> budget = (Map<?, ?>) frozenBudget.get("budget");
+                long inputBudget = budgetLong(budget, "maxInputTokens");
+                long completionBudget = budgetLong(budget, "maxCompletionTokens");
+                long reasoningBudget = budgetLong(budget, "maxReasoningTokens");
+                long visibleBudget = budgetLong(budget, "maxVisibleOutputTokens");
+                long costBudget = budgetLong(budget, "maxCostMicros");
+                long wallTimeBudget = Math.multiplyExact(
+                        budgetLong(budget, "maxWallClockSeconds"), 1_000L);
+                long[] completionParts = completionParts(
+                        completionBudget, reasoningBudget, visibleBudget);
                 Map<String, Object> usage = new LinkedHashMap<>(Map.of("usageStatus", "complete", "inputTokens", inputBudget,
-                        "cachedTokens", 0, "promptCacheMissTokens", inputBudget, "completionTokens", generator ? 16_000 : 2_000,
-                        "reasoningTokens", generator ? 8_000 : 0, "visibleOutputTokens", generator ? 8_000 : 2_000,
-                        "costMicros", generator ? 600_000 : 200_000, "providerAttempts", 1, "protocolCorrections", 0));
-                usage.put("wallTimeMillis", generator ? 300_000 : 75_000);
+                        "cachedTokens", 0, "promptCacheMissTokens", inputBudget,
+                        "completionTokens", completionBudget,
+                        "reasoningTokens", completionParts[0],
+                        "visibleOutputTokens", completionParts[1],
+                        "costMicros", costBudget, "providerAttempts", 1, "protocolCorrections", 0));
+                usage.put("wallTimeMillis", wallTimeBudget);
                 if (step.get("ordinal", Integer.class) == 2) {
                     switch (dimension) {
                         case "input" -> { usage.put("inputTokens", inputBudget + 1); usage.put("promptCacheMissTokens", inputBudget + 1); }
-                        case "completion", "visible" -> { usage.put("completionTokens", 2_001); usage.put("visibleOutputTokens", 2_001); }
-                        case "reasoning" -> { usage.put("completionTokens", 2_001); usage.put("reasoningTokens", 1); }
-                        case "cost" -> usage.put("costMicros", 200_001);
-                        case "wall" -> usage.put("wallTimeMillis", 75_001);
+                        case "completion" -> {
+                            long exceededCompletion = completionBudget + 1;
+                            long[] exceededParts = completionParts(
+                                    exceededCompletion, reasoningBudget, visibleBudget);
+                            usage.put("completionTokens", exceededCompletion);
+                            usage.put("reasoningTokens", exceededParts[0]);
+                            usage.put("visibleOutputTokens", exceededParts[1]);
+                        }
+                        case "reasoning" -> {
+                            long exceededReasoning = reasoningBudget + 1;
+                            usage.put("reasoningTokens", exceededReasoning);
+                            usage.put("visibleOutputTokens", 0);
+                            usage.put("completionTokens", exceededReasoning);
+                        }
+                        case "visible" -> {
+                            long exceededVisible = visibleBudget + 1;
+                            usage.put("visibleOutputTokens", exceededVisible);
+                            usage.put("reasoningTokens", 0);
+                            usage.put("completionTokens", exceededVisible);
+                        }
+                        case "cost" -> usage.put("costMicros", costBudget + 1);
+                        case "wall" -> usage.put("wallTimeMillis", wallTimeBudget + 1);
                         case "wall_long" -> usage.put("wallTimeMillis", 3_000_000_000L);
                         default -> throw new AssertionError(dimension);
                     }
                 } else if ("cost".equals(dimension)) {
                     usage.clear();
                     usage.putAll(Map.of("usageStatus", "unknown", "providerAttempts", 1, "protocolCorrections", 0,
-                            "wallTimeMillis", generator ? 300_000 : 75_000));
+                            "wallTimeMillis", wallTimeBudget));
                 }
                 database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE id = ?", json.writeValueAsString(usage), step.get("id", String.class));
             }
@@ -330,6 +357,24 @@ class JooqDurableReviewDecisionStoreTest {
             assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE id = ? AND status = 'awaiting_user' AND revision = 1", fixture.artifactId())).isEqualTo(1);
             assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
         }
+    }
+
+    private static long budgetLong(Map<?, ?> budget, String field) {
+        return ((Number) budget.get(field)).longValue();
+    }
+
+    private static long[] completionParts(
+            long completion, long reasoningBudget, long visibleBudget) {
+        long reasoning = Math.min(reasoningBudget, Math.max(0, completion - visibleBudget));
+        long visible = completion - reasoning;
+        if (visible > visibleBudget) {
+            visible = visibleBudget;
+            reasoning = completion - visible;
+        }
+        if (reasoning < 0 || reasoning > reasoningBudget || visible < 0 || visible > visibleBudget) {
+            throw new AssertionError("冻结 Step 预算无法构造完整 usage");
+        }
+        return new long[] {reasoning, visible};
     }
 
     @Test

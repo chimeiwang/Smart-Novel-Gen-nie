@@ -1517,6 +1517,14 @@ class JooqWorkflowCallbackRepositoryTest {
     private static Flow runningChapterFlow(String prefix, String operationKey) {
         Fixture fixture = fixture(prefix);
         var op = registry.resolve("long_serial." + operationKey, false);
+        // 本夹具验证复审与返工，余额按整轮最坏 token 预留准备，避免扩大额度后误测余额不足。
+        var runBudget = op.operation().runBudget();
+        long requiredBalance = cn.inkforge.core.billing.domain.BillingPricing.usageCostMicros(
+                Math.toIntExact(runBudget.maxInputTokens()), 0,
+                Math.toIntExact(runBudget.maxCompletionTokens()));
+        database.dsl().execute(
+                "UPDATE public.\"User\" SET \"creditBalanceMicros\" = GREATEST(\"creditBalanceMicros\", ?) WHERE id = ?",
+                requiredBalance, fixture.userId());
         Map<String, Object> input = Map.of("userInstruction", "完成当前章节正文", "targetWordCount", 2500);
         Map<String, Object> normalized = new LinkedHashMap<>(input);
         normalized.putAll(Map.of("workflow", "long_serial", "operation", operationKey, "novelId", fixture.novelId(), "chapterId", fixture.chapterId()));
