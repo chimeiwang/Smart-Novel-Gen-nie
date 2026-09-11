@@ -342,6 +342,23 @@
       }
     },
     {
+      "key": "step_budget.long_serial.write_chapter.generator.v3",
+      "version": 3,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 100000,
+        "maxPromptCacheMissTokens": 100000,
+        "maxCompletionTokens": 100000,
+        "maxReasoningTokens": 100000,
+        "maxVisibleOutputTokens": 100000,
+        "maxCostMicros": 600000,
+        "maxWallClockSeconds": 300,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
       "version": 1,
       "supported": true,
@@ -376,6 +393,23 @@
       }
     },
     {
+      "key": "step_budget.long_serial.write_chapter.reviewer_consistency.v3",
+      "version": 3,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 100000,
+        "maxPromptCacheMissTokens": 100000,
+        "maxCompletionTokens": 100000,
+        "maxReasoningTokens": 100000,
+        "maxVisibleOutputTokens": 100000,
+        "maxCostMicros": 200000,
+        "maxWallClockSeconds": 75,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
       "key": "step_budget.long_serial.write_chapter.reviewer_editorial.v1",
       "version": 1,
       "supported": true,
@@ -403,6 +437,23 @@
         "maxCompletionTokens": 2000,
         "maxReasoningTokens": 0,
         "maxVisibleOutputTokens": 2000,
+        "maxCostMicros": 200000,
+        "maxWallClockSeconds": 75,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.write_chapter.reviewer_editorial.v3",
+      "version": 3,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 100000,
+        "maxPromptCacheMissTokens": 100000,
+        "maxCompletionTokens": 100000,
+        "maxReasoningTokens": 100000,
+        "maxVisibleOutputTokens": 100000,
         "maxCostMicros": 200000,
         "maxWallClockSeconds": 75,
         "maxProviderRetries": 2,

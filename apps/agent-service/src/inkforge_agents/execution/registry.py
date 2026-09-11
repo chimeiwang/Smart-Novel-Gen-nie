@@ -145,8 +145,9 @@ class _RunBudgetDocument(_StrictModel):
     def validate_totals(self) -> Self:
         if self.maxPromptCacheMissTokens > self.maxInputTokens:
             raise ValueError("Run cache miss 预算不能超过输入预算")
-        if self.maxReasoningTokens + self.maxVisibleOutputTokens > self.maxCompletionTokens:
-            raise ValueError("Run reasoning 与可见输出预算之和不能超过 completion 预算")
+        # 分项共享实际总输出上限，不要求按两个最坏值预分配额度。
+        if max(self.maxReasoningTokens, self.maxVisibleOutputTokens) > self.maxCompletionTokens:
+            raise ValueError("Run reasoning 或可见输出预算不能超过 completion 预算")
         return self
 
 
@@ -1219,7 +1220,7 @@ def _validate_profile_budget(
     operation_key: str,
 ) -> None:
     reasoning_enabled = profile.reasoning_mode == "bounded"
-    if reasoning_enabled != (budget.max_reasoning_tokens > 0):
+    if reasoning_enabled and budget.max_reasoning_tokens == 0:
         raise ExecutionRegistryReferenceError(
             f"Operation {operation_key} 的 Profile 与 Step reasoning 预算不一致"
         )

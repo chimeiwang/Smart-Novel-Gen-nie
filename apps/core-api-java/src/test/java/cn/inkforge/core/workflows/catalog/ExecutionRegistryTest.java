@@ -253,24 +253,31 @@ class ExecutionRegistryTest {
                 .isEqualTo("review.chapter_draft.patch_or_author.v1");
         assertThat(draft.operation().reviewPolicy().maxAutomaticRevisions()).isEqualTo(1);
         assertThat(draft.operation().runBudget().maxModelCalls()).isEqualTo(6);
-        assertThat(draft.operation().runBudget().profile()).isEqualTo("budget.long_serial.chapter_draft.v2");
+        assertThat(draft.operation().runBudget().profile()).isEqualTo("budget.long_serial.chapter_draft.v3");
         assertThat(draft.operation().runBudget().maxInputTokens()).isEqualTo(600_000);
         assertThat(draft.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(600_000);
+        assertThat(draft.operation().runBudget().maxCompletionTokens()).isEqualTo(600_000);
+        assertThat(draft.operation().runBudget().maxReasoningTokens()).isEqualTo(600_000);
+        assertThat(draft.operation().runBudget().maxVisibleOutputTokens()).isEqualTo(600_000);
         assertThat(draft.generatorStepBudget().key())
-                .isEqualTo("step_budget.long_serial.write_chapter.generator.v2");
+                .isEqualTo("step_budget.long_serial.write_chapter.generator.v3");
         assertThat(draft.generatorStepBudget().budget().maxInputTokens()).isEqualTo(100_000);
         assertThat(draft.generatorStepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(100_000);
-        assertThat(draft.generatorStepBudget().budget().maxCompletionTokens()).isEqualTo(16_000);
+        assertThat(draft.generatorStepBudget().budget().maxCompletionTokens()).isEqualTo(100_000);
+        assertThat(draft.generatorStepBudget().budget().maxReasoningTokens()).isEqualTo(100_000);
+        assertThat(draft.generatorStepBudget().budget().maxVisibleOutputTokens()).isEqualTo(100_000);
         assertThat(draft.reviewers())
                 .extracting(reviewer -> reviewer.stepBudget().key())
                 .containsExactly(
-                        "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
-                        "step_budget.long_serial.write_chapter.reviewer_editorial.v2");
+                        "step_budget.long_serial.write_chapter.reviewer_consistency.v3",
+                        "step_budget.long_serial.write_chapter.reviewer_editorial.v3");
         assertThat(draft.reviewers()).allSatisfy(reviewer -> {
             assertThat(reviewer.profile().key()).startsWith("reviewer.chapter_draft_").endsWith(".v1");
             assertThat(reviewer.stepBudget().budget().maxInputTokens()).isEqualTo(100_000);
             assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(100_000);
-            assertThat(reviewer.stepBudget().budget().maxReasoningTokens()).isZero();
+            assertThat(reviewer.stepBudget().budget().maxCompletionTokens()).isEqualTo(100_000);
+            assertThat(reviewer.stepBudget().budget().maxReasoningTokens()).isEqualTo(100_000);
+            assertThat(reviewer.stepBudget().budget().maxVisibleOutputTokens()).isEqualTo(100_000);
         });
     }
 
@@ -368,6 +375,29 @@ class ExecutionRegistryTest {
         assertThat(operation.runBudget().maxProviderRetriesPerStep()).isEqualTo(2);
         assertThat(resolved.generatorStepBudget().budget().maxModelCalls()).isEqualTo(1);
         assertThat(resolved.generatorStepBudget().budget().maxProviderRetries()).isEqualTo(2);
+    }
+
+    @Test
+    void disabled模型可以冻结正reasoning额度但仍由reasoningMode关闭推理() {
+        Map<String, byte[]> documents = classpathDocuments();
+        JsonNode budgets = JSON.readTree(documents.get("step-budget-registry.v1.json"));
+        JsonNode reviewer = findByKey(
+                budgets.get("budgets"),
+                "step_budget.long_serial.rewrite_chapter_selection.reviewer_consistency.v1");
+        reviewer.get("budget").asObject().put("maxReasoningTokens", 1);
+        replaceDocumentAndHash(
+                documents,
+                "stepBudgetRegistry",
+                "step-budget-registry.v1.json",
+                JSON.writeValueAsBytes(budgets));
+
+        ExecutionRegistry registry = ExecutionRegistry.load(documents::get);
+        ExecutionPlanSnapshot.Step step = registry
+                .freezePlan("long_serial.rewrite_chapter_selection", false)
+                .reviewers()
+                .getFirst();
+        assertThat(step.modelProfile().reasoningMode()).isEqualTo("disabled");
+        assertThat(step.stepBudget().budget().maxReasoningTokens()).isEqualTo(1);
     }
 
     @Test

@@ -3,7 +3,7 @@
   "catalogVersion": "1",
   "catalog": {
     "path": "operation-catalog.v1.json",
-    "sha256": "16bdaef6d3e1140da4efce44e9add9755f5a582c8f6235751fdc8f46315b5d51"
+    "sha256": "97a8821ed8cfed0286d92f209933eee7aa5164dbcce689ddf4ce708ffb872eb6"
   },
   "schema": {
     "path": "operation-catalog.schema.json",
@@ -43,7 +43,7 @@
   },
   "stepBudgetRegistry": {
     "path": "step-budget-registry.v1.json",
-    "sha256": "7af9ac9047f34be3ed8696c48aea661cd560b2890f33ceeadb109e7acd1c8585"
+    "sha256": "713bd9e058ef698ac2ac7583f0c7ede2ced9e56657d0985b64466341cad2a9fd"
   },
   "stepBudgetRegistrySchema": {
     "path": "step-budget-registry.schema.json",

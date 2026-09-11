@@ -28,6 +28,16 @@ class WorkflowRunBudgetTest {
     }
 
     @Test
+    void Run的reasoning与可见输出额度可分别达到completion上限() {
+        WorkflowRunBudget independent = new WorkflowRunBudget(
+                1, 100, 100, 100, 100, 100, 1_000, 100, 0, 0);
+
+        assertThat(independent.requireWithin(
+                        new WorkflowRunBudgetCharge(1, 100, 100, 100, 100, 100, 1_000, 1_000, 0)))
+                .isNotNull();
+    }
+
+    @Test
     void 完整终报按实际用量结算并释放剩余额度() {
         WorkflowStepUsage usage = new WorkflowStepUsage(
                 WorkflowUsageStatus.COMPLETE,

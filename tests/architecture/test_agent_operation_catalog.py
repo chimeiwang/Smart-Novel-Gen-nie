@@ -393,6 +393,9 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
     assert set(step_budgets) == referenced_step_budgets | {
         "step_budget.system.protocol_correction.v1",
         "step_budget.long_serial.write_chapter.generator.v1",
+        "step_budget.long_serial.write_chapter.generator.v2",
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+        "step_budget.long_serial.write_chapter.reviewer_editorial.v2",
     }
     for profile in profiles.values():
         _assert_key_version(profile)
@@ -833,10 +836,8 @@ def test_step_budget_registry_matches_execution_step_budget_boundaries() -> None
             assert isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
         assert budget["maxPromptCacheMissTokens"] <= budget["maxInputTokens"]
-        assert (
-            budget["maxReasoningTokens"] + budget["maxVisibleOutputTokens"]
-            <= budget["maxCompletionTokens"]
-        )
+        assert budget["maxReasoningTokens"] <= budget["maxCompletionTokens"]
+        assert budget["maxVisibleOutputTokens"] <= budget["maxCompletionTokens"]
         assert budget["maxProviderRetries"] <= 2
         assert budget["maxProtocolCorrections"] <= 1
 
@@ -1121,10 +1122,6 @@ def test_operation_catalog_budgets_are_explicit_and_bounded() -> None:
         assert budget["maxPromptCacheMissTokens"] <= budget["maxInputTokens"]
         assert budget["maxReasoningTokens"] <= budget["maxCompletionTokens"]
         assert budget["maxVisibleOutputTokens"] <= budget["maxCompletionTokens"]
-        assert (
-            budget["maxReasoningTokens"] + budget["maxVisibleOutputTokens"]
-            <= budget["maxCompletionTokens"]
-        )
 
 
 def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> None:
@@ -1140,8 +1137,8 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
         generator_budget_key = operation["generatorStepBudgetProfile"]
         generator_budget = step_budgets[generator_budget_key]
         assert generator_budget["supported"] is True
-        if profiles[operation["generatorProfile"]]["reasoningMode"] == "disabled":
-            assert generator_budget["budget"]["maxReasoningTokens"] == 0
+        if profiles[operation["generatorProfile"]]["reasoningMode"] == "bounded":
+            assert generator_budget["budget"]["maxReasoningTokens"] > 0
 
         reviewer_budgets = []
         for reviewer_profile_key in review_policy["reviewerProfiles"]:
@@ -1149,8 +1146,8 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
                 reviewer_budget_profiles[reviewer_profile_key]
             ]
             assert reviewer_budget["supported"] is True
-            if profiles[reviewer_profile_key]["reasoningMode"] == "disabled":
-                assert reviewer_budget["budget"]["maxReasoningTokens"] == 0
+            if profiles[reviewer_profile_key]["reasoningMode"] == "bounded":
+                assert reviewer_budget["budget"]["maxReasoningTokens"] > 0
             reviewer_budgets.append(reviewer_budget)
 
         review_rounds = 1 + review_policy["maxAutomaticRevisions"]
@@ -1218,12 +1215,15 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
         budget = operations[key]["runBudgetProfile"]
         if key == "long_serial.write_chapter":
             assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 600000
+            assert budget["maxReasoningTokens"] == 600000
+            assert budget["maxVisibleOutputTokens"] == budget["maxCompletionTokens"] == 600000
         elif key == "long_serial.rewrite_scene":
             assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 180000
         else:
             assert budget["maxPromptCacheMissTokens"] <= 60000
-        assert budget["maxReasoningTokens"] <= 16000
-        assert budget["maxVisibleOutputTokens"] <= 24000
+        if key != "long_serial.write_chapter":
+            assert budget["maxReasoningTokens"] <= 16000
+            assert budget["maxVisibleOutputTokens"] <= 24000
 
     chapter_plan_budget = operations["long_serial.plan_chapter"]["runBudgetProfile"]
     assert chapter_plan_budget["maxPromptCacheMissTokens"] == 120000
@@ -1243,7 +1243,7 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
 
 
 def test_video_migration_preserves_existing_operations_except_approved_writing_budget() -> None:
-    """仅归一化获批的正文输入预算调整，其余非视频操作仍逐值冻结到 65ebacf。"""
+    """仅归一化获批的正文 token 预算调整，其余非视频操作仍逐值冻结到 65ebacf。"""
     retained = [
         operation
         for operation in _operations()
@@ -1266,6 +1266,9 @@ def test_video_migration_preserves_existing_operations_except_approved_writing_b
         profile="budget.long_serial.chapter_draft.v1",
         maxInputTokens=180000,
         maxPromptCacheMissTokens=180000,
+        maxCompletionTokens=40000,
+        maxReasoningTokens=16000,
+        maxVisibleOutputTokens=24000,
     )
     assert hashlib.sha256(canonical_execution_json_bytes(retained)).hexdigest() == (
         "96afc59ca82841eeebbef5e3152c49e14902cfe1ae641501a06933a393642b12"

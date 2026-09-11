@@ -68,7 +68,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "8f98910764258f638d629d972452b2131af572e8c7e6411038e142a84df99db6"
+        "f554365c8c4b5bd358110a7e0bb7754ee98ca9ba5ee7d67e449f36d36379eebe"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -153,6 +153,40 @@ def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     assert "title" not in outline.output_schema.json_schema
     assert "title" not in outline.output_schema.json_schema["properties"]["replacement"]
     assert outline.operation.run_budget.max_prompt_cache_miss_tokens == 90_000
+
+    draft = registry.resolve("long_serial", "write_chapter")
+    assert draft.generator_step_budget.key == (
+        "step_budget.long_serial.write_chapter.generator.v3"
+    )
+    assert {
+        profile: budget.key for profile, budget in draft.reviewer_step_budgets.items()
+    } == {
+        "reviewer.chapter_draft_consistency.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v3"
+        ),
+        "reviewer.chapter_draft_editorial.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
+        ),
+    }
+    for budget in (
+        draft.generator_step_budget,
+        *draft.reviewer_step_budgets.values(),
+    ):
+        assert (
+            budget.max_input_tokens,
+            budget.max_prompt_cache_miss_tokens,
+            budget.max_completion_tokens,
+            budget.max_reasoning_tokens,
+            budget.max_visible_output_tokens,
+        ) == (100_000, 100_000, 100_000, 100_000, 100_000)
+    assert draft.operation.run_budget.profile == "budget.long_serial.chapter_draft.v3"
+    assert (
+        draft.operation.run_budget.max_input_tokens,
+        draft.operation.run_budget.max_prompt_cache_miss_tokens,
+        draft.operation.run_budget.max_completion_tokens,
+        draft.operation.run_budget.max_reasoning_tokens,
+        draft.operation.run_budget.max_visible_output_tokens,
+    ) == (600_000, 600_000, 600_000, 600_000, 600_000)
 
     with pytest.raises(FrozenInstanceError):
         resolved.operation.v2_enabled = False  # type: ignore[misc]

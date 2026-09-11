@@ -129,10 +129,20 @@ def _request(
 
 
 def _executor(model):
-    return StatelessExecutionStepExecutor(model, max_output_tokens=20_000, retry_base_seconds=0)
+    return StatelessExecutionStepExecutor(model, max_output_tokens=100_000, retry_base_seconds=0)
 
 
-def _result(output, *, finish="stop", input_tokens=12_000):
+def _result(
+    output,
+    *,
+    finish="stop",
+    input_tokens=12_000,
+    completion_tokens=100,
+    reasoning_tokens=0,
+    prompt_cache_miss_tokens=None,
+):
+    if prompt_cache_miss_tokens is None:
+        prompt_cache_miss_tokens = input_tokens
     return ModelTurnResult(
         content="",
         toolCalls=[],
@@ -142,10 +152,13 @@ def _result(output, *, finish="stop", input_tokens=12_000):
         usage=ModelUsage(
             promptTokens=input_tokens,
             cachedTokens=0,
-            completionTokens=100,
-            totalTokens=input_tokens + 100,
+            completionTokens=completion_tokens,
+            totalTokens=input_tokens + completion_tokens,
         ),
-        diagnostics=ModelUsageDiagnostics(reasoningTokens=0, promptCacheMissTokens=input_tokens),
+        diagnostics=ModelUsageDiagnostics(
+            reasoningTokens=reasoning_tokens,
+            promptCacheMissTokens=prompt_cache_miss_tokens,
+        ),
     )
 
 
@@ -178,6 +191,17 @@ def _freeze_v1_budget(request, *, reviewer: str | None = None):
     return rehash_request(request.model_copy(update={"budget": _budget_contract(key)}))
 
 
+def _freeze_v2_budget(request, *, reviewer: str | None = None):
+    key = (
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v2"
+        if reviewer == "reviewer.chapter_draft_consistency.v1"
+        else "step_budget.long_serial.write_chapter.reviewer_editorial.v2"
+        if reviewer == "reviewer.chapter_draft_editorial.v1"
+        else "step_budget.long_serial.write_chapter.generator.v2"
+    )
+    return rehash_request(request.model_copy(update={"budget": _budget_contract(key)}))
+
+
 def test_draft_catalog_has_six_cold_calls_and_dedicated_review_profiles():
     operation = load_execution_registry(environment="test").resolve("long_serial", "write_chapter")
     assert [p.key for p in operation.reviewer_profiles] == [
@@ -201,6 +225,46 @@ def test_draft_catalog_has_six_cold_calls_and_dedicated_review_profiles():
         for budget in operation.reviewer_step_budgets.values()
     )
     assert all("选区外" not in p.prompt_profile.system_prompt for p in operation.reviewer_profiles)
+
+
+def test_draft_catalog_uses_v3_token_budgets_for_generator_reviewers_and_run():
+    operation = load_execution_registry(environment="test").resolve("long_serial", "write_chapter")
+
+    assert operation.generator_step_budget.key == (
+        "step_budget.long_serial.write_chapter.generator.v3"
+    )
+    assert {
+        profile: budget.key for profile, budget in operation.reviewer_step_budgets.items()
+    } == {
+        "reviewer.chapter_draft_consistency.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v3"
+        ),
+        "reviewer.chapter_draft_editorial.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
+        ),
+    }
+
+    for budget in (
+        operation.generator_step_budget,
+        *operation.reviewer_step_budgets.values(),
+    ):
+        assert (
+            budget.max_input_tokens,
+            budget.max_prompt_cache_miss_tokens,
+            budget.max_completion_tokens,
+            budget.max_reasoning_tokens,
+            budget.max_visible_output_tokens,
+        ) == (100_000, 100_000, 100_000, 100_000, 100_000)
+
+    run_budget = operation.operation.run_budget
+    assert run_budget.profile == "budget.long_serial.chapter_draft.v3"
+    assert (
+        run_budget.max_input_tokens,
+        run_budget.max_prompt_cache_miss_tokens,
+        run_budget.max_completion_tokens,
+        run_budget.max_reasoning_tokens,
+        run_budget.max_visible_output_tokens,
+    ) == (600_000, 600_000, 600_000, 600_000, 600_000)
 
 
 @pytest.mark.asyncio
@@ -252,6 +316,94 @@ async def test_draft_generates_complete_result_once_and_preserves_revision_input
     assert model.requests[0].tools == []
 
 
+def test_draft_real_usage_with_8627_reasoning_tokens_reaches_terminal():
+    from inkforge_agents.execution.executor import ProviderCallOutcome
+
+    request = _request()
+    executor = _executor(RecordingModel())
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    terminal = executor.terminal_from_outcome(
+        request,
+        resolved,
+        ProviderCallOutcome(
+            _result(
+                _draft(),
+                input_tokens=31_742,
+                completion_tokens=11_406,
+                reasoning_tokens=8_627,
+            ),
+            1,
+            20,
+        ),
+    )
+
+    assert terminal.resultKind == "output"
+    assert terminal.usage.usageStatus == "partial"
+    assert terminal.usage.inputTokens == 31_742
+    assert terminal.usage.promptCacheMissTokens == 31_742
+    assert terminal.usage.completionTokens == 11_406
+    assert terminal.usage.reasoningTokens == 8_627
+    assert terminal.usage.visibleOutputTokens == 2_779
+    assert terminal.usage.costMicros is None
+
+
+@pytest.mark.parametrize("input_tokens", [100_000, 100_001])
+def test_draft_v3_usage_input_boundary_accepts_limit_and_rejects_one_over(input_tokens):
+    from inkforge_agents.execution.executor import ProviderCallOutcome
+
+    request = _request()
+    executor = _executor(RecordingModel())
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    terminal = executor.terminal_from_outcome(
+        request,
+        resolved,
+        ProviderCallOutcome(
+            _result(_draft(), input_tokens=input_tokens),
+            1,
+            20,
+        ),
+    )
+
+    if input_tokens == 100_000:
+        assert terminal.resultKind == "output"
+    else:
+        assert terminal.errorCode == "STEP_BUDGET_EXCEEDED"
+        assert terminal.usage.inputTokens == 100_001
+        assert terminal.usage.promptCacheMissTokens == 100_001
+
+
+@pytest.mark.parametrize(
+    ("completion_tokens", "reasoning_tokens", "accepted"),
+    [(100_000, 100_000, True), (100_000, 0, True), (100_001, 8_627, False),
+     (200_000, 100_000, False)],
+)
+def test_draft_v3_output_caps_share_the_completion_total(
+    completion_tokens, reasoning_tokens, accepted
+):
+    from inkforge_agents.execution.executor import ProviderCallOutcome
+
+    request = _request()
+    executor = _executor(RecordingModel())
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    assert executor.build_model_request(request, resolved).maxOutputTokens == 100_000
+    terminal = executor.terminal_from_outcome(
+        request,
+        resolved,
+        ProviderCallOutcome(
+            _result(
+                _draft(), completion_tokens=completion_tokens, reasoning_tokens=reasoning_tokens
+            ),
+            1,
+            20,
+        ),
+    )
+
+    if accepted:
+        assert terminal.resultKind == "output"
+    else:
+        assert terminal.errorCode == "STEP_BUDGET_EXCEEDED"
+
+
 @pytest.mark.parametrize(
     "reviewer", ["reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1"]
 )
@@ -279,6 +431,8 @@ def test_draft_reviews_keep_current_and_original_instruction_and_optional_struct
     executor = _executor(RecordingModel())
     resolved = executor.resolve(request, load_execution_registry(environment="test"))
     model_request = executor.build_model_request(request, resolved)
+    assert model_request.maxOutputTokens == 100_000
+    assert model_request.policy.thinkingMode == "disabled"
     assert json.loads(model_request.messages[1].content)["input"] == request.input
     terminal = executor.terminal_from_outcome(
         request,
@@ -524,6 +678,36 @@ def test_draft_v1_frozen_budget_remains_compatible_for_new_or_retained_steps(
     if dispatch_mode == "initial":
         assert resolved.budget.key == budget_key
     assert resolved.budget.max_input_tokens == 30_000
+    model_request = executor.build_model_request(request, resolved)
+    assert json.loads(model_request.messages[1].content)["input"] == request.input
+    assert model.requests == []
+
+
+@pytest.mark.parametrize(
+    ("reviewer", "budget_key"),
+    [
+        (None, "step_budget.long_serial.write_chapter.generator.v2"),
+        (
+            "reviewer.chapter_draft_consistency.v1",
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+        ),
+        (
+            "reviewer.chapter_draft_editorial.v1",
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v2",
+        ),
+    ],
+)
+def test_draft_v2_frozen_budget_remains_compatible_for_initial_dispatch(reviewer, budget_key):
+    request = _freeze_v2_budget(_request(reviewer=reviewer), reviewer=reviewer).model_copy(
+        update={"dispatchMode": "initial"}
+    )
+    model = RecordingModel()
+    executor = _executor(model)
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+
+    assert resolved.budget.key == budget_key
+    assert resolved.budget.max_input_tokens == 100_000
+    assert resolved.budget.max_prompt_cache_miss_tokens == 100_000
     model_request = executor.build_model_request(request, resolved)
     assert json.loads(model_request.messages[1].content)["input"] == request.input
     assert model.requests == []

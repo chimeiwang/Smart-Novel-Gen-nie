@@ -29,6 +29,21 @@ class WorkflowStepBudgetTest {
     }
 
     @Test
+    void reasoning与可见输出额度可分别达到completion上限且实际completion仍受总上限约束() {
+        WorkflowStepBudget independent = new WorkflowStepBudget(
+                1, 100, 100, 100, 100, 100, 1_000, 100, 0, 0);
+        WorkflowStepUsage within = usage(1, 0, 1, 100, 60, 40, 0, 1, 0, 1);
+
+        assertThat(independent.requireWithin(within)).isSameAs(within);
+        assertThatThrownBy(() -> independent.requireWithin(
+                        usage(1, 0, 1, 101, 60, 41, 0, 1, 0, 1)))
+                .isInstanceOfSatisfying(
+                        WorkflowBudgetExceededException.class,
+                        exception -> assertThat(exception.dimension())
+                                .isEqualTo(WorkflowBudgetDimension.COMPLETION_TOKENS));
+    }
+
+    @Test
     void 精确报告越界维度() {
         assertExceeded(
                 usage(20_001, 8_000, 12_001, 10_000, 3_000, 7_000, 0, 1, 0, 1),

@@ -1839,14 +1839,17 @@ def _validate_output_schema_ref(
 
 
 _RETAINED_CHAPTER_WRITING_BUDGET_KEYS = {
-    "step_budget.long_serial.write_chapter.generator.v2": (
-        "step_budget.long_serial.write_chapter.generator.v1"
+    "step_budget.long_serial.write_chapter.generator.v3": (
+        "step_budget.long_serial.write_chapter.generator.v2",
+        "step_budget.long_serial.write_chapter.generator.v1",
     ),
-    "step_budget.long_serial.write_chapter.reviewer_consistency.v2": (
-        "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
+    "step_budget.long_serial.write_chapter.reviewer_consistency.v3": (
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
     ),
-    "step_budget.long_serial.write_chapter.reviewer_editorial.v2": (
-        "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+    "step_budget.long_serial.write_chapter.reviewer_editorial.v3": (
+        "step_budget.long_serial.write_chapter.reviewer_editorial.v2",
+        "step_budget.long_serial.write_chapter.reviewer_editorial.v1",
     ),
 }
 
@@ -1862,10 +1865,14 @@ def _resolve_initial_step_budget(
         and request.operation == "write_chapter"
         and not _step_budget_matches(request, current)
     ):
-        retained_key = _RETAINED_CHAPTER_WRITING_BUDGET_KEYS.get(current.key)
-        retained = registry.step_budgets.get(retained_key) if retained_key is not None else None
-        if retained is not None and retained.supported and _step_budget_matches(request, retained):
-            return retained
+        for retained_key in _RETAINED_CHAPTER_WRITING_BUDGET_KEYS.get(current.key, ()):
+            retained = registry.step_budgets.get(retained_key)
+            if (
+                retained is not None
+                and retained.supported
+                and _step_budget_matches(request, retained)
+            ):
+                return retained
     return current
 
 

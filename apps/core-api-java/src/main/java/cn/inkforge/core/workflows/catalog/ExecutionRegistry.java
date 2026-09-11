@@ -910,8 +910,8 @@ public final class ExecutionRegistry {
     private static void requireReasoningBudget(
             Profile profile, StepBudgetProfile budget, String owner) {
         long reasoning = budget.budget().maxReasoningTokens();
-        if (("disabled".equals(profile.reasoningMode()) && reasoning != 0)
-                || ("bounded".equals(profile.reasoningMode()) && reasoning == 0)) {
+        // disabled 只关闭推理能力，正额度仍需冻结以承接供应商 usage 与费用事实。
+        if ("bounded".equals(profile.reasoningMode()) && reasoning == 0) {
             throw invalid(owner + " 的 Profile reasoningMode 与 Step Budget 不一致");
         }
     }

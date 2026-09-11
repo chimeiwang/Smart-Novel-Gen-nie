@@ -639,6 +639,29 @@ def test_step_budget_does_not_reuse_run_budget_per_step_field_name() -> None:
     assert "单 Step" in schema["properties"]["maxProviderRetries"]["description"]
 
 
+def test_step_output_budgets_are_independent_caps_with_a_shared_total() -> None:
+    payload = valid_budget_payload()
+    for field in (
+        "maxInputTokens", "maxPromptCacheMissTokens", "maxCompletionTokens",
+        "maxReasoningTokens", "maxVisibleOutputTokens",
+    ):
+        payload[field] = 100_000
+
+    budget = StepBudget.model_validate(payload)
+    assert budget.maxCompletionTokens == 100_000
+    assert budget.maxReasoningTokens == budget.maxVisibleOutputTokens == 100_000
+
+
+def test_disabled_reasoning_keeps_its_mode_with_a_positive_token_cap() -> None:
+    payload = valid_request_payload()
+    payload["modelProfile"] = valid_profile_payload(reasoning_mode="disabled")
+    payload["requestHash"] = sha256(canonical_bytes(request_hash_material(payload)))
+
+    request = ExecutionStepRequest.model_validate(payload)
+    assert request.modelProfile.reasoningMode == "disabled"
+    assert request.budget.maxReasoningTokens == 4_000
+
+
 def test_execution_request_binds_run_evidence_artifact_and_reasoning_budget() -> None:
     request = ExecutionStepRequest.model_validate(valid_request_payload())
 
@@ -651,10 +674,13 @@ def test_execution_request_binds_run_evidence_artifact_and_reasoning_budget() ->
     with pytest.raises(ValidationError):
         ExecutionStepRequest.model_validate(artifact_mismatch)
 
-    disabled_reasoning = valid_request_payload()
-    disabled_reasoning["modelProfile"] = valid_profile_payload(reasoning_mode="disabled")
+    missing_reasoning_budget = valid_request_payload()
+    missing_reasoning_budget["budget"] = {**valid_budget_payload(), "maxReasoningTokens": 0}
+    missing_reasoning_budget["requestHash"] = sha256(
+        canonical_bytes(request_hash_material(missing_reasoning_budget))
+    )
     with pytest.raises(ValidationError):
-        ExecutionStepRequest.model_validate(disabled_reasoning)
+        ExecutionStepRequest.model_validate(missing_reasoning_budget)
 
 
 def test_execution_messages_require_explicit_nullable_novel_binding() -> None:
