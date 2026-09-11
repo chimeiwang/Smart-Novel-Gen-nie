@@ -45,6 +45,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.MountableFile;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 @Testcontainers
@@ -292,17 +293,21 @@ class JooqDurableReviewDecisionStoreTest {
     void 整章作者返工在整轮任何剩余预算不足时提前原子拒绝() {
         for (String dimension : List.of("input", "completion", "reasoning", "visible", "cost", "wall", "wall_long")) {
             Fixture fixture = waitingArtifact("draft-budget-" + dimension, true, false, true, true);
-            var steps = database.dsl().fetch("SELECT id, ordinal FROM public.\"WorkflowStep\" WHERE \"runId\" = ? ORDER BY ordinal", fixture.runId());
+            var steps = database.dsl().fetch("SELECT id, ordinal, \"budgetJson\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? ORDER BY ordinal", fixture.runId());
             for (Record step : steps) {
                 boolean generator = step.get("ordinal", Integer.class) == 1;
-                Map<String, Object> usage = new LinkedHashMap<>(Map.of("usageStatus", "complete", "inputTokens", 30_000,
-                        "cachedTokens", 0, "promptCacheMissTokens", 30_000, "completionTokens", generator ? 16_000 : 2_000,
+                Map<String, Object> frozenBudget = json.readValue(
+                        step.get("budgetJson", String.class), new TypeReference<>() {});
+                long inputBudget = ((Number) ((Map<?, ?>) frozenBudget.get("budget"))
+                        .get("maxInputTokens")).longValue();
+                Map<String, Object> usage = new LinkedHashMap<>(Map.of("usageStatus", "complete", "inputTokens", inputBudget,
+                        "cachedTokens", 0, "promptCacheMissTokens", inputBudget, "completionTokens", generator ? 16_000 : 2_000,
                         "reasoningTokens", generator ? 8_000 : 0, "visibleOutputTokens", generator ? 8_000 : 2_000,
                         "costMicros", generator ? 600_000 : 200_000, "providerAttempts", 1, "protocolCorrections", 0));
                 usage.put("wallTimeMillis", generator ? 300_000 : 75_000);
                 if (step.get("ordinal", Integer.class) == 2) {
                     switch (dimension) {
-                        case "input" -> { usage.put("inputTokens", 40_000); usage.put("promptCacheMissTokens", 40_000); }
+                        case "input" -> { usage.put("inputTokens", inputBudget + 1); usage.put("promptCacheMissTokens", inputBudget + 1); }
                         case "completion", "visible" -> { usage.put("completionTokens", 2_001); usage.put("visibleOutputTokens", 2_001); }
                         case "reasoning" -> { usage.put("completionTokens", 2_001); usage.put("reasoningTokens", 1); }
                         case "cost" -> usage.put("costMicros", 200_001);

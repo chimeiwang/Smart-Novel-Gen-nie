@@ -196,8 +196,13 @@ class JooqWorkflowDispatchRepositoryTest {
     @Test
     void 解析模型已发生超额用量不能从外层总预算中消失() {
         IntentFixture fixture = budgetFixture("intent-budget-outer", 1, 1);
+        String frozenBudgetJson = database.dsl().fetchOne(
+                "SELECT \"budgetJson\" FROM public.\"WorkflowRun\" WHERE id = ?", fixture.runId())
+                .get("budgetJson", String.class);
+        Map<String, Object> runBudget = json.readValue(frozenBudgetJson, new TypeReference<>() {});
+        long exceededInputTokens = ((Number) runBudget.get("maxInputTokens")).longValue() + 1;
         database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE \"runId\" = ? AND purpose = 'resolve_intent'",
-                json.writeValueAsString(Map.of("usageStatus", "partial", "inputTokens", 204001,
+                json.writeValueAsString(Map.of("usageStatus", "partial", "inputTokens", exceededInputTokens,
                         "providerAttempts", 1, "protocolCorrections", 0, "wallTimeMillis", 1000)), fixture.runId());
         assertThatThrownBy(() -> reserveIntentGeneration(fixture))
                 .isInstanceOfSatisfying(WorkflowExecutionRejectedException.class,
