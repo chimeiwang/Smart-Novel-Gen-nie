@@ -80,3 +80,19 @@ EvidenceBundle，使用原输出 Schema、提示词哈希、模型、thinking di
 未推送或部署。权威库仍有 1 个非终态 V2 Run，即本次 waiting_user 草案任务。
 `scripts/deploy-production.sh` 第 707–730 行要求不同 manifest 切换前旧 V2 Run 全部终态；
 本次没有批准、丢弃、取消该任务，也未关闭生产新建入口或绕过该部署门禁。
+
+## 推送后 CI 修复
+
+提交 `91812ba4` 已推送，GitHub Actions `34598524349` 在 Java 测试阶段失败，deploy 被跳过。
+Core 1,212 项测试仅 `ExecutionPlanSnapshotTest` 失败：该当前状态测试重复硬编码了旧 manifest
+`f554365c...`，而加载中的资产已为 `2faa3408...`。此前本地只运行 Registry/历史快照测试，漏跑了
+此当前快照测试，这是验证遗漏；并非运行期资产校验失效。
+
+修复先在本地复现同一失败，再让测试断言新快照绑定当前 Registry 指纹。当前资产的固定指纹
+仍由 Python Registry 基线测试核对，历史快照的固定 SHA-256 断言保持。整个 Java catalog 包
+verify 共 118 项测试通过；Python Registry/Catalog 33 项通过，资产派生检查通过。
+
+用户明确选择“保留待审，先修复 CI”。本次新增 `[skip deploy]` 头提交消息标记，仅跳过 deploy，
+CI 各门禁保持。对应门禁测试先失败后通过；工作流/Compose 测试 42 项通过，两项因 Windows
+不提供 POSIX mode 语义失败。Git 索引核对上传脚本为 100755、Redis 配置为 100644，权限未变；
+Linux GitHub 全量 CI 将复验这两项。没有修改生产入口、原草案或数据库。

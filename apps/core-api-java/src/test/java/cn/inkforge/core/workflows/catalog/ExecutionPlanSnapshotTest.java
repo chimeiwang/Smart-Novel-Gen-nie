@@ -16,8 +16,6 @@ import tools.jackson.databind.ObjectMapper;
 
 class ExecutionPlanSnapshotTest {
 
-    private static final String MANIFEST_FINGERPRINT =
-            "f554365c8c4b5bd358110a7e0bb7754ee98ca9ba5ee7d67e449f36d36379eebe";
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
@@ -27,8 +25,8 @@ class ExecutionPlanSnapshotTest {
         ExecutionPlanSnapshot snapshot = registry.freezePlan(
                 "long_serial.rewrite_chapter_selection", false);
 
-        assertThat(registry.manifestFingerprint()).isEqualTo(MANIFEST_FINGERPRINT);
-        assertThat(snapshot.executionManifestFingerprint()).isEqualTo(MANIFEST_FINGERPRINT);
+        // 新计划绑定当前资产；历史计划的固定哈希由独立历史快照测试守护。
+        assertThat(snapshot.executionManifestFingerprint()).isEqualTo(registry.manifestFingerprint());
         assertThat(snapshot.operationCatalogVersion()).isEqualTo(registry.catalogVersion());
         assertThat(snapshot.operation().key())
                 .isEqualTo("long_serial.rewrite_chapter_selection");

@@ -39,6 +39,18 @@ def test_ci_uses_current_node_python_and_openapi_gates() -> None:
         assert command in source
 
 
+def test_ci_only_commit_skips_deployment_without_skipping_validation() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+    ci, deploy = source.split("\n  deploy:\n", maxsplit=1)
+    condition = deploy.split("\n    runs-on:", maxsplit=1)[0]
+    assert "[skip deploy]" not in ci
+    assert "needs: ci" in condition
+    assert "github.event_name == 'push'" in condition
+    assert "github.ref == 'refs/heads/main'" in condition
+    assert "github.ref == 'refs/heads/codex/chapter-input-budget-release'" in condition
+    assert "!contains(github.event.head_commit.message, '[skip deploy]')" in condition
+
+
 def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
