@@ -2,8 +2,10 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)
--- Dumped by pg_dump version 14.24 (Debian 14.24-1.pgdg12+2)
+\restrict bzYPxhkGhF6ciA3P3FvXBIcxBdbZnGxfoPGEYmevZ4OMUAfrRiJAoABifd23hz1
+
+-- Dumped from database version 14.19 (Debian 14.19-1.pgdg12+1)
+-- Dumped by pg_dump version 14.19 (Debian 14.19-1.pgdg12+1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -203,7 +205,9 @@ CREATE TYPE public."ReviewArtifactKind" AS ENUM (
     'beat_plan',
     'freeform_markdown',
     'video_scene_plan',
-    'video_adaptation_plan'
+    'video_adaptation_plan',
+    'video_episode_script',
+    'video_episode_storyboard'
 );
 
 
@@ -743,7 +747,9 @@ CREATE TABLE public."ReviewArtifact" (
     "videoSceneId" text,
     "videoAdaptationId" text,
     "videoAdaptationTaskId" text,
+    "videoEpisodeId" text,
     CONSTRAINT "ReviewArtifact_video_adaptation_kind_check" CHECK ((((kind)::text <> 'video_adaptation_plan'::text) OR (("videoAdaptationId" IS NOT NULL) AND ("videoAdaptationTaskId" IS NOT NULL) AND ("videoSceneId" IS NULL) AND ("taskId" IS NULL)))),
+    CONSTRAINT "ReviewArtifact_video_episode_target_check" CHECK (((("videoEpisodeId" IS NULL) AND ((kind)::text <> ALL (ARRAY['video_episode_script'::text, 'video_episode_storyboard'::text]))) OR (("videoEpisodeId" IS NOT NULL) AND ((kind)::text = ANY (ARRAY['video_episode_script'::text, 'video_episode_storyboard'::text])) AND ("chapterId" IS NULL) AND ("taskId" IS NULL) AND ("videoSceneId" IS NULL) AND ("videoAdaptationId" IS NULL) AND ("videoAdaptationTaskId" IS NULL)))),
     CONSTRAINT "ReviewArtifact_video_target_exclusive_check" CHECK ((NOT (("videoSceneId" IS NOT NULL) AND ("videoAdaptationId" IS NOT NULL))))
 );
 
@@ -1192,13 +1198,45 @@ CREATE TABLE public."VideoDramaticBeatSourceAnchor" (
 
 
 --
+-- Name: VideoEpisode; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisode" (
+    id text NOT NULL,
+    "projectId" text NOT NULL,
+    "novelId" text NOT NULL,
+    title text NOT NULL,
+    ordinal integer NOT NULL,
+    "creativeIntent" text DEFAULT ''::text NOT NULL,
+    "targetDurationSeconds" integer,
+    revision integer DEFAULT 1 NOT NULL,
+    "currentSourceSetVersionId" text,
+    "currentScriptVersionId" text,
+    "archivedAt" timestamp(3) without time zone,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "currentStoryboardVersionId" text,
+    "currentProductionBaselineId" text,
+    "productionRevision" integer DEFAULT 1 NOT NULL,
+    "latestDeliveryVersionId" text,
+    "deliveryRevision" integer DEFAULT 1 NOT NULL,
+    CONSTRAINT "VideoEpisode_delivery_revision_check" CHECK (("deliveryRevision" > 0)),
+    CONSTRAINT "VideoEpisode_ordinal_check" CHECK ((ordinal > 0)),
+    CONSTRAINT "VideoEpisode_production_revision_check" CHECK (("productionRevision" > 0)),
+    CONSTRAINT "VideoEpisode_revision_check" CHECK ((revision > 0)),
+    CONSTRAINT "VideoEpisode_targetDurationSeconds_check" CHECK (("targetDurationSeconds" > 0)),
+    CONSTRAINT "VideoEpisode_title_check" CHECK ((btrim(title) <> ''::text))
+);
+
+
+--
 -- Name: VideoEpisodeAudioClip; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public."VideoEpisodeAudioClip" (
     "mixVersionId" text NOT NULL,
     "projectId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
+    "shotPlanVersionId" text,
     ordinal integer NOT NULL,
     "trackKind" text NOT NULL,
     "assetId" text NOT NULL,
@@ -1209,9 +1247,14 @@ CREATE TABLE public."VideoEpisodeAudioClip" (
     "gainMillibels" integer DEFAULT 0 NOT NULL,
     "fadeInMs" integer DEFAULT 0 NOT NULL,
     "fadeOutMs" integer DEFAULT 0 NOT NULL,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
     CONSTRAINT "VideoEpisodeAudioClip_fade_check" CHECK ((("fadeInMs" >= 0) AND ("fadeOutMs" >= 0) AND (("fadeInMs" + "fadeOutMs") <= ("sourceOutMs" - "sourceInMs")))),
     CONSTRAINT "VideoEpisodeAudioClip_gain_check" CHECK ((("gainMillibels" >= '-6000'::integer) AND ("gainMillibels" <= 1200))),
     CONSTRAINT "VideoEpisodeAudioClip_range_check" CHECK (((ordinal > 0) AND ("timelineStartMs" >= 0) AND ("sourceInMs" >= 0) AND ("sourceOutMs" > "sourceInMs"))),
+    CONSTRAINT "VideoEpisodeAudioClip_scope_branch_check" CHECK (((("shotPlanVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL)) OR (("shotPlanVersionId" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL) AND ((("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL)) OR (("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL)))))),
     CONSTRAINT "VideoEpisodeAudioClip_track_check" CHECK (("trackKind" = ANY (ARRAY['dialogue'::text, 'narration'::text, 'ambience'::text, 'sfx'::text, 'music'::text])))
 );
 
@@ -1230,13 +1273,57 @@ CREATE TABLE public."VideoEpisodeBoundary" (
 
 
 --
+-- Name: VideoEpisodeCommand; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeCommand" (
+    id text NOT NULL,
+    "actorUserId" text NOT NULL,
+    "clientRequestId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "novelId" text NOT NULL,
+    "episodeId" text,
+    operation text NOT NULL,
+    "requestHash" text NOT NULL,
+    "resultJson" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoEpisodeCommand_clientRequestId_check" CHECK ((btrim("clientRequestId") <> ''::text)),
+    CONSTRAINT "VideoEpisodeCommand_operation_check" CHECK ((btrim(operation) <> ''::text)),
+    CONSTRAINT "VideoEpisodeCommand_requestHash_check" CHECK (("requestHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoEpisodeCommand_resultJson_check" CHECK ((jsonb_typeof(("resultJson")::jsonb) = 'object'::text))
+);
+
+
+--
+-- Name: VideoEpisodeDependency; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeDependency" (
+    id text NOT NULL,
+    "projectId" text NOT NULL,
+    "consumerEpisodeId" text NOT NULL,
+    "consumerScriptVersionId" text NOT NULL,
+    "consumerSceneId" text NOT NULL,
+    "consumerLineId" text,
+    "producerEpisodeId" text NOT NULL,
+    "producerScriptVersionId" text NOT NULL,
+    "producerStateKey" text NOT NULL,
+    "narrativeTime" text NOT NULL,
+    description text NOT NULL,
+    "sourceHash" text NOT NULL,
+    CONSTRAINT "VideoEpisodeDependency_distinct_episode_check" CHECK (("consumerEpisodeId" <> "producerEpisodeId")),
+    CONSTRAINT "VideoEpisodeDependency_sourceHash_check" CHECK (("sourceHash" ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
 -- Name: VideoEpisodeEditClip; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public."VideoEpisodeEditClip" (
     "editVersionId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
-    "shotId" text NOT NULL,
+    "shotPlanVersionId" text,
+    "shotId" text,
     "takeId" text,
     ordinal integer NOT NULL,
     "sourceInMs" integer,
@@ -1245,7 +1332,16 @@ CREATE TABLE public."VideoEpisodeEditClip" (
     "outputDurationMs" integer NOT NULL,
     "transitionAfter" text DEFAULT 'cut'::text NOT NULL,
     "transitionDurationMs" integer DEFAULT 0 NOT NULL,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "adoptionId" text,
+    "sourceAudioMode" text DEFAULT 'keep'::text NOT NULL,
+    "clipId" text,
     CONSTRAINT "VideoEpisodeEditClip_ordinal_check" CHECK ((ordinal > 0)),
+    CONSTRAINT "VideoEpisodeEditClip_scope_branch_check" CHECK (((("shotId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("adoptionId" IS NULL)) OR (("shotId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("clipId" IS NOT NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("takeId" IS NOT NULL) AND ("adoptionId" IS NOT NULL)))),
+    CONSTRAINT "VideoEpisodeEditClip_source_audio_mode_check" CHECK (("sourceAudioMode" = ANY (ARRAY['keep'::text, 'mute'::text]))),
     CONSTRAINT "VideoEpisodeEditClip_source_check" CHECK (((("takeId" IS NULL) AND ("sourceInMs" IS NULL) AND ("sourceOutMs" IS NULL)) OR (("takeId" IS NOT NULL) AND ("sourceInMs" >= 0) AND ("sourceOutMs" > "sourceInMs") AND ("outputDurationMs" = ("sourceOutMs" - "sourceInMs"))))),
     CONSTRAINT "VideoEpisodeEditClip_timeline_check" CHECK ((("timelineStartMs" >= 0) AND ("outputDurationMs" >= 500))),
     CONSTRAINT "VideoEpisodeEditClip_transition_check" CHECK (((("transitionAfter" = 'cut'::text) AND ("transitionDurationMs" = 0)) OR (("transitionAfter" = 'fade_black'::text) AND ("transitionDurationMs" > 0) AND (("transitionDurationMs" * 2) <= "outputDurationMs"))))
@@ -1274,12 +1370,12 @@ CREATE TABLE public."VideoEpisodeEditHead" (
 
 CREATE TABLE public."VideoEpisodeEditVersion" (
     id text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
-    "episodePlanVersionId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
-    "episodeNo" integer NOT NULL,
+    "episodePlanVersionId" text,
+    "shotPlanVersionId" text,
+    "episodeNo" integer,
     "versionNo" integer NOT NULL,
     "basedOnVersionId" text,
     "totalDurationMs" integer NOT NULL,
@@ -1288,9 +1384,14 @@ CREATE TABLE public."VideoEpisodeEditVersion" (
     "contentHash" text NOT NULL,
     "createdByUserId" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
+    "omissionsJson" text DEFAULT '[]'::text NOT NULL,
     CONSTRAINT "VideoEpisodeEditVersion_hash_check" CHECK ((("requestHash" ~ '^[0-9a-f]{64}$'::text) AND ("contentHash" ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT "VideoEpisodeEditVersion_numbers_check" CHECK ((("episodeNo" > 0) AND ("versionNo" > 0) AND ("totalDurationMs" > 0))),
-    CONSTRAINT "VideoEpisodeEditVersion_request_check" CHECK ((btrim("clientRequestId") <> ''::text))
+    CONSTRAINT "VideoEpisodeEditVersion_omissions_json_check" CHECK (COALESCE((jsonb_typeof(("omissionsJson")::jsonb) = 'array'::text), false)),
+    CONSTRAINT "VideoEpisodeEditVersion_request_check" CHECK ((btrim("clientRequestId") <> ''::text)),
+    CONSTRAINT "VideoEpisodeEditVersion_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("episodePlanVersionId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("episodeNo" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("episodePlanVersionId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("episodeNo" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL))))
 );
 
 
@@ -1301,18 +1402,21 @@ CREATE TABLE public."VideoEpisodeEditVersion" (
 CREATE TABLE public."VideoEpisodeExport" (
     id text NOT NULL,
     "taskId" text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
-    "episodePlanVersionId" text NOT NULL,
-    "episodeNo" integer NOT NULL,
+    "episodePlanVersionId" text,
+    "episodeNo" integer,
     "editVersionId" text NOT NULL,
     "mixVersionId" text NOT NULL,
     "assetId" text NOT NULL,
     "versionNo" integer NOT NULL,
     "inputHash" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoEpisodeExport_hash_check" CHECK (("inputHash" ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT "VideoEpisodeExport_numbers_check" CHECK ((("episodeNo" > 0) AND ("versionNo" > 0)))
+    CONSTRAINT "VideoEpisodeExport_numbers_check" CHECK ((("episodeNo" > 0) AND ("versionNo" > 0))),
+    CONSTRAINT "VideoEpisodeExport_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("episodePlanVersionId" IS NOT NULL) AND ("episodeNo" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("episodePlanVersionId" IS NULL) AND ("episodeNo" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL))))
 );
 
 
@@ -1323,12 +1427,12 @@ CREATE TABLE public."VideoEpisodeExport" (
 CREATE TABLE public."VideoEpisodeExportTask" (
     id text NOT NULL,
     "requestedByUserId" text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
-    "episodePlanVersionId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
-    "episodeNo" integer NOT NULL,
+    "episodePlanVersionId" text,
+    "shotPlanVersionId" text,
+    "episodeNo" integer,
     "editVersionId" text NOT NULL,
     "mixVersionId" text NOT NULL,
     "retryOfTaskId" text,
@@ -1347,11 +1451,14 @@ CREATE TABLE public."VideoEpisodeExportTask" (
     "updatedAt" timestamp(3) without time zone NOT NULL,
     "startedAt" timestamp(3) without time zone,
     "completedAt" timestamp(3) without time zone,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoEpisodeExportTask_hash_check" CHECK (("inputHash" ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT "VideoEpisodeExportTask_manifest_check" CHECK (COALESCE((jsonb_typeof(("requestManifestJson")::jsonb) = 'object'::text), false)),
     CONSTRAINT "VideoEpisodeExportTask_numbers_check" CHECK ((("episodeNo" > 0) AND ("attemptCount" >= 0))),
     CONSTRAINT "VideoEpisodeExportTask_output_check" CHECK (((resolution = ANY (ARRAY['720p'::text, '1080p'::text])) AND ("framesPerSecond" = ANY (ARRAY[24, 25, 30])))),
     CONSTRAINT "VideoEpisodeExportTask_request_check" CHECK ((btrim("clientRequestId") <> ''::text)),
+    CONSTRAINT "VideoEpisodeExportTask_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("episodePlanVersionId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("episodeNo" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("episodePlanVersionId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("episodeNo" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL)))),
     CONSTRAINT "VideoEpisodeExportTask_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'rendering'::text, 'succeeded'::text, 'failed'::text])))
 );
 
@@ -1378,12 +1485,12 @@ CREATE TABLE public."VideoEpisodeMixHead" (
 
 CREATE TABLE public."VideoEpisodeMixVersion" (
     id text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
-    "episodePlanVersionId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
-    "episodeNo" integer NOT NULL,
+    "episodePlanVersionId" text,
+    "shotPlanVersionId" text,
+    "episodeNo" integer,
     "editVersionId" text NOT NULL,
     "versionNo" integer NOT NULL,
     "basedOnVersionId" text,
@@ -1392,9 +1499,12 @@ CREATE TABLE public."VideoEpisodeMixVersion" (
     "contentHash" text NOT NULL,
     "createdByUserId" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoEpisodeMixVersion_hash_check" CHECK ((("requestHash" ~ '^[0-9a-f]{64}$'::text) AND ("contentHash" ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT "VideoEpisodeMixVersion_numbers_check" CHECK ((("episodeNo" > 0) AND ("versionNo" > 0))),
-    CONSTRAINT "VideoEpisodeMixVersion_request_check" CHECK ((btrim("clientRequestId") <> ''::text))
+    CONSTRAINT "VideoEpisodeMixVersion_request_check" CHECK ((btrim("clientRequestId") <> ''::text)),
+    CONSTRAINT "VideoEpisodeMixVersion_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("episodePlanVersionId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("episodeNo" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("episodePlanVersionId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("episodeNo" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL))))
 );
 
 
@@ -1424,19 +1534,129 @@ COMMENT ON TABLE public."VideoEpisodePlanVersion" IS '固定引用一个镜头�
 
 
 --
+-- Name: VideoEpisodeScriptDraft; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeScriptDraft" (
+    "episodeId" text NOT NULL,
+    revision integer DEFAULT 1 NOT NULL,
+    "basedOnScriptVersionId" text,
+    "sourceSetVersionId" text,
+    "documentJson" text NOT NULL,
+    "contentHash" text NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    CONSTRAINT "VideoEpisodeScriptDraft_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoEpisodeScriptDraft_documentJson_check" CHECK ((jsonb_typeof(("documentJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoEpisodeScriptDraft_revision_check" CHECK ((revision > 0))
+);
+
+
+--
+-- Name: VideoEpisodeScriptVersion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeScriptVersion" (
+    id text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "versionNo" integer NOT NULL,
+    "basedOnVersionId" text,
+    "sourceSetVersionId" text,
+    "documentJson" text NOT NULL,
+    "contentHash" text NOT NULL,
+    "reviewArtifactId" text NOT NULL,
+    "approvedByUserId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoEpisodeScriptVersion_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoEpisodeScriptVersion_documentJson_check" CHECK ((jsonb_typeof(("documentJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoEpisodeScriptVersion_versionNo_check" CHECK (("versionNo" > 0))
+);
+
+
+--
+-- Name: VideoEpisodeShot; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeShot" (
+    id text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "createdByUserId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: TABLE "VideoEpisodeShot"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoEpisodeShot" IS '独立分集中不随标题、镜号或顺序变化的稳定镜头身份';
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeSourceSetVersion" (
+    id text NOT NULL,
+    "episodeId" text NOT NULL,
+    "versionNo" integer NOT NULL,
+    "basedOnVersionId" text,
+    "contentHash" text NOT NULL,
+    "createdByUserId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoEpisodeSourceSetVersion_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoEpisodeSourceSetVersion_versionNo_check" CHECK (("versionNo" > 0))
+);
+
+
+--
+-- Name: VideoEpisodeSourceSnapshot; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoEpisodeSourceSnapshot" (
+    id text NOT NULL,
+    "sourceSetVersionId" text NOT NULL,
+    ordinal integer NOT NULL,
+    "chapterId" text NOT NULL,
+    "chapterTitle" text NOT NULL,
+    "chapterUpdatedAt" timestamp(3) without time zone NOT NULL,
+    "sourceText" text NOT NULL,
+    "sourceHash" text NOT NULL,
+    "rangesJson" text NOT NULL,
+    CONSTRAINT "VideoEpisodeSourceSnapshot_ordinal_check" CHECK ((ordinal > 0)),
+    CONSTRAINT "VideoEpisodeSourceSnapshot_rangesJson_check" CHECK ((jsonb_typeof(("rangesJson")::jsonb) = 'array'::text)),
+    CONSTRAINT "VideoEpisodeSourceSnapshot_sourceHash_check" CHECK (("sourceHash" ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: COLUMN "VideoEpisodeSourceSnapshot"."chapterId"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public."VideoEpisodeSourceSnapshot"."chapterId" IS '不可变来源身份，不以实时章节外键使历史快照随删章丢失';
+
+
+--
 -- Name: VideoEpisodeSubtitleCue; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public."VideoEpisodeSubtitleCue" (
     "mixVersionId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
+    "shotPlanVersionId" text,
     ordinal integer NOT NULL,
     "shotId" text,
     "startMs" integer NOT NULL,
     "endMs" integer NOT NULL,
     speaker text,
     text text NOT NULL,
+    "videoEpisodeId" text,
+    "productionBaselineId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "scriptLineId" text,
     CONSTRAINT "VideoEpisodeSubtitleCue_range_check" CHECK (((ordinal > 0) AND ("startMs" >= 0) AND ("endMs" > "startMs"))),
+    CONSTRAINT "VideoEpisodeSubtitleCue_scope_branch_check" CHECK (((("shotPlanVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("productionBaselineId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("scriptLineId" IS NULL)) OR (("shotPlanVersionId" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("scriptLineId" IS NOT NULL)))),
     CONSTRAINT "VideoEpisodeSubtitleCue_text_check" CHECK (((btrim(text) <> ''::text) AND ((speaker IS NULL) OR (char_length(speaker) <= 120))))
 );
 
@@ -1478,6 +1698,137 @@ CREATE TABLE public."VideoGenerationTask" (
 --
 
 COMMENT ON TABLE public."VideoGenerationTask" IS '视频规划、渲染、轮询和归档的耐久任务事实';
+
+
+--
+-- Name: VideoImpactReview; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoImpactReview" (
+    id text NOT NULL,
+    "projectId" text NOT NULL,
+    "producerEpisodeId" text NOT NULL,
+    "beforeScriptVersionId" text,
+    "afterScriptVersionId" text NOT NULL,
+    "targetEpisodeId" text NOT NULL,
+    "targetScriptVersionId" text,
+    revision integer DEFAULT 1 NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    "reportJson" text NOT NULL,
+    "decisionsJson" text DEFAULT '[]'::text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    "producerProductionRevision" integer,
+    "targetProductionRevision" integer,
+    "producerBaselineId" text,
+    "targetBaselineId" text,
+    CONSTRAINT "VideoImpactReview_decisionsJson_check" CHECK ((jsonb_typeof(("decisionsJson")::jsonb) = 'array'::text)),
+    CONSTRAINT "VideoImpactReview_production_revision_check" CHECK (((("producerProductionRevision" IS NULL) OR ("producerProductionRevision" > 0)) AND (("targetProductionRevision" IS NULL) OR ("targetProductionRevision" > 0)))),
+    CONSTRAINT "VideoImpactReview_reportJson_check" CHECK ((jsonb_typeof(("reportJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoImpactReview_revision_check" CHECK ((revision > 0)),
+    CONSTRAINT "VideoImpactReview_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'resolved'::text])))
+);
+
+
+--
+-- Name: VideoProductionBaseline; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoProductionBaseline" (
+    id text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "versionNo" integer NOT NULL,
+    "basedOnBaselineId" text,
+    "scriptVersionId" text NOT NULL,
+    "storyboardVersionId" text NOT NULL,
+    "manifestJson" text NOT NULL,
+    "contentHash" text NOT NULL,
+    "createdByUserId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoProductionBaseline_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoProductionBaseline_manifestJson_check" CHECK ((jsonb_typeof(("manifestJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoProductionBaseline_versionNo_check" CHECK (("versionNo" > 0))
+);
+
+
+--
+-- Name: TABLE "VideoProductionBaseline"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoProductionBaseline" IS '作者确认的整集不可变制作输入版本';
+
+
+--
+-- Name: VideoProductionBaselineShot; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoProductionBaselineShot" (
+    "baselineId" text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    ordinal integer NOT NULL,
+    "shotId" text NOT NULL,
+    "shotVersionId" text NOT NULL,
+    "adoptionId" text,
+    status text DEFAULT 'pending'::text NOT NULL,
+    "inputSnapshotJson" text NOT NULL,
+    "inputHash" text NOT NULL,
+    CONSTRAINT "VideoProductionBaselineShot_inputHash_check" CHECK (("inputHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoProductionBaselineShot_inputSnapshotJson_check" CHECK ((jsonb_typeof(("inputSnapshotJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoProductionBaselineShot_ordinal_check" CHECK ((ordinal > 0)),
+    CONSTRAINT "VideoProductionBaselineShot_status_adoption_check" CHECK ((((status = 'adopted'::text) AND ("adoptionId" IS NOT NULL)) OR ((status = 'pending'::text) AND ("adoptionId" IS NULL)))),
+    CONSTRAINT "VideoProductionBaselineShot_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'adopted'::text])))
+);
+
+
+--
+-- Name: TABLE "VideoProductionBaselineShot"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoProductionBaselineShot" IS '制作基线逐镜冻结的确切镜头版本及输入快照';
+
+
+--
+-- Name: VideoProductionEditHead; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoProductionEditHead" (
+    "episodeId" text NOT NULL,
+    "productionBaselineId" text NOT NULL,
+    "currentVersionId" text,
+    revision integer DEFAULT 1 NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    CONSTRAINT "VideoProductionEditHead_revision_check" CHECK ((revision > 0))
+);
+
+
+--
+-- Name: TABLE "VideoProductionEditHead"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoProductionEditHead" IS '独立剧集粗剪当前版本的 CAS head';
+
+
+--
+-- Name: VideoProductionMixHead; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoProductionMixHead" (
+    "episodeId" text NOT NULL,
+    "productionBaselineId" text NOT NULL,
+    "currentVersionId" text,
+    revision integer DEFAULT 1 NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    CONSTRAINT "VideoProductionMixHead_revision_check" CHECK ((revision > 0))
+);
+
+
+--
+-- Name: TABLE "VideoProductionMixHead"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoProductionMixHead" IS '独立剧集声音字幕当前版本的 CAS head';
 
 
 --
@@ -1533,7 +1884,7 @@ CREATE TABLE public."VideoReviewDecisionCommand" (
     "completedAt" timestamp(3) without time zone NOT NULL,
     "novelId" text NOT NULL,
     "projectId" text NOT NULL,
-    CONSTRAINT "VideoReviewDecisionCommand_client_request_check" CHECK ((((char_length("clientRequestId") >= 16) AND (char_length("clientRequestId") <= 128)) AND (btrim("clientRequestId") = "clientRequestId"))),
+    CONSTRAINT "VideoReviewDecisionCommand_client_request_check" CHECK (((char_length("clientRequestId") >= 16) AND (char_length("clientRequestId") <= 128) AND (btrim("clientRequestId") = "clientRequestId"))),
     CONSTRAINT "VideoReviewDecisionCommand_decision_check" CHECK ((decision = 'approve'::text)),
     CONSTRAINT "VideoReviewDecisionCommand_request_hash_check" CHECK (("requestHash" ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT "VideoReviewDecisionCommand_result_json_check" CHECK (COALESCE((jsonb_typeof(("resultJson")::jsonb) = 'object'::text), false)),
@@ -1669,7 +2020,7 @@ CREATE TABLE public."VideoShot" (
     CONSTRAINT "VideoShot_adaptation_type_check" CHECK (("adaptationType" = ANY (ARRAY['direct'::text, 'visualized'::text, 'voiceover'::text, 'supplemental'::text]))),
     CONSTRAINT "VideoShot_angle_check" CHECK (("cameraAngle" = ANY (ARRAY['eye_level'::text, 'high_angle'::text, 'low_angle'::text, 'overhead'::text, 'dutch_angle'::text]))),
     CONSTRAINT "VideoShot_audio_mode_check" CHECK (("audioMode" = ANY (ARRAY['sync_dialogue'::text, 'offscreen_dialogue'::text, 'voiceover'::text, 'ambient'::text, 'music'::text, 'silence'::text]))),
-    CONSTRAINT "VideoShot_duration_check" CHECK (((("timelineDurationMs" >= 500) AND ("timelineDurationMs" <= 15000)) AND (mod("timelineDurationMs", 500) = 0))),
+    CONSTRAINT "VideoShot_duration_check" CHECK ((("timelineDurationMs" >= 500) AND ("timelineDurationMs" <= 15000) AND (mod("timelineDurationMs", 500) = 0))),
     CONSTRAINT "VideoShot_goal_driven_fields_check" CHECK (((("sourceRelation" IS NULL) AND ("storyFunction" IS NULL) AND ("audienceGain" IS NULL) AND ("coveredGoalKeysJson" IS NULL) AND ("speechMode" IS NULL) AND ("spokenText" IS NULL)) OR (("sourceRelation" = ANY (ARRAY['direct'::text, 'derived'::text, 'supplemental'::text])) AND COALESCE((btrim("storyFunction") <> ''::text), false) AND COALESCE((btrim("audienceGain") <> ''::text), false) AND COALESCE((jsonb_typeof(("coveredGoalKeysJson")::jsonb) = 'array'::text), false) AND ("speechMode" = ANY (ARRAY['none'::text, 'sync'::text, 'offscreen'::text, 'voiceover'::text])) AND ((("speechMode" = 'none'::text) AND ("spokenText" IS NULL)) OR (("speechMode" <> 'none'::text) AND COALESCE((btrim("spokenText") <> ''::text), false)))))),
     CONSTRAINT "VideoShot_key_check" CHECK (("shotKey" ~ '^S[0-9]{2,3}$'::text)),
     CONSTRAINT "VideoShot_movement_check" CHECK (("cameraMovement" = ANY (ARRAY['locked'::text, 'pan'::text, 'tilt'::text, 'push_in'::text, 'pull_out'::text, 'tracking'::text, 'arc'::text, 'handheld'::text, 'focus_shift'::text]))),
@@ -1709,11 +2060,11 @@ CREATE TABLE public."VideoShotKeyframeHead" (
 
 CREATE TABLE public."VideoShotKeyframeVersion" (
     id text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
-    "shotId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
+    "shotId" text,
+    "shotPlanVersionId" text,
     role text NOT NULL,
     "versionNo" integer NOT NULL,
     "basedOnVersionId" text,
@@ -1726,13 +2077,41 @@ CREATE TABLE public."VideoShotKeyframeVersion" (
     "contentHash" text NOT NULL,
     "createdByUserId" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoShotKeyframeVersion_hash_check" CHECK ((("requestHash" ~ '^[0-9a-f]{64}$'::text) AND ("contentHash" ~ '^[0-9a-f]{64}$'::text))),
     CONSTRAINT "VideoShotKeyframeVersion_request_check" CHECK ((btrim("clientRequestId") <> ''::text)),
     CONSTRAINT "VideoShotKeyframeVersion_role_check" CHECK ((role = ANY (ARRAY['initial_state'::text, 'transition_anchor'::text, 'end_state'::text]))),
+    CONSTRAINT "VideoShotKeyframeVersion_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("shotId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("shotId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL)))),
     CONSTRAINT "VideoShotKeyframeVersion_source_check" CHECK (((("sourceKind" = 'cleared'::text) AND ("assetId" IS NULL) AND ("sourceTakeId" IS NULL) AND ("sourceTimeMs" IS NULL)) OR (("sourceKind" = 'asset'::text) AND ("assetId" IS NOT NULL) AND ("sourceTakeId" IS NULL) AND ("sourceTimeMs" IS NULL)) OR (("sourceKind" = 'take_frame'::text) AND ("assetId" IS NOT NULL) AND ("sourceTakeId" IS NOT NULL) AND ("sourceTimeMs" >= 0)))),
     CONSTRAINT "VideoShotKeyframeVersion_source_kind_check" CHECK (("sourceKind" = ANY (ARRAY['asset'::text, 'take_frame'::text, 'cleared'::text]))),
     CONSTRAINT "VideoShotKeyframeVersion_version_check" CHECK (("versionNo" > 0))
 );
+
+
+--
+-- Name: VideoShotLineage; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoShotLineage" (
+    "childShotId" text NOT NULL,
+    "sourceShotId" text NOT NULL,
+    "episodeId" text NOT NULL,
+    ordinal integer NOT NULL,
+    relation text NOT NULL,
+    CONSTRAINT "VideoShotLineage_distinct_check" CHECK (("childShotId" <> "sourceShotId")),
+    CONSTRAINT "VideoShotLineage_ordinal_check" CHECK ((ordinal > 0)),
+    CONSTRAINT "VideoShotLineage_relation_check" CHECK ((relation = ANY (ARRAY['replacement'::text, 'copy'::text, 'split'::text, 'merge'::text])))
+);
+
+
+--
+-- Name: TABLE "VideoShotLineage"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoShotLineage" IS '替换、复制、拆分和合并产生新镜头身份时冻结的多源沿袭关系';
 
 
 --
@@ -1781,8 +2160,8 @@ CREATE TABLE public."VideoShotPromptHead" (
 
 CREATE TABLE public."VideoShotPromptVersion" (
     id text NOT NULL,
-    "shotId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
+    "shotId" text,
+    "shotPlanVersionId" text,
     "versionNo" integer NOT NULL,
     "basedOnVersionId" text,
     "generatedText" text,
@@ -1791,8 +2170,13 @@ CREATE TABLE public."VideoShotPromptVersion" (
     "createdByUserId" text NOT NULL,
     "contentHash" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoShotPromptVersion_content_hash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT "VideoShotPromptVersion_text_check" CHECK ((((char_length("currentText") >= 1) AND (char_length("currentText") <= 2000)) AND (("generatedText" IS NULL) OR ((char_length("generatedText") >= 1) AND (char_length("generatedText") <= 2000))))),
+    CONSTRAINT "VideoShotPromptVersion_scope_branch_check" CHECK (((("shotId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("shotId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("sourceTaskId" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL)))),
+    CONSTRAINT "VideoShotPromptVersion_text_check" CHECK (((char_length("currentText") >= 1) AND (char_length("currentText") <= 2000) AND (("generatedText" IS NULL) OR ((char_length("generatedText") >= 1) AND (char_length("generatedText") <= 2000))))),
     CONSTRAINT "VideoShotPromptVersion_version_check" CHECK (("versionNo" > 0))
 );
 
@@ -1836,12 +2220,12 @@ COMMENT ON TABLE public."VideoShotPromptVisualReference" IS '正式提示词版�
 
 CREATE TABLE public."VideoShotRenderTask" (
     id text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
-    "shotId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
-    "promptVersionId" text NOT NULL,
+    "shotId" text,
+    "shotPlanVersionId" text,
+    "promptVersionId" text,
     "retryOfTaskId" text,
     provider text DEFAULT 'seedance'::text NOT NULL,
     model text NOT NULL,
@@ -1859,11 +2243,16 @@ CREATE TABLE public."VideoShotRenderTask" (
     "updatedAt" timestamp(3) without time zone NOT NULL,
     "submittedAt" timestamp(3) without time zone,
     "completedAt" timestamp(3) without time zone,
+    "videoEpisodeId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoShotRenderTask_counts_check" CHECK ((("pollCount" >= 0) AND ("attemptCount" >= 0))),
     CONSTRAINT "VideoShotRenderTask_input_hash_check" CHECK (("inputHash" ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT "VideoShotRenderTask_manifest_check" CHECK (COALESCE((jsonb_typeof(("requestManifestJson")::jsonb) = 'object'::text), false)),
     CONSTRAINT "VideoShotRenderTask_provider_check" CHECK ((provider = 'seedance'::text)),
     CONSTRAINT "VideoShotRenderTask_provider_task_check" CHECK ((((status = ANY (ARRAY['queued'::text, 'running'::text, 'archiving'::text, 'succeeded'::text])) AND ("providerTaskId" IS NOT NULL)) OR (status <> ALL (ARRAY['queued'::text, 'running'::text, 'archiving'::text, 'succeeded'::text])))),
+    CONSTRAINT "VideoShotRenderTask_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("shotId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("promptVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("shotId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("promptVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL)))),
     CONSTRAINT "VideoShotRenderTask_status_check" CHECK ((status = ANY (ARRAY['pending'::text, 'submitting'::text, 'submission_unknown'::text, 'queued'::text, 'running'::text, 'archiving'::text, 'succeeded'::text, 'failed'::text, 'expired'::text, 'cancelled'::text]))),
     CONSTRAINT "VideoShotRenderTask_text_check" CHECK (((btrim(model) <> ''::text) AND (btrim("clientRequestId") <> ''::text)))
 );
@@ -1891,12 +2280,12 @@ CREATE TABLE public."VideoShotSourceAnchor" (
 CREATE TABLE public."VideoShotTake" (
     id text NOT NULL,
     "taskId" text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
-    "shotId" text NOT NULL,
-    "shotPlanVersionId" text NOT NULL,
-    "promptVersionId" text NOT NULL,
+    "shotId" text,
+    "shotPlanVersionId" text,
+    "promptVersionId" text,
     "assetId" text NOT NULL,
     "takeNo" integer NOT NULL,
     provider text NOT NULL,
@@ -1905,9 +2294,15 @@ CREATE TABLE public."VideoShotTake" (
     "inputHash" text NOT NULL,
     "providerMetadataJson" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "productionBaselineId" text,
+    "lastFrameAssetId" text,
     CONSTRAINT "VideoShotTake_input_hash_check" CHECK (("inputHash" ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT "VideoShotTake_metadata_check" CHECK (COALESCE((jsonb_typeof(("providerMetadataJson")::jsonb) = 'object'::text), false)),
     CONSTRAINT "VideoShotTake_provider_check" CHECK ((provider = 'seedance'::text)),
+    CONSTRAINT "VideoShotTake_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("shotId" IS NOT NULL) AND ("shotPlanVersionId" IS NOT NULL) AND ("promptVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("shotId" IS NULL) AND ("shotPlanVersionId" IS NULL) AND ("promptVersionId" IS NOT NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL)))),
     CONSTRAINT "VideoShotTake_take_no_check" CHECK (("takeNo" > 0)),
     CONSTRAINT "VideoShotTake_text_check" CHECK (((btrim(model) <> ''::text) AND (btrim("providerTaskId") <> ''::text)))
 );
@@ -1953,6 +2348,39 @@ CREATE TABLE public."VideoShotTakeHead" (
     "updatedAt" timestamp(3) without time zone NOT NULL,
     CONSTRAINT "VideoShotTakeHead_revision_check" CHECK ((revision > 0))
 );
+
+
+--
+-- Name: VideoShotVersion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoShotVersion" (
+    id text NOT NULL,
+    "shotId" text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "storyboardVersionId" text NOT NULL,
+    ordinal integer NOT NULL,
+    "versionNo" integer NOT NULL,
+    "scriptSceneId" text NOT NULL,
+    "scriptLineIdsJson" text NOT NULL,
+    "contentJson" text NOT NULL,
+    "contentHash" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoShotVersion_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoShotVersion_contentJson_check" CHECK ((jsonb_typeof(("contentJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoShotVersion_ordinal_check" CHECK ((ordinal > 0)),
+    CONSTRAINT "VideoShotVersion_scriptLineIdsJson_check" CHECK ((jsonb_typeof(("scriptLineIdsJson")::jsonb) = 'array'::text)),
+    CONSTRAINT "VideoShotVersion_scriptSceneId_check" CHECK ((btrim("scriptSceneId") <> ''::text)),
+    CONSTRAINT "VideoShotVersion_versionNo_check" CHECK (("versionNo" > 0))
+);
+
+
+--
+-- Name: TABLE "VideoShotVersion"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoShotVersion" IS '一次正式分镜中某稳定镜头的不可变内容版本';
 
 
 --
@@ -2004,14 +2432,96 @@ COMMENT ON TABLE public."VideoShotVisualReferenceSet" IS '正式镜头当前视�
 
 
 --
+-- Name: VideoStoryboardDraft; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoStoryboardDraft" (
+    "episodeId" text NOT NULL,
+    revision integer DEFAULT 1 NOT NULL,
+    "basedOnStoryboardVersionId" text,
+    "scriptVersionId" text,
+    "documentJson" text NOT NULL,
+    "contentHash" text NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    CONSTRAINT "VideoStoryboardDraft_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoStoryboardDraft_documentJson_check" CHECK ((jsonb_typeof(("documentJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoStoryboardDraft_revision_check" CHECK ((revision > 0))
+);
+
+
+--
+-- Name: TABLE "VideoStoryboardDraft"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoStoryboardDraft" IS '分镜自动保存工作稿，CAS 更新且不等同正式版本';
+
+
+--
+-- Name: VideoStoryboardVersion; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoStoryboardVersion" (
+    id text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "versionNo" integer NOT NULL,
+    "basedOnVersionId" text,
+    "scriptVersionId" text NOT NULL,
+    "documentJson" text NOT NULL,
+    "contentHash" text NOT NULL,
+    "reviewArtifactId" text NOT NULL,
+    "approvedByUserId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoStoryboardVersion_contentHash_check" CHECK (("contentHash" ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT "VideoStoryboardVersion_documentJson_check" CHECK ((jsonb_typeof(("documentJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoStoryboardVersion_versionNo_check" CHECK (("versionNo" > 0))
+);
+
+
+--
+-- Name: TABLE "VideoStoryboardVersion"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoStoryboardVersion" IS '作者确认后的不可变整集分镜版本';
+
+
+--
+-- Name: VideoTakeAdoption; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."VideoTakeAdoption" (
+    id text NOT NULL,
+    "episodeId" text NOT NULL,
+    "projectId" text NOT NULL,
+    "targetShotId" text NOT NULL,
+    "targetShotVersionId" text NOT NULL,
+    "sourceTakeId" text NOT NULL,
+    "sourceBaselineId" text,
+    "comparisonJson" text NOT NULL,
+    "decisionHash" text NOT NULL,
+    "createdByUserId" text NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT "VideoTakeAdoption_comparisonJson_check" CHECK ((jsonb_typeof(("comparisonJson")::jsonb) = 'object'::text)),
+    CONSTRAINT "VideoTakeAdoption_decisionHash_check" CHECK (("decisionHash" ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: TABLE "VideoTakeAdoption"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public."VideoTakeAdoption" IS '原始 Take 到目标镜头版本的人工采用事实，不修改原生成依据';
+
+
+--
 -- Name: VideoTakeFrameExtraction; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public."VideoTakeFrameExtraction" (
     "assetId" text NOT NULL,
     "takeId" text NOT NULL,
-    "shotId" text NOT NULL,
-    "adaptationId" text NOT NULL,
+    "shotId" text,
+    "adaptationId" text,
     "projectId" text NOT NULL,
     "novelId" text NOT NULL,
     "timestampMs" integer NOT NULL,
@@ -2019,8 +2529,13 @@ CREATE TABLE public."VideoTakeFrameExtraction" (
     "requestHash" text NOT NULL,
     "requestedByUserId" text NOT NULL,
     "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "videoEpisodeId" text,
+    "episodeShotId" text,
+    "episodeShotVersionId" text,
+    "productionBaselineId" text,
     CONSTRAINT "VideoTakeFrameExtraction_hash_check" CHECK (("requestHash" ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT "VideoTakeFrameExtraction_request_check" CHECK ((btrim("clientRequestId") <> ''::text)),
+    CONSTRAINT "VideoTakeFrameExtraction_scope_branch_check" CHECK (((("adaptationId" IS NOT NULL) AND ("shotId" IS NOT NULL) AND ("videoEpisodeId" IS NULL) AND ("episodeShotId" IS NULL) AND ("episodeShotVersionId" IS NULL) AND ("productionBaselineId" IS NULL)) OR (("adaptationId" IS NULL) AND ("shotId" IS NULL) AND ("videoEpisodeId" IS NOT NULL) AND ("episodeShotId" IS NOT NULL) AND ("episodeShotVersionId" IS NOT NULL) AND ("productionBaselineId" IS NOT NULL)))),
     CONSTRAINT "VideoTakeFrameExtraction_time_check" CHECK (("timestampMs" >= 0))
 );
 
@@ -2922,6 +3437,38 @@ ALTER TABLE ONLY public."VideoEpisodeBoundary"
 
 
 --
+-- Name: VideoEpisodeCommand VideoEpisodeCommand_actor_client_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeCommand"
+    ADD CONSTRAINT "VideoEpisodeCommand_actor_client_key" UNIQUE ("actorUserId", "clientRequestId");
+
+
+--
+-- Name: VideoEpisodeCommand VideoEpisodeCommand_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeCommand"
+    ADD CONSTRAINT "VideoEpisodeCommand_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeDependency VideoEpisodeDependency_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeDependency"
+    ADD CONSTRAINT "VideoEpisodeDependency_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_clipId_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_clipId_key" UNIQUE ("clipId");
+
+
+--
 -- Name: VideoEpisodeEditClip VideoEpisodeEditClip_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2946,6 +3493,22 @@ ALTER TABLE ONLY public."VideoEpisodeEditVersion"
 
 
 --
+-- Name: VideoEpisodeEditVersion VideoEpisodeEditVersion_id_new_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditVersion"
+    ADD CONSTRAINT "VideoEpisodeEditVersion_id_new_scope_key" UNIQUE (id, "videoEpisodeId", "productionBaselineId");
+
+
+--
+-- Name: VideoEpisodeEditVersion VideoEpisodeEditVersion_id_video_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditVersion"
+    ADD CONSTRAINT "VideoEpisodeEditVersion_id_video_episode_key" UNIQUE (id, "videoEpisodeId");
+
+
+--
 -- Name: VideoEpisodeEditVersion VideoEpisodeEditVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2962,11 +3525,27 @@ ALTER TABLE ONLY public."VideoEpisodeExportTask"
 
 
 --
+-- Name: VideoEpisodeExportTask VideoEpisodeExportTask_id_video_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExportTask"
+    ADD CONSTRAINT "VideoEpisodeExportTask_id_video_episode_key" UNIQUE (id, "videoEpisodeId");
+
+
+--
 -- Name: VideoEpisodeExportTask VideoEpisodeExportTask_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoEpisodeExportTask"
     ADD CONSTRAINT "VideoEpisodeExportTask_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeExport VideoEpisodeExport_id_video_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExport"
+    ADD CONSTRAINT "VideoEpisodeExport_id_video_episode_key" UNIQUE (id, "videoEpisodeId");
 
 
 --
@@ -2994,6 +3573,22 @@ ALTER TABLE ONLY public."VideoEpisodeMixVersion"
 
 
 --
+-- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_id_new_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeMixVersion"
+    ADD CONSTRAINT "VideoEpisodeMixVersion_id_new_scope_key" UNIQUE (id, "videoEpisodeId", "productionBaselineId");
+
+
+--
+-- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_id_video_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeMixVersion"
+    ADD CONSTRAINT "VideoEpisodeMixVersion_id_video_episode_key" UNIQUE (id, "videoEpisodeId");
+
+
+--
 -- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3018,11 +3613,163 @@ ALTER TABLE ONLY public."VideoEpisodePlanVersion"
 
 
 --
+-- Name: VideoEpisodeScriptDraft VideoEpisodeScriptDraft_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptDraft"
+    ADD CONSTRAINT "VideoEpisodeScriptDraft_pkey" PRIMARY KEY ("episodeId");
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_artifact_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_artifact_key" UNIQUE ("reviewArtifactId");
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_episode_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_episode_version_key" UNIQUE ("episodeId", "versionNo");
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_id_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_id_episode_key" UNIQUE (id, "episodeId");
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_id_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_id_scope_key" UNIQUE (id, "episodeId", "projectId");
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeShot VideoEpisodeShot_id_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeShot"
+    ADD CONSTRAINT "VideoEpisodeShot_id_episode_key" UNIQUE (id, "episodeId");
+
+
+--
+-- Name: VideoEpisodeShot VideoEpisodeShot_id_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeShot"
+    ADD CONSTRAINT "VideoEpisodeShot_id_scope_key" UNIQUE (id, "episodeId", "projectId");
+
+
+--
+-- Name: VideoEpisodeShot VideoEpisodeShot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeShot"
+    ADD CONSTRAINT "VideoEpisodeShot_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion VideoEpisodeSourceSetVersion_episode_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSetVersion"
+    ADD CONSTRAINT "VideoEpisodeSourceSetVersion_episode_version_key" UNIQUE ("episodeId", "versionNo");
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion VideoEpisodeSourceSetVersion_id_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSetVersion"
+    ADD CONSTRAINT "VideoEpisodeSourceSetVersion_id_episode_key" UNIQUE (id, "episodeId");
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion VideoEpisodeSourceSetVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSetVersion"
+    ADD CONSTRAINT "VideoEpisodeSourceSetVersion_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeSourceSnapshot VideoEpisodeSourceSnapshot_id_set_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSnapshot"
+    ADD CONSTRAINT "VideoEpisodeSourceSnapshot_id_set_key" UNIQUE (id, "sourceSetVersionId");
+
+
+--
+-- Name: VideoEpisodeSourceSnapshot VideoEpisodeSourceSnapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSnapshot"
+    ADD CONSTRAINT "VideoEpisodeSourceSnapshot_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisodeSourceSnapshot VideoEpisodeSourceSnapshot_set_ordinal_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSnapshot"
+    ADD CONSTRAINT "VideoEpisodeSourceSnapshot_set_ordinal_key" UNIQUE ("sourceSetVersionId", ordinal);
+
+
+--
 -- Name: VideoEpisodeSubtitleCue VideoEpisodeSubtitleCue_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
     ADD CONSTRAINT "VideoEpisodeSubtitleCue_pkey" PRIMARY KEY ("mixVersionId", ordinal);
+
+
+--
+-- Name: VideoEpisode VideoEpisode_id_novel_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_id_novel_key" UNIQUE (id, "novelId");
+
+
+--
+-- Name: VideoEpisode VideoEpisode_id_project_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_id_project_key" UNIQUE (id, "projectId");
+
+
+--
+-- Name: VideoEpisode VideoEpisode_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoEpisode VideoEpisode_project_ordinal_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_project_ordinal_key" UNIQUE ("projectId", ordinal) DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -3055,6 +3802,86 @@ ALTER TABLE ONLY public."VideoGenerationTask"
 
 ALTER TABLE ONLY public."VideoGenerationTask"
     ADD CONSTRAINT "VideoGenerationTask_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoProductionBaselineShot VideoProductionBaselineShot_baseline_shot_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaselineShot"
+    ADD CONSTRAINT "VideoProductionBaselineShot_baseline_shot_key" UNIQUE ("baselineId", "shotId");
+
+
+--
+-- Name: VideoProductionBaselineShot VideoProductionBaselineShot_input_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaselineShot"
+    ADD CONSTRAINT "VideoProductionBaselineShot_input_scope_key" UNIQUE ("baselineId", "shotVersionId", "episodeId", "shotId");
+
+
+--
+-- Name: VideoProductionBaselineShot VideoProductionBaselineShot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaselineShot"
+    ADD CONSTRAINT "VideoProductionBaselineShot_pkey" PRIMARY KEY ("baselineId", ordinal);
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_episode_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_episode_version_key" UNIQUE ("episodeId", "versionNo");
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_id_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_id_episode_key" UNIQUE (id, "episodeId");
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_id_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_id_scope_key" UNIQUE (id, "episodeId", "projectId");
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoProductionEditHead VideoProductionEditHead_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionEditHead"
+    ADD CONSTRAINT "VideoProductionEditHead_pkey" PRIMARY KEY ("episodeId", "productionBaselineId");
+
+
+--
+-- Name: VideoProductionMixHead VideoProductionMixHead_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionMixHead"
+    ADD CONSTRAINT "VideoProductionMixHead_pkey" PRIMARY KEY ("episodeId", "productionBaselineId");
 
 
 --
@@ -3122,6 +3949,14 @@ ALTER TABLE ONLY public."VideoShotKeyframeHead"
 
 
 --
+-- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_id_episode_role_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotKeyframeVersion"
+    ADD CONSTRAINT "VideoShotKeyframeVersion_id_episode_role_key" UNIQUE (id, "episodeShotId", role);
+
+
+--
 -- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_id_shot_role_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3135,6 +3970,22 @@ ALTER TABLE ONLY public."VideoShotKeyframeVersion"
 
 ALTER TABLE ONLY public."VideoShotKeyframeVersion"
     ADD CONSTRAINT "VideoShotKeyframeVersion_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoShotLineage VideoShotLineage_child_source_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotLineage"
+    ADD CONSTRAINT "VideoShotLineage_child_source_key" UNIQUE ("childShotId", "sourceShotId");
+
+
+--
+-- Name: VideoShotLineage VideoShotLineage_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotLineage"
+    ADD CONSTRAINT "VideoShotLineage_pkey" PRIMARY KEY ("childShotId", ordinal);
 
 
 --
@@ -3178,6 +4029,22 @@ ALTER TABLE ONLY public."VideoShotPromptHead"
 
 
 --
+-- Name: VideoShotPromptVersion VideoShotPromptVersion_id_episode_shot_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotPromptVersion"
+    ADD CONSTRAINT "VideoShotPromptVersion_id_episode_shot_key" UNIQUE (id, "episodeShotId");
+
+
+--
+-- Name: VideoShotPromptVersion VideoShotPromptVersion_id_new_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotPromptVersion"
+    ADD CONSTRAINT "VideoShotPromptVersion_id_new_scope_key" UNIQUE (id, "videoEpisodeId", "episodeShotId", "episodeShotVersionId", "productionBaselineId");
+
+
+--
 -- Name: VideoShotPromptVersion VideoShotPromptVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3207,6 +4074,22 @@ ALTER TABLE ONLY public."VideoShotPromptVisualReference"
 
 ALTER TABLE ONLY public."VideoShotPromptVisualReference"
     ADD CONSTRAINT "VideoShotPromptVisualReference_prompt_canon_key" UNIQUE ("promptVersionId", "canonVersionId");
+
+
+--
+-- Name: VideoShotRenderTask VideoShotRenderTask_id_episode_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_id_episode_scope_key" UNIQUE (id, "videoEpisodeId", "projectId", "novelId", "episodeShotId", "episodeShotVersionId", "productionBaselineId", "promptVersionId");
+
+
+--
+-- Name: VideoShotRenderTask VideoShotRenderTask_id_episode_shot_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_id_episode_shot_key" UNIQUE (id, "episodeShotId");
 
 
 --
@@ -3250,11 +4133,75 @@ ALTER TABLE ONLY public."VideoShotTakeHead"
 
 
 --
+-- Name: VideoShotTake VideoShotTake_id_episode_project_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotTake"
+    ADD CONSTRAINT "VideoShotTake_id_episode_project_key" UNIQUE (id, "videoEpisodeId", "projectId");
+
+
+--
+-- Name: VideoShotTake VideoShotTake_id_episode_shot_version_baseline_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotTake"
+    ADD CONSTRAINT "VideoShotTake_id_episode_shot_version_baseline_key" UNIQUE (id, "videoEpisodeId", "episodeShotId", "episodeShotVersionId", "productionBaselineId");
+
+
+--
 -- Name: VideoShotTake VideoShotTake_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoShotTake"
     ADD CONSTRAINT "VideoShotTake_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_id_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_id_scope_key" UNIQUE (id, "shotId", "episodeId", "projectId");
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_id_shot_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_id_shot_episode_key" UNIQUE (id, "shotId", "episodeId");
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_shot_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_shot_version_key" UNIQUE ("shotId", "versionNo");
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_storyboard_ordinal_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_storyboard_ordinal_key" UNIQUE ("storyboardVersionId", ordinal);
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_storyboard_shot_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_storyboard_shot_key" UNIQUE ("storyboardVersionId", "shotId");
 
 
 --
@@ -3303,6 +4250,86 @@ ALTER TABLE ONLY public."VideoShot"
 
 ALTER TABLE ONLY public."VideoShot"
     ADD CONSTRAINT "VideoShot_plan_ordinal_key" UNIQUE ("planVersionId", ordinal);
+
+
+--
+-- Name: VideoStoryboardDraft VideoStoryboardDraft_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardDraft"
+    ADD CONSTRAINT "VideoStoryboardDraft_pkey" PRIMARY KEY ("episodeId");
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_artifact_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_artifact_key" UNIQUE ("reviewArtifactId");
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_episode_version_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_episode_version_key" UNIQUE ("episodeId", "versionNo");
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_id_episode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_id_episode_key" UNIQUE (id, "episodeId");
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_id_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_id_scope_key" UNIQUE (id, "episodeId", "projectId");
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_id_script_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_id_script_scope_key" UNIQUE (id, "scriptVersionId", "episodeId", "projectId");
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_id_take_target_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_id_take_target_scope_key" UNIQUE (id, "sourceTakeId", "episodeId", "targetShotId", "targetShotVersionId");
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_id_target_scope_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_id_target_scope_key" UNIQUE (id, "episodeId", "targetShotId", "targetShotVersionId");
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_pkey" PRIMARY KEY (id);
 
 
 --
@@ -3821,6 +4848,13 @@ CREATE UNIQUE INDEX "ReviewArtifact_id_videoAdaptationId_key" ON public."ReviewA
 
 
 --
+-- Name: ReviewArtifact_id_videoEpisodeId_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "ReviewArtifact_id_videoEpisodeId_key" ON public."ReviewArtifact" USING btree (id, "videoEpisodeId");
+
+
+--
 -- Name: ReviewArtifact_novelId_status_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3839,6 +4873,13 @@ CREATE INDEX "ReviewArtifact_taskId_idx" ON public."ReviewArtifact" USING btree 
 --
 
 CREATE INDEX "ReviewArtifact_videoAdaptationId_status_idx" ON public."ReviewArtifact" USING btree ("videoAdaptationId", status);
+
+
+--
+-- Name: ReviewArtifact_videoEpisodeId_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "ReviewArtifact_videoEpisodeId_status_idx" ON public."ReviewArtifact" USING btree ("videoEpisodeId", status);
 
 
 --
@@ -4059,6 +5100,13 @@ CREATE UNIQUE INDEX "VideoDramaticBeat_id_sceneId_planVersionId_key" ON public."
 
 
 --
+-- Name: VideoEpisodeDependency_producer_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoEpisodeDependency_producer_idx" ON public."VideoEpisodeDependency" USING btree ("producerScriptVersionId");
+
+
+--
 -- Name: VideoEpisodeEditClip_version_shot_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4080,6 +5128,20 @@ CREATE UNIQUE INDEX "VideoEpisodeEditVersion_id_plan_key" ON public."VideoEpisod
 
 
 --
+-- Name: VideoEpisodeEditVersion_new_episode_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoEpisodeEditVersion_new_episode_idx" ON public."VideoEpisodeEditVersion" USING btree ("videoEpisodeId", "productionBaselineId", "versionNo");
+
+
+--
+-- Name: VideoEpisodeEditVersion_new_episode_version_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoEpisodeEditVersion_new_episode_version_key" ON public."VideoEpisodeEditVersion" USING btree ("videoEpisodeId", "versionNo") WHERE ("videoEpisodeId" IS NOT NULL);
+
+
+--
 -- Name: VideoEpisodeEditVersion_user_request_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4098,6 +5160,20 @@ CREATE UNIQUE INDEX "VideoEpisodeExportTask_active_episode_key" ON public."Video
 --
 
 CREATE INDEX "VideoEpisodeExportTask_due_idx" ON public."VideoEpisodeExportTask" USING btree ("nextAttemptAt", "createdAt") WHERE (status = ANY (ARRAY['pending'::text, 'rendering'::text]));
+
+
+--
+-- Name: VideoEpisodeExportTask_new_active_episode_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoEpisodeExportTask_new_active_episode_key" ON public."VideoEpisodeExportTask" USING btree ("videoEpisodeId") WHERE (("videoEpisodeId" IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'rendering'::text])));
+
+
+--
+-- Name: VideoEpisodeExportTask_new_episode_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoEpisodeExportTask_new_episode_idx" ON public."VideoEpisodeExportTask" USING btree ("videoEpisodeId", "productionBaselineId", "createdAt");
 
 
 --
@@ -4126,6 +5202,13 @@ CREATE INDEX "VideoEpisodeExport_episode_created_idx" ON public."VideoEpisodeExp
 --
 
 CREATE UNIQUE INDEX "VideoEpisodeExport_episode_version_key" ON public."VideoEpisodeExport" USING btree ("episodePlanVersionId", "episodeNo", "versionNo");
+
+
+--
+-- Name: VideoEpisodeExport_new_episode_version_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoEpisodeExport_new_episode_version_key" ON public."VideoEpisodeExport" USING btree ("videoEpisodeId", "versionNo") WHERE ("videoEpisodeId" IS NOT NULL);
 
 
 --
@@ -4164,6 +5247,20 @@ CREATE UNIQUE INDEX "VideoEpisodeMixVersion_id_project_plan_key" ON public."Vide
 
 
 --
+-- Name: VideoEpisodeMixVersion_new_episode_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoEpisodeMixVersion_new_episode_idx" ON public."VideoEpisodeMixVersion" USING btree ("videoEpisodeId", "productionBaselineId", "versionNo");
+
+
+--
+-- Name: VideoEpisodeMixVersion_new_episode_version_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoEpisodeMixVersion_new_episode_version_key" ON public."VideoEpisodeMixVersion" USING btree ("videoEpisodeId", "versionNo") WHERE ("videoEpisodeId" IS NOT NULL);
+
+
+--
 -- Name: VideoEpisodeMixVersion_user_request_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4192,6 +5289,13 @@ CREATE UNIQUE INDEX "VideoEpisodePlanVersion_id_shotPlanVersionId_key" ON public
 
 
 --
+-- Name: VideoEpisodeShot_episode_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoEpisodeShot_episode_created_idx" ON public."VideoEpisodeShot" USING btree ("episodeId", "createdAt", id);
+
+
+--
 -- Name: VideoGenerationTask_due_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4203,6 +5307,13 @@ CREATE INDEX "VideoGenerationTask_due_idx" ON public."VideoGenerationTask" USING
 --
 
 CREATE INDEX "VideoGenerationTask_sceneId_createdAt_idx" ON public."VideoGenerationTask" USING btree ("sceneId", "createdAt");
+
+
+--
+-- Name: VideoProductionBaselineShot_version_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoProductionBaselineShot_version_idx" ON public."VideoProductionBaselineShot" USING btree ("shotVersionId");
 
 
 --
@@ -4248,6 +5359,20 @@ CREATE INDEX "VideoScene_projectId_status_idx" ON public."VideoScene" USING btre
 
 
 --
+-- Name: VideoShotKeyframeVersion_episode_version_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoShotKeyframeVersion_episode_version_idx" ON public."VideoShotKeyframeVersion" USING btree ("videoEpisodeId", "episodeShotVersionId");
+
+
+--
+-- Name: VideoShotKeyframeVersion_new_shot_role_version_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoShotKeyframeVersion_new_shot_role_version_key" ON public."VideoShotKeyframeVersion" USING btree ("episodeShotId", role, "versionNo") WHERE ("videoEpisodeId" IS NOT NULL);
+
+
+--
 -- Name: VideoShotKeyframeVersion_shot_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4269,10 +5394,24 @@ CREATE UNIQUE INDEX "VideoShotKeyframeVersion_user_request_key" ON public."Video
 
 
 --
+-- Name: VideoShotLineage_source_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoShotLineage_source_idx" ON public."VideoShotLineage" USING btree ("sourceShotId", "childShotId");
+
+
+--
 -- Name: VideoShotPlanVersion_id_adaptationId_key; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX "VideoShotPlanVersion_id_adaptationId_key" ON public."VideoShotPlanVersion" USING btree (id, "adaptationId");
+
+
+--
+-- Name: VideoShotPromptVersion_episode_version_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoShotPromptVersion_episode_version_idx" ON public."VideoShotPromptVersion" USING btree ("videoEpisodeId", "episodeShotVersionId");
 
 
 --
@@ -4290,6 +5429,13 @@ CREATE UNIQUE INDEX "VideoShotPromptVersion_id_shot_plan_key" ON public."VideoSh
 
 
 --
+-- Name: VideoShotPromptVersion_new_shot_version_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoShotPromptVersion_new_shot_version_key" ON public."VideoShotPromptVersion" USING btree ("episodeShotId", "versionNo") WHERE ("videoEpisodeId" IS NOT NULL);
+
+
+--
 -- Name: VideoShotRenderTask_active_shot_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4304,10 +5450,31 @@ CREATE INDEX "VideoShotRenderTask_due_idx" ON public."VideoShotRenderTask" USING
 
 
 --
+-- Name: VideoShotRenderTask_episode_baseline_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoShotRenderTask_episode_baseline_idx" ON public."VideoShotRenderTask" USING btree ("videoEpisodeId", "productionBaselineId", "createdAt");
+
+
+--
 -- Name: VideoShotRenderTask_id_scope_key; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX "VideoShotRenderTask_id_scope_key" ON public."VideoShotRenderTask" USING btree (id, "adaptationId", "projectId", "novelId", "shotId", "shotPlanVersionId", "promptVersionId");
+
+
+--
+-- Name: VideoShotRenderTask_new_active_shot_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoShotRenderTask_new_active_shot_key" ON public."VideoShotRenderTask" USING btree ("videoEpisodeId", "episodeShotId") WHERE (("videoEpisodeId" IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'submitting'::text, 'queued'::text, 'running'::text, 'archiving'::text])));
+
+
+--
+-- Name: VideoShotRenderTask_new_shot_client_request_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoShotRenderTask_new_shot_client_request_key" ON public."VideoShotRenderTask" USING btree ("episodeShotId", "clientRequestId") WHERE ("videoEpisodeId" IS NOT NULL);
 
 
 --
@@ -4353,6 +5520,13 @@ CREATE UNIQUE INDEX "VideoShotTake_assetId_key" ON public."VideoShotTake" USING 
 
 
 --
+-- Name: VideoShotTake_episode_baseline_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoShotTake_episode_baseline_idx" ON public."VideoShotTake" USING btree ("videoEpisodeId", "productionBaselineId", "createdAt");
+
+
+--
 -- Name: VideoShotTake_id_shot_adaptation_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4364,6 +5538,13 @@ CREATE UNIQUE INDEX "VideoShotTake_id_shot_adaptation_key" ON public."VideoShotT
 --
 
 CREATE UNIQUE INDEX "VideoShotTake_id_shot_plan_key" ON public."VideoShotTake" USING btree (id, "shotId", "shotPlanVersionId");
+
+
+--
+-- Name: VideoShotTake_new_shot_take_no_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX "VideoShotTake_new_shot_take_no_key" ON public."VideoShotTake" USING btree ("episodeShotId", "takeNo") WHERE ("videoEpisodeId" IS NOT NULL);
 
 
 --
@@ -4388,6 +5569,13 @@ CREATE UNIQUE INDEX "VideoShotTake_taskId_key" ON public."VideoShotTake" USING b
 
 
 --
+-- Name: VideoShotVersion_episode_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoShotVersion_episode_created_idx" ON public."VideoShotVersion" USING btree ("episodeId", "createdAt", id);
+
+
+--
 -- Name: VideoShotVisualReferenceSet_scope_key; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4399,6 +5587,13 @@ CREATE UNIQUE INDEX "VideoShotVisualReferenceSet_scope_key" ON public."VideoShot
 --
 
 CREATE UNIQUE INDEX "VideoShot_id_planVersionId_key" ON public."VideoShot" USING btree (id, "planVersionId");
+
+
+--
+-- Name: VideoTakeAdoption_source_take_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX "VideoTakeAdoption_source_take_idx" ON public."VideoTakeAdoption" USING btree ("sourceTakeId", "createdAt");
 
 
 --
@@ -4961,6 +6156,14 @@ ALTER TABLE ONLY public."ReviewArtifact"
 
 
 --
+-- Name: ReviewArtifact ReviewArtifact_video_episode_novel_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."ReviewArtifact"
+    ADD CONSTRAINT "ReviewArtifact_video_episode_novel_fkey" FOREIGN KEY ("videoEpisodeId", "novelId") REFERENCES public."VideoEpisode"(id, "novelId") ON DELETE RESTRICT;
+
+
+--
 -- Name: ReviewArtifact ReviewArtifact_video_scene_novel_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5233,6 +6436,38 @@ ALTER TABLE ONLY public."VideoEpisodeAudioClip"
 
 
 --
+-- Name: VideoEpisodeAudioClip VideoEpisodeAudioClip_baseline_input_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeAudioClip"
+    ADD CONSTRAINT "VideoEpisodeAudioClip_baseline_input_fkey" FOREIGN KEY ("productionBaselineId", "episodeShotVersionId", "videoEpisodeId", "episodeShotId") REFERENCES public."VideoProductionBaselineShot"("baselineId", "shotVersionId", "episodeId", "shotId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeAudioClip VideoEpisodeAudioClip_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeAudioClip"
+    ADD CONSTRAINT "VideoEpisodeAudioClip_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeAudioClip VideoEpisodeAudioClip_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeAudioClip"
+    ADD CONSTRAINT "VideoEpisodeAudioClip_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeAudioClip VideoEpisodeAudioClip_mix_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeAudioClip"
+    ADD CONSTRAINT "VideoEpisodeAudioClip_mix_new_scope_fkey" FOREIGN KEY ("mixVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeMixVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeAudioClip VideoEpisodeAudioClip_mix_project_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5265,11 +6500,99 @@ ALTER TABLE ONLY public."VideoEpisodeBoundary"
 
 
 --
+-- Name: VideoEpisodeCommand VideoEpisodeCommand_episode_project_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeCommand"
+    ADD CONSTRAINT "VideoEpisodeCommand_episode_project_fkey" FOREIGN KEY ("episodeId", "projectId") REFERENCES public."VideoEpisode"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeCommand VideoEpisodeCommand_novel_owner_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeCommand"
+    ADD CONSTRAINT "VideoEpisodeCommand_novel_owner_fkey" FOREIGN KEY ("novelId", "actorUserId") REFERENCES public."Novel"(id, "userId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeCommand VideoEpisodeCommand_project_novel_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeCommand"
+    ADD CONSTRAINT "VideoEpisodeCommand_project_novel_fkey" FOREIGN KEY ("projectId", "novelId") REFERENCES public."VideoProject"(id, "novelId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeDependency VideoEpisodeDependency_consumer_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeDependency"
+    ADD CONSTRAINT "VideoEpisodeDependency_consumer_fkey" FOREIGN KEY ("consumerScriptVersionId", "consumerEpisodeId", "projectId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeDependency VideoEpisodeDependency_producer_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeDependency"
+    ADD CONSTRAINT "VideoEpisodeDependency_producer_fkey" FOREIGN KEY ("producerScriptVersionId", "producerEpisodeId", "projectId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_adoption_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_adoption_scope_fkey" FOREIGN KEY ("adoptionId", "videoEpisodeId", "episodeShotId", "episodeShotVersionId") REFERENCES public."VideoTakeAdoption"(id, "episodeId", "targetShotId", "targetShotVersionId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_adoption_take_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_adoption_take_fkey" FOREIGN KEY ("adoptionId", "takeId", "videoEpisodeId", "episodeShotId", "episodeShotVersionId") REFERENCES public."VideoTakeAdoption"(id, "sourceTakeId", "episodeId", "targetShotId", "targetShotVersionId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_baseline_input_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_baseline_input_fkey" FOREIGN KEY ("productionBaselineId", "episodeShotVersionId", "videoEpisodeId", "episodeShotId") REFERENCES public."VideoProductionBaselineShot"("baselineId", "shotVersionId", "episodeId", "shotId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_edit_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_edit_new_scope_fkey" FOREIGN KEY ("editVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeEditVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeEditClip VideoEpisodeEditClip_edit_plan_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoEpisodeEditClip"
     ADD CONSTRAINT "VideoEpisodeEditClip_edit_plan_fkey" FOREIGN KEY ("editVersionId", "shotPlanVersionId") REFERENCES public."VideoEpisodeEditVersion"(id, "shotPlanVersionId") ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VideoEpisodeEditClip VideoEpisodeEditClip_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditClip"
+    ADD CONSTRAINT "VideoEpisodeEditClip_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5321,11 +6644,27 @@ ALTER TABLE ONLY public."VideoEpisodeEditVersion"
 
 
 --
+-- Name: VideoEpisodeEditVersion VideoEpisodeEditVersion_based_on_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditVersion"
+    ADD CONSTRAINT "VideoEpisodeEditVersion_based_on_episode_fkey" FOREIGN KEY ("basedOnVersionId", "videoEpisodeId") REFERENCES public."VideoEpisodeEditVersion"(id, "videoEpisodeId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeEditVersion VideoEpisodeEditVersion_based_on_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoEpisodeEditVersion"
     ADD CONSTRAINT "VideoEpisodeEditVersion_based_on_fkey" FOREIGN KEY ("basedOnVersionId", "episodePlanVersionId", "episodeNo") REFERENCES public."VideoEpisodeEditVersion"(id, "episodePlanVersionId", "episodeNo") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeEditVersion VideoEpisodeEditVersion_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeEditVersion"
+    ADD CONSTRAINT "VideoEpisodeEditVersion_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5369,6 +6708,22 @@ ALTER TABLE ONLY public."VideoEpisodeExportTask"
 
 
 --
+-- Name: VideoEpisodeExportTask VideoEpisodeExportTask_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExportTask"
+    ADD CONSTRAINT "VideoEpisodeExportTask_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeExportTask VideoEpisodeExportTask_edit_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExportTask"
+    ADD CONSTRAINT "VideoEpisodeExportTask_edit_new_scope_fkey" FOREIGN KEY ("editVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeEditVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeExportTask VideoEpisodeExportTask_edit_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5385,6 +6740,14 @@ ALTER TABLE ONLY public."VideoEpisodeExportTask"
 
 
 --
+-- Name: VideoEpisodeExportTask VideoEpisodeExportTask_mix_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExportTask"
+    ADD CONSTRAINT "VideoEpisodeExportTask_mix_new_scope_fkey" FOREIGN KEY ("mixVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeMixVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeExportTask VideoEpisodeExportTask_mix_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5398,6 +6761,14 @@ ALTER TABLE ONLY public."VideoEpisodeExportTask"
 
 ALTER TABLE ONLY public."VideoEpisodeExportTask"
     ADD CONSTRAINT "VideoEpisodeExportTask_novel_owner_fkey" FOREIGN KEY ("novelId", "requestedByUserId") REFERENCES public."Novel"(id, "userId") ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VideoEpisodeExportTask VideoEpisodeExportTask_retry_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExportTask"
+    ADD CONSTRAINT "VideoEpisodeExportTask_retry_episode_fkey" FOREIGN KEY ("retryOfTaskId", "videoEpisodeId") REFERENCES public."VideoEpisodeExportTask"(id, "videoEpisodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5425,6 +6796,22 @@ ALTER TABLE ONLY public."VideoEpisodeExport"
 
 
 --
+-- Name: VideoEpisodeExport VideoEpisodeExport_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExport"
+    ADD CONSTRAINT "VideoEpisodeExport_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeExport VideoEpisodeExport_edit_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExport"
+    ADD CONSTRAINT "VideoEpisodeExport_edit_new_scope_fkey" FOREIGN KEY ("editVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeEditVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeExport VideoEpisodeExport_edit_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5433,11 +6820,27 @@ ALTER TABLE ONLY public."VideoEpisodeExport"
 
 
 --
+-- Name: VideoEpisodeExport VideoEpisodeExport_mix_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExport"
+    ADD CONSTRAINT "VideoEpisodeExport_mix_new_scope_fkey" FOREIGN KEY ("mixVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeMixVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeExport VideoEpisodeExport_mix_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoEpisodeExport"
     ADD CONSTRAINT "VideoEpisodeExport_mix_version_fkey" FOREIGN KEY ("mixVersionId", "episodePlanVersionId", "episodeNo") REFERENCES public."VideoEpisodeMixVersion"(id, "episodePlanVersionId", "episodeNo") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeExport VideoEpisodeExport_task_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeExport"
+    ADD CONSTRAINT "VideoEpisodeExport_task_new_scope_fkey" FOREIGN KEY ("taskId", "videoEpisodeId") REFERENCES public."VideoEpisodeExportTask"(id, "videoEpisodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5481,11 +6884,35 @@ ALTER TABLE ONLY public."VideoEpisodeMixVersion"
 
 
 --
+-- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_based_on_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeMixVersion"
+    ADD CONSTRAINT "VideoEpisodeMixVersion_based_on_episode_fkey" FOREIGN KEY ("basedOnVersionId", "videoEpisodeId") REFERENCES public."VideoEpisodeMixVersion"(id, "videoEpisodeId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_based_on_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoEpisodeMixVersion"
     ADD CONSTRAINT "VideoEpisodeMixVersion_based_on_fkey" FOREIGN KEY ("basedOnVersionId", "episodePlanVersionId", "episodeNo") REFERENCES public."VideoEpisodeMixVersion"(id, "episodePlanVersionId", "episodeNo") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeMixVersion"
+    ADD CONSTRAINT "VideoEpisodeMixVersion_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeMixVersion VideoEpisodeMixVersion_edit_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeMixVersion"
+    ADD CONSTRAINT "VideoEpisodeMixVersion_edit_new_scope_fkey" FOREIGN KEY ("editVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeEditVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
 
 
 --
@@ -5545,6 +6972,158 @@ ALTER TABLE ONLY public."VideoEpisodePlanVersion"
 
 
 --
+-- Name: VideoEpisodeScriptDraft VideoEpisodeScriptDraft_base_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptDraft"
+    ADD CONSTRAINT "VideoEpisodeScriptDraft_base_fkey" FOREIGN KEY ("basedOnScriptVersionId", "episodeId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptDraft VideoEpisodeScriptDraft_episodeId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptDraft"
+    ADD CONSTRAINT "VideoEpisodeScriptDraft_episodeId_fkey" FOREIGN KEY ("episodeId") REFERENCES public."VideoEpisode"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptDraft VideoEpisodeScriptDraft_source_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptDraft"
+    ADD CONSTRAINT "VideoEpisodeScriptDraft_source_fkey" FOREIGN KEY ("sourceSetVersionId", "episodeId") REFERENCES public."VideoEpisodeSourceSetVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_approvedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_approvedByUserId_fkey" FOREIGN KEY ("approvedByUserId") REFERENCES public."User"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_base_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_base_fkey" FOREIGN KEY ("basedOnVersionId", "episodeId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_episode_project_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_episode_project_fkey" FOREIGN KEY ("episodeId", "projectId") REFERENCES public."VideoEpisode"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_reviewArtifactId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_reviewArtifactId_fkey" FOREIGN KEY ("reviewArtifactId") REFERENCES public."ReviewArtifact"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_review_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_review_episode_fkey" FOREIGN KEY ("reviewArtifactId", "episodeId") REFERENCES public."ReviewArtifact"(id, "videoEpisodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeScriptVersion VideoEpisodeScriptVersion_source_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeScriptVersion"
+    ADD CONSTRAINT "VideoEpisodeScriptVersion_source_fkey" FOREIGN KEY ("sourceSetVersionId", "episodeId") REFERENCES public."VideoEpisodeSourceSetVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeShot VideoEpisodeShot_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeShot"
+    ADD CONSTRAINT "VideoEpisodeShot_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeShot VideoEpisodeShot_episode_project_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeShot"
+    ADD CONSTRAINT "VideoEpisodeShot_episode_project_fkey" FOREIGN KEY ("episodeId", "projectId") REFERENCES public."VideoEpisode"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion VideoEpisodeSourceSetVersion_base_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSetVersion"
+    ADD CONSTRAINT "VideoEpisodeSourceSetVersion_base_fkey" FOREIGN KEY ("basedOnVersionId", "episodeId") REFERENCES public."VideoEpisodeSourceSetVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion VideoEpisodeSourceSetVersion_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSetVersion"
+    ADD CONSTRAINT "VideoEpisodeSourceSetVersion_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSourceSetVersion VideoEpisodeSourceSetVersion_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSetVersion"
+    ADD CONSTRAINT "VideoEpisodeSourceSetVersion_episode_fkey" FOREIGN KEY ("episodeId") REFERENCES public."VideoEpisode"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSourceSnapshot VideoEpisodeSourceSnapshot_sourceSetVersionId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSourceSnapshot"
+    ADD CONSTRAINT "VideoEpisodeSourceSnapshot_sourceSetVersionId_fkey" FOREIGN KEY ("sourceSetVersionId") REFERENCES public."VideoEpisodeSourceSetVersion"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSubtitleCue VideoEpisodeSubtitleCue_baseline_input_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
+    ADD CONSTRAINT "VideoEpisodeSubtitleCue_baseline_input_fkey" FOREIGN KEY ("productionBaselineId", "episodeShotVersionId", "videoEpisodeId", "episodeShotId") REFERENCES public."VideoProductionBaselineShot"("baselineId", "shotVersionId", "episodeId", "shotId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSubtitleCue VideoEpisodeSubtitleCue_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
+    ADD CONSTRAINT "VideoEpisodeSubtitleCue_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSubtitleCue VideoEpisodeSubtitleCue_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
+    ADD CONSTRAINT "VideoEpisodeSubtitleCue_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisodeSubtitleCue VideoEpisodeSubtitleCue_mix_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
+    ADD CONSTRAINT "VideoEpisodeSubtitleCue_mix_new_scope_fkey" FOREIGN KEY ("mixVersionId", "videoEpisodeId", "productionBaselineId") REFERENCES public."VideoEpisodeMixVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoEpisodeSubtitleCue VideoEpisodeSubtitleCue_mix_plan_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5558,6 +7137,54 @@ ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
 
 ALTER TABLE ONLY public."VideoEpisodeSubtitleCue"
     ADD CONSTRAINT "VideoEpisodeSubtitleCue_shot_plan_fkey" FOREIGN KEY ("shotId", "shotPlanVersionId") REFERENCES public."VideoShot"(id, "planVersionId") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisode VideoEpisode_current_baseline_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_current_baseline_fkey" FOREIGN KEY ("currentProductionBaselineId", id) REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisode VideoEpisode_current_script_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_current_script_fkey" FOREIGN KEY ("currentScriptVersionId", id) REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisode VideoEpisode_current_source_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_current_source_fkey" FOREIGN KEY ("currentSourceSetVersionId", id) REFERENCES public."VideoEpisodeSourceSetVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisode VideoEpisode_current_storyboard_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_current_storyboard_fkey" FOREIGN KEY ("currentStoryboardVersionId", id) REFERENCES public."VideoStoryboardVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisode VideoEpisode_latest_delivery_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_latest_delivery_fkey" FOREIGN KEY ("latestDeliveryVersionId", id) REFERENCES public."VideoEpisodeExport"(id, "videoEpisodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoEpisode VideoEpisode_project_novel_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoEpisode"
+    ADD CONSTRAINT "VideoEpisode_project_novel_fkey" FOREIGN KEY ("projectId", "novelId") REFERENCES public."VideoProject"(id, "novelId") ON DELETE RESTRICT;
 
 
 --
@@ -5582,6 +7209,142 @@ ALTER TABLE ONLY public."VideoGenerationTask"
 
 ALTER TABLE ONLY public."VideoGenerationTask"
     ADD CONSTRAINT "VideoGenerationTask_scene_project_fkey" FOREIGN KEY ("sceneId", "projectId") REFERENCES public."VideoScene"(id, "projectId") ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_after_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_after_fkey" FOREIGN KEY ("afterScriptVersionId", "producerEpisodeId", "projectId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_before_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_before_fkey" FOREIGN KEY ("beforeScriptVersionId", "producerEpisodeId", "projectId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_producer_baseline_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_producer_baseline_fkey" FOREIGN KEY ("producerBaselineId", "producerEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_target_baseline_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_target_baseline_fkey" FOREIGN KEY ("targetBaselineId", "targetEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_target_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_target_fkey" FOREIGN KEY ("targetEpisodeId", "projectId") REFERENCES public."VideoEpisode"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoImpactReview VideoImpactReview_target_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoImpactReview"
+    ADD CONSTRAINT "VideoImpactReview_target_version_fkey" FOREIGN KEY ("targetScriptVersionId", "targetEpisodeId", "projectId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaselineShot VideoProductionBaselineShot_adoption_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaselineShot"
+    ADD CONSTRAINT "VideoProductionBaselineShot_adoption_scope_fkey" FOREIGN KEY ("adoptionId", "episodeId", "shotId", "shotVersionId") REFERENCES public."VideoTakeAdoption"(id, "episodeId", "targetShotId", "targetShotVersionId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaselineShot VideoProductionBaselineShot_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaselineShot"
+    ADD CONSTRAINT "VideoProductionBaselineShot_baseline_scope_fkey" FOREIGN KEY ("baselineId", "episodeId", "projectId") REFERENCES public."VideoProductionBaseline"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaselineShot VideoProductionBaselineShot_version_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaselineShot"
+    ADD CONSTRAINT "VideoProductionBaselineShot_version_scope_fkey" FOREIGN KEY ("shotVersionId", "shotId", "episodeId", "projectId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_base_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_base_fkey" FOREIGN KEY ("basedOnBaselineId", "episodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_episode_project_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_episode_project_fkey" FOREIGN KEY ("episodeId", "projectId") REFERENCES public."VideoEpisode"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionBaseline VideoProductionBaseline_storyboard_script_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionBaseline"
+    ADD CONSTRAINT "VideoProductionBaseline_storyboard_script_fkey" FOREIGN KEY ("storyboardVersionId", "scriptVersionId", "episodeId", "projectId") REFERENCES public."VideoStoryboardVersion"(id, "scriptVersionId", "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionEditHead VideoProductionEditHead_baseline_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionEditHead"
+    ADD CONSTRAINT "VideoProductionEditHead_baseline_fkey" FOREIGN KEY ("productionBaselineId", "episodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionEditHead VideoProductionEditHead_current_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionEditHead"
+    ADD CONSTRAINT "VideoProductionEditHead_current_fkey" FOREIGN KEY ("currentVersionId", "episodeId", "productionBaselineId") REFERENCES public."VideoEpisodeEditVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionMixHead VideoProductionMixHead_baseline_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionMixHead"
+    ADD CONSTRAINT "VideoProductionMixHead_baseline_fkey" FOREIGN KEY ("productionBaselineId", "episodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoProductionMixHead VideoProductionMixHead_current_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoProductionMixHead"
+    ADD CONSTRAINT "VideoProductionMixHead_current_fkey" FOREIGN KEY ("currentVersionId", "episodeId", "productionBaselineId") REFERENCES public."VideoEpisodeMixVersion"(id, "videoEpisodeId", "productionBaselineId") ON DELETE RESTRICT;
 
 
 --
@@ -5737,11 +7500,43 @@ ALTER TABLE ONLY public."VideoShotKeyframeVersion"
 
 
 --
+-- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_based_on_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotKeyframeVersion"
+    ADD CONSTRAINT "VideoShotKeyframeVersion_based_on_episode_fkey" FOREIGN KEY ("basedOnVersionId", "episodeShotId", role) REFERENCES public."VideoShotKeyframeVersion"(id, "episodeShotId", role) ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_based_on_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoShotKeyframeVersion"
     ADD CONSTRAINT "VideoShotKeyframeVersion_based_on_fkey" FOREIGN KEY ("basedOnVersionId", "shotId", role) REFERENCES public."VideoShotKeyframeVersion"(id, "shotId", role) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_baseline_input_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotKeyframeVersion"
+    ADD CONSTRAINT "VideoShotKeyframeVersion_baseline_input_fkey" FOREIGN KEY ("productionBaselineId", "episodeShotVersionId", "videoEpisodeId", "episodeShotId") REFERENCES public."VideoProductionBaselineShot"("baselineId", "shotVersionId", "episodeId", "shotId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotKeyframeVersion"
+    ADD CONSTRAINT "VideoShotKeyframeVersion_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotKeyframeVersion VideoShotKeyframeVersion_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotKeyframeVersion"
+    ADD CONSTRAINT "VideoShotKeyframeVersion_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5790,6 +7585,22 @@ ALTER TABLE ONLY public."VideoShotKeyframeVersion"
 
 ALTER TABLE ONLY public."VideoShotKeyframeVersion"
     ADD CONSTRAINT "VideoShotKeyframeVersion_user_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotLineage VideoShotLineage_child_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotLineage"
+    ADD CONSTRAINT "VideoShotLineage_child_fkey" FOREIGN KEY ("childShotId", "episodeId") REFERENCES public."VideoEpisodeShot"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotLineage VideoShotLineage_source_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotLineage"
+    ADD CONSTRAINT "VideoShotLineage_source_fkey" FOREIGN KEY ("sourceShotId", "episodeId") REFERENCES public."VideoEpisodeShot"(id, "episodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5849,6 +7660,14 @@ ALTER TABLE ONLY public."VideoShotPromptHead"
 
 
 --
+-- Name: VideoShotPromptVersion VideoShotPromptVersion_based_on_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotPromptVersion"
+    ADD CONSTRAINT "VideoShotPromptVersion_based_on_episode_fkey" FOREIGN KEY ("basedOnVersionId", "episodeShotId") REFERENCES public."VideoShotPromptVersion"(id, "episodeShotId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoShotPromptVersion VideoShotPromptVersion_based_on_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5857,11 +7676,35 @@ ALTER TABLE ONLY public."VideoShotPromptVersion"
 
 
 --
+-- Name: VideoShotPromptVersion VideoShotPromptVersion_baseline_input_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotPromptVersion"
+    ADD CONSTRAINT "VideoShotPromptVersion_baseline_input_fkey" FOREIGN KEY ("productionBaselineId", "episodeShotVersionId", "videoEpisodeId", "episodeShotId") REFERENCES public."VideoProductionBaselineShot"("baselineId", "shotVersionId", "episodeId", "shotId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotPromptVersion VideoShotPromptVersion_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotPromptVersion"
+    ADD CONSTRAINT "VideoShotPromptVersion_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoShotPromptVersion VideoShotPromptVersion_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoShotPromptVersion"
     ADD CONSTRAINT "VideoShotPromptVersion_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotPromptVersion VideoShotPromptVersion_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotPromptVersion"
+    ADD CONSTRAINT "VideoShotPromptVersion_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
 
 
 --
@@ -5945,6 +7788,30 @@ ALTER TABLE ONLY public."VideoShotRenderTask"
 
 
 --
+-- Name: VideoShotRenderTask VideoShotRenderTask_baseline_input_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_baseline_input_fkey" FOREIGN KEY ("productionBaselineId", "episodeShotVersionId", "videoEpisodeId", "episodeShotId") REFERENCES public."VideoProductionBaselineShot"("baselineId", "shotVersionId", "episodeId", "shotId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotRenderTask VideoShotRenderTask_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotRenderTask VideoShotRenderTask_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoShotRenderTask VideoShotRenderTask_plan_adaptation_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5961,11 +7828,27 @@ ALTER TABLE ONLY public."VideoShotRenderTask"
 
 
 --
+-- Name: VideoShotRenderTask VideoShotRenderTask_prompt_new_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_prompt_new_scope_fkey" FOREIGN KEY ("promptVersionId", "videoEpisodeId", "episodeShotId", "episodeShotVersionId", "productionBaselineId") REFERENCES public."VideoShotPromptVersion"(id, "videoEpisodeId", "episodeShotId", "episodeShotVersionId", "productionBaselineId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoShotRenderTask VideoShotRenderTask_prompt_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoShotRenderTask"
     ADD CONSTRAINT "VideoShotRenderTask_prompt_scope_fkey" FOREIGN KEY ("promptVersionId", "shotId", "shotPlanVersionId") REFERENCES public."VideoShotPromptVersion"(id, "shotId", "shotPlanVersionId") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotRenderTask VideoShotRenderTask_retry_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotRenderTask"
+    ADD CONSTRAINT "VideoShotRenderTask_retry_episode_fkey" FOREIGN KEY ("retryOfTaskId", "episodeShotId") REFERENCES public."VideoShotRenderTask"(id, "episodeShotId") ON DELETE RESTRICT;
 
 
 --
@@ -6057,11 +7940,59 @@ ALTER TABLE ONLY public."VideoShotTake"
 
 
 --
+-- Name: VideoShotTake VideoShotTake_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotTake"
+    ADD CONSTRAINT "VideoShotTake_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotTake VideoShotTake_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotTake"
+    ADD CONSTRAINT "VideoShotTake_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotTake VideoShotTake_last_frame_asset_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotTake"
+    ADD CONSTRAINT "VideoShotTake_last_frame_asset_fkey" FOREIGN KEY ("lastFrameAssetId", "projectId") REFERENCES public."VideoAsset"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotTake VideoShotTake_task_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotTake"
+    ADD CONSTRAINT "VideoShotTake_task_episode_scope_fkey" FOREIGN KEY ("taskId", "videoEpisodeId", "projectId", "novelId", "episodeShotId", "episodeShotVersionId", "productionBaselineId", "promptVersionId") REFERENCES public."VideoShotRenderTask"(id, "videoEpisodeId", "projectId", "novelId", "episodeShotId", "episodeShotVersionId", "productionBaselineId", "promptVersionId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoShotTake VideoShotTake_task_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoShotTake"
     ADD CONSTRAINT "VideoShotTake_task_scope_fkey" FOREIGN KEY ("taskId", "adaptationId", "projectId", "novelId", "shotId", "shotPlanVersionId", "promptVersionId") REFERENCES public."VideoShotRenderTask"(id, "adaptationId", "projectId", "novelId", "shotId", "shotPlanVersionId", "promptVersionId") ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_shot_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_shot_scope_fkey" FOREIGN KEY ("shotId", "episodeId", "projectId") REFERENCES public."VideoEpisodeShot"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoShotVersion VideoShotVersion_storyboard_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoShotVersion"
+    ADD CONSTRAINT "VideoShotVersion_storyboard_scope_fkey" FOREIGN KEY ("storyboardVersionId", "episodeId", "projectId") REFERENCES public."VideoStoryboardVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
 
 
 --
@@ -6145,6 +8076,118 @@ ALTER TABLE ONLY public."VideoShot"
 
 
 --
+-- Name: VideoStoryboardDraft VideoStoryboardDraft_base_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardDraft"
+    ADD CONSTRAINT "VideoStoryboardDraft_base_fkey" FOREIGN KEY ("basedOnStoryboardVersionId", "episodeId") REFERENCES public."VideoStoryboardVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardDraft VideoStoryboardDraft_episodeId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardDraft"
+    ADD CONSTRAINT "VideoStoryboardDraft_episodeId_fkey" FOREIGN KEY ("episodeId") REFERENCES public."VideoEpisode"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardDraft VideoStoryboardDraft_script_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardDraft"
+    ADD CONSTRAINT "VideoStoryboardDraft_script_fkey" FOREIGN KEY ("scriptVersionId", "episodeId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_approvedByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_approvedByUserId_fkey" FOREIGN KEY ("approvedByUserId") REFERENCES public."User"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_base_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_base_fkey" FOREIGN KEY ("basedOnVersionId", "episodeId") REFERENCES public."VideoStoryboardVersion"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_episode_project_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_episode_project_fkey" FOREIGN KEY ("episodeId", "projectId") REFERENCES public."VideoEpisode"(id, "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_reviewArtifactId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_reviewArtifactId_fkey" FOREIGN KEY ("reviewArtifactId") REFERENCES public."ReviewArtifact"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_review_episode_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_review_episode_fkey" FOREIGN KEY ("reviewArtifactId", "episodeId") REFERENCES public."ReviewArtifact"(id, "videoEpisodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoStoryboardVersion VideoStoryboardVersion_script_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoStoryboardVersion"
+    ADD CONSTRAINT "VideoStoryboardVersion_script_fkey" FOREIGN KEY ("scriptVersionId", "episodeId", "projectId") REFERENCES public."VideoEpisodeScriptVersion"(id, "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_createdByUserId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_createdByUserId_fkey" FOREIGN KEY ("createdByUserId") REFERENCES public."User"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_sourceTakeId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_sourceTakeId_fkey" FOREIGN KEY ("sourceTakeId") REFERENCES public."VideoShotTake"(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_source_baseline_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_source_baseline_fkey" FOREIGN KEY ("sourceBaselineId", "episodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_source_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_source_scope_fkey" FOREIGN KEY ("sourceTakeId", "episodeId", "projectId") REFERENCES public."VideoShotTake"(id, "videoEpisodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoTakeAdoption VideoTakeAdoption_target_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeAdoption"
+    ADD CONSTRAINT "VideoTakeAdoption_target_scope_fkey" FOREIGN KEY ("targetShotVersionId", "targetShotId", "episodeId", "projectId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId", "projectId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoTakeFrameExtraction VideoTakeFrameExtraction_adaptation_novel_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6169,11 +8212,35 @@ ALTER TABLE ONLY public."VideoTakeFrameExtraction"
 
 
 --
+-- Name: VideoTakeFrameExtraction VideoTakeFrameExtraction_baseline_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeFrameExtraction"
+    ADD CONSTRAINT "VideoTakeFrameExtraction_baseline_scope_fkey" FOREIGN KEY ("productionBaselineId", "videoEpisodeId") REFERENCES public."VideoProductionBaseline"(id, "episodeId") ON DELETE RESTRICT;
+
+
+--
+-- Name: VideoTakeFrameExtraction VideoTakeFrameExtraction_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeFrameExtraction"
+    ADD CONSTRAINT "VideoTakeFrameExtraction_episode_scope_fkey" FOREIGN KEY ("episodeShotVersionId", "episodeShotId", "videoEpisodeId") REFERENCES public."VideoShotVersion"(id, "shotId", "episodeId") ON DELETE RESTRICT;
+
+
+--
 -- Name: VideoTakeFrameExtraction VideoTakeFrameExtraction_novel_owner_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public."VideoTakeFrameExtraction"
     ADD CONSTRAINT "VideoTakeFrameExtraction_novel_owner_fkey" FOREIGN KEY ("novelId", "requestedByUserId") REFERENCES public."Novel"(id, "userId") ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: VideoTakeFrameExtraction VideoTakeFrameExtraction_take_episode_scope_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."VideoTakeFrameExtraction"
+    ADD CONSTRAINT "VideoTakeFrameExtraction_take_episode_scope_fkey" FOREIGN KEY ("takeId", "videoEpisodeId", "episodeShotId", "episodeShotVersionId", "productionBaselineId") REFERENCES public."VideoShotTake"(id, "videoEpisodeId", "episodeShotId", "episodeShotVersionId", "productionBaselineId") ON DELETE RESTRICT;
 
 
 --
@@ -6379,3 +8446,5 @@ ALTER TABLE ONLY public."_FactionTerritories"
 --
 -- PostgreSQL database dump complete
 --
+
+\unrestrict bzYPxhkGhF6ciA3P3FvXBIcxBdbZnGxfoPGEYmevZ4OMUAfrRiJAoABifd23hz1

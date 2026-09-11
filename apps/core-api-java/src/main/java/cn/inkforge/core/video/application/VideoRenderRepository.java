@@ -18,13 +18,26 @@ public interface VideoRenderRepository {
             String shotId,
             StartShotRenderRequest request,
             String model,
-            boolean referenceTransportConfigured);
+            boolean referenceTransportConfigured,
+            String executionMode);
+
+    default ShotRenderTaskResponse createTask(
+            String userId, String adaptationId, String shotId, StartShotRenderRequest request,
+            String model, boolean referenceTransportConfigured) {
+        return createTask(userId, adaptationId, shotId, request, model, referenceTransportConfigured, "live");
+    }
 
     ShotRenderTaskResponse retryTask(
             String userId,
             String taskId,
             RetryShotRenderRequest request,
-            boolean referenceTransportConfigured);
+            boolean referenceTransportConfigured,
+            String executionMode);
+
+    default ShotRenderTaskResponse retryTask(
+            String userId, String taskId, RetryShotRenderRequest request, boolean referenceTransportConfigured) {
+        return retryTask(userId, taskId, request, referenceTransportConfigured, "live");
+    }
 
     ShotRenderTaskResponse getTask(String userId, String taskId);
 
@@ -60,7 +73,8 @@ public interface VideoRenderRepository {
 
     void markProviderTerminal(String taskId, String status, String code, String message);
 
-    boolean failArchiving(String taskId, String message);
+    /** 归档失败保留原供应商任务并安排恢复，返回是否仍拥有待恢复任务。 */
+    boolean retryArchiving(String taskId, String message);
 
     void completeTake(String taskId, CompletedVideoTake take);
 }

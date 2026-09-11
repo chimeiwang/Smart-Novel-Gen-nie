@@ -1,5 +1,6 @@
 package cn.inkforge.core.platform.db;
 
+/** 按生产能力开关选择冻结数据库契约的只读投影。 */
 public enum SchemaProfile {
     FULL(true, true),
     WITHOUT_VIDEO_PREVIEW(false, true),

@@ -35,6 +35,7 @@ public final class ControlledFileStorage {
         this.root = root.normalize();
     }
 
+    /** 有界流式写入临时文件，刷盘后原子发布并返回内容哈希。 */
     public StoredFile store(String namespace, String extension, InputStream input, long maximumBytes)
             throws IOException {
         if (!SAFE_SEGMENT.matcher(namespace).matches()
@@ -93,6 +94,7 @@ public final class ControlledFileStorage {
         }
     }
 
+    /** 在受控根目录内以 NOFOLLOW_LINKS 打开已存在的普通文件。 */
     public InputStream open(String relativePath) throws IOException {
         Path path = resolve(relativePath);
         validateExistingParents(path.getParent());

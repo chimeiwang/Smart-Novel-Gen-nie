@@ -45,8 +45,11 @@ import cn.inkforge.core.db.generated.tables.Videochapteradaptationhead;
 import cn.inkforge.core.db.generated.tables.Videocinematicscene;
 import cn.inkforge.core.db.generated.tables.Videodramaticbeat;
 import cn.inkforge.core.db.generated.tables.Videodramaticbeatsourceanchor;
+import cn.inkforge.core.db.generated.tables.Videoepisode;
 import cn.inkforge.core.db.generated.tables.Videoepisodeaudioclip;
 import cn.inkforge.core.db.generated.tables.Videoepisodeboundary;
+import cn.inkforge.core.db.generated.tables.Videoepisodecommand;
+import cn.inkforge.core.db.generated.tables.Videoepisodedependency;
 import cn.inkforge.core.db.generated.tables.Videoepisodeeditclip;
 import cn.inkforge.core.db.generated.tables.Videoepisodeedithead;
 import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion;
@@ -55,14 +58,25 @@ import cn.inkforge.core.db.generated.tables.Videoepisodeexporttask;
 import cn.inkforge.core.db.generated.tables.Videoepisodemixhead;
 import cn.inkforge.core.db.generated.tables.Videoepisodemixversion;
 import cn.inkforge.core.db.generated.tables.Videoepisodeplanversion;
+import cn.inkforge.core.db.generated.tables.Videoepisodescriptdraft;
+import cn.inkforge.core.db.generated.tables.Videoepisodescriptversion;
+import cn.inkforge.core.db.generated.tables.Videoepisodeshot;
+import cn.inkforge.core.db.generated.tables.Videoepisodesourcesetversion;
+import cn.inkforge.core.db.generated.tables.Videoepisodesourcesnapshot;
 import cn.inkforge.core.db.generated.tables.Videoepisodesubtitlecue;
 import cn.inkforge.core.db.generated.tables.Videogenerationtask;
+import cn.inkforge.core.db.generated.tables.Videoimpactreview;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaselineshot;
+import cn.inkforge.core.db.generated.tables.Videoproductionedithead;
+import cn.inkforge.core.db.generated.tables.Videoproductionmixhead;
 import cn.inkforge.core.db.generated.tables.Videoproject;
 import cn.inkforge.core.db.generated.tables.Videoreviewdecisioncommand;
 import cn.inkforge.core.db.generated.tables.Videoscene;
 import cn.inkforge.core.db.generated.tables.Videoshot;
 import cn.inkforge.core.db.generated.tables.Videoshotkeyframehead;
 import cn.inkforge.core.db.generated.tables.Videoshotkeyframeversion;
+import cn.inkforge.core.db.generated.tables.Videoshotlineage;
 import cn.inkforge.core.db.generated.tables.Videoshotplanversion;
 import cn.inkforge.core.db.generated.tables.Videoshotprompthead;
 import cn.inkforge.core.db.generated.tables.Videoshotpromptversion;
@@ -72,8 +86,12 @@ import cn.inkforge.core.db.generated.tables.Videoshotsourceanchor;
 import cn.inkforge.core.db.generated.tables.Videoshottake;
 import cn.inkforge.core.db.generated.tables.Videoshottakedecisioncommand;
 import cn.inkforge.core.db.generated.tables.Videoshottakehead;
+import cn.inkforge.core.db.generated.tables.Videoshotversion;
 import cn.inkforge.core.db.generated.tables.Videoshotvisualreferencebinding;
 import cn.inkforge.core.db.generated.tables.Videoshotvisualreferenceset;
+import cn.inkforge.core.db.generated.tables.Videostoryboarddraft;
+import cn.inkforge.core.db.generated.tables.Videostoryboardversion;
+import cn.inkforge.core.db.generated.tables.Videotakeadoption;
 import cn.inkforge.core.db.generated.tables.Videotakeframeextraction;
 import cn.inkforge.core.db.generated.tables.Videovisualcanon;
 import cn.inkforge.core.db.generated.tables.Videovisualcanonversion;
@@ -323,6 +341,11 @@ public class Tables {
     public static final Videodramaticbeatsourceanchor VIDEODRAMATICBEATSOURCEANCHOR = Videodramaticbeatsourceanchor.VIDEODRAMATICBEATSOURCEANCHOR;
 
     /**
+     * The table <code>public.VideoEpisode</code>.
+     */
+    public static final Videoepisode VIDEOEPISODE = Videoepisode.VIDEOEPISODE;
+
+    /**
      * The table <code>public.VideoEpisodeAudioClip</code>.
      */
     public static final Videoepisodeaudioclip VIDEOEPISODEAUDIOCLIP = Videoepisodeaudioclip.VIDEOEPISODEAUDIOCLIP;
@@ -331,6 +354,16 @@ public class Tables {
      * The table <code>public.VideoEpisodeBoundary</code>.
      */
     public static final Videoepisodeboundary VIDEOEPISODEBOUNDARY = Videoepisodeboundary.VIDEOEPISODEBOUNDARY;
+
+    /**
+     * The table <code>public.VideoEpisodeCommand</code>.
+     */
+    public static final Videoepisodecommand VIDEOEPISODECOMMAND = Videoepisodecommand.VIDEOEPISODECOMMAND;
+
+    /**
+     * The table <code>public.VideoEpisodeDependency</code>.
+     */
+    public static final Videoepisodedependency VIDEOEPISODEDEPENDENCY = Videoepisodedependency.VIDEOEPISODEDEPENDENCY;
 
     /**
      * The table <code>public.VideoEpisodeEditClip</code>.
@@ -373,6 +406,31 @@ public class Tables {
     public static final Videoepisodeplanversion VIDEOEPISODEPLANVERSION = Videoepisodeplanversion.VIDEOEPISODEPLANVERSION;
 
     /**
+     * The table <code>public.VideoEpisodeScriptDraft</code>.
+     */
+    public static final Videoepisodescriptdraft VIDEOEPISODESCRIPTDRAFT = Videoepisodescriptdraft.VIDEOEPISODESCRIPTDRAFT;
+
+    /**
+     * The table <code>public.VideoEpisodeScriptVersion</code>.
+     */
+    public static final Videoepisodescriptversion VIDEOEPISODESCRIPTVERSION = Videoepisodescriptversion.VIDEOEPISODESCRIPTVERSION;
+
+    /**
+     * 独立分集中不随标题、镜号或顺序变化的稳定镜头身份
+     */
+    public static final Videoepisodeshot VIDEOEPISODESHOT = Videoepisodeshot.VIDEOEPISODESHOT;
+
+    /**
+     * The table <code>public.VideoEpisodeSourceSetVersion</code>.
+     */
+    public static final Videoepisodesourcesetversion VIDEOEPISODESOURCESETVERSION = Videoepisodesourcesetversion.VIDEOEPISODESOURCESETVERSION;
+
+    /**
+     * The table <code>public.VideoEpisodeSourceSnapshot</code>.
+     */
+    public static final Videoepisodesourcesnapshot VIDEOEPISODESOURCESNAPSHOT = Videoepisodesourcesnapshot.VIDEOEPISODESOURCESNAPSHOT;
+
+    /**
      * The table <code>public.VideoEpisodeSubtitleCue</code>.
      */
     public static final Videoepisodesubtitlecue VIDEOEPISODESUBTITLECUE = Videoepisodesubtitlecue.VIDEOEPISODESUBTITLECUE;
@@ -381,6 +439,31 @@ public class Tables {
      * 视频规划、渲染、轮询和归档的耐久任务事实
      */
     public static final Videogenerationtask VIDEOGENERATIONTASK = Videogenerationtask.VIDEOGENERATIONTASK;
+
+    /**
+     * The table <code>public.VideoImpactReview</code>.
+     */
+    public static final Videoimpactreview VIDEOIMPACTREVIEW = Videoimpactreview.VIDEOIMPACTREVIEW;
+
+    /**
+     * 作者确认的整集不可变制作输入版本
+     */
+    public static final Videoproductionbaseline VIDEOPRODUCTIONBASELINE = Videoproductionbaseline.VIDEOPRODUCTIONBASELINE;
+
+    /**
+     * 制作基线逐镜冻结的确切镜头版本及输入快照
+     */
+    public static final Videoproductionbaselineshot VIDEOPRODUCTIONBASELINESHOT = Videoproductionbaselineshot.VIDEOPRODUCTIONBASELINESHOT;
+
+    /**
+     * 独立剧集粗剪当前版本的 CAS head
+     */
+    public static final Videoproductionedithead VIDEOPRODUCTIONEDITHEAD = Videoproductionedithead.VIDEOPRODUCTIONEDITHEAD;
+
+    /**
+     * 独立剧集声音字幕当前版本的 CAS head
+     */
+    public static final Videoproductionmixhead VIDEOPRODUCTIONMIXHEAD = Videoproductionmixhead.VIDEOPRODUCTIONMIXHEAD;
 
     /**
      * 小说级视频制作项目
@@ -411,6 +494,11 @@ public class Tables {
      * The table <code>public.VideoShotKeyframeVersion</code>.
      */
     public static final Videoshotkeyframeversion VIDEOSHOTKEYFRAMEVERSION = Videoshotkeyframeversion.VIDEOSHOTKEYFRAMEVERSION;
+
+    /**
+     * 替换、复制、拆分和合并产生新镜头身份时冻结的多源沿袭关系
+     */
+    public static final Videoshotlineage VIDEOSHOTLINEAGE = Videoshotlineage.VIDEOSHOTLINEAGE;
 
     /**
      * 用户批准后的不可变章节电影化镜头方案版本
@@ -458,6 +546,11 @@ public class Tables {
     public static final Videoshottakehead VIDEOSHOTTAKEHEAD = Videoshottakehead.VIDEOSHOTTAKEHEAD;
 
     /**
+     * 一次正式分镜中某稳定镜头的不可变内容版本
+     */
+    public static final Videoshotversion VIDEOSHOTVERSION = Videoshotversion.VIDEOSHOTVERSION;
+
+    /**
      * 镜头参考集合中的有序视觉版本与参考强度
      */
     public static final Videoshotvisualreferencebinding VIDEOSHOTVISUALREFERENCEBINDING = Videoshotvisualreferencebinding.VIDEOSHOTVISUALREFERENCEBINDING;
@@ -466,6 +559,21 @@ public class Tables {
      * 正式镜头当前视觉参考集合的 CAS Head
      */
     public static final Videoshotvisualreferenceset VIDEOSHOTVISUALREFERENCESET = Videoshotvisualreferenceset.VIDEOSHOTVISUALREFERENCESET;
+
+    /**
+     * 分镜自动保存工作稿，CAS 更新且不等同正式版本
+     */
+    public static final Videostoryboarddraft VIDEOSTORYBOARDDRAFT = Videostoryboarddraft.VIDEOSTORYBOARDDRAFT;
+
+    /**
+     * 作者确认后的不可变整集分镜版本
+     */
+    public static final Videostoryboardversion VIDEOSTORYBOARDVERSION = Videostoryboardversion.VIDEOSTORYBOARDVERSION;
+
+    /**
+     * 原始 Take 到目标镜头版本的人工采用事实，不修改原生成依据
+     */
+    public static final Videotakeadoption VIDEOTAKEADOPTION = Videotakeadoption.VIDEOTAKEADOPTION;
 
     /**
      * The table <code>public.VideoTakeFrameExtraction</code>.

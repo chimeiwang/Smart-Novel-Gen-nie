@@ -1,0 +1,25 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardStageDependency/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "resultHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Resulthash",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Stepid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stepId",
+    "resultHash"
+  ],
+  "title": "VideoStoryboardStageDependency",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardStageDependency"
+}

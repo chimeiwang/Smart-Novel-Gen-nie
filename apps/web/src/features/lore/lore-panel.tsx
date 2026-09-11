@@ -2,7 +2,7 @@
 
 import type { components } from "@inkforge/api-client";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Form, Input, Select, InputNumber, Button, Space, Divider, Popconfirm, Card, Empty, Row, Col } from "antd";
 
 import { browserApi } from "@/lib/api/browser";
@@ -15,6 +15,9 @@ import {
 } from "@/features/workspace/edit-baseline";
 import { buildLoreListItems, type LoreListKind } from "./lore-list-presenter";
 import { buildChildMutationPlan, executeChildMutationPlan } from "./lore-mutation-plan";
+import { LoreVisualPanel } from "@/features/video/adaptation/lore-visual-panel";
+import { confirmVisualEditorLeave, useVisualEditorLeaveGuard } from "@/features/video/adaptation/visual-editor-leave-guard";
+import type { VisualSetting } from "@/features/video/adaptation/visual-canon-state";
 
 type LoreTabKey = LoreListKind;
 
@@ -77,6 +80,8 @@ const RELATION_LABELS: Record<RelationType, string> = {
 
 type LorePanelProps = {
   novelId: string;
+  novelName?: string;
+  allowVisuals?: boolean;
   characters: components["schemas"]["CharacterDto"][];
   items: components["schemas"]["ItemDto"][];
   locations: components["schemas"]["LocationDto"][];
@@ -89,6 +94,8 @@ type LorePanelProps = {
 
 export function LorePanel({
   novelId,
+  novelName = "小说",
+  allowVisuals = false,
   characters,
   items,
   locations,
@@ -108,6 +115,9 @@ export function LorePanel({
   const [entityClientRequestId, setEntityClientRequestId] = useState(createClientRequestId);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form] = Form.useForm();
+  const [detailTab, setDetailTab] = useState<"text" | "visual">("text");
+  const [visualVisited, setVisualVisited] = useState(false);
+  const [textBaseline, setTextBaseline] = useState<string | null>(null);
 
   // 角色表单状态
   const [characterForm, setCharacterForm] = useState({
@@ -176,7 +186,20 @@ export function LorePanel({
     category: "",
   });
 
+  const textSnapshot = JSON.stringify({ characterForm, itemForm, locationForm, factionForm, glossaryForm });
+  const textDirty = textBaseline !== null && textBaseline !== textSnapshot;
+  useVisualEditorLeaveGuard(novelId, isModalOpen && textDirty, isModalOpen && pending, "text");
+  useEffect(() => {
+    if (!isModalOpen || textBaseline !== null) return;
+    const timer = window.setTimeout(() => setTextBaseline(textSnapshot), 0);
+    return () => window.clearTimeout(timer);
+  }, [isModalOpen, textBaseline, textSnapshot]);
+
   const openCreateModal = () => {
+    if (!confirmVisualEditorLeave(novelId)) return;
+    setDetailTab("text");
+    setVisualVisited(false);
+    setTextBaseline(null);
     setEditingId(null);
     setEditBaseline(null);
     setEntityClientRequestId(createClientRequestId());
@@ -248,6 +271,10 @@ export function LorePanel({
   };
 
   const openEditModal = (id: string) => {
+    if (!confirmVisualEditorLeave(novelId)) return;
+    setDetailTab("text");
+    setVisualVisited(false);
+    setTextBaseline(null);
     setEditingId(id);
     setEditBaseline(null);
     setSaveError(null);
@@ -362,8 +389,9 @@ export function LorePanel({
   };
 
   const closeModal = () => {
-    if (pending) return;
+    if (pending || !confirmVisualEditorLeave(novelId)) return;
     setIsModalOpen(false);
+    setTextBaseline(null);
     setEditingId(null);
     setEditBaseline(null);
   };
@@ -378,6 +406,7 @@ export function LorePanel({
 
   const finishMutation = () => {
     setIsModalOpen(false);
+    setTextBaseline(null);
     setEditingId(null);
     setEditBaseline(null);
     setSaveError(null);
@@ -387,7 +416,9 @@ export function LorePanel({
 
   const showMutationError = (error: unknown) => {
     setSaveError(
-      error instanceof ApiResponseError && error.status === 409
+      error instanceof ApiResponseError && error.code === "LORE_ENTITY_REFERENCED"
+        ? error.message
+        : error instanceof ApiResponseError && error.status === 409
         ? "资料已在其他位置更新，当前表单已保留，请刷新后重试。"
         : error instanceof Error ? error.message : "保存失败，请稍后重试。",
     );
@@ -499,7 +530,7 @@ export function LorePanel({
   };
 
   const handleDelete = () => {
-    if (!editingId) return;
+    if (!editingId || !confirmVisualEditorLeave(novelId, "visual")) return;
     startTransition(async () => {
       setSaveError(null);
       try {
@@ -535,6 +566,8 @@ export function LorePanel({
   };
 
   const handleSubmit = () => {
+    // 文字保存成功会关闭整个设定卡，先保护其他页签中尚未提交的视觉输入。
+    if (visualVisited && !confirmVisualEditorLeave(novelId, "visual")) return;
     startTransition(async () => {
       setSaveError(null);
       try {
@@ -1472,6 +1505,24 @@ export function LorePanel({
     return null;
   };
 
+  const savedVisualSetting: VisualSetting | null = (() => {
+    if (!editingId || !allowVisuals) return null;
+    if (activeTab === "characters") {
+      const saved = characters.find((item) => item.id === editingId);
+      return saved ? { id: saved.id, kind: "character", name: saved.name, summary: saved.appearance || saved.identity || "" } : null;
+    }
+    if (activeTab === "locations") {
+      const saved = locations.find((item) => item.id === editingId);
+      return saved ? { id: saved.id, kind: "location", name: saved.name, summary: saved.description || "" } : null;
+    }
+    if (activeTab === "items") {
+      const saved = items.find((item) => item.id === editingId);
+      return saved ? { id: saved.id, kind: "item", name: saved.name, summary: saved.description || "" } : null;
+    }
+    return null;
+  })();
+  const visualKindAvailable = allowVisuals && ["characters", "locations", "items"].includes(activeTab);
+
   return (
     <div className="stack lore-panel-root">
       <div>
@@ -1541,15 +1592,21 @@ export function LorePanel({
               ✕
             </button>
           </div>
+          {visualKindAvailable ? <div className="setting-visual-lore-tabs" role="tablist" aria-label="设定内容">
+            <button className={detailTab === "text" ? "button secondary sm" : "button ghost sm"} type="button" role="tab" aria-selected={detailTab === "text"} onClick={() => setDetailTab("text")}>文字设定</button>
+            <button className={detailTab === "visual" ? "button secondary sm" : "button ghost sm"} type="button" role="tab" aria-selected={detailTab === "visual"} disabled={!savedVisualSetting} title={savedVisualSetting ? "管理当前设定在视频项目中的视觉版本" : "请先保存文字设定，再制作定妆"} onClick={() => { setVisualVisited(true); setDetailTab("visual"); }}>视觉定妆</button>
+            {!savedVisualSetting ? <span className="muted">先保存文字设定，再制作定妆</span> : null}
+          </div> : null}
           <div className="lore-fullscreen-content">
             <div className="lore-form-scroll">
-              {renderForm()}
+              <div className="setting-visual-lore-panel" hidden={detailTab !== "text"}>{renderForm()}</div>
+              {visualVisited && savedVisualSetting ? <div className="setting-visual-lore-panel" hidden={detailTab !== "visual"}><LoreVisualPanel key={`${novelId}:${savedVisualSetting.kind}:${savedVisualSetting.id}`} novelId={novelId} novelName={novelName} setting={savedVisualSetting} /></div> : null}
             </div>
           </div>
           <div className="lore-fullscreen-footer">
             {saveError ? <span className="form-error" role="alert">{saveError}</span> : null}
             <Space>
-              {editingId && (
+              {editingId && detailTab === "text" && (
                 <Popconfirm
                   title="确认删除"
                   description="确定要删除这个设定吗？此操作不可撤销。"
@@ -1565,10 +1622,11 @@ export function LorePanel({
               )}
             </Space>
             <Space>
-              <Button onClick={closeModal}>取消</Button>
-              <Button type="primary" onClick={handleSubmit} loading={pending}>
+              {detailTab === "visual" ? <span className="muted">候选保存与定妆确认在当前页分别完成</span> : null}
+              <Button onClick={closeModal}>{detailTab === "visual" ? "关闭设定卡" : "取消"}</Button>
+              {detailTab === "text" ? <Button type="primary" onClick={handleSubmit} loading={pending}>
                 {editingId ? "保存修改" : "新增设定"}
-              </Button>
+              </Button> : null}
             </Space>
           </div>
         </div>

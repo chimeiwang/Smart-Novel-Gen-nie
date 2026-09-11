@@ -138,10 +138,51 @@
       "title": "Durationseconds",
       "type": "integer"
     },
+    "executionMode": {
+      "anyOf": [
+        {
+          "enum": [
+            "simulated",
+            "live"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Executionmode"
+    },
+    "feeConfirmed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Feeconfirmed"
+    },
     "generateAudio": {
       "default": true,
       "title": "Generateaudio",
       "type": "boolean"
+    },
+    "generationMode": {
+      "anyOf": [
+        {
+          "const": "reference",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Generationmode"
     },
     "keyframes": {
       "items": {
@@ -235,10 +276,11 @@
       "type": "string"
     },
     "schemaVersion": {
-      "default": "video-shot-render-manifest/1.1",
+      "default": "video-shot-render-manifest/1.2",
       "enum": [
         "video-shot-render-manifest/1.0",
-        "video-shot-render-manifest/1.1"
+        "video-shot-render-manifest/1.1",
+        "video-shot-render-manifest/1.2"
       ],
       "title": "Schemaversion",
       "type": "string"

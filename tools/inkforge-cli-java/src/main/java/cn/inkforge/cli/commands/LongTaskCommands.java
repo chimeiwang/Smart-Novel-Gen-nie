@@ -62,6 +62,7 @@ final class LongTaskCommands {
         handlers.put("long.task.cancel", LongTaskCommands::cancel);
     }
 
+    /** 校验显式长篇操作的目标、范围和可选选区后创建 Run。 */
     private static CommandResult start(CommandContext context, ObjectNode payload) {
         if (payload.has("inputMode")) return startNatural(context, payload);
         rejectUnexpectedStartFields(payload);
@@ -134,6 +135,7 @@ final class LongTaskCommands {
         return post(context, "/api/v1/writing/runs", body);
     }
 
+    /** 区分旧任务恢复与 V2 澄清回答，并发送对应公共命令。 */
     private static CommandResult resume(CommandContext context, ObjectNode payload) {
         if (payload.has("inputMode")) return clarify(context, payload);
         MutationPayloads.requireFields(
@@ -223,6 +225,7 @@ final class LongTaskCommands {
                 body);
     }
 
+    /** 校验选区来源的资源身份、版本哈希和 Unicode 码点范围。 */
     private static ObjectNode selectionTarget(
             ObjectNode payload, String operation, String chapterId) {
         JsonNode raw = payload.get("selectionTarget");
@@ -287,6 +290,7 @@ final class LongTaskCommands {
         return selection;
     }
 
+    /** 确保 scope 与 operation、章节及选区资源处在同一业务范围。 */
     private static void validateScope(
             ObjectNode scope,
             String operation,

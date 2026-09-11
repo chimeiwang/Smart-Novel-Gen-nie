@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "VideoStoryboardReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "script_coverage",
+            "continuity",
+            "shot_clarity",
+            "feasibility",
+            "reference",
+            "duration"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "scriptSceneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scriptsceneid"
+        },
+        "shotId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Shotid"
+        }
+      },
+      "required": [
+        "code",
+        "shotId",
+        "scriptSceneId",
+        "message"
+      ],
+      "title": "VideoStoryboardReviewFinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardReview/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "enum": [
+        "pass",
+        "revise"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/VideoStoryboardReviewFinding"
+      },
+      "maxItems": 200,
+      "title": "Findings",
+      "type": "array"
+    },
+    "requiredChanges": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Requiredchanges",
+      "type": "array"
+    },
+    "summary": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "summary",
+    "requiredChanges",
+    "findings"
+  ],
+  "title": "VideoStoryboardReview",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardReview"
+}

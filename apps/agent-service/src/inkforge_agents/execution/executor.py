@@ -57,6 +57,8 @@ from inkforge_contracts.execution import (
 from inkforge_contracts.rag_execution import RagEmbeddingBatchOutput, RagEmbeddingStepInput
 from inkforge_contracts.short_medium_execution import materialize_short_medium_output
 from inkforge_contracts.style_execution import StylePortraitSectionOutput, StylePortraitStepInput
+from inkforge_contracts.video_episode import VideoEpisodeScriptStageInput
+from inkforge_contracts.video_storyboard import VideoStoryboardStageInput
 from pydantic import JsonValue, ValidationError
 
 from ..providers.base import (
@@ -96,25 +98,68 @@ from .registry import (
     StepBudgetDefinition,
 )
 from .short_medium import SHORT_MEDIUM_HANDLERS, validate_short_medium_request
-from .video import (
-    VIDEO_PROTOCOL_CORRECTION_REQUIRED,
-    VideoStageOutputError,
-    build_video_request,
-    materialize_video_output,
-    video_context,
+from .video_episode import (
+    EPISODE_SCRIPT_OPERATIONS,
+    build_episode_script_request,
+    episode_script_context,
+    materialize_episode_script_output,
+)
+from .video_storyboard import (
+    EPISODE_STORYBOARD_OPERATIONS,
+    build_episode_storyboard_request,
+    episode_storyboard_context,
+    materialize_episode_storyboard_output,
 )
 
 _LOGGER = logging.getLogger(__name__)
-_STRUCTURED_DIAGNOSTIC_KEYWORDS = frozenset({
-    "additionalItems", "additionalProperties", "allOf", "anyOf", "const", "contains", "content",
-    "dependentRequired", "dependentSchemas", "enum", "exclusiveMaximum", "exclusiveMinimum",
-    "falseSchema", "format", "items", "json", "maxContains", "maxItems", "maxLength",
-    "maxProperties", "maximum", "minContains", "minItems", "minLength", "minProperties",
-    "minimum", "multipleOf", "not", "oneOf", "pattern", "patternProperties", "prefixItems",
-    "propertyNames", "required", "toolCalls", "type", "unevaluatedItems", "unevaluatedProperties",
-    "uniqueItems", "unknown",
-    "json_control_character", "json_syntax", "json_duplicate_key", "json_constant",
-})
+_STRUCTURED_DIAGNOSTIC_KEYWORDS = frozenset(
+    {
+        "additionalItems",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "const",
+        "contains",
+        "content",
+        "dependentRequired",
+        "dependentSchemas",
+        "enum",
+        "exclusiveMaximum",
+        "exclusiveMinimum",
+        "falseSchema",
+        "format",
+        "items",
+        "json",
+        "maxContains",
+        "maxItems",
+        "maxLength",
+        "maxProperties",
+        "maximum",
+        "minContains",
+        "minItems",
+        "minLength",
+        "minProperties",
+        "minimum",
+        "multipleOf",
+        "not",
+        "oneOf",
+        "pattern",
+        "patternProperties",
+        "prefixItems",
+        "propertyNames",
+        "required",
+        "toolCalls",
+        "type",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+        "uniqueItems",
+        "unknown",
+        "json_control_character",
+        "json_syntax",
+        "json_duplicate_key",
+        "json_constant",
+    }
+)
 
 ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]
 FailureCategory = Literal[
@@ -521,7 +566,13 @@ class StatelessExecutionStepExecutor:
         self, request: ExecutionStepRequest, registry: ExecutionRegistry
     ) -> ResolvedExecutionStep:
         try:
-            _, value = video_context(request)
+            value: VideoEpisodeScriptStageInput | VideoStoryboardStageInput
+            if request.operation in EPISODE_SCRIPT_OPERATIONS:
+                _, value = episode_script_context(request)
+            elif request.operation in EPISODE_STORYBOARD_OPERATIONS:
+                _, value = episode_storyboard_context(request)
+            else:
+                raise ExecutionCapabilityError("旧章节视频 Operation 已退役")
             if request.dispatchMode == "initial":
                 if request.operation is None:
                     raise ValueError("视频必须有精确 operation")
@@ -845,7 +896,13 @@ class StatelessExecutionStepExecutor:
         resolved: ResolvedExecutionStep,
     ) -> ModelTurnRequest | EmbeddingRequest | VideoResponsesRequest:
         if request.workflow == "video":
-            turn = build_video_request(request, resolved.prompt_profile.system_prompt)
+            if request.operation in EPISODE_SCRIPT_OPERATIONS:
+                builder = build_episode_script_request
+            elif request.operation in EPISODE_STORYBOARD_OPERATIONS:
+                builder = build_episode_storyboard_request
+            else:
+                raise ExecutionCapabilityError("旧章节视频 Operation 已退役")
+            turn = builder(request, resolved.prompt_profile.system_prompt)
             estimated = sum(len(message.content) for message in turn.messages)
             if turn.structuredOutput is not None:
                 estimated += len(turn.structuredOutput.model_dump_json())
@@ -1442,18 +1499,21 @@ class StatelessExecutionStepExecutor:
                 usage.visibleOutputTokens,
             )
         )
-        _, value = video_context(request)
-        correction_available = (
-            reliable
-            and not value.correction
-            and value.cycle == 0
-            and value.stageKey in {"dramatic_structure", "shot_design", "shot_prompt"}
-        )
+        episode_script = request.operation in EPISODE_SCRIPT_OPERATIONS
+        episode_storyboard = request.operation in EPISODE_STORYBOARD_OPERATIONS
+        value: VideoEpisodeScriptStageInput | VideoStoryboardStageInput
+        if episode_script:
+            _, value = episode_script_context(request)
+        elif episode_storyboard:
+            _, value = episode_storyboard_context(request)
+        else:
+            raise ExecutionCapabilityError("旧章节视频 Operation 已退役")
+        correction_available = False
         if _step_budget_exceeded(request, usage):
             code = "STEP_BUDGET_EXCEEDED"
         elif result.finishReason in {"length", "content_filter"} and correction_available:
             # 只保留原视频首轮的明确结束重做；Core 结算后另建 Step，绝不续接半截正文。
-            category, code = "protocol", VIDEO_PROTOCOL_CORRECTION_REQUIRED
+            category, code = "protocol", "VIDEO_EPISODE_OUTPUT_INVALID"
         elif result.finishReason != "stop":
             category = "provider_terminal"
             code = {
@@ -1464,21 +1524,23 @@ class StatelessExecutionStepExecutor:
         elif result.diagnostic is not None or result.structuredOutput is None:
             category = "protocol"
             code = (
-                VIDEO_PROTOCOL_CORRECTION_REQUIRED
-                if correction_available
-                else "VIDEO_ADAPTATION_OUTPUT_INVALID"
+                "VIDEO_EPISODE_OUTPUT_INVALID"
             )
         else:
             try:
-                output = materialize_video_output(request, result.structuredOutput)
+                if episode_script:
+                    materializer = materialize_episode_script_output
+                elif episode_storyboard:
+                    materializer = materialize_episode_storyboard_output
+                else:
+                    raise ExecutionCapabilityError("旧章节视频 Operation 已退役")
+                output = materializer(request, result.structuredOutput)
                 if output.get("outcome") == "needs_correction" and not reliable:
                     category, code = "protocol", "MODEL_USAGE_INVALID"
                 else:
                     jsonschema_rs.validator_for(request.outputSchema.jsonSchema).validate(output)
-            except VideoStageOutputError as exc:
-                code = exc.code
             except (ValueError, ValidationError, jsonschema_rs.ValidationError):
-                code = "VIDEO_ADAPTATION_OUTPUT_INVALID"
+                code = "VIDEO_EPISODE_OUTPUT_INVALID"
         if code is not None:
             return _failure(
                 request,

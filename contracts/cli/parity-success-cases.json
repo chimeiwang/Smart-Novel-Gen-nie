@@ -3,13 +3,27 @@
   "cases": [
     {
       "command": "auth.login",
-      "arguments": ["--origin", "http://127.0.0.1:8000", "--username", "parity-user"],
+      "arguments": [
+        "--origin",
+        "http://127.0.0.1:8000",
+        "--username",
+        "parity-user"
+      ],
       "payload": {},
       "tty": true
     },
-    {"command": "auth.logout", "payload": {}},
-    {"command": "auth.whoami", "payload": {}},
-    {"command": "short.list", "payload": {}},
+    {
+      "command": "auth.logout",
+      "payload": {}
+    },
+    {
+      "command": "auth.whoami",
+      "payload": {}
+    },
+    {
+      "command": "short.list",
+      "payload": {}
+    },
     {
       "command": "short.create",
       "payload": {
@@ -21,13 +35,30 @@
         "sourceText": "完整灵感"
       }
     },
-    {"command": "long.novel.list", "payload": {}},
-    {"command": "long.novel.get", "payload": {"novelId": "作品 /😀"}},
+    {
+      "command": "long.novel.list",
+      "payload": {}
+    },
+    {
+      "command": "long.novel.get",
+      "payload": {
+        "novelId": "作品 /😀"
+      }
+    },
     {
       "command": "long.novel.create",
-      "payload": {"name": "  长篇  ", "summary": null, "targetTotalWordCount": 1000000}
+      "payload": {
+        "name": "  长篇  ",
+        "summary": null,
+        "targetTotalWordCount": 1000000
+      }
     },
-    {"command": "long.chapter.create", "payload": {"novelId": "n/1"}},
+    {
+      "command": "long.chapter.create",
+      "payload": {
+        "novelId": "n/1"
+      }
+    },
     {
       "caseId": "long-session-create-preserves-unicode",
       "command": "long.session.create",
@@ -36,15 +67,17 @@
         "chapterId": "章节 /😀",
         "title": "  隔离验收😀\r\n完整标题  "
       },
-      "responses": [{
-        "id": "会话 /😀",
-        "novelId": "作品 /😀",
-        "chapterId": "章节 /😀",
-        "title": "  隔离验收😀\r\n完整标题  ",
-        "phase": "idle",
-        "createdAt": "2026-09-07T00:00:00Z",
-        "updatedAt": "2026-09-07T00:00:00Z"
-      }]
+      "responses": [
+        {
+          "id": "会话 /😀",
+          "novelId": "作品 /😀",
+          "chapterId": "章节 /😀",
+          "title": "  隔离验收😀\r\n完整标题  ",
+          "phase": "idle",
+          "createdAt": "2026-09-07T00:00:00Z",
+          "updatedAt": "2026-09-07T00:00:00Z"
+        }
+      ]
     },
     {
       "command": "long.chapter.save",
@@ -57,7 +90,11 @@
     },
     {
       "command": "long.chapter.status",
-      "payload": {"chapterId": "c1", "status": "reviewing", "expectedUpdatedAt": "v2"}
+      "payload": {
+        "chapterId": "c1",
+        "status": "reviewing",
+        "expectedUpdatedAt": "v2"
+      }
     },
     {
       "command": "long.agent.start",
@@ -66,8 +103,14 @@
         "chapterId": "c1",
         "clientRequestId": "agent-answer-00001",
         "operation": "answer_question",
-        "target": {"type": "chapter", "id": "c1"},
-        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "target": {
+          "type": "chapter",
+          "id": "c1"
+        },
+        "scope": {
+          "kind": "chapter",
+          "chapterId": "c1"
+        },
         "writingSessionId": "s1",
         "userInstruction": "  这一章的主要冲突是什么？  "
       }
@@ -90,8 +133,13 @@
         "engineVersion": 2,
         "expectedRevision": 4,
         "selectedUpdateRefs": [
-          {"section": "characters", "index": 0},
-          {"section": "worldSetting"}
+          {
+            "section": "characters",
+            "index": 0
+          },
+          {
+            "section": "worldSetting"
+          }
         ]
       },
       "responses": [
@@ -105,32 +153,58 @@
             "kind": "agent_updates",
             "summary": "更新人物和世界设定",
             "updates": {
-              "characters": [{"action": "create", "name": "林舟"}],
+              "characters": [
+                {
+                  "action": "create",
+                  "name": "林舟"
+                }
+              ],
               "worldSetting": "雨城仍在封锁中。"
             }
           }
         },
-        {"artifactId": "updates /1", "revision": 4, "decision": "approve"}
+        {
+          "artifactId": "updates /1",
+          "revision": 4,
+          "decision": "approve"
+        }
       ]
     },
     {
       "command": "long.artifact.discard",
-      "payload": {"artifactId": "a/1", "clientRequestId": "artifact-discard-01", "expectedRevision": 1}
+      "payload": {
+        "artifactId": "a/1",
+        "clientRequestId": "artifact-discard-01",
+        "expectedRevision": 1
+      }
     },
     {
       "command": "long.quality.run",
-      "payload": {"checkId": "q/1", "clientRequestId": "quality-run-00001", "taskId": null, "message": "重跑"}
+      "payload": {
+        "checkId": "q/1",
+        "clientRequestId": "quality-run-00001",
+        "taskId": null,
+        "message": "重跑"
+      }
     },
     {
       "command": "long.quality.skip",
-      "payload": {"checkId": "q1", "expectedUpdatedAt": "v1"}
+      "payload": {
+        "checkId": "q1",
+        "expectedUpdatedAt": "v1"
+      }
     },
     {
       "command": "long.outline-node.create",
       "payload": {
         "novelId": "n1",
         "clientRequestId": "outline-create-0001",
-        "data": {"title": "第一幕", "kind": "stage", "chapterStartOrder": 1, "chapterEndOrder": 3}
+        "data": {
+          "title": "第一幕",
+          "kind": "stage",
+          "chapterStartOrder": 1,
+          "chapterEndOrder": 3
+        }
       }
     },
     {
@@ -138,7 +212,10 @@
       "payload": {
         "novelId": "n1",
         "clientRequestId": "character-create-01",
-        "data": {"name": "沈砚", "currentStatus": "active"}
+        "data": {
+          "name": "沈砚",
+          "currentStatus": "active"
+        }
       }
     },
     {
@@ -146,7 +223,13 @@
       "payload": {
         "novelId": "n1",
         "clientRequestId": "relation-create-0001",
-        "data": {"characterId": "c1", "targetId": "c2", "relationType": "friend", "intimacy": 80, "description": null}
+        "data": {
+          "characterId": "c1",
+          "targetId": "c2",
+          "relationType": "friend",
+          "intimacy": 80,
+          "description": null
+        }
       }
     },
     {
@@ -161,40 +244,54 @@
     },
     {
       "command": "long.style.apply",
-      "payload": {"novelId": "n1", "styleId": "s/1", "expectedStyleId": null}
+      "payload": {
+        "novelId": "n1",
+        "styleId": "s/1",
+        "expectedStyleId": null
+      }
     },
     {
       "command": "long.video.project.create",
-      "payload": {"novelId": "n1", "title": "第一章影视化"}
+      "payload": {
+        "novelId": "n1",
+        "title": "第一章影视化"
+      }
     },
     {
-      "command": "long.video.adaptation.create",
+      "command": "long.video.episode.create",
       "payload": {
         "projectId": "p1",
-        "chapterId": "c1",
-        "expectedChapterUpdatedAt": "v1",
-        "clientRequestId": "video-adapt-00001"
+        "clientRequestId": "video-episode-0001",
+        "title": "  第一集😀  ",
+        "creativeIntent": "保留完整人物弧光",
+        "targetDurationSeconds": 90
       }
     },
     {
-      "command": "long.video.plan.start",
+      "command": "long.video.episode.script.run.start",
       "payload": {
-        "adaptationId": "ad1",
-        "clientRequestId": "video-plan-start01",
-        "pacingPreset": "cinematic",
-        "targetEpisodeSeconds": 120,
-        "baseShotPlanVersionId": "pv1",
-        "revisionBrief": "减少机械对白"
+        "episodeId": "episode/1",
+        "clientRequestId": "video-script-run-01",
+        "expectedDraftRevision": 2,
+        "operation": "episode_script_revise",
+        "selectedSceneIds": [
+          "scene/1"
+        ],
+        "instruction": "减少机械对白😀"
       }
     },
     {
-      "command": "long.video.prompt.save",
+      "command": "long.video.episode.storyboard.run.start",
       "payload": {
-        "adaptationId": "ad1",
-        "shotId": "s/1",
-        "expectedPromptRevision": 2,
-        "candidateTaskId": null,
-        "currentPrompt": "第一行\r\n尾部😀"
+        "episodeId": "episode/1",
+        "clientRequestId": "video-board-run-001",
+        "expectedDraftRevision": 2,
+        "scriptVersionId": "script/1",
+        "operation": "episode_storyboard_revise",
+        "selectedShotIds": [
+          "shot/1"
+        ],
+        "instruction": "调整镜头节奏😀"
       }
     },
     {
@@ -202,60 +299,73 @@
       "payload": {
         "projectId": "p1",
         "clientRequestId": "video-canon-set-01",
+        "expectedRevision": 0,
         "settingKind": "character",
         "settingId": "c1",
         "duty": "identity",
         "variantKey": "default",
         "label": "林默身份",
         "candidateAssetId": "a1",
-        "includeFeatures": ["黑发"],
+        "includeFeatures": [
+          "黑发"
+        ],
         "excludeFeatures": [],
         "defaultStrength": 72
       }
     },
     {
-      "command": "long.video.render.start",
+      "command": "long.video.episode.render.start",
       "payload": {
-        "adaptationId": "ad/1",
-        "shotId": "s/1",
+        "episodeId": "episode/1",
+        "baselineId": "baseline/1",
+        "shotId": "shot/1",
         "clientRequestId": "video-render-00001",
-        "expectedPromptRevision": 3,
-        "durationSeconds": 5,
-        "resolution": "1080p",
-        "generateAudio": false,
-        "watermark": true
+        "feeConfirmed": false
       }
     },
     {
-      "command": "long.video.take.confirm",
+      "command": "long.video.episode.adoption.create",
       "payload": {
-        "adaptationId": "ad/1",
-        "shotId": "s/1",
-        "takeId": "tk/1",
-        "clientRequestId": "video-take-ok-0001",
-        "expectedTakeRevision": 2
+        "episodeId": "episode/1",
+        "clientRequestId": "video-adoption-0001",
+        "expectedProductionRevision": 2,
+        "targetShotVersionId": "shot-version/1",
+        "sourceTakeId": "take/1",
+        "sourceBaselineId": "baseline/0",
+        "comparison": {
+          "sourceBaselineId": "baseline/0",
+          "targetShotVersionId": "shot-version/1",
+          "directInputsUnchanged": false,
+          "referenceHashesChecked": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ],
+          "summary": "人工核对通过"
+        }
       }
     },
     {
-      "command": "long.video.keyframe.set",
+      "command": "long.video.episode.impact.decide",
       "payload": {
-        "adaptationId": "ad1",
-        "shotId": "s1",
-        "role": "initial_state",
-        "assetId": "a1",
-        "sourceTakeId": "tk1",
-        "sourceTimeMs": 1200,
-        "clientRequestId": "video-keyframe-001",
-        "expectedRevision": 1
+        "episodeId": "episode/1",
+        "reviewId": "review/1",
+        "clientRequestId": "video-impact-00001",
+        "expectedRevision": 1,
+        "decisions": [
+          {
+            "itemId": "item/1",
+            "action": "revise_target",
+            "note": "下一版修订"
+          }
+        ]
       }
     },
     {
-      "command": "long.video.export.start",
+      "command": "long.video.episode.export.start",
       "payload": {
-        "adaptationId": "ad/1",
-        "episodeNo": 2,
-        "editVersionId": "ev1",
-        "mixVersionId": "mv1",
+        "episodeId": "episode/1",
+        "baselineId": "baseline/1",
+        "editVersionId": "edit/1",
+        "mixVersionId": "mix/1",
         "clientRequestId": "video-export-0001",
         "resolution": "1080p",
         "framesPerSecond": 25,

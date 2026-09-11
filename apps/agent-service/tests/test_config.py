@@ -8,6 +8,14 @@ from inkforge_agents.providers.fake import FakeModelProvider
 from pydantic import ValidationError
 
 
+def test_seedance_defaults_to_simulation_even_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SEEDANCE_EXECUTION_MODE", raising=False)
+    settings = Settings.model_validate({"seedance_enabled": True})
+    assert settings.seedance_execution_mode == "simulated"
+
+
 def test_trusted_core_cidrs_accept_comma_separated_environment_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

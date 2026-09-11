@@ -7,6 +7,7 @@ import java.util.Map;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册章节读写、状态流转和进度命令。 */
 final class LongChapterCommands {
 
     private LongChapterCommands() {}

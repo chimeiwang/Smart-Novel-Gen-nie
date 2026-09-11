@@ -343,6 +343,20 @@ public class ReviewartifactRecord extends UpdatableRecordImpl<ReviewartifactReco
         return (String) get(21);
     }
 
+    /**
+     * Setter for <code>public.ReviewArtifact.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(22, value);
+    }
+
+    /**
+     * Getter for <code>public.ReviewArtifact.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(22);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -366,7 +380,7 @@ public class ReviewartifactRecord extends UpdatableRecordImpl<ReviewartifactReco
     /**
      * Create a detached, initialised ReviewartifactRecord
      */
-    public ReviewartifactRecord(String id, String novelid, String chapterid, String taskid, String workflowrunid, String artifactkey, Reviewartifactkind kind, Reviewartifactstatus status, String title, String summary, String payloadjson, String diffjson, String createdbyagent, String updatedbyagent, String revieweragent, Integer revision, LocalDateTime appliedat, LocalDateTime createdat, LocalDateTime updatedat, String videosceneid, String videoadaptationid, String videoadaptationtaskid) {
+    public ReviewartifactRecord(String id, String novelid, String chapterid, String taskid, String workflowrunid, String artifactkey, Reviewartifactkind kind, Reviewartifactstatus status, String title, String summary, String payloadjson, String diffjson, String createdbyagent, String updatedbyagent, String revieweragent, Integer revision, LocalDateTime appliedat, LocalDateTime createdat, LocalDateTime updatedat, String videosceneid, String videoadaptationid, String videoadaptationtaskid, String videoepisodeid) {
         super(Reviewartifact.REVIEWARTIFACT);
 
         setId(id);
@@ -391,6 +405,7 @@ public class ReviewartifactRecord extends UpdatableRecordImpl<ReviewartifactReco
         setVideosceneid(videosceneid);
         setVideoadaptationid(videoadaptationid);
         setVideoadaptationtaskid(videoadaptationtaskid);
+        setVideoepisodeid(videoepisodeid);
         resetTouchedOnNotNull();
     }
 }

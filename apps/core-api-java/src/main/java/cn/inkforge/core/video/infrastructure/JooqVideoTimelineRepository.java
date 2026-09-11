@@ -74,6 +74,7 @@ final class JooqVideoTimelineRepository {
         this.json = Objects.requireNonNull(json);
     }
 
+    /** 以 head revision CAS 保存不可变粗剪版本，并原子切换当前 Head。 */
     EpisodeEditHeadResponse saveEditVersion(
             String userId,
             String adaptationId,
@@ -310,6 +311,7 @@ final class JooqVideoTimelineRepository {
         return editVersionResponse(database.dsl(), version);
     }
 
+    /** 冻结所引用粗剪、音频与字幕后保存不可变混音版本，并原子切换 Head。 */
     EpisodeMixHeadResponse saveMixVersion(
             String userId,
             String adaptationId,

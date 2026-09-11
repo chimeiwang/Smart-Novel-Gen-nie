@@ -277,6 +277,7 @@ public final class PostgresSchemaInspector {
 
     private SchemaContract inspectWithinReadOnlyTransaction(Connection connection, String schema)
             throws SQLException {
+        // 各类结构分批读取后统一排序和指纹化，避免系统目录返回顺序造成契约漂移。
         Map<String, ObjectNode> tables = new TreeMap<>();
         for (Row row : rows(connection, TABLES_QUERY, schema)) {
             String name = row.text("table_name");

@@ -8,6 +8,7 @@ import java.util.Set;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册小说文风应用与清除命令，并保留 expectedStyleId 的 CAS 语义。 */
 final class LongStyleCommands {
 
     private LongStyleCommands() {}

@@ -1,0 +1,36 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeScriptOverview/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "creativeIntent": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Creativeintent",
+      "type": "string"
+    },
+    "summary": {
+      "default": "",
+      "maxLength": 4000,
+      "title": "Summary",
+      "type": "string"
+    },
+    "targetDurationSeconds": {
+      "anyOf": [
+        {
+          "maximum": 86400,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Targetdurationseconds"
+    }
+  },
+  "title": "VideoEpisodeScriptOverview",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeScriptOverview"
+}

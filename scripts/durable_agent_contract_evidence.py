@@ -60,11 +60,30 @@ _VIDEO_TABLES = {
     "VideoEpisodeMixHead",
     "VideoEpisodeExportTask",
     "VideoEpisodeExport",
+    "VideoEpisode",
+    "VideoEpisodeSourceSetVersion",
+    "VideoEpisodeSourceSnapshot",
+    "VideoEpisodeScriptDraft",
+    "VideoEpisodeScriptVersion",
+    "VideoEpisodeDependency",
+    "VideoImpactReview",
+    "VideoEpisodeCommand",
+    "VideoEpisodeShot",
+    "VideoShotLineage",
+    "VideoStoryboardDraft",
+    "VideoStoryboardVersion",
+    "VideoShotVersion",
+    "VideoProductionBaseline",
+    "VideoTakeAdoption",
+    "VideoProductionBaselineShot",
+    "VideoProductionEditHead",
+    "VideoProductionMixHead",
 }
 _REVIEW_VIDEO_COLUMNS = {
     "videoSceneId",
     "videoAdaptationId",
     "videoAdaptationTaskId",
+    "videoEpisodeId",
 }
 _TOKEN_DETAIL_COLUMNS = {"promptCacheMissTokens", "reasoningTokens"}
 _TOKEN_DETAIL_CHECKS = {
@@ -202,7 +221,13 @@ def _project_contract(contract: dict[str, Any], profile: str) -> dict[str, Any]:
                 enum["values"] = [
                     value
                     for value in values
-                    if value not in {"video_scene_plan", "video_adaptation_plan"}
+                    if value
+                    not in {
+                        "video_scene_plan",
+                        "video_adaptation_plan",
+                        "video_episode_script",
+                        "video_episode_storyboard",
+                    }
                 ]
 
     projected["fingerprint"] = _canonical_fingerprint(projected)

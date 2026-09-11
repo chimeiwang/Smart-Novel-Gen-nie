@@ -87,6 +87,7 @@ public final class JooqVideoVisualCanonRepository implements VideoVisualCanonRep
         return library(database.dsl(), projectId);
     }
 
+    /** 以 revision CAS 保存待批准定妆候选，不创建正式版本。 */
     @Override
     public VisualCanonResponse setCandidate(
             String userId,
@@ -120,6 +121,7 @@ public final class JooqVideoVisualCanonRepository implements VideoVisualCanonRep
             LocalDateTime now = DatabaseTimestamp.now(clock);
             // 候选区允许反复调整，但不会产生正式版本，也不会被既有 Prompt/Render 任务引用。
             if (canon == null) {
+                if (command.expectedRevision() != 0) throw revisionConflict(0);
                 String createdId = ids.next();
                 transaction.insertInto(VIDEOVISUALCANON)
                         .set(VIDEOVISUALCANON.ID, createdId)
@@ -151,6 +153,9 @@ public final class JooqVideoVisualCanonRepository implements VideoVisualCanonRep
                     && Objects.equals(
                             canon.getCandidatedefaultstrength(), command.defaultStrength());
             if (!unchanged) {
+                if (canon.getRevision() != command.expectedRevision()) {
+                    throw revisionConflict(canon.getRevision());
+                }
                 LocalDateTime updated = DatabaseTimestamp.next(clock, canon.getUpdatedat());
                 transaction.update(VIDEOVISUALCANON)
                         .set(VIDEOVISUALCANON.SETTINGNAME, settingName)
@@ -171,6 +176,7 @@ public final class JooqVideoVisualCanonRepository implements VideoVisualCanonRep
         return canonById(library(database.dsl(), projectId), canonId);
     }
 
+    /** 将当前候选固化为不可变正式版本，并清空候选槽位。 */
     @Override
     public VisualCanonResponse approve(
             String userId, String canonId, VisualCanonApproval approval) {
@@ -256,6 +262,7 @@ public final class JooqVideoVisualCanonRepository implements VideoVisualCanonRep
         return canonById(library(database.dsl(), projectId), canonId);
     }
 
+    /** 以 revision CAS 保存镜头对正式 CanonVersion 的有序引用。 */
     @Override
     public ShotVisualReferenceSetResponse saveShotReferences(
             String userId,

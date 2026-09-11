@@ -365,6 +365,62 @@ public class VideoshotrendertaskRecord extends UpdatableRecordImpl<Videoshotrend
         return (LocalDateTime) get(23);
     }
 
+    /**
+     * Setter for <code>public.VideoShotRenderTask.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(24, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotRenderTask.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(24);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotRenderTask.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(25, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotRenderTask.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(25);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotRenderTask.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(26, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotRenderTask.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(26);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotRenderTask.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(27, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotRenderTask.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(27);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -388,7 +444,7 @@ public class VideoshotrendertaskRecord extends UpdatableRecordImpl<Videoshotrend
     /**
      * Create a detached, initialised VideoshotrendertaskRecord
      */
-    public VideoshotrendertaskRecord(String id, String adaptationid, String projectid, String novelid, String shotid, String shotplanversionid, String promptversionid, String retryoftaskid, String provider, String model, String status, String clientrequestid, String inputhash, String requestmanifestjson, String providertaskid, Integer pollcount, Integer attemptcount, LocalDateTime nextattemptat, String lasterrorcode, String lasterrormessage, LocalDateTime createdat, LocalDateTime updatedat, LocalDateTime submittedat, LocalDateTime completedat) {
+    public VideoshotrendertaskRecord(String id, String adaptationid, String projectid, String novelid, String shotid, String shotplanversionid, String promptversionid, String retryoftaskid, String provider, String model, String status, String clientrequestid, String inputhash, String requestmanifestjson, String providertaskid, Integer pollcount, Integer attemptcount, LocalDateTime nextattemptat, String lasterrorcode, String lasterrormessage, LocalDateTime createdat, LocalDateTime updatedat, LocalDateTime submittedat, LocalDateTime completedat, String videoepisodeid, String episodeshotid, String episodeshotversionid, String productionbaselineid) {
         super(Videoshotrendertask.VIDEOSHOTRENDERTASK);
 
         setId(id);
@@ -415,6 +471,10 @@ public class VideoshotrendertaskRecord extends UpdatableRecordImpl<Videoshotrend
         setUpdatedat(updatedat);
         setSubmittedat(submittedat);
         setCompletedat(completedat);
+        setVideoepisodeid(videoepisodeid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

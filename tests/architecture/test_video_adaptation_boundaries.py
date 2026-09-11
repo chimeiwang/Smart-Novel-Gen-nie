@@ -1,4 +1,4 @@
-"""章节影视化 v2 不得继续寄生在旧 VideoScene/planJson 上。"""
+"""Episode 视频生产链不得重新依赖旧章节改编身份。"""
 
 from __future__ import annotations
 
@@ -7,16 +7,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_video_adaptation_has_independent_service_modules() -> None:
+def test_episode_video_production_has_independent_service_modules() -> None:
     expected = (
-        "apps/core-api/src/inkforge_core/video/adaptation/repository.py",
-        "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-        "apps/core-api/src/inkforge_core/video/adaptation/validation.py",
-        "apps/core-api/src/inkforge_core/video/adaptation/visual_canon.py",
-        "apps/agent-service/src/inkforge_agents/jobs/video_adaptation.py",
-        "apps/agent-service/src/inkforge_agents/jobs/video_dispatch.py",
-        "packages/service-contracts/src/inkforge_contracts/video_adaptation.py",
-        "apps/web/src/features/video/adaptation/chapter-adaptation-workspace.tsx",
+        "apps/core-api/src/inkforge_core/video/episodes/router.py",
+        "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+        "apps/core-api/src/inkforge_core/video/episodes/render_router.py",
+        "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+        "apps/agent-service/src/inkforge_agents/execution/video_episode.py",
+        "apps/agent-service/src/inkforge_agents/execution/video_storyboard.py",
+        "apps/agent-service/src/inkforge_agents/providers/video_generation.py",
+        "packages/service-contracts/src/inkforge_contracts/video_episode.py",
+        "packages/service-contracts/src/inkforge_contracts/video_storyboard.py",
+        "apps/web/src/features/video/production/episode-workspace.tsx",
     )
 
     assert all((ROOT / relative).is_file() for relative in expected)
@@ -32,15 +34,17 @@ def test_new_adaptation_domain_does_not_extend_legacy_repository() -> None:
     assert "ChapterAdaptationPlanCandidate" not in legacy_repository
 
 
-def test_new_workspace_does_not_use_legacy_scene_or_plan_json() -> None:
-    workspace = ROOT / (
+def test_episode_workspace_replaces_legacy_chapter_workspace() -> None:
+    legacy_workspace = ROOT / (
         "apps/web/src/features/video/adaptation/chapter-adaptation-workspace.tsx"
     )
-    source = workspace.read_text(encoding="utf-8")
+    workspace = ROOT / "apps/web/src/features/video/production/episode-workspace.tsx"
 
+    assert not legacy_workspace.exists()
+    source = workspace.read_text(encoding="utf-8")
+    assert "adaptationId" not in source
     assert "VideoScene" not in source
     assert "planJson" not in source
-    assert "chapter-shot-plan" not in source
 
 
 def test_legacy_agent_handler_does_not_import_chapter_adaptation() -> None:

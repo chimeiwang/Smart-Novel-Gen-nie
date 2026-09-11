@@ -17,6 +17,7 @@ public final class VideoStageTransitions {
 
     private VideoStageTransitions() {}
 
+    /** 重放有序 Step 终态，验证每次输入后推导唯一的下一阶段或最终产物。 */
     public static Decision replay(ExecutionPlanSnapshot plan, Map<String, Object> context, List<Completed> history) {
         boolean prompt = VideoStagePolicy.PROMPT.equals(plan.videoStagePolicy());
         if (!prompt && !VideoStagePolicy.CINEMATIC.equals(plan.videoStagePolicy())) throw invalid("缺少冻结视频阶段策略");
@@ -30,6 +31,7 @@ public final class VideoStageTransitions {
         Decision decision = new Decision(expected, null, null, null);
         Map<String, Object> lastDesign = null;
         for (Completed completed : history) {
+            // 历史输入必须等于上一步推导结果，禁止模型或数据库记录跳过既定阶段。
             if (decision.nextInput() == null) throw invalid("视频终态之后不能存在其他模型阶段");
             if (!ExecutionCanonicalJson.sha256(expected).equals(ExecutionCanonicalJson.sha256(completed.input()))) {
                 throw invalid("视频阶段 input 与冻结来源和前序结果不一致");
@@ -59,6 +61,7 @@ public final class VideoStageTransitions {
             if (output == null || !stage.equals(output.get("stageKey"))) throw invalid("视频结果阶段与本次 Step 不一致");
             String outcome = text(output, "outcome");
             if ("needs_correction".equals(outcome)) {
+                // 每个阶段只允许一次受控纠正；缺槽补全另复用最近一次完整设计且同样只有一次机会。
                 boolean designRetry = "missing_beat_shots".equals(stage) && lastDesign != null
                         && !Boolean.TRUE.equals(lastDesign.get("correction")) && cycle == 0;
                 boolean canRetry = completed.correctionAllowed() && (designRetry

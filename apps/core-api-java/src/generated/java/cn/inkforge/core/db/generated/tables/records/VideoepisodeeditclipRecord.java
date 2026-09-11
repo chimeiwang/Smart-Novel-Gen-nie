@@ -181,6 +181,104 @@ public class VideoepisodeeditclipRecord extends UpdatableRecordImpl<Videoepisode
         return (Integer) get(10);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(11);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(12);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(13);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(14, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(14);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.adoptionId</code>.
+     */
+    public void setAdoptionid(String value) {
+        set(15, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.adoptionId</code>.
+     */
+    public String getAdoptionid() {
+        return (String) get(15);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.sourceAudioMode</code>.
+     */
+    public void setSourceaudiomode(String value) {
+        set(16, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.sourceAudioMode</code>.
+     */
+    public String getSourceaudiomode() {
+        return (String) get(16);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditClip.clipId</code>.
+     */
+    public void setClipid(String value) {
+        set(17, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditClip.clipId</code>.
+     */
+    public String getClipid() {
+        return (String) get(17);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -204,7 +302,7 @@ public class VideoepisodeeditclipRecord extends UpdatableRecordImpl<Videoepisode
     /**
      * Create a detached, initialised VideoepisodeeditclipRecord
      */
-    public VideoepisodeeditclipRecord(String editversionid, String shotplanversionid, String shotid, String takeid, Integer ordinal, Integer sourceinms, Integer sourceoutms, Integer timelinestartms, Integer outputdurationms, String transitionafter, Integer transitiondurationms) {
+    public VideoepisodeeditclipRecord(String editversionid, String shotplanversionid, String shotid, String takeid, Integer ordinal, Integer sourceinms, Integer sourceoutms, Integer timelinestartms, Integer outputdurationms, String transitionafter, Integer transitiondurationms, String videoepisodeid, String productionbaselineid, String episodeshotid, String episodeshotversionid, String adoptionid, String sourceaudiomode, String clipid) {
         super(Videoepisodeeditclip.VIDEOEPISODEEDITCLIP);
 
         setEditversionid(editversionid);
@@ -218,6 +316,13 @@ public class VideoepisodeeditclipRecord extends UpdatableRecordImpl<Videoepisode
         setOutputdurationms(outputdurationms);
         setTransitionafter(transitionafter);
         setTransitiondurationms(transitiondurationms);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setAdoptionid(adoptionid);
+        setSourceaudiomode(sourceaudiomode);
+        setClipid(clipid);
         resetTouchedOnNotNull();
     }
 }

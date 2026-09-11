@@ -14,7 +14,6 @@ from .agent_client import (
     PortraitAgentSubmitter,
     QualityAgentSubmitter,
     RagAgentSubmitter,
-    VideoAgentSubmitter,
     WritingTaskAgentSubmitter,
 )
 from .auth import router as auth_router
@@ -83,26 +82,20 @@ from .styles.repository import StyleRepository
 from .styles.router import router as styles_router
 from .styles.service import StyleService
 from .styles.storage import StyleStorage
-from .video.adaptation.dispatcher import VideoAdaptationTaskDispatcher
-from .video.adaptation.internal_router import router as video_adaptation_internal_router
-from .video.adaptation.post_production_media import VideoPostProductionMediaProcessor
-from .video.adaptation.post_production_reconciler import VideoPostProductionReconciler
-from .video.adaptation.post_production_repository import VideoPostProductionRepository
-from .video.adaptation.post_production_router import router as video_post_production_router
-from .video.adaptation.post_production_service import VideoPostProductionService
-from .video.adaptation.render_reconciler import VideoShotRenderReconciler
-from .video.adaptation.render_repository import VideoShotRenderRepository
 from .video.adaptation.render_router import router as video_render_router
 from .video.adaptation.render_security import ProviderAssetTokenCodec
-from .video.adaptation.render_service import VideoShotRenderService
-from .video.adaptation.render_storage import SeedanceResultArchiver
-from .video.adaptation.repository import VideoAdaptationRepository
 from .video.adaptation.router import router as video_adaptation_router
-from .video.adaptation.service import VideoAdaptationService
 from .video.adaptation.visual_canon import VideoVisualCanonRepository
-from .video.dispatcher import VideoTaskDispatcher
-from .video.internal_router import router as video_internal_router
+from .video.adaptation.visual_canon_service import VideoVisualCanonService
+from .video.episodes.impact_router import router as video_episode_impact_router
+from .video.episodes.post_production_router import (
+    router as video_episode_post_production_router,
+)
+from .video.episodes.production_router import router as video_production_router
+from .video.episodes.render_router import router as video_episode_render_router
+from .video.episodes.router import router as video_episode_router
 from .video.media_probe import VideoMediaProbe
+from .video.provider_asset import VideoProviderAssetService
 from .video.repository import VideoRepository
 from .video.router import router as video_router
 from .video.service import VideoService
@@ -166,7 +159,6 @@ def _configure_auth(app: FastAPI, settings: Settings) -> None:
         environment=settings.environment,
         cookie_secure=settings.session_cookie_secure,
     )
-
 
 def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     """使用同一个受控会话工厂组装业务领域服务。"""
@@ -303,33 +295,6 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             session_factory,
             dispatch_namespace=cast(str, settings.video_dispatch_namespace),
         )
-        video_adaptation_repository = VideoAdaptationRepository(
-            session_factory,
-            dispatch_namespace=cast(str, settings.video_dispatch_namespace),
-        )
-        video_submitter = VideoAgentSubmitter(agent_client) if agent_client else None
-        if (
-            settings.video_dispatch_enabled
-            and video_submitter is not None
-            and getattr(app.state, "video_dispatcher", None) is None
-        ):
-            app.state.video_dispatcher = VideoTaskDispatcher(
-                video_repository,
-                video_submitter,
-                batch_size=20,
-                interval_seconds=5,
-            )
-        if (
-            settings.video_dispatch_enabled
-            and video_submitter is not None
-            and getattr(app.state, "video_adaptation_dispatcher", None) is None
-        ):
-            app.state.video_adaptation_dispatcher = VideoAdaptationTaskDispatcher(
-                video_adaptation_repository,
-                video_submitter,
-                batch_size=20,
-                interval_seconds=5,
-            )
         app.state.video_service = VideoService(
             video_repository,
             video_storage,
@@ -338,12 +303,10 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             seedance_enabled=settings.seedance_enabled,
             duration_probe=video_duration_probe,
         )
-        app.state.video_adaptation_service = VideoAdaptationService(
-            video_adaptation_repository,
+        app.state.video_visual_canon_service = VideoVisualCanonService(
             VideoVisualCanonRepository(session_factory),
             video_preview_enabled=True,
         )
-        render_repository = VideoShotRenderRepository(session_factory)
         token_codec = (
             ProviderAssetTokenCodec(
                 settings.video_provider_media_token_secret.get_secret_value()
@@ -351,46 +314,9 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             if settings.video_provider_media_token_secret is not None
             else None
         )
-        app.state.video_shot_render_service = VideoShotRenderService(
-            render_repository,
-            video_storage,
-            configured=settings.seedance_configured,
-            enabled=settings.seedance_enabled,
-            model=settings.seedance_model,
-            provider_media_base_url=settings.video_provider_media_base_url,
-            provider_asset_token_codec=token_codec,
-        )
-        post_production_repository = VideoPostProductionRepository(session_factory)
-        post_production_media = VideoPostProductionMediaProcessor()
-        app.state.video_post_production_service = VideoPostProductionService(
-            post_production_repository,
-            video_storage,
-            post_production_media,
-        )
-        if (
-            post_production_media.readiness.ready
-            and getattr(app.state, "video_post_production_reconciler", None) is None
-        ):
-            app.state.video_post_production_reconciler = VideoPostProductionReconciler(
-                post_production_repository,
-                post_production_media,
-                video_storage,
-            )
-        if (
-            settings.seedance_enabled
-            and agent_client is not None
-            and getattr(app.state, "video_shot_render_reconciler", None) is None
-        ):
-            app.state.video_shot_render_reconciler = VideoShotRenderReconciler(
-                render_repository,
-                agent_client,
-                SeedanceResultArchiver(
-                    video_storage,
-                    allowed_host_suffixes=settings.seedance_result_allowed_host_suffixes,
-                ),
-                video_storage,
-                provider_media_base_url=settings.video_provider_media_base_url,
-                provider_asset_token_codec=token_codec,
+        if token_codec is not None:
+            app.state.video_provider_asset_service = VideoProviderAssetService(
+                session_factory, video_storage, token_codec
             )
     if (
         writing_submitter is not None
@@ -431,7 +357,6 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         writing_task_repository, event_store
     )
 
-
 def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
     """仅在 JWKS 与 Redis 都可用时装配索引回调验签器。"""
 
@@ -442,7 +367,6 @@ def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
         jwks_path=settings.agent_service_public_key_path,
         replay_store=RedisReplayStore(redis),
     )
-
 
 def _configure_agent_client(app: FastAPI, settings: Settings) -> None:
     if settings.core_service_private_key_path is None or settings.agent_service_url is None:
@@ -458,7 +382,6 @@ def _configure_agent_client(app: FastAPI, settings: Settings) -> None:
     )
     app.state.agent_http = http
     app.state.agent_client = AgentClient(http, signer)
-
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -479,19 +402,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             ("portrait_dispatcher", getattr(app.state, "portrait_dispatcher", None)),
             ("quality_dispatcher", getattr(app.state, "quality_dispatcher", None)),
             ("rag_dispatcher", getattr(app.state, "rag_dispatcher", None)),
-            ("video_dispatcher", getattr(app.state, "video_dispatcher", None)),
-            (
-                "video_adaptation_dispatcher",
-                getattr(app.state, "video_adaptation_dispatcher", None),
-            ),
-            (
-                "video_shot_render_reconciler",
-                getattr(app.state, "video_shot_render_reconciler", None),
-            ),
-            (
-                "video_post_production_reconciler",
-                getattr(app.state, "video_post_production_reconciler", None),
-            ),
         )
         if worker is not None
     ]
@@ -536,7 +446,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 if engine is not None:
                     await engine.dispose()
 
-
 def create_app(
     *,
     testing: bool = False,
@@ -545,7 +454,6 @@ def create_app(
     writing_command_dispatcher: object | None = None,
     writing_outbox_publisher: object | None = None,
     writing_outbox_readiness: object | None = None,
-    video_dispatcher: object | None = None,
 ) -> FastAPI:
     loaded_settings = settings
     if loaded_settings is None:
@@ -566,12 +474,8 @@ def create_app(
     app.state.writing_command_dispatcher = writing_command_dispatcher
     app.state.writing_outbox_publisher = writing_outbox_publisher
     app.state.writing_outbox_readiness = writing_outbox_readiness
-    app.state.video_dispatcher = video_dispatcher
-    app.state.video_adaptation_dispatcher = None
-    app.state.video_shot_render_reconciler = None
-    app.state.video_shot_render_service = None
-    app.state.video_post_production_reconciler = None
-    app.state.video_post_production_service = None
+    app.state.video_visual_canon_service = None
+    app.state.video_provider_asset_service = None
     app.state.readiness_checks = {}
     app.state.readiness_error_details = {}
     register_readiness_check(app, "configuration", lambda: True)
@@ -610,8 +514,12 @@ def create_app(
     app.include_router(short_medium_router, prefix="/api/v1")
     app.include_router(video_router, prefix="/api/v1")
     app.include_router(video_adaptation_router, prefix="/api/v1")
+    app.include_router(video_episode_router, prefix="/api/v1")
+    app.include_router(video_episode_impact_router, prefix="/api/v1")
+    app.include_router(video_episode_render_router, prefix="/api/v1")
+    app.include_router(video_episode_post_production_router, prefix="/api/v1")
+    app.include_router(video_production_router, prefix="/api/v1")
     app.include_router(video_render_router, prefix="/api/v1")
-    app.include_router(video_post_production_router, prefix="/api/v1")
     app.include_router(debug_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
@@ -621,7 +529,5 @@ def create_app(
     app.include_router(writing_callback_router, include_in_schema=False)
     app.include_router(workflow_execution_callback_router, include_in_schema=False)
     app.include_router(reviews_internal_router, include_in_schema=False)
-    app.include_router(video_internal_router, include_in_schema=False)
-    app.include_router(video_adaptation_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app

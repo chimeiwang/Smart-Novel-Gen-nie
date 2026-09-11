@@ -48,6 +48,7 @@ public record WorkflowRunBudget(
         }
     }
 
+    /** 将本次 Step 消耗累加到 Run，并校验总调用、token、费用和墙钟预算。 */
     public WorkflowRunBudgetCharge requireWithin(
             Collection<WorkflowRunBudgetCharge> charges) {
         Objects.requireNonNull(charges, "Run 预算占用集合不能为空");
@@ -90,6 +91,7 @@ public record WorkflowRunBudget(
         return charge;
     }
 
+    /** 校验单 Step 的授权上限本身没有超过 Run 总预算。 */
     public WorkflowStepBudget requireStepFits(WorkflowStepBudget step) {
         Objects.requireNonNull(step, "Step 预算不能为空");
         if (step.maxProviderRetries() > maxProviderRetriesPerStep) {

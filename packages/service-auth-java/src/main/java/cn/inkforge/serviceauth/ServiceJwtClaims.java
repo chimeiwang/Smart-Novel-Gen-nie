@@ -3,6 +3,7 @@ package cn.inkforge.serviceauth;
 import java.util.List;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+/** 服务 JWT 中与资源身份、HTTP 请求和重放保护绑定的完整声明。 */
 public record ServiceJwtClaims(
         String iss,
         String sub,

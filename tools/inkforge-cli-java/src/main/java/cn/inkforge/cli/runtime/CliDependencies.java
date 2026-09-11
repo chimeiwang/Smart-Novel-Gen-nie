@@ -6,6 +6,7 @@ import cn.inkforge.cli.transport.CoreApi;
 import java.util.function.BooleanSupplier;
 import tools.jackson.databind.ObjectMapper;
 
+/** 汇集 CLI 运行时依赖，并为观察命令提供可替换的单调时钟与等待器。 */
 public record CliDependencies(
         ApiFactory apiFactory,
         ConfigStore configStore,

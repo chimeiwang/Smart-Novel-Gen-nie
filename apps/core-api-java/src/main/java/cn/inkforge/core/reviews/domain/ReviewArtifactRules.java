@@ -79,6 +79,7 @@ public final class ReviewArtifactRules {
         }
     }
 
+    /** 复验冻结来源后，把局部 replacement 确定性物化为完整候选和可审核 Diff。 */
     public static SelectionMaterialization materializeSelection(
             Map<String, Object> originalPayload,
             String kind,
@@ -102,6 +103,7 @@ public final class ReviewArtifactRules {
         for (Map.Entry<?, ?> entry : rawTarget.entrySet()) {
             if (entry.getKey() instanceof String key) identity.put(key, entry.getValue());
         }
+        // 顶层兼容字段与 target 内身份必须一致，避免旧新载荷混用时选择更宽松的一份。
         for (String field : IDENTITY_FIELDS) {
             if (identity.containsKey(field)
                     && originalPayload.containsKey(field)
@@ -133,6 +135,7 @@ public final class ReviewArtifactRules {
                 || !sha256(source.content()).equals(baseHash)) {
             throw sourceConflict(source);
         }
+        // 坐标按 Unicode code point 解释，不能直接当成 Java UTF-16 下标。
         String selected = slice(source.content(), start, end);
         if (!sha256(selected).equals(selectedHash)) {
             throw sourceConflict(source);

@@ -50,12 +50,31 @@ final class SchemaContractProjector {
             "VideoEpisodeSubtitleCue",
             "VideoEpisodeMixHead",
             "VideoEpisodeExportTask",
-            "VideoEpisodeExport");
+            "VideoEpisodeExport",
+            "VideoEpisode",
+            "VideoEpisodeSourceSetVersion",
+            "VideoEpisodeSourceSnapshot",
+            "VideoEpisodeScriptDraft",
+            "VideoEpisodeScriptVersion",
+            "VideoEpisodeDependency",
+            "VideoImpactReview",
+            "VideoEpisodeCommand",
+            "VideoEpisodeShot",
+            "VideoShotLineage",
+            "VideoStoryboardDraft",
+            "VideoStoryboardVersion",
+            "VideoShotVersion",
+            "VideoProductionBaseline",
+            "VideoTakeAdoption",
+            "VideoProductionBaselineShot",
+            "VideoProductionEditHead",
+            "VideoProductionMixHead");
     private static final Set<String> REVIEW_VIDEO_COLUMNS =
-            Set.of("videoSceneId", "videoAdaptationId", "videoAdaptationTaskId");
+            Set.of("videoSceneId", "videoAdaptationId", "videoAdaptationTaskId", "videoEpisodeId");
 
     private SchemaContractProjector() {}
 
+    /** 从完整冻结契约删除关闭能力对应结构，并重新计算投影指纹。 */
     static SchemaContract project(SchemaContract contract, SchemaProfile profile) {
         ObjectNode document = contract.document().asObject();
         document.remove("fingerprint");
@@ -82,6 +101,7 @@ final class SchemaContractProjector {
     }
 
     private static void projectWithoutVideo(ObjectNode document) {
+        // 除视频表外还要同步移除共享表上的视频列、约束和索引，投影仍必须结构自洽。
         ArrayNode remaining = document.arrayNode();
         for (JsonNode tableNode : document.path("tables")) {
             if (!tableNode.isObject()) {
@@ -118,7 +138,13 @@ final class SchemaContractProjector {
         for (JsonNode enumNode : document.path("enums")) {
             if (enumNode.isObject() && enumNode.path("name").asString().equals("ReviewArtifactKind")) {
                 ArrayNode values = enumNode.asObject().withArray("values");
-                removeTextValues(values, Set.of("video_scene_plan", "video_adaptation_plan"));
+                removeTextValues(
+                        values,
+                        Set.of(
+                                "video_scene_plan",
+                                "video_adaptation_plan",
+                                "video_episode_script",
+                                "video_episode_storyboard"));
             }
         }
     }

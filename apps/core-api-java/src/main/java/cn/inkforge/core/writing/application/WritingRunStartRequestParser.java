@@ -98,12 +98,14 @@ public final class WritingRunStartRequestParser {
         this.validator = Objects.requireNonNull(validator);
     }
 
+    /** 区分自然入口、旧 V1 与两种显式 V2 请求，并执行各自的严格跨字段校验。 */
     public ParsedWritingRunStartRequest parse(WritingRunStartBody body) {
         JsonNode value = Objects.requireNonNull(body, "写作启动请求体不能为空").value();
         if (!value.isObject()) {
             throw validation("请求体必须是 JSON 对象");
         }
         if (value.has("inputMode")) {
+            // inputMode 的出现本身选择自然入口，禁止再按其他请求形状宽松回退。
             exactFields(value, NATURAL_FIELDS);
             requiredConst(value, "inputMode", "natural");
             requiredConst(value, "workflow", "long_serial");
@@ -120,6 +122,7 @@ public final class WritingRunStartRequestParser {
         }
         JsonNode workflow = value.get("workflow");
         if (workflow == null) {
+            // 只有完全缺少 workflow 才按冻结 V1 契约解析；类型错误不能伪装成旧请求。
             validateLegacy(value);
             StartWritingRunRequest request = read(value, StartWritingRunRequest.class);
             validateBean(request);
@@ -196,6 +199,7 @@ public final class WritingRunStartRequestParser {
                 || ("outline".equals(documentType) && hasChapter)) {
             throw validation("中短篇文档与章节身份不匹配");
         }
+        // 选区身份必须成组出现，并由具体 operation 决定是否允许。
         boolean hasSelection = nonNull(value, "selectionStart")
                 || nonNull(value, "selectionEnd")
                 || nonNull(value, "selectedTextHash");
@@ -262,6 +266,7 @@ public final class WritingRunStartRequestParser {
         if (attachment != null) {
             validateSelectionAttachment(attachment);
         }
+        // 操作名、选区来源和可选展示附件必须共同一致，不能只靠 DTO 字段是否可空判断。
         boolean selectionOperation = SELECTION_OPERATIONS.contains(operation);
         if (selectionOperation != (selection != null)) {
             throw validation(selectionOperation

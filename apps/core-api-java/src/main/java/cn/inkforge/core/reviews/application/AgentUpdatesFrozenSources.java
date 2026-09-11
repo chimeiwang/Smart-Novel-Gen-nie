@@ -68,6 +68,7 @@ public final class AgentUpdatesFrozenSources {
     private final Map<SourceKey, Snapshot> sources;
     private final Map<CollectionKey, List<Map<String, Object>>> collections;
 
+    /** 校验一次 Run 的 Evidence 清单，并建立采用阶段只读索引。 */
     public AgentUpdatesFrozenSources(String novelId, List<WorkflowEvidenceItemPlan> evidence) {
         if (novelId == null || novelId.isEmpty()) throw invalid("小说 ID 不能为空");
         if (evidence == null) throw invalid("冻结资料清单不能为空");
@@ -95,6 +96,7 @@ public final class AgentUpdatesFrozenSources {
         collections = Collections.unmodifiableMap(indexedCollections);
     }
 
+    /** 按真实资源类型和 ID 取得唯一冻结来源，缺失时拒绝采用。 */
     public Snapshot require(ResourceKind kind, String id) {
         if (kind == null || id == null || id.isEmpty()) throw required("资料来源身份不能为空");
         Snapshot result = sources.get(new SourceKey(kind, id));
@@ -108,6 +110,7 @@ public final class AgentUpdatesFrozenSources {
         return sources.values().stream().filter(snapshot -> snapshot.kind() == kind).toList();
     }
 
+    /** 取得具名目标的完整冻结集合，缺失时拒绝以当前数据库内容补齐。 */
     public List<Map<String, Object>> requireCollection(String resourceType, String targetId) {
         if (resourceType == null || resourceType.isEmpty() || targetId == null || targetId.isEmpty()) {
             throw required("资料集合身份不能为空");
@@ -220,6 +223,7 @@ public final class AgentUpdatesFrozenSources {
                 putSource(sources, new Snapshot(ResourceKind.OUTLINE_NODE, rowId, true, row, optionalUpdatedAt(row)));
             }
         }
+        // 同一集合重复出现只能内容完全一致，避免 Evidence 顺序决定最终采用内容。
         List<Map<String, Object>> frozenRows = Collections.unmodifiableList(rows);
         CollectionKey key = new CollectionKey(item.resourceType(), item.resourceId());
         List<Map<String, Object>> previous = collections.putIfAbsent(key, frozenRows);

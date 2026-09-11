@@ -7,6 +7,10 @@ package cn.inkforge.core.db.generated.tables;
 import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.Videoasset.VideoassetPath;
+import cn.inkforge.core.db.generated.tables.Videoepisodemixversion.VideoepisodemixversionPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaselineshot.VideoproductionbaselineshotPath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
 import cn.inkforge.core.db.generated.tables.records.VideoepisodeaudioclipRecord;
 
 import java.util.Arrays;
@@ -80,7 +84,7 @@ public class Videoepisodeaudioclip extends TableImpl<VideoepisodeaudioclipRecord
     /**
      * The column <code>public.VideoEpisodeAudioClip.shotPlanVersionId</code>.
      */
-    public final TableField<VideoepisodeaudioclipRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeaudioclipRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeAudioClip.ordinal</code>.
@@ -131,6 +135,28 @@ public class Videoepisodeaudioclip extends TableImpl<VideoepisodeaudioclipRecord
      * The column <code>public.VideoEpisodeAudioClip.fadeOutMs</code>.
      */
     public final TableField<VideoepisodeaudioclipRecord, Integer> FADEOUTMS = createField(DSL.name("fadeOutMs"), SQLDataType.INTEGER.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.INTEGER)), this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeAudioClip.videoEpisodeId</code>.
+     */
+    public final TableField<VideoepisodeaudioclipRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoEpisodeAudioClip.productionBaselineId</code>.
+     */
+    public final TableField<VideoepisodeaudioclipRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeAudioClip.episodeShotId</code>.
+     */
+    public final TableField<VideoepisodeaudioclipRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoEpisodeAudioClip.episodeShotVersionId</code>.
+     */
+    public final TableField<VideoepisodeaudioclipRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
 
     private Videoepisodeaudioclip(Name alias, Table<VideoepisodeaudioclipRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -215,7 +241,7 @@ public class Videoepisodeaudioclip extends TableImpl<VideoepisodeaudioclipRecord
 
     @Override
     public List<ForeignKey<VideoepisodeaudioclipRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_ASSET_PROJECT_FKEY);
+        return Arrays.asList(Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_ASSET_PROJECT_FKEY, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_BASELINE_INPUT_FKEY, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_BASELINE_SCOPE_FKEY, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_EPISODE_SCOPE_FKEY, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_MIX_NEW_SCOPE_FKEY);
     }
 
     private transient VideoassetPath _videoasset;
@@ -230,12 +256,65 @@ public class Videoepisodeaudioclip extends TableImpl<VideoepisodeaudioclipRecord
         return _videoasset;
     }
 
+    private transient VideoproductionbaselineshotPath _videoproductionbaselineshot;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaselineShot</code> table.
+     */
+    public VideoproductionbaselineshotPath videoproductionbaselineshot() {
+        if (_videoproductionbaselineshot == null)
+            _videoproductionbaselineshot = new VideoproductionbaselineshotPath(this, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_BASELINE_INPUT_FKEY, null);
+
+        return _videoproductionbaselineshot;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
+    }
+
+    private transient VideoepisodemixversionPath _videoepisodemixversion;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeMixVersion</code> table.
+     */
+    public VideoepisodemixversionPath videoepisodemixversion() {
+        if (_videoepisodemixversion == null)
+            _videoepisodemixversion = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEAUDIOCLIP__VIDEOEPISODEAUDIOCLIP_MIX_NEW_SCOPE_FKEY, null);
+
+        return _videoepisodemixversion;
+    }
+
     @Override
     public List<Check<VideoepisodeaudioclipRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("VideoEpisodeAudioClip_fade_check"), "(((\"fadeInMs\" >= 0) AND (\"fadeOutMs\" >= 0) AND ((\"fadeInMs\" + \"fadeOutMs\") <= (\"sourceOutMs\" - \"sourceInMs\"))))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeAudioClip_gain_check"), "(((\"gainMillibels\" >= '-6000'::integer) AND (\"gainMillibels\" <= 1200)))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeAudioClip_range_check"), "(((ordinal > 0) AND (\"timelineStartMs\" >= 0) AND (\"sourceInMs\" >= 0) AND (\"sourceOutMs\" > \"sourceInMs\")))", true),
+            Internal.createCheck(this, DSL.name("VideoEpisodeAudioClip_scope_branch_check"), "((((\"shotPlanVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"productionBaselineId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL)) OR ((\"shotPlanVersionId\" IS NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL) AND (((\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL)) OR ((\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL))))))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeAudioClip_track_check"), "((\"trackKind\" = ANY (ARRAY['dialogue'::text, 'narration'::text, 'ambience'::text, 'sfx'::text, 'music'::text])))", true)
         );
     }

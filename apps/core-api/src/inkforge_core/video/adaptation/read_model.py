@@ -484,8 +484,8 @@ async def _load_prompt_versions(
     return [
         ShotPromptVersionResponse(
             id=version.id,
-            shotId=version.shotId,
-            shotKey=shot_map[version.shotId].shotKey,
+            shotId=cast(str, version.shotId),
+            shotKey=shot_map[cast(str, version.shotId)].shotKey,
             versionNo=version.versionNo,
             generatedText=version.generatedText,
             currentText=version.currentText,
@@ -493,10 +493,12 @@ async def _load_prompt_versions(
                 version.generatedText is None or version.currentText != version.generatedText
             ),
             visualReferences=references_by_version.get(version.id, []),
-            headRevision=head_by_shot[version.shotId].revision,
+            headRevision=head_by_shot[cast(str, version.shotId)].revision,
             createdAt=version.createdAt,
         )
-        for version in sorted(versions, key=lambda item: shot_map[item.shotId].ordinal)
+        for version in sorted(
+            versions, key=lambda item: shot_map[cast(str, item.shotId)].ordinal
+        )
     ]
 
 

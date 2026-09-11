@@ -54,6 +54,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
         this.json = Objects.requireNonNull(json);
     }
 
+    /** 幂等创建完整 V2 Run；任一 Evidence、Step 或 Event 写入失败都会回滚。 */
     @Override
     public WorkflowRunStartResult start(WorkflowStartPlan plan) {
         Objects.requireNonNull(plan, "Workflow start plan 不能为空");
@@ -71,6 +72,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
     }
 
     private WorkflowRunStartResult start(DSLContext transaction, WorkflowStartPlan plan) {
+        // 同一用户与 clientRequestId 先取事务级锁，使并发首提只能有一个创建者。
         transaction.execute(
                 "SELECT pg_catalog.pg_advisory_xact_lock(?)",
                 CommandIdempotency.advisoryLockKey(
@@ -96,6 +98,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
             return existingResult(transaction, existing, true);
         }
 
+        // 统一按 Novel、Chapter、Session 顺序锁定来源，避免不同工作流形成反向等待。
         lockOwnedResources(transaction, plan);
         LocalDateTime now = DatabaseTimestamp.now(clock);
         String runId = ids.next();
@@ -272,6 +275,7 @@ public final class JooqWorkflowStartRepository implements WorkflowStartRepositor
                 json.writeValueAsString(plan.storedExecutionPlan()));
     }
 
+    /** 在调用方现有事务中追加不可变 Evidence bundle，并返回其内容寻址信息。 */
     EvidenceBundleRef appendEvidence(DSLContext transaction, String runId, int version,
             String policyVersion, List<WorkflowEvidenceItemPlan> items, LocalDateTime now) {
         if (version < 1 || items.isEmpty()) throw new IllegalArgumentException("追加 Evidence 的版本和来源不能为空");

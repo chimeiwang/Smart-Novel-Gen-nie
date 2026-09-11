@@ -15,6 +15,32 @@ README_PATH = Path(__file__).resolve().parents[1] / "README.md"
 COMMAND_LIST_START = "<!-- command-list:start -->"
 COMMAND_LIST_END = "<!-- command-list:end -->"
 
+VIDEO_EPISODE_READS = {
+    "long.video.episode.list",
+    "long.video.episode.get",
+    "long.video.episode.source.list",
+    "long.video.episode.source.get",
+    "long.video.episode.script.draft.get",
+    "long.video.episode.script.run.get",
+    "long.video.episode.script.confirmation.get",
+    "long.video.episode.script.version.list",
+    "long.video.episode.script.version.get",
+    "long.video.episode.command.get",
+    "long.video.episode.project-command.get",
+}
+
+VIDEO_EPISODE_MUTATIONS = {
+    "long.video.episode.create",
+    "long.video.episode.update",
+    "long.video.episode.reorder",
+    "long.video.episode.source.create",
+    "long.video.episode.script.draft.save",
+    "long.video.episode.script.run.start",
+    "long.video.episode.script.candidate.adopt",
+    "long.video.episode.script.confirmation.prepare",
+    "long.video.episode.script.confirmation.approve",
+}
+
 VIDEO_COMMANDS = {
     "long.video.project.list",
     "long.video.project.get",
@@ -23,87 +49,103 @@ VIDEO_COMMANDS = {
     "long.video.asset.rights",
     "long.video.asset.download",
     "long.video.asset.preview",
-    "long.video.adaptation.list",
-    "long.video.adaptation.get",
-    "long.video.adaptation.create",
-    "long.video.adaptation.watch",
-    "long.video.plan.start",
-    "long.video.plan.confirm",
-    "long.video.plan.discard",
-    "long.video.episode.save",
-    "long.video.prompt.start",
-    "long.video.prompt.save",
+    "long.video.episode.list",
+    "long.video.episode.get",
+    "long.video.episode.create",
+    "long.video.episode.update",
+    "long.video.episode.reorder",
+    "long.video.episode.source.create",
+    "long.video.episode.source.list",
+    "long.video.episode.source.get",
+    "long.video.episode.script.draft.get",
+    "long.video.episode.script.draft.save",
+    "long.video.episode.script.run.start",
+    "long.video.episode.script.run.get",
+    "long.video.episode.script.candidate.adopt",
+    "long.video.episode.script.confirmation.prepare",
+    "long.video.episode.script.confirmation.get",
+    "long.video.episode.script.confirmation.approve",
+    "long.video.episode.script.version.list",
+    "long.video.episode.script.version.get",
+    "long.video.episode.command.get",
+    "long.video.episode.project-command.get",
     "long.video.canon.list",
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
-    "long.video.reference.save",
-    "long.video.render.list",
-    "long.video.render.start",
-    "long.video.render.get",
-    "long.video.render.retry",
-    "long.video.render.watch",
-    "long.video.take.confirm",
-    "long.video.take.download",
-    "long.video.post.show",
-    "long.video.keyframe.set",
-    "long.video.keyframe.clear",
-    "long.video.keyframe.extract",
-    "long.video.edit.save",
-    "long.video.edit.get",
-    "long.video.mix.save",
-    "long.video.mix.get",
-    "long.video.export.start",
-    "long.video.export.get",
-    "long.video.export.retry",
-    "long.video.export.watch",
-    "long.video.export.download",
+    "long.video.production.capabilities.get",
+    "long.video.episode.storyboard.draft.get",
+    "long.video.episode.storyboard.draft.save",
+    "long.video.episode.storyboard.run.start",
+    "long.video.episode.storyboard.run.list",
+    "long.video.episode.storyboard.run.get",
+    "long.video.episode.storyboard.candidate.get",
+    "long.video.episode.storyboard.candidate.adopt",
+    "long.video.episode.storyboard.confirmation.prepare",
+    "long.video.episode.storyboard.confirmation.get",
+    "long.video.episode.storyboard.confirmation.approve",
+    "long.video.episode.storyboard.version.list",
+    "long.video.episode.storyboard.version.get",
+    "long.video.episode.take.list",
+    "long.video.episode.take.download",
+    "long.video.episode.adoption.create",
+    "long.video.episode.adoption.get",
+    "long.video.episode.baseline.create",
+    "long.video.episode.baseline.list",
+    "long.video.episode.baseline.get",
+    "long.video.episode.impact.list",
+    "long.video.episode.impact.get",
+    "long.video.episode.impact.decide",
+    "long.video.episode.render.start",
+    "long.video.episode.render.get",
+    "long.video.episode.render.retry",
+    "long.video.episode.edit.create",
+    "long.video.episode.edit.list",
+    "long.video.episode.edit.get",
+    "long.video.episode.mix.create",
+    "long.video.episode.mix.list",
+    "long.video.episode.mix.get",
+    "long.video.episode.export.start",
+    "long.video.episode.export.get",
+    "long.video.episode.export.retry",
+    "long.video.episode.delivery.get",
+    "long.video.episode.delivery.download",
 }
 
 VIDEO_MUTATIONS = {
     "long.video.project.create",
     "long.video.asset.upload",
     "long.video.asset.rights",
-    "long.video.adaptation.create",
-    "long.video.plan.start",
-    "long.video.plan.confirm",
-    "long.video.plan.discard",
-    "long.video.episode.save",
-    "long.video.prompt.start",
-    "long.video.prompt.save",
+    "long.video.episode.create",
+    "long.video.episode.update",
+    "long.video.episode.reorder",
+    "long.video.episode.source.create",
+    "long.video.episode.script.draft.save",
+    "long.video.episode.script.run.start",
+    "long.video.episode.script.candidate.adopt",
+    "long.video.episode.script.confirmation.prepare",
+    "long.video.episode.script.confirmation.approve",
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
-    "long.video.reference.save",
-    "long.video.render.start",
-    "long.video.render.retry",
-    "long.video.take.confirm",
-    "long.video.keyframe.set",
-    "long.video.keyframe.clear",
-    "long.video.keyframe.extract",
-    "long.video.edit.save",
-    "long.video.mix.save",
-    "long.video.export.start",
-    "long.video.export.retry",
+    "long.video.episode.storyboard.draft.save",
+    "long.video.episode.storyboard.run.start",
+    "long.video.episode.storyboard.candidate.adopt",
+    "long.video.episode.storyboard.confirmation.prepare",
+    "long.video.episode.storyboard.confirmation.approve",
+    "long.video.episode.adoption.create",
+    "long.video.episode.baseline.create",
+    "long.video.episode.impact.decide",
+    "long.video.episode.render.start",
+    "long.video.episode.render.retry",
+    "long.video.episode.edit.create",
+    "long.video.episode.mix.create",
+    "long.video.episode.export.start",
+    "long.video.episode.export.retry",
 }
 
-VIDEO_REQUEST_ID_MUTATIONS = {
-    "long.video.adaptation.create",
-    "long.video.plan.start",
-    "long.video.plan.confirm",
-    "long.video.plan.discard",
-    "long.video.episode.save",
-    "long.video.prompt.start",
-    "long.video.canon.candidate.set",
-    "long.video.canon.approve",
-    "long.video.render.start",
-    "long.video.render.retry",
-    "long.video.take.confirm",
-    "long.video.keyframe.set",
-    "long.video.keyframe.clear",
-    "long.video.keyframe.extract",
-    "long.video.edit.save",
-    "long.video.mix.save",
-    "long.video.export.start",
-    "long.video.export.retry",
+VIDEO_REQUEST_ID_MUTATIONS = VIDEO_MUTATIONS - {
+    "long.video.project.create",
+    "long.video.asset.upload",
+    "long.video.asset.rights",
 }
 
 EXPECTED_COMMANDS = {
@@ -331,20 +373,20 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
     assert registry["long.task.watch"].fileOutput.kind == "none"
     assert registry["long.task.watch"].requiresIdentity is True
     assert registry["long.task.watch"].requiresClientRequestId is False
-    assert registry["long.video.adaptation.watch"].mutation is False
-    assert registry["long.video.adaptation.watch"].outputMode == "jsonl"
-    assert registry["long.video.adaptation.watch"].fileOutput.kind == "none"
-    assert registry["long.video.adaptation.watch"].requiresIdentity is True
+    assert registry["long.video.episode.take.download"].mutation is False
+    assert registry["long.video.episode.take.download"].outputMode == "json"
+    assert registry["long.video.episode.take.download"].fileOutput.kind == "none"
+    assert registry["long.video.episode.take.download"].requiresIdentity is True
 
 
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 126
+    assert len(registry) == 152
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 75
+    ) == 80
     assert len(EXPECTED_STRUCTURED_WRITES) == 36
     assert "long.novel.create" not in EXPECTED_STRUCTURED_WRITES
     assert "long.novel.summary.save" not in EXPECTED_STRUCTURED_WRITES

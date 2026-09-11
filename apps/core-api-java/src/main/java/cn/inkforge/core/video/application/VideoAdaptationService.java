@@ -42,8 +42,7 @@ public final class VideoAdaptationService {
     public ChapterAdaptationResponse create(
             String userId, String projectId, CreateChapterAdaptationRequest request) {
         requireEnabled();
-        VideoAdaptationSnapshot created = repository.create(userId, projectId, request);
-        return repository.getDetail(userId, created.id());
+        throw retiredCreation();
     }
 
     public ChapterAdaptationResponse get(String userId, String adaptationId) {
@@ -90,17 +89,18 @@ public final class VideoAdaptationService {
     public ChapterAdaptationTaskAcceptedResponse startPlan(
             String userId, String adaptationId, StartShotPlanRunRequest request) {
         requireEnabled();
-        VideoAdaptationTaskAcceptance accepted =
-                tasks.createPlanTask(userId, adaptationId, request);
-        return accepted(userId, accepted);
+        throw retiredCreation();
     }
 
     public ChapterAdaptationTaskAcceptedResponse startPrompts(
             String userId, String adaptationId, StartPromptRunRequest request) {
         requireEnabled();
-        VideoAdaptationTaskAcceptance accepted =
-                tasks.createPromptTask(userId, adaptationId, request);
-        return accepted(userId, accepted);
+        throw retiredCreation();
+    }
+
+    /** 新创作只使用独立剧集；旧任务回调和历史读取继续按原身份收敛。 */
+    private static ApiException retiredCreation() {
+        return new ApiException(410, "VIDEO_CHAPTER_CREATION_RETIRED", "章节改编新建入口已退出，请使用独立剧集制作");
     }
 
     public VideoAdaptationWorkflowProgressResponse progress(

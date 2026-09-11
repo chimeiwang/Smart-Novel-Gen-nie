@@ -50,6 +50,7 @@ final class JooqWorkflowBillingReconciliationRepository
         this.billing = new WorkflowBillingCoordinator(ids, json, registry);
     }
 
+    /** 在单事务内审计未知用量并选择精确结算或释放预留，不改写 Run 终态。 */
     @Override
     public WorkflowBillingReconciliationResult reconcile(
             WorkflowBillingReconciliationCommand command) {
@@ -127,6 +128,7 @@ final class JooqWorkflowBillingReconciliationRepository
                         "Workflow 计费用户不存在");
             }
 
+            // 已处理预留只允许同 reconciliationId 的完全相同命令幂等重放。
             String status = reservation.get("status", String.class);
             if (!"reconciliation_required".equals(status)) {
                 return duplicateOrConflict(command, reservation, status);

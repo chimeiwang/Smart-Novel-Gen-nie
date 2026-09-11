@@ -1,0 +1,56 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardReviewFinding/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "enum": [
+        "script_coverage",
+        "continuity",
+        "shot_clarity",
+        "feasibility",
+        "reference",
+        "duration"
+      ],
+      "title": "Code",
+      "type": "string"
+    },
+    "message": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "scriptSceneId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Scriptsceneid"
+    },
+    "shotId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Shotid"
+    }
+  },
+  "required": [
+    "code",
+    "shotId",
+    "scriptSceneId",
+    "message"
+  ],
+  "title": "VideoStoryboardReviewFinding",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardReviewFinding"
+}

@@ -183,6 +183,66 @@ public class VideoshotpromptversionRecord extends UpdatableRecordImpl<Videoshotp
         return (LocalDateTime) get(10);
     }
 
+    /**
+     * Setter for <code>public.VideoShotPromptVersion.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotPromptVersion.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(11);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotPromptVersion.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotPromptVersion.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(12);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoShotPromptVersion.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoShotPromptVersion.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(13);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoShotPromptVersion.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(14, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoShotPromptVersion.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(14);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -206,7 +266,7 @@ public class VideoshotpromptversionRecord extends UpdatableRecordImpl<Videoshotp
     /**
      * Create a detached, initialised VideoshotpromptversionRecord
      */
-    public VideoshotpromptversionRecord(String id, String shotid, String shotplanversionid, Integer versionno, String basedonversionid, String generatedtext, String currenttext, String sourcetaskid, String createdbyuserid, String contenthash, LocalDateTime createdat) {
+    public VideoshotpromptversionRecord(String id, String shotid, String shotplanversionid, Integer versionno, String basedonversionid, String generatedtext, String currenttext, String sourcetaskid, String createdbyuserid, String contenthash, LocalDateTime createdat, String videoepisodeid, String episodeshotid, String episodeshotversionid, String productionbaselineid) {
         super(Videoshotpromptversion.VIDEOSHOTPROMPTVERSION);
 
         setId(id);
@@ -220,6 +280,10 @@ public class VideoshotpromptversionRecord extends UpdatableRecordImpl<Videoshotp
         setCreatedbyuserid(createdbyuserid);
         setContenthash(contenthash);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

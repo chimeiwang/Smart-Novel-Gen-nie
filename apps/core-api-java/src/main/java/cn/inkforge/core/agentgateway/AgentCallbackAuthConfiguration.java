@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** 以 Agent 公钥和 Redis 一次性消费记录装配内部回调认证。 */
 @Configuration(proxyBeanMethods = false)
 class AgentCallbackAuthConfiguration {
 

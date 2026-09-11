@@ -68,6 +68,24 @@ _VIDEO_PREVIEW_TABLES = frozenset(
         "VideoEpisodeMixHead",
         "VideoEpisodeExportTask",
         "VideoEpisodeExport",
+        "VideoEpisode",
+        "VideoEpisodeSourceSetVersion",
+        "VideoEpisodeSourceSnapshot",
+        "VideoEpisodeScriptDraft",
+        "VideoEpisodeScriptVersion",
+        "VideoEpisodeDependency",
+        "VideoImpactReview",
+        "VideoEpisodeCommand",
+        "VideoEpisodeShot",
+        "VideoShotLineage",
+        "VideoStoryboardDraft",
+        "VideoStoryboardVersion",
+        "VideoShotVersion",
+        "VideoProductionBaseline",
+        "VideoTakeAdoption",
+        "VideoProductionBaselineShot",
+        "VideoProductionEditHead",
+        "VideoProductionMixHead",
     }
 )
 _VIDEO_PREVIEW_NOVEL_OBJECTS = frozenset({"Novel_id_userId_key"})
@@ -458,7 +476,13 @@ def project_schema_contract(
                 item["values"] = [
                     value
                     for value in values
-                    if value not in {"video_scene_plan", "video_adaptation_plan"}
+                    if value
+                    not in {
+                        "video_scene_plan",
+                        "video_adaptation_plan",
+                        "video_episode_script",
+                        "video_episode_storyboard",
+                    }
                 ]
 
     return add_contract_fingerprint(projected)
@@ -480,6 +504,7 @@ def _project_review_artifact_without_video(table: Contract) -> None:
         "videoSceneId",
         "videoAdaptationId",
         "videoAdaptationTaskId",
+        "videoEpisodeId",
     }
     columns = table.get("columns")
     if isinstance(columns, list):

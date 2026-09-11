@@ -1,0 +1,171 @@
+.setting-visual-context,
+.setting-visual-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.setting-visual-heading,
+.setting-visual-project,
+.setting-visual-slot > header,
+.setting-visual-draft > header,
+.setting-visual-draft > footer,
+.setting-visual-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.setting-visual-project > label,
+.setting-visual-fields > label,
+.setting-visual-file > label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.setting-visual-project > label {
+  flex: 1;
+  max-width: 440px;
+}
+
+.setting-visual-heading h3,
+.setting-visual-draft h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.setting-visual-heading p,
+.setting-visual-draft p,
+.setting-visual-context > p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.setting-visual-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+  gap: 12px;
+}
+
+.setting-visual-slot,
+.setting-visual-draft {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 14px;
+}
+
+.setting-visual-slot > header > div,
+.setting-visual-history figcaption,
+.setting-visual-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.setting-visual-slot > header span,
+.setting-visual-file > small,
+.setting-visual-draft > footer > span,
+.setting-visual-history figcaption {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.setting-visual-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.setting-visual-editor figure {
+  min-width: 0;
+  margin: 0;
+}
+
+.setting-visual-editor img {
+  display: block;
+  width: 100%;
+  height: 180px;
+  object-fit: contain;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.setting-visual-images figcaption {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.setting-visual-images .candidate img {
+  border-style: dashed;
+}
+
+.setting-visual-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.setting-visual-confirm p {
+  margin: 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.setting-visual-history {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  font-size: 13px;
+}
+
+.setting-visual-history summary { cursor: pointer; }
+.setting-visual-history > div { display: grid; gap: 12px; margin-top: 12px; }
+.setting-visual-history figure { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 10px; }
+.setting-visual-history img { height: 88px; }
+
+.setting-visual-empty,
+.setting-visual-placeholder {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.setting-visual-empty p { margin: 0; }
+.setting-visual-placeholder { min-height: 140px; text-align: center; }
+.setting-visual-draft-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr); gap: 16px; margin: 16px 0; }
+.setting-visual-file { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.setting-visual-file input { max-width: 100%; font-size: 12px; }
+.setting-visual-fields .textarea { min-height: 76px; }
+.setting-visual-fields .setting-visual-rights { flex-direction: row; align-items: flex-start; line-height: 1.6; }
+.setting-visual-rights input { flex-shrink: 0; margin-top: 4px; }
+.setting-visual-lore-tabs { display: flex; gap: 6px; padding: 8px 24px; border-bottom: 1px solid var(--border); }
+.setting-visual-lore-panel[hidden] { display: none; }
+.setting-visual-lore-footer { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+
+@media (max-width: 1100px) {
+  .setting-visual-draft-grid { grid-template-columns: minmax(0, 1fr); }
+}

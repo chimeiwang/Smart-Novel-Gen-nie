@@ -45,10 +45,16 @@ public final class ExecutionRegistryFixtures {
                 .withRagEmbeddingConfig("e2e-embedding-vector-v1", "http://e2e-control:8090");
     }
 
-    /** 视频测试只在内存启用两项，部署身份仍须通过 Registry 的精确环境授权。 */
+    /** Episode 视频测试只启用当前四项，旧章节 Operation 不再进入测试 Registry。 */
     public static ExecutionRegistry videoOperationsEnabled(ExecutionRegistry.Environment environment) {
-        return modifiedOperations(environment, java.util.Set.of("video.chapter_cinematic_adaptation_v2",
-                "video.chapter_shot_prompt_v2"), operation -> operation.put("v2Enabled", true));
+        return modifiedOperations(
+                environment,
+                java.util.Set.of(
+                        "video.episode_script_generate",
+                        "video.episode_script_revise",
+                        "video.episode_storyboard_generate",
+                        "video.episode_storyboard_revise"),
+                operation -> operation.put("v2Enabled", true));
     }
 
     private static ExecutionRegistry modifiedSelectionOperation(

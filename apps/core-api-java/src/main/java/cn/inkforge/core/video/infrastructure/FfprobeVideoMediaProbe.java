@@ -8,6 +8,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -33,6 +35,7 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
         this.json = Objects.requireNonNull(json);
     }
 
+    /** 从显式路径或 PATH 中发现可执行文件；未找到时返回不可用探针。 */
     public static FfprobeVideoMediaProbe discover(
             String executableName,
             String pathEnvironment,
@@ -51,21 +54,31 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
 
     @Override
     public int probeDurationMs(Path path) {
+        return probe(path, false);
+    }
+
+    @Override
+    public int probeVideoDurationMs(Path path) {
+        return probe(path, true);
+    }
+
+    /** 有界执行 ffprobe；可选要求至少存在一帧有效视频画面。 */
+    private int probe(Path path, boolean requireVideo) {
         if (!available()) {
             throw new VideoMediaProbeException("当前环境缺少 ffprobe");
         }
         Path media = Objects.requireNonNull(path).toAbsolutePath().normalize();
         Process process;
         try {
-            process = new ProcessBuilder(
-                            executable.toString(),
-                            "-v",
-                            "error",
-                            "-show_entries",
-                            "format=duration",
-                            "-of",
-                            "json",
-                            media.toString())
+            List<String> command = new ArrayList<>(List.of(executable.toString(), "-v", "error"));
+            if (requireVideo) command.addAll(List.of("-count_frames", "-select_streams", "v:0"));
+            command.addAll(List.of(
+                    "-show_entries",
+                    requireVideo
+                            ? "format=duration:stream=codec_type,width,height,nb_read_frames"
+                            : "format=duration",
+                    "-of", "json", media.toString()));
+            process = new ProcessBuilder(command)
                     .directory(media.getParent().toFile())
                     .start();
             process.getOutputStream().close();
@@ -73,6 +86,7 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
             throw new VideoMediaProbeException("无法启动 ffprobe", exception);
         }
 
+        // stdout/stderr 必须并行排空，否则子进程可能因管道写满而在 waitFor 前死锁。
         CompletableFuture<byte[]> stdout = readAsync(process.getInputStream());
         CompletableFuture<byte[]> stderr = readAsync(process.getErrorStream());
         try {
@@ -82,10 +96,11 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
                 throw new VideoMediaProbeException("媒体时长探测超时");
             }
             byte[] output = await(stdout);
-            await(stderr);
-            if (process.exitValue() != 0) {
+            byte[] errors = await(stderr);
+            if (process.exitValue() != 0 || (requireVideo && errors.length > 0)) {
                 throw new VideoMediaProbeException("ffprobe 无法读取媒体时长");
             }
+            if (requireVideo) requireVideoFrames(output);
             return durationMs(output);
         } catch (InterruptedException exception) {
             stop(process);
@@ -93,6 +108,26 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
             throw new VideoMediaProbeException("媒体时长探测被中断", exception);
         } finally {
             if (process.isAlive()) stop(process);
+        }
+    }
+
+    private void requireVideoFrames(byte[] output) {
+        try {
+            JsonNode streams = json.readTree(output).path("streams");
+            if (!streams.isArray() || streams.size() != 1) {
+                throw new VideoMediaProbeException("归档结果没有可读取的视频画面");
+            }
+            JsonNode video = streams.get(0);
+            if (!"video".equals(video.path("codec_type").asString())
+                    || video.path("width").asInt() <= 0
+                    || video.path("height").asInt() <= 0
+                    || Long.parseLong(video.path("nb_read_frames").asString()) <= 0) {
+                throw new VideoMediaProbeException("归档结果没有可读取的视频画面");
+            }
+        } catch (VideoMediaProbeException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new VideoMediaProbeException("归档结果视频探测数据无效", exception);
         }
     }
 
@@ -114,6 +149,7 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
         }
     }
 
+    /** 异步读取并限制工具输出，避免异常媒体导致无界内存占用。 */
     private static CompletableFuture<byte[]> readAsync(InputStream input) {
         return CompletableFuture.supplyAsync(() -> {
             try (input) {
@@ -145,7 +181,7 @@ public final class FfprobeVideoMediaProbe implements VideoMediaProbe {
         }
     }
 
-    private static Path findExecutable(String name, String pathEnvironment) {
+    static Path findExecutable(String name, String pathEnvironment) {
         if (name == null || name.isBlank()) return null;
         Path direct = Path.of(name);
         if (direct.getNameCount() > 1 || direct.isAbsolute()) {

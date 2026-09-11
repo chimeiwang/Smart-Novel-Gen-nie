@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
 import tools.jackson.databind.ObjectMapper;
 
+/** 装配中短篇双文档版本仓储、用例服务和公共枚举转换。 */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class ShortMediumConfiguration {

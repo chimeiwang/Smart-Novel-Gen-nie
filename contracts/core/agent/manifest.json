@@ -1,6 +1,6 @@
 {
   "generator": "scripts/export_agent_contract_schemas.py",
-  "modelCount": 316,
+  "modelCount": 351,
   "models": [
     {
       "model": "AgentUpdates",
@@ -1683,6 +1683,216 @@
       "sha256": "a6bc1aa5777191d68618c9283b1bf5fc18a1dca7f87023022b113d2b8ba3fb31"
     },
     {
+      "model": "VideoEpisodeCharacterEvidence",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeCharacterEvidence.schema.json",
+      "sha256": "83fda51ed68edb9027d2caf19bab744c7a59ff7f7b760e64941340070de2fa27"
+    },
+    {
+      "model": "VideoEpisodeDependencyEvidence",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeDependencyEvidence.schema.json",
+      "sha256": "f1a86f63cb1112aeef7cb05955b3eae8c2534371066d41fc5ef1dff9a8ec0730"
+    },
+    {
+      "model": "VideoEpisodeDependencyInput",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeDependencyInput.schema.json",
+      "sha256": "3ac5fed09d43acac4add9e47da025f0da919614e2f7ad9c4d79afa8db7d69c8e"
+    },
+    {
+      "model": "VideoEpisodeEndingState",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeEndingState.schema.json",
+      "sha256": "d6f8b3257b8a34ad2e3d7870759318718a576c40ae13e5e3b9d2b61beadabd51"
+    },
+    {
+      "model": "VideoEpisodeScriptContext",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptContext.schema.json",
+      "sha256": "026a47f3ccf4dfbc63aaba305fe50ff16d80947dda9c12b42a53404cf6e731f2"
+    },
+    {
+      "model": "VideoEpisodeScriptDocument",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptDocument.schema.json",
+      "sha256": "9bf5d72588a1027552cc938e75617143971cb14a30e12fdcd1ca50d128da0c89"
+    },
+    {
+      "model": "VideoEpisodeScriptLine",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptLine.schema.json",
+      "sha256": "35b017966df4fe36c1adcfe6c56e893e8db7f7830d36f2d96fc8a3eaf28440f0"
+    },
+    {
+      "model": "VideoEpisodeScriptOverview",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptOverview.schema.json",
+      "sha256": "55453224a06f9d24f1d5458cc841d724fd0b198c6d13fb7adb2d26e0a4c2f802"
+    },
+    {
+      "model": "VideoEpisodeScriptProposal",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptProposal.schema.json",
+      "sha256": "fd45389e99932d06907cb19c42e3044ce3933b00ec240525928a55da1b13eb37"
+    },
+    {
+      "model": "VideoEpisodeScriptReview",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptReview.schema.json",
+      "sha256": "5664f0ce7aa61b4aed5fd61366eb6ac558e69ee4750e2ea07696096f6a1d383c"
+    },
+    {
+      "model": "VideoEpisodeScriptReviewFinding",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptReviewFinding.schema.json",
+      "sha256": "8dacd3055c2195244631ce30f39e7ce7938e56a2f3fc9b9e437cf940c684d04f"
+    },
+    {
+      "model": "VideoEpisodeScriptScene",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptScene.schema.json",
+      "sha256": "5a8c12134bda3db351d48c39a85ca099055ed58517d2cdb590b877d3ee97ccb8"
+    },
+    {
+      "model": "VideoEpisodeScriptStageDependency",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptStageDependency.schema.json",
+      "sha256": "c79c61b7316f307c95e112297dd02c7cbda6780f932beb74450bac7191fc6905"
+    },
+    {
+      "model": "VideoEpisodeScriptStageInput",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptStageInput.schema.json",
+      "sha256": "9983519bd7b606b943330433ef65716541d2a58a2381a680831f8d72926f2854"
+    },
+    {
+      "model": "VideoEpisodeScriptStageOutput",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeScriptStageOutput.schema.json",
+      "sha256": "adcd9c908d54902bf284206c720999b24cb10ff1e60b11ce9da06ec7a426f61e"
+    },
+    {
+      "model": "VideoEpisodeSelectedSourceEvidence",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeSelectedSourceEvidence.schema.json",
+      "sha256": "2881c246b607edc3aac7d016b1d2944994eaa326dc67852f237e1bee50799dbe"
+    },
+    {
+      "model": "VideoEpisodeSourceEvidence",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeSourceEvidence.schema.json",
+      "sha256": "33fe976dc8526548f811218a0f71f5c46f9b0bcfe10bfd668aeb47409fc8d346"
+    },
+    {
+      "model": "VideoEpisodeSourceRef",
+      "module": "video_episode",
+      "path": "video_episode/VideoEpisodeSourceRef.schema.json",
+      "sha256": "820b41a013b03ed7c03b52e4698cd7eb325e0e4e52ad2a114ac7f6ebced105c1"
+    },
+    {
+      "model": "VideoStoryboardContext",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardContext.schema.json",
+      "sha256": "565a646ee2837de3ca7a7e1b7e2ab048846b0c6bda1a4a37c762280c18faec4d"
+    },
+    {
+      "model": "VideoStoryboardDocument",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardDocument.schema.json",
+      "sha256": "0317dd072917ce7c5956a02a0b129d00213182794f38024582e1b87b35cb6eb4"
+    },
+    {
+      "model": "VideoStoryboardLineage",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardLineage.schema.json",
+      "sha256": "2151d5671309616d85d892bd104d12feec40b19377819a6726194f7ef7aa39b4"
+    },
+    {
+      "model": "VideoStoryboardProductionDefaults",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardProductionDefaults.schema.json",
+      "sha256": "877d0b5556cf6a5acd0e51e94b58f801450b8c4f66c2fe1307fbe7c6149e3eeb"
+    },
+    {
+      "model": "VideoStoryboardProductionIntent",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardProductionIntent.schema.json",
+      "sha256": "2a251283b2b70765799fe93678cc4cba4158686cd5229d386a7ce245f1675ca8"
+    },
+    {
+      "model": "VideoStoryboardProductionIntentProposal",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardProductionIntentProposal.schema.json",
+      "sha256": "3a5312bd6094a4173567b4e0a48bb0974a927261938575f3c3588b33a51c9dba"
+    },
+    {
+      "model": "VideoStoryboardProposal",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardProposal.schema.json",
+      "sha256": "64c45d6064e6cd143baaa9799b0b5964afbf42794c89b771251f1a8ec47ed6ed"
+    },
+    {
+      "model": "VideoStoryboardReferenceChoice",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardReferenceChoice.schema.json",
+      "sha256": "1c7193b8ddf6eb7e1b19d8b6753b73c015e64eb148dd1f0d15973936a8702f1e"
+    },
+    {
+      "model": "VideoStoryboardReferenceEvidence",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardReferenceEvidence.schema.json",
+      "sha256": "1bca98b3aa9177f3c96165cce4fc0f9fdd3f137ae86de12eb2585cd4ef11bc92"
+    },
+    {
+      "model": "VideoStoryboardReferenceSnapshot",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardReferenceSnapshot.schema.json",
+      "sha256": "8f639d71e21ca408424b1dac42d7c07c327fe06efa86f7c8437b73c846006082"
+    },
+    {
+      "model": "VideoStoryboardReview",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardReview.schema.json",
+      "sha256": "4229b83548c8aaf0185264fa810614b21350d1961dad7766677127551e22c694"
+    },
+    {
+      "model": "VideoStoryboardReviewFinding",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardReviewFinding.schema.json",
+      "sha256": "4f237d6a19dcbc599a6463d398836a27d76341c89a4bd34e24a7d60db271cce6"
+    },
+    {
+      "model": "VideoStoryboardShot",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardShot.schema.json",
+      "sha256": "eb7ddd3bf736c008e04733e80d1c7aa2198e75d040d5f5585039929cc39eb2cc"
+    },
+    {
+      "model": "VideoStoryboardShotProposal",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardShotProposal.schema.json",
+      "sha256": "c2514c70fb03aac6d556712a23584324a6152c9a406a60ad0ebf15cb959e85c9"
+    },
+    {
+      "model": "VideoStoryboardStageDependency",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardStageDependency.schema.json",
+      "sha256": "d879d56268337588076b8e378e069f48a9654d905f802181b779d653365340a3"
+    },
+    {
+      "model": "VideoStoryboardStageInput",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardStageInput.schema.json",
+      "sha256": "57e6b926615ed9c58696435e5a7faddb69247ac4ed984a9bd5c581995044d2cb"
+    },
+    {
+      "model": "VideoStoryboardStageOutput",
+      "module": "video_storyboard",
+      "path": "video_storyboard/VideoStoryboardStageOutput.schema.json",
+      "sha256": "9273f474cd7ff943f7656af42c50e74c7b2ad8b7e1d334f412f8f05f48957341"
+    },
+    {
       "model": "SeedanceRenderError",
       "module": "video_render",
       "path": "video_render/SeedanceRenderError.schema.json",
@@ -1692,25 +1902,25 @@
       "model": "SeedanceRenderOutput",
       "module": "video_render",
       "path": "video_render/SeedanceRenderOutput.schema.json",
-      "sha256": "d5bc5fa9dd16e65608c5ddac0dc6c0eefa2edc3c01b02bea363eba6e4061f58b"
+      "sha256": "72413506b7acf8d549b57724a4c2522960eaa29eb64344dc31e4f4181dd99256"
     },
     {
       "model": "SeedanceRenderQueryRequest",
       "module": "video_render",
       "path": "video_render/SeedanceRenderQueryRequest.schema.json",
-      "sha256": "9a1e9f4b6aadd8066d868b86e9ee984d21dc590734d3b233f97960a1afaacb49"
+      "sha256": "773c1249f91ff13aa6707004bec8df03c5ac0cb2e1196585fca189ac14c9170c"
     },
     {
       "model": "SeedanceRenderQueryResponse",
       "module": "video_render",
       "path": "video_render/SeedanceRenderQueryResponse.schema.json",
-      "sha256": "5d9e12a86e61dce5372e957b7354bd996bc3904936abbe44bbebfcc3e04e9878"
+      "sha256": "68b1e586ca504d209cb4125f293c0aa5aa6ce00bef8e68d6dc7d6ae00ecc8fdd"
     },
     {
       "model": "SeedanceRenderSubmitRequest",
       "module": "video_render",
       "path": "video_render/SeedanceRenderSubmitRequest.schema.json",
-      "sha256": "68915636e44bbdfca0e4596dbd548e14630b09af0662be9b6752635c069749c4"
+      "sha256": "c3ea5335ce2b2a0d57972b6f1b2f6e0912ad360e9da6381d64784b9c3525c54e"
     },
     {
       "model": "SeedanceRenderSubmitResponse",
@@ -1740,7 +1950,7 @@
       "model": "VideoShotRenderManifest",
       "module": "video_render",
       "path": "video_render/VideoShotRenderManifest.schema.json",
-      "sha256": "0c89ab4fbee1979007b93c64cd085a60221b2020876a7dcd4a5ea462825e253a"
+      "sha256": "00e6222c3cdfe67fe475964eba354740038e1e49e5e13d37848a49c71eec7134"
     },
     {
       "model": "ApplyingEventPayload",

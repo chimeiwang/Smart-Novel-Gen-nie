@@ -113,188 +113,161 @@ class JooqWorkflowCallbackRepositoryTest {
     }
 
     @Test
-    void 视频提示词具体纠正独立结算且原任务只完成一次() {
-        VideoFlow flow = videoFlow("video-prompt-correction", true);
-        Map<String, Object> finding = new LinkedHashMap<>();
-        finding.put("code", "prompt_budget"); finding.put("shotKey", "S01");
-        finding.put("parameters", Map.of("actual", 500, "maximum", 360)); finding.put("blocking", true);
-        Map<String, Object> output = new LinkedHashMap<>();
-        output.put("stageKey", "shot_prompt"); output.put("outcome", "needs_correction");
-        output.put("validationFindings", List.of(finding)); output.put("promptBatch", null);
-        var first = videoResult(flow.request(), output);
+    void 独立剧本两阶段重启可重放且完成只物化一次候选() {
+        var flow = episodeFlow("episode-script-complete");
+        Map<String, Object> candidate = new LinkedHashMap<>();
+        candidate.put("overview", Map.of("summary", "来客到访", "creativeIntent", "悬念", "targetDurationSeconds", 60));
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("id", null); line.put("tempKey", "line-new"); line.put("kind", "action");
+        line.put("speakerId", null); line.put("text", "门被推开。"); line.put("sourceRefs", List.of());
+        Map<String, Object> scene = new LinkedHashMap<>();
+        scene.put("id", null); scene.put("tempKey", "scene-new"); scene.put("title", "书房");
+        scene.put("locationLabel", "书房"); scene.put("timeLabel", "夜"); scene.put("narrativeTime", "当晚");
+        scene.put("characterIds", List.of()); scene.put("lines", List.of(line));
+        candidate.put("scenes", List.of(scene)); candidate.put("endingStates", List.of()); candidate.put("dependencies", List.of());
+        Map<String, Object> firstOutput = new LinkedHashMap<>();
+        firstOutput.put("stageKey", "episode_script"); firstOutput.put("candidate", candidate); firstOutput.put("review", null);
+        var request = flow.dispatches().claimNext().orElseThrow();
+        prepareEpisode(flow, request);
+        var first = episodeResult(request, firstOutput);
         assertThat(flow.callbacks().result(first).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
         assertThat(flow.callbacks().result(first).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
-        var second = flow.dispatches().claimNext().orElseThrow();
-        assertThat(second.getInput()).containsEntry("stageKey", "shot_prompt").containsEntry("correction", true)
-                .containsEntry("correctionFindings", List.of(finding))
-                .containsEntry("dependencies", List.of(Map.of("stepId", first.getStepId(), "resultHash", first.getResultHash())));
-        prepareVideo(flow, second);
-        Map<String, Object> batch = Map.of("schemaVersion", "shot_prompt_spec_batch_v2", "prompts", List.of(
-                Map.of("shotKey", "S01", "qualityWarnings", List.of(), "spec", Map.of("subjectAndScene", "门前站着一人",
-                        "visibleAction", "他推开木门", "camera", "固定近景", "audio", "门轴轻响", "negativeConstraints", List.of()))));
-        var last = videoResult(second, Map.of("stageKey", "shot_prompt", "outcome", "ready", "validationFindings", List.of(), "promptBatch", batch));
+        assertThat(runStatus(request.getRunId())).isEqualTo("running");
+        org.mockito.Mockito.verifyNoInteractions(flow.candidateSink());
+        var review = flow.dispatches().claimNext().orElseThrow();
+        assertThat(review.getEvidenceBundle()).isEqualTo(request.getEvidenceBundle());
+        assertThat(review.getInput()).containsEntry("stageKey", "episode_script_review");
+        prepareEpisode(flow, review);
+        Map<String, Object> finalOutput = new LinkedHashMap<>();
+        finalOutput.put("stageKey", "episode_script_review"); finalOutput.put("candidate", null);
+        finalOutput.put("review", Map.of("decision", "pass", "summary", "供作者选择", "requiredChanges", List.of(), "findings", List.of()));
+        var last = episodeResult(review, finalOutput);
         flow.callbacks().result(last);
-        flow.callbacks().result(last);
-        assertThat(runStatus(first.getRunId())).isEqualTo("completed");
-        assertThat(database.dsl().fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\"=?", first.getRunId()).get(0, Integer.class)).isEqualTo(2);
-        assertThat(database.dsl().fetchOne("SELECT count(*) FROM public.\"WorkflowBillingReservation\" WHERE \"runId\"=? AND status='settled'", first.getRunId()).get(0, Integer.class)).isEqualTo(2);
-        org.mockito.Mockito.verify(flow.projection(), org.mockito.Mockito.times(1)).completePrompts(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(first.getRunId()), org.mockito.ArgumentMatchers.eq(batch));
+        assertThat(flow.callbacks().result(last).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.DUPLICATE);
+        assertThat(runStatus(review.getRunId())).isEqualTo("completed");
+        org.mockito.Mockito.verify(flow.candidateSink()).accept(org.mockito.ArgumentMatchers.argThat(document ->
+                "video-episode-script/1.0".equals(document.get("schemaVersion")) && ((List<?>) document.get("scenes")).size() == 1));
+        assertThat(count("SELECT count(*) AS count FROM public.\"WorkflowStep\" WHERE \"runId\"=?", request.getRunId())).isEqualTo(2);
+        assertThat(eventTypes(request.getRunId())).contains("candidate_ready").endsWith("completed");
     }
 
     @Test
-    void 视频未知用量格式失败不追加纠正并投影原任务失败() {
-        VideoFlow flow = videoFlow("video-unknown-protocol", true);
-        var failure = reviewFailure(flow.request()).resolvedModel(toApiResolved(videoAgentResolved(flow.request())))
-                .errorCode(cn.inkforge.core.workflows.domain.VideoStageTransitions.CORRECTION_REQUIRED)
-                .errorCategory(ExecutionStepFailure.ErrorCategoryEnum.PROTOCOL).retryable(false).outcomeUnknown(false)
-                .usage(new StepUsage(0, 1, StepUsage.UsageStatusEnum.UNKNOWN, 1000));
-        failure.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.failureHashMaterial(failure)));
-        flow.callbacks().failure(failure);
-        assertThat(runStatus(flow.request().getRunId())).isEqualTo("failed");
-        assertThat(database.dsl().fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\"=?", flow.request().getRunId()).get(0, Integer.class)).isEqualTo(1);
-        org.mockito.Mockito.verify(flow.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(flow.request().getRunId()),
-                org.mockito.ArgumentMatchers.eq("failed"), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    void 独立剧本取消无需旧视频Task投影() {
+        var flow = episodeFlow("episode-script-cancel");
+        cancellations.request(flow.userId(), flow.runId(), "episode-cancel-request-0001");
+        assertThat(runStatus(flow.runId())).isEqualTo("cancelled");
+        assertThat(flow.dispatches().claimNext()).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(flow.candidateSink());
     }
 
-    @Test
-    void 视频关闭调度时旧running恢复也不可领取但取消仍可完成() {
-        VideoFlow flow = videoFlow("video-dispatch-gate", true);
-        database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"leaseExpiresAt\"=? WHERE id=?", NOW.minusSeconds(1), flow.request().getStepId());
-        var disabled = videoDispatch(flow.registry(), flow.projection(), false);
-        assertThat(disabled.claimNext()).isEmpty();
-        var recovered = flow.dispatches().claimNext().orElseThrow();
-        assertThat(recovered.getStepId()).isEqualTo(flow.request().getStepId());
-        assertThat(recovered.getDispatchMode().getValue()).isEqualTo("running_recovery");
-        var cancellation = new JooqWorkflowRunCancellationRepository(database, new CuidV1Generator(CLOCK), CLOCK, json,
-                flow.registry(), () -> null, () -> null, () -> null, flow::projection);
-        cancellation.request(flow.fixture().userId(), recovered.getRunId(), "video-cancel-request-0001");
-        var failure = reviewFailure(recovered).resolvedModel(toApiResolved(videoAgentResolved(recovered)))
-                .errorCode("RUN_CANCELLED").cancelRequestId("video-cancel-request-0001")
-                .errorCategory(ExecutionStepFailure.ErrorCategoryEnum.CANCELLED)
-                .usage(new StepUsage(0, 1, StepUsage.UsageStatusEnum.UNKNOWN, 1000));
-        failure.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.failureHashMaterial(failure)));
-        flow.callbacks().failure(failure);
-        assertThat(runStatus(recovered.getRunId())).isEqualTo("cancelled");
-        org.mockito.Mockito.verify(flow.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(recovered.getRunId()),
-                org.mockito.ArgumentMatchers.eq("cancelled"), org.mockito.ArgumentMatchers.eq("RUN_CANCELLED"), org.mockito.ArgumentMatchers.anyString());
-    }
-
-    @Test
-    void 中间审镜可保存完整发现但最终超原候选包络必须结算后明确失败() {
-        VideoFlow flow = videoFlow("video-final-envelope", true, false);
-        var mapped = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
-        Map<String, Object> candidate = mapped.convertValue(cn.inkforge.core.video.support.VideoAdaptationFixtures.candidate(
-                "video-final-envelope-adaptation", "甲😀乙"), new tools.jackson.core.type.TypeReference<>() {});
-        Map<String, Object> design = new LinkedHashMap<>();
-        design.put("stageKey", "shot_design"); design.put("outcome", "ready"); design.put("validationFindings", List.of());
-        design.put("candidate", candidate); design.put("design", null); design.put("missingBeatKeys", List.of());
-        flow.callbacks().result(videoResult(flow.request(), design));
-        var review = flow.dispatches().claimNext().orElseThrow(); prepareVideo(flow, review);
-        List<Map<String, Object>> findings = java.util.stream.IntStream.range(0, 481).mapToObj(index -> {
-            Map<String, Object> finding = new LinkedHashMap<>();
-            finding.put("severity", "notice"); finding.put("scope", "plan"); finding.put("scopeKey", null);
-            finding.put("message", "完整发现" + index); finding.put("evidence", "明确证据"); finding.put("suggestion", "作者核对");
-            return finding;
-        }).toList();
-        var result = videoResult(review, Map.of("stageKey", "cinematic_review", "outcome", "ready", "validationFindings", List.of(),
-                "review", Map.of("decision", "pass", "summary", "完整审镜结论", "requiredChanges", List.of(), "findings", findings)));
-        assertThat(flow.callbacks().result(result).getStatus()).isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
-        assertThat(runStatus(review.getRunId())).isEqualTo("failed");
-        assertThat(database.dsl().fetchOne("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\"=? AND status='completed'", review.getRunId())
-                .get(0, Integer.class)).isEqualTo(2);
-        org.mockito.Mockito.verify(flow.projection(), org.mockito.Mockito.never()).completePlan(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap());
-        org.mockito.Mockito.verify(flow.projection()).finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(review.getRunId()),
-                org.mockito.ArgumentMatchers.eq("failed"), org.mockito.ArgumentMatchers.eq("VIDEO_ADAPTATION_OUTPUT_INVALID"), org.mockito.ArgumentMatchers.anyString());
-    }
-
-    private static VideoFlow videoFlow(String prefix, boolean prepare) { return videoFlow(prefix, prepare, true); }
-
-    private static VideoFlow videoFlow(String prefix, boolean prepare, boolean prompt) {
+    private static EpisodeFlow episodeFlow(String prefix) {
         Fixture fixture = fixture(prefix);
         var enabled = ExecutionRegistryFixtures.videoOperationsEnabled(ExecutionRegistry.Environment.TEST);
-        String operationKey = prompt ? "video.chapter_shot_prompt_v2" : "video.chapter_cinematic_adaptation_v2";
-        var resolved = enabled.resolve(operationKey, true);
-        var projection = org.mockito.Mockito.mock(cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion.class);
-        String taskId = prefix + "-task";
-        // 此组只隔离通用执行器，业务候选物化使用 mock；真实任务完整创建/确认由视频领域与 E2E 验证。
-        database.dsl().execute("INSERT INTO public.\"VideoProject\"(id,\"novelId\",title,\"updatedAt\") VALUES(?,?,?,?)",
-                prefix + "-project", fixture.novelId(), "隔离调度来源", NOW);
-        database.dsl().execute("""
-                INSERT INTO public."VideoChapterAdaptation"(id,"projectId","novelId","chapterTitle","chapterUpdatedAt","sourceText","sourceHash")
-                VALUES(?,?,?,?,?,?,?)
-                """, prefix + "-adaptation", prefix + "-project", fixture.novelId(), "冻结章节", NOW, "甲😀乙", sha256("甲😀乙"));
-        database.dsl().execute("""
-                INSERT INTO public."VideoAdaptationTask"(id,"adaptationId","projectId","novelId","jobId",kind,workflow,"idempotencyKey","requestJson","updatedAt")
-                VALUES(?,?,?,?,?,'shot_plan','chapter_cinematic_adaptation_v2',?,'{}',?)
-                """, taskId, prefix + "-adaptation", prefix + "-project", fixture.novelId(), "video-adaptation-test-" + taskId, "video-model-" + taskId, NOW);
-        org.mockito.Mockito.when(projection.targetExists(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
-        org.mockito.Mockito.when(projection.completePrompts(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap()))
-                .thenReturn(new cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion.Completion("completed", taskId, null));
-        org.mockito.Mockito.when(projection.finish(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString())).thenAnswer(call -> call.getArgument(2));
-        Map<String, Object> context = new LinkedHashMap<>(); context.put("taskId", taskId);
-        context.put("payload", Map.of("冻结来源", "此测试只覆盖Core接续，完整业务来源由视频领域测试覆盖"));
-        context.put("inheritedCheckpoint", prompt ? null : Map.of("schemaVersion", "dramatic_structure_v3", "scenes", List.of()));
-        var plan = enabled.freezePlan(operationKey, true);
-        var input = cn.inkforge.core.workflows.domain.VideoStageTransitions.replay(plan, context, List.of()).nextInput();
-        var firstStage = resolved.stageSteps().stream().filter(stage -> stage.stageKey().equals(input.get("stageKey"))).findFirst().orElseThrow();
+        var resolved = enabled.resolve("video.episode_script_generate", true);
+        var frozen = enabled.freezePlan("video.episode_script_generate", true);
+        @SuppressWarnings("unchecked")
+        java.util.function.Consumer<Map<String, Object>> sink = org.mockito.Mockito.mock(java.util.function.Consumer.class);
+        var completion = new cn.inkforge.core.workflows.application.WorkflowVideoEpisodeScriptCompletion() {
+            public boolean targetExists(org.jooq.DSLContext transaction, String runId) { return true; }
+            public String completeCandidate(org.jooq.DSLContext transaction, String runId, Map<String, Object> document, Map<String, Object> review) {
+                sink.accept(document); return prefix + "-candidate";
+            }
+        };
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("schemaVersion", "video-episode-script-context/1.0"); context.put("episodeId", prefix + "-episode");
+        context.put("novelId", fixture.novelId()); context.put("projectId", prefix + "-project"); context.put("episodeTitle", "雨夜");
+        context.put("operation", "episode_script_generate"); context.put("draftRevision", 1); context.put("sourceSetVersionId", null);
+        context.put("baseScriptVersionId", null); context.put("sources", List.of()); context.put("characters", List.of());
+        context.put("inheritedStates", List.of()); context.put("selectedSceneIds", List.of()); context.put("instruction", "创作雨夜");
+        context.put("draft", Map.of("schemaVersion", "video-episode-script/1.0", "overview", Map.of(), "scenes", List.of(), "endingStates", List.of(), "dependencies", List.of()));
         var started = starts.start(new WorkflowStartPlan(fixture.userId(), prefix + "-request-0001", sha256(prefix),
-                "video", resolved.operation().operation(), enabled.catalogVersion(), "chat", fixture.novelId(), null, null,
-                prompt ? "video_shot_prompt" : "video_adaptation", prefix + "-adaptation",
-                Map.of("taskId", taskId), resolved.operation().evidencePolicy(), List.of(new WorkflowEvidenceItemPlan("video_task_context", taskId,
-                        true, null, null, null, context, null, null, Map.of())), resolved.operation().runBudget(), plan,
-                new WorkflowInitialStepPlan("generation", "batch_media", input, firstStage.profile(), firstStage.stepBudget(), firstStage.outputSchema()),
-                null, new WorkflowStartPlan.SourceBinding("video_adaptation_task_v2", taskId)));
-        assertThat(videoDispatch(enabled, projection, false).claimNext()).isEmpty();
-        var otherNamespace = new JooqWorkflowDispatchRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, enabled, Duration.ofSeconds(30), 3,
-                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> projection, true, "other");
-        assertThat(otherNamespace.claimNext()).isEmpty();
-        var dispatch = videoDispatch(enabled, projection, true);
+                "video", "episode_script_generate", enabled.catalogVersion(), "chat", fixture.novelId(), null, null,
+                "video_episode_script", prefix + "-episode", Map.of("episodeId", prefix + "-episode", "dispatchNamespace", "test"),
+                resolved.operation().evidencePolicy(), List.of(new WorkflowEvidenceItemPlan("video_episode_script_context", prefix + "-episode",
+                true, 1, null, null, context, null, null, Map.of())), resolved.operation().runBudget(), frozen,
+                new WorkflowInitialStepPlan("generation", "batch_media", cn.inkforge.core.workflows.domain.VideoEpisodeScriptTransitions.initialInput(),
+                resolved.generatorProfile(), resolved.generatorStepBudget(), resolved.outputSchema()),
+                null, new WorkflowStartPlan.SourceBinding("video_episode_script", prefix + "-episode")));
+        assertThat(episodeDispatch(enabled, false).claimNext()).isEmpty();
+        var other = new JooqWorkflowDispatchRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, enabled, Duration.ofSeconds(30), 3,
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, true, "other");
+        assertThat(other.claimNext()).isEmpty();
         var callback = new JooqWorkflowCallbackRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, enabled, Duration.ofSeconds(30),
-                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> projection);
-        var request = dispatch.claimNext().orElseThrow();
-        assertThat(request.getRunId()).isEqualTo(started.runId());
-        var flow = new VideoFlow(fixture, request, dispatch, callback, enabled, projection);
-        if (prepare) prepareVideo(flow, request);
-        return flow;
+                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> null, () -> null, () -> null, () -> completion);
+        return new EpisodeFlow(fixture.userId(), started.runId(), episodeDispatch(enabled, true), callback, sink);
     }
 
-    private static JooqWorkflowDispatchRepository videoDispatch(ExecutionRegistry registry,
-            cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion projection, boolean enabled) {
-        return new JooqWorkflowDispatchRepository(database, new CuidV1Generator(CLOCK), CLOCK, json, registry, Duration.ofSeconds(30), 3,
-                new JooqWorkflowExecutionContextReader(json), () -> null, () -> null, () -> null, () -> projection, enabled, "test");
+    private static JooqWorkflowDispatchRepository episodeDispatch(
+            ExecutionRegistry registry, boolean enabled) {
+        return new JooqWorkflowDispatchRepository(
+                database,
+                new CuidV1Generator(CLOCK),
+                CLOCK,
+                json,
+                registry,
+                Duration.ofSeconds(30),
+                3,
+                new JooqWorkflowExecutionContextReader(json),
+                () -> null,
+                () -> null,
+                () -> null,
+                enabled,
+                "test");
     }
 
-    private static void prepareVideo(VideoFlow flow, ExecutionStepRequest request) {
-        flow.dispatches().recordAccepted(request, accepted(request, videoAgentResolved(request)));
-        assertThat(flow.callbacks().progress(progress(request, unknownUsage()).resolvedModel(toApiResolved(videoAgentResolved(request)))).getStatus())
+    private static void prepareEpisode(EpisodeFlow flow, ExecutionStepRequest request) {
+        flow.dispatches().recordAccepted(request, accepted(request, episodeAgentResolved(request)));
+        assertThat(flow.callbacks().progress(progress(request, unknownUsage()).resolvedModel(toApiResolved(episodeAgentResolved(request)))).getStatus())
                 .isEqualTo(ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
     }
 
-    private static cn.inkforge.contracts.agent.ResolvedModelRef videoAgentResolved(ExecutionStepRequest request) {
+    private static cn.inkforge.contracts.agent.ResolvedModelRef episodeAgentResolved(
+            ExecutionStepRequest request) {
         String profile = request.getModelProfile().getDeploymentProfileKey();
         String transport = "transport.deepseek-responses.v1";
         String endpoint = "endpoint.deepseek-responses-official.v1";
         String capability = "capability.deepseek-responses.json-schema.v1";
-        return new cn.inkforge.contracts.agent.ResolvedModelRef().deploymentProfileKey(profile).provider("openai_compatible")
-                .model("deepseek-v4-flash").transportProfile(transport).endpointProfile(endpoint).capabilityVersion(capability)
-                .reasoningMode(cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.DISABLED)
-                .structuredOutputRoute(cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum.RESPONSES_JSON_SCHEMA_V1)
-                .supportsRequestIdempotency(false).deploymentFingerprint(WorkflowResolvedModel.fingerprint(profile, "openai_compatible",
-                        "deepseek-v4-flash", transport, endpoint, "responses_json_schema_v1", capability, "disabled", false));
+        return new cn.inkforge.contracts.agent.ResolvedModelRef()
+                .deploymentProfileKey(profile)
+                .provider("openai_compatible")
+                .model("deepseek-v4-flash")
+                .transportProfile(transport)
+                .endpointProfile(endpoint)
+                .capabilityVersion(capability)
+                .reasoningMode(
+                        cn.inkforge.contracts.agent.ResolvedModelRef.ReasoningModeEnum.DISABLED)
+                .structuredOutputRoute(
+                        cn.inkforge.contracts.agent.ResolvedModelRef.StructuredOutputRouteEnum
+                                .RESPONSES_JSON_SCHEMA_V1)
+                .supportsRequestIdempotency(false)
+                .deploymentFingerprint(
+                        WorkflowResolvedModel.fingerprint(
+                                profile,
+                                "openai_compatible",
+                                "deepseek-v4-flash",
+                                transport,
+                                endpoint,
+                                "responses_json_schema_v1",
+                                capability,
+                                "disabled",
+                                false));
     }
 
-    private static ExecutionStepResult videoResult(ExecutionStepRequest request, Map<String, Object> output) {
-        var result = outputResult(request, "占位").resolvedModel(toApiResolved(videoAgentResolved(request))).usage(answerUsage()).output(output);
-        result.setResultHash(ExecutionCanonicalJson.sha256(WorkflowCallbackValues.resultHashMaterial(result)));
+    private static ExecutionStepResult episodeResult(
+            ExecutionStepRequest request, Map<String, Object> output) {
+        var result =
+                outputResult(request, "占位")
+                        .resolvedModel(toApiResolved(episodeAgentResolved(request)))
+                        .usage(answerUsage())
+                        .output(output);
+        result.setResultHash(
+                ExecutionCanonicalJson.sha256(
+                        WorkflowCallbackValues.resultHashMaterial(result)));
         return result;
     }
 
-    private record VideoFlow(Fixture fixture, ExecutionStepRequest request, JooqWorkflowDispatchRepository dispatches,
-            JooqWorkflowCallbackRepository callbacks, ExecutionRegistry registry,
-            cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion projection) {}
+    private record EpisodeFlow(String userId, String runId, JooqWorkflowDispatchRepository dispatches,
+            JooqWorkflowCallbackRepository callbacks, java.util.function.Consumer<Map<String, Object>> candidateSink) {}
 
     @Test
     void RAG两批完整向量成功才物化且缺失用量保持零金额待对账() {

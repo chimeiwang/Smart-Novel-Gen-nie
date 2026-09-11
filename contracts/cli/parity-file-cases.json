@@ -9,26 +9,71 @@
         "toVersionId": "v2",
         "outputFile": "${TMP}/short-diff.json"
       },
-      "responses": [{"blocks": [{"text": "尾部😀"}]}],
-      "captureFiles": ["short-diff.json"]
+      "responses": [
+        {
+          "blocks": [
+            {
+              "text": "尾部😀"
+            }
+          ]
+        }
+      ],
+      "captureFiles": [
+        "short-diff.json"
+      ]
     },
     {
       "command": "short.version.get",
-      "payload": {"novelId": "n1", "versionId": "v/1", "outputFile": "${TMP}/short-version.txt"},
-      "responses": [{"id": "v/1", "content": "正文\r\n尾部😀"}],
-      "captureFiles": ["short-version.txt"]
+      "payload": {
+        "novelId": "n1",
+        "versionId": "v/1",
+        "outputFile": "${TMP}/short-version.txt"
+      },
+      "responses": [
+        {
+          "id": "v/1",
+          "content": "正文\r\n尾部😀"
+        }
+      ],
+      "captureFiles": [
+        "short-version.txt"
+      ]
     },
     {
       "command": "long.novel.list",
-      "payload": {"outputFile": "${TMP}/novels.json"},
-      "responses": [{"novels": [{"id": "n1", "name": "完整作品😀"}]}],
-      "captureFiles": ["novels.json"]
+      "payload": {
+        "outputFile": "${TMP}/novels.json"
+      },
+      "responses": [
+        {
+          "novels": [
+            {
+              "id": "n1",
+              "name": "完整作品😀"
+            }
+          ]
+        }
+      ],
+      "captureFiles": [
+        "novels.json"
+      ]
     },
     {
       "command": "long.chapter.get",
-      "payload": {"chapterId": "c/1", "outputFile": "${TMP}/chapter.txt"},
-      "responses": [{"id": "c/1", "content": "完整正文\r\n尾部😀", "nullable": null}],
-      "captureFiles": ["chapter.txt"]
+      "payload": {
+        "chapterId": "c/1",
+        "outputFile": "${TMP}/chapter.txt"
+      },
+      "responses": [
+        {
+          "id": "c/1",
+          "content": "完整正文\r\n尾部😀",
+          "nullable": null
+        }
+      ],
+      "captureFiles": [
+        "chapter.txt"
+      ]
     },
     {
       "command": "long.chapter.save",
@@ -39,7 +84,10 @@
         "expectedUpdatedAt": "v1"
       },
       "files": {
-        "chapter-source.txt": {"encoding": "utf8", "content": "文件正文\r\n尾部😀"}
+        "chapter-source.txt": {
+          "encoding": "utf8",
+          "content": "文件正文\r\n尾部😀"
+        }
       }
     },
     {
@@ -53,7 +101,10 @@
         "sourceUrl": null
       },
       "files": {
-        "reference.txt": {"encoding": "utf8", "content": "资料正文\r\n尾部😀"}
+        "reference.txt": {
+          "encoding": "utf8",
+          "content": "资料正文\r\n尾部😀"
+        }
       }
     },
     {
@@ -66,23 +117,61 @@
         "duty": "identity"
       },
       "files": {
-        "角色.png": {"encoding": "base64", "content": "iVBORwD/8J+YgA=="}
+        "角色.png": {
+          "encoding": "base64",
+          "content": "iVBORwD/8J+YgA=="
+        }
+      }
+    },
+    {
+      "command": "long.video.episode.script.draft.save",
+      "payload": {
+        "episodeId": "episode/1",
+        "clientRequestId": "script-file-save-01",
+        "expectedRevision": 2,
+        "sourceSetVersionId": "source/1",
+        "baseScriptVersionId": null,
+        "documentFile": "${TMP}/episode-script.json"
+      },
+      "files": {
+        "episode-script.json": {
+          "encoding": "utf8",
+          "content": "{\"schemaVersion\":\"video-episode-script/1.0\",\"overview\":{\"summary\":\"  完整😀\\r\\n尾行  \",\"creativeIntent\":\"\",\"targetDurationSeconds\":90},\"scenes\":[],\"endingStates\":[],\"dependencies\":[]}"
+        }
       }
     },
     {
       "command": "long.video.asset.download",
-      "payload": {"assetId": "a/1", "outputFile": "${TMP}/asset.bin"},
-      "captureFiles": ["asset.bin"]
+      "payload": {
+        "assetId": "a/1",
+        "outputFile": "${TMP}/asset.bin"
+      },
+      "captureFiles": [
+        "asset.bin"
+      ]
     },
     {
-      "command": "long.video.take.download",
-      "payload": {"takeId": "tk/1", "outputFile": "${TMP}/take.mp4"},
-      "captureFiles": ["take.mp4"]
+      "command": "long.video.episode.take.download",
+      "payload": {
+        "episodeId": "episode/1",
+        "takeId": "tk/1",
+        "outputFile": "${TMP}/take.mp4"
+      },
+      "captureFiles": [
+        "take.mp4"
+      ]
     },
     {
-      "command": "long.video.export.download",
-      "payload": {"exportId": "ex/1", "outputFile": "${TMP}/episode.mp4"},
-      "captureFiles": ["episode.mp4"]
+      "command": "long.video.episode.delivery.download",
+      "payload": {
+        "episodeId": "episode/1",
+        "baselineId": "baseline/1",
+        "exportId": "ex/1",
+        "outputFile": "${TMP}/episode.mp4"
+      },
+      "captureFiles": [
+        "episode.mp4"
+      ]
     }
   ]
 }

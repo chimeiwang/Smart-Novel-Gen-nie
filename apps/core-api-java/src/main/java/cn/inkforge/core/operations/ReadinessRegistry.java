@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.function.Supplier;
 
-/** 聚合数据库、Redis、Agent 与后台任务检查；任何异常都收敛为 failed。 */
+/** 聚合数据库、Redis、Agent 与后台任务检查；探针异常记为 failed，并继续检查其他依赖。 */
 public final class ReadinessRegistry {
 
     private final Map<String, Check> checks = new ConcurrentSkipListMap<>();
@@ -29,6 +29,7 @@ public final class ReadinessRegistry {
             try {
                 ready = Boolean.TRUE.equals(check.probe().get());
             } catch (Exception exception) {
+                // 公共健康响应不透出底层异常文本；诊断由检查项另行提供稳定状态码。
                 ready = false;
             }
             results.put(name, ready ? "ok" : "failed");

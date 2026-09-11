@@ -8,6 +8,11 @@ import cn.inkforge.core.db.generated.Indexes;
 import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.Videoasset.VideoassetPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
+import cn.inkforge.core.db.generated.tables.Videoshotrendertask.VideoshotrendertaskPath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
+import cn.inkforge.core.db.generated.tables.Videotakeadoption.VideotakeadoptionPath;
+import cn.inkforge.core.db.generated.tables.Videotakeframeextraction.VideotakeframeextractionPath;
 import cn.inkforge.core.db.generated.tables.records.VideoshottakeRecord;
 
 import java.time.LocalDateTime;
@@ -83,7 +88,7 @@ public class Videoshottake extends TableImpl<VideoshottakeRecord> {
     /**
      * The column <code>public.VideoShotTake.adaptationId</code>.
      */
-    public final TableField<VideoshottakeRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshottakeRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotTake.projectId</code>.
@@ -98,17 +103,17 @@ public class Videoshottake extends TableImpl<VideoshottakeRecord> {
     /**
      * The column <code>public.VideoShotTake.shotId</code>.
      */
-    public final TableField<VideoshottakeRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshottakeRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotTake.shotPlanVersionId</code>.
      */
-    public final TableField<VideoshottakeRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshottakeRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotTake.promptVersionId</code>.
      */
-    public final TableField<VideoshottakeRecord, String> PROMPTVERSIONID = createField(DSL.name("promptVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshottakeRecord, String> PROMPTVERSIONID = createField(DSL.name("promptVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotTake.assetId</code>.
@@ -149,6 +154,31 @@ public class Videoshottake extends TableImpl<VideoshottakeRecord> {
      * The column <code>public.VideoShotTake.createdAt</code>.
      */
     public final TableField<VideoshottakeRecord, LocalDateTime> CREATEDAT = createField(DSL.name("createdAt"), SQLDataType.LOCALDATETIME(3).nullable(false).defaultValue(DSL.field(DSL.raw("CURRENT_TIMESTAMP"), SQLDataType.LOCALDATETIME)), this, "");
+
+    /**
+     * The column <code>public.VideoShotTake.videoEpisodeId</code>.
+     */
+    public final TableField<VideoshottakeRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotTake.episodeShotId</code>.
+     */
+    public final TableField<VideoshottakeRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotTake.episodeShotVersionId</code>.
+     */
+    public final TableField<VideoshottakeRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotTake.productionBaselineId</code>.
+     */
+    public final TableField<VideoshottakeRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotTake.lastFrameAssetId</code>.
+     */
+    public final TableField<VideoshottakeRecord, String> LASTFRAMEASSETID = createField(DSL.name("lastFrameAssetId"), SQLDataType.CLOB, this, "");
 
     private Videoshottake(Name alias, Table<VideoshottakeRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -226,7 +256,7 @@ public class Videoshottake extends TableImpl<VideoshottakeRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.VIDEOSHOTTAKE_ASSETID_KEY, Indexes.VIDEOSHOTTAKE_ID_SHOT_ADAPTATION_KEY, Indexes.VIDEOSHOTTAKE_ID_SHOT_PLAN_KEY, Indexes.VIDEOSHOTTAKE_SHOT_CREATED_IDX, Indexes.VIDEOSHOTTAKE_SHOT_TAKE_NO_KEY, Indexes.VIDEOSHOTTAKE_TASKID_KEY);
+        return Arrays.asList(Indexes.VIDEOSHOTTAKE_ASSETID_KEY, Indexes.VIDEOSHOTTAKE_EPISODE_BASELINE_IDX, Indexes.VIDEOSHOTTAKE_ID_SHOT_ADAPTATION_KEY, Indexes.VIDEOSHOTTAKE_ID_SHOT_PLAN_KEY, Indexes.VIDEOSHOTTAKE_NEW_SHOT_TAKE_NO_KEY, Indexes.VIDEOSHOTTAKE_SHOT_CREATED_IDX, Indexes.VIDEOSHOTTAKE_SHOT_TAKE_NO_KEY, Indexes.VIDEOSHOTTAKE_TASKID_KEY);
     }
 
     @Override
@@ -235,20 +265,119 @@ public class Videoshottake extends TableImpl<VideoshottakeRecord> {
     }
 
     @Override
-    public List<ForeignKey<VideoshottakeRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_ASSET_PROJECT_FKEY);
+    public List<UniqueKey<VideoshottakeRecord>> getUniqueKeys() {
+        return Arrays.asList(Keys.VIDEOSHOTTAKE_ID_EPISODE_PROJECT_KEY, Keys.VIDEOSHOTTAKE_ID_EPISODE_SHOT_VERSION_BASELINE_KEY);
     }
 
-    private transient VideoassetPath _videoasset;
+    @Override
+    public List<ForeignKey<VideoshottakeRecord, ?>> getReferences() {
+        return Arrays.asList(Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_ASSET_PROJECT_FKEY, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_BASELINE_SCOPE_FKEY, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_EPISODE_SCOPE_FKEY, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_LAST_FRAME_ASSET_FKEY, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_TASK_EPISODE_SCOPE_FKEY);
+    }
+
+    private transient VideoassetPath _videoshottakeAssetProjectFkey;
 
     /**
-     * Get the implicit join path to the <code>public.VideoAsset</code> table.
+     * Get the implicit join path to the <code>public.VideoAsset</code> table,
+     * via the <code>VideoShotTake_asset_project_fkey</code> key.
      */
-    public VideoassetPath videoasset() {
-        if (_videoasset == null)
-            _videoasset = new VideoassetPath(this, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_ASSET_PROJECT_FKEY, null);
+    public VideoassetPath videoshottakeAssetProjectFkey() {
+        if (_videoshottakeAssetProjectFkey == null)
+            _videoshottakeAssetProjectFkey = new VideoassetPath(this, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_ASSET_PROJECT_FKEY, null);
 
-        return _videoasset;
+        return _videoshottakeAssetProjectFkey;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
+    }
+
+    private transient VideoassetPath _videoshottakeLastFrameAssetFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoAsset</code> table,
+     * via the <code>VideoShotTake_last_frame_asset_fkey</code> key.
+     */
+    public VideoassetPath videoshottakeLastFrameAssetFkey() {
+        if (_videoshottakeLastFrameAssetFkey == null)
+            _videoshottakeLastFrameAssetFkey = new VideoassetPath(this, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_LAST_FRAME_ASSET_FKEY, null);
+
+        return _videoshottakeLastFrameAssetFkey;
+    }
+
+    private transient VideoshotrendertaskPath _videoshotrendertask;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotRenderTask</code>
+     * table.
+     */
+    public VideoshotrendertaskPath videoshotrendertask() {
+        if (_videoshotrendertask == null)
+            _videoshotrendertask = new VideoshotrendertaskPath(this, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_TASK_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotrendertask;
+    }
+
+    private transient VideotakeadoptionPath _videotakeadoptionSourceScopeFkey;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoTakeAdoption</code> table, via the
+     * <code>VideoTakeAdoption_source_scope_fkey</code> key
+     */
+    public VideotakeadoptionPath videotakeadoptionSourceScopeFkey() {
+        if (_videotakeadoptionSourceScopeFkey == null)
+            _videotakeadoptionSourceScopeFkey = new VideotakeadoptionPath(this, null, Keys.VIDEOTAKEADOPTION__VIDEOTAKEADOPTION_SOURCE_SCOPE_FKEY.getInverseKey());
+
+        return _videotakeadoptionSourceScopeFkey;
+    }
+
+    private transient VideotakeadoptionPath _videotakeadoptionSourcetakeidFkey;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoTakeAdoption</code> table, via the
+     * <code>VideoTakeAdoption_sourceTakeId_fkey</code> key
+     */
+    public VideotakeadoptionPath videotakeadoptionSourcetakeidFkey() {
+        if (_videotakeadoptionSourcetakeidFkey == null)
+            _videotakeadoptionSourcetakeidFkey = new VideotakeadoptionPath(this, null, Keys.VIDEOTAKEADOPTION__VIDEOTAKEADOPTION_SOURCETAKEID_FKEY.getInverseKey());
+
+        return _videotakeadoptionSourcetakeidFkey;
+    }
+
+    private transient VideotakeframeextractionPath _videotakeframeextraction;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoTakeFrameExtraction</code> table
+     */
+    public VideotakeframeextractionPath videotakeframeextraction() {
+        if (_videotakeframeextraction == null)
+            _videotakeframeextraction = new VideotakeframeextractionPath(this, null, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_TAKE_EPISODE_SCOPE_FKEY.getInverseKey());
+
+        return _videotakeframeextraction;
     }
 
     @Override
@@ -257,6 +386,7 @@ public class Videoshottake extends TableImpl<VideoshottakeRecord> {
             Internal.createCheck(this, DSL.name("VideoShotTake_input_hash_check"), "((\"inputHash\" ~ '^[0-9a-f]{64}$'::text))", true),
             Internal.createCheck(this, DSL.name("VideoShotTake_metadata_check"), "(COALESCE((jsonb_typeof((\"providerMetadataJson\")::jsonb) = 'object'::text), false))", true),
             Internal.createCheck(this, DSL.name("VideoShotTake_provider_check"), "((provider = 'seedance'::text))", true),
+            Internal.createCheck(this, DSL.name("VideoShotTake_scope_branch_check"), "((((\"adaptationId\" IS NOT NULL) AND (\"shotId\" IS NOT NULL) AND (\"shotPlanVersionId\" IS NOT NULL) AND (\"promptVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"adaptationId\" IS NULL) AND (\"shotId\" IS NULL) AND (\"shotPlanVersionId\" IS NULL) AND (\"promptVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true),
             Internal.createCheck(this, DSL.name("VideoShotTake_take_no_check"), "((\"takeNo\" > 0))", true),
             Internal.createCheck(this, DSL.name("VideoShotTake_text_check"), "(((btrim(model) <> ''::text) AND (btrim(\"providerTaskId\") <> ''::text)))", true)
         );

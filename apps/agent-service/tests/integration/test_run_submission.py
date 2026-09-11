@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import timedelta
 from typing import Any
 
@@ -32,6 +34,60 @@ def body() -> dict[str, object]:
         "payload": {"resume": False},
         "force": False,
     }
+
+
+def test_retired_video_job_is_authenticated_then_rejected_without_queue_write() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:runs")
+    verifier = Verifier()
+    client = TestClient(
+        create_app(testing=True, run_queue=queue, core_request_verifier=verifier),
+        client=("127.0.0.1", 50000),
+    )
+    request_body = body()
+    request_body.update(
+        {
+            "jobId": "retired-video-job",
+            "kind": "video",
+            "runId": "retired-video-run",
+            "taskId": "retired-video-task",
+            "payload": {
+                "projectId": "project-1",
+                "sceneId": "scene-1",
+                "chapterId": "chapter-1",
+                "title": "旧章节镜头",
+                "sourceText": "旧入口必须拒绝",
+                "durationSeconds": 5,
+                "ratio": "9:16",
+                "settingSnapshot": {
+                    "schemaVersion": "1.0",
+                    "fingerprint": hashlib.sha256(
+                        json.dumps(
+                            [],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest(),
+                    "entries": [],
+                },
+            },
+        }
+    )
+    headers = {
+        "Authorization": "Bearer signed",
+        "Idempotency-Key": "retired-video-job",
+        "X-InkForge-Timestamp": "1",
+        "X-InkForge-Body-SHA256": "0" * 64,
+    }
+
+    with client:
+        response = client.post("/internal/v1/runs", json=request_body, headers=headers)
+        queued_status = client.portal.call(lambda: queue.status("retired-video-job"))
+
+    assert response.status_code == 410
+    assert response.json()["detail"] == "旧章节视频任务入口已退役"
+    assert verifier.calls and verifier.calls[0]["task_id"] == "retired-video-task"
+    assert queued_status is None
 
 
 def test_signed_run_submission_verifies_binding_and_enqueues() -> None:

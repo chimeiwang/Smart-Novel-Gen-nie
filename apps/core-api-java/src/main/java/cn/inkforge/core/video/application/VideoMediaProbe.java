@@ -8,4 +8,7 @@ public interface VideoMediaProbe {
     boolean available();
 
     int probeDurationMs(Path path);
+
+    /** 仅接受有可读取画面的完整视频，返回实际容器时长。 */
+    int probeVideoDurationMs(Path path);
 }

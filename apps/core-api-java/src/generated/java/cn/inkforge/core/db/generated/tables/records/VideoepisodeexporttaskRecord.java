@@ -397,6 +397,36 @@ public class VideoepisodeexporttaskRecord extends UpdatableRecordImpl<Videoepiso
         return (LocalDateTime) get(25);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeExportTask.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(26, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeExportTask.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(26);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeExportTask.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(27, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeExportTask.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(27);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -420,7 +450,7 @@ public class VideoepisodeexporttaskRecord extends UpdatableRecordImpl<Videoepiso
     /**
      * Create a detached, initialised VideoepisodeexporttaskRecord
      */
-    public VideoepisodeexporttaskRecord(String id, String requestedbyuserid, String adaptationid, String projectid, String novelid, String episodeplanversionid, String shotplanversionid, Integer episodeno, String editversionid, String mixversionid, String retryoftaskid, String clientrequestid, String status, String inputhash, String requestmanifestjson, String resolution, Integer framespersecond, Boolean burnsubtitles, Integer attemptcount, LocalDateTime nextattemptat, String lasterrorcode, String lasterrormessage, LocalDateTime createdat, LocalDateTime updatedat, LocalDateTime startedat, LocalDateTime completedat) {
+    public VideoepisodeexporttaskRecord(String id, String requestedbyuserid, String adaptationid, String projectid, String novelid, String episodeplanversionid, String shotplanversionid, Integer episodeno, String editversionid, String mixversionid, String retryoftaskid, String clientrequestid, String status, String inputhash, String requestmanifestjson, String resolution, Integer framespersecond, Boolean burnsubtitles, Integer attemptcount, LocalDateTime nextattemptat, String lasterrorcode, String lasterrormessage, LocalDateTime createdat, LocalDateTime updatedat, LocalDateTime startedat, LocalDateTime completedat, String videoepisodeid, String productionbaselineid) {
         super(Videoepisodeexporttask.VIDEOEPISODEEXPORTTASK);
 
         setId(id);
@@ -449,6 +479,8 @@ public class VideoepisodeexporttaskRecord extends UpdatableRecordImpl<Videoepiso
         setUpdatedat(updatedat);
         setStartedat(startedat);
         setCompletedat(completedat);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

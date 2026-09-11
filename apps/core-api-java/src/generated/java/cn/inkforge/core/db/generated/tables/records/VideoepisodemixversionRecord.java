@@ -241,6 +241,36 @@ public class VideoepisodemixversionRecord extends UpdatableRecordImpl<Videoepiso
         return (LocalDateTime) get(14);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeMixVersion.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(15, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeMixVersion.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(15);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeMixVersion.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(16, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeMixVersion.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(16);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -264,7 +294,7 @@ public class VideoepisodemixversionRecord extends UpdatableRecordImpl<Videoepiso
     /**
      * Create a detached, initialised VideoepisodemixversionRecord
      */
-    public VideoepisodemixversionRecord(String id, String adaptationid, String projectid, String novelid, String episodeplanversionid, String shotplanversionid, Integer episodeno, String editversionid, Integer versionno, String basedonversionid, String clientrequestid, String requesthash, String contenthash, String createdbyuserid, LocalDateTime createdat) {
+    public VideoepisodemixversionRecord(String id, String adaptationid, String projectid, String novelid, String episodeplanversionid, String shotplanversionid, Integer episodeno, String editversionid, Integer versionno, String basedonversionid, String clientrequestid, String requesthash, String contenthash, String createdbyuserid, LocalDateTime createdat, String videoepisodeid, String productionbaselineid) {
         super(Videoepisodemixversion.VIDEOEPISODEMIXVERSION);
 
         setId(id);
@@ -282,6 +312,8 @@ public class VideoepisodemixversionRecord extends UpdatableRecordImpl<Videoepiso
         setContenthash(contenthash);
         setCreatedbyuserid(createdbyuserid);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

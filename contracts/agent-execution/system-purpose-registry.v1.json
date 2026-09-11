@@ -9,7 +9,9 @@
       "evidencePolicy": "evidence.system.intent.v1",
       "lane": "interactive",
       "stepBudgetProfile": "step_budget.system.resolve_intent.v1",
-      "workflows": ["long_serial"],
+      "workflows": [
+        "long_serial"
+      ],
       "parentOperations": []
     },
     {
@@ -20,7 +22,12 @@
       "evidencePolicy": "evidence.system.summary.v1",
       "lane": "batch_media",
       "stepBudgetProfile": "step_budget.system.summarize_evidence.v1",
-      "workflows": ["long_serial", "quality", "short_medium", "style", "video"],
+      "workflows": [
+        "long_serial",
+        "quality",
+        "short_medium",
+        "style"
+      ],
       "parentOperations": [
         "long_serial.answer_question",
         "long_serial.create_lore",
@@ -39,9 +46,7 @@
         "short_medium.replace_selection",
         "short_medium.full_check",
         "quality.consistency",
-        "style.portrait",
-        "video.chapter_cinematic_adaptation_v2",
-        "video.chapter_shot_prompt_v2"
+        "style.portrait"
       ]
     },
     {
@@ -52,8 +57,12 @@
       "evidencePolicy": "evidence.quality.consistency.v1",
       "lane": "interactive",
       "stepBudgetProfile": "step_budget.system.quality_protocol_correction.v2",
-      "workflows": ["quality"],
-      "parentOperations": ["quality.consistency"]
+      "workflows": [
+        "quality"
+      ],
+      "parentOperations": [
+        "quality.consistency"
+      ]
     }
   ]
 }

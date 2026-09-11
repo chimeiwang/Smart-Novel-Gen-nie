@@ -29,12 +29,6 @@ from .jobs.short_medium import (
     ShortMediumWritingJobHandler,
     WritingJobDispatcher,
 )
-from .jobs.video import ModelVideoScenePlanner, VideoPromptJobHandler
-from .jobs.video_adaptation import (
-    ModelVideoAdaptationPlanner,
-    VideoAdaptationJobHandler,
-)
-from .jobs.video_dispatch import VideoJobDispatcher
 from .jobs.writing import WritingJobHandler
 from .observability import HumanWorkflowLog, WorkflowModelObserver
 from .observability.router import router as debug_router
@@ -215,6 +209,7 @@ def create_app(
         api_key=loaded_settings.seedance_api_key,
         base_url=loaded_settings.seedance_base_url,
         enabled=loaded_settings.seedance_enabled,
+        execution_mode=loaded_settings.seedance_execution_mode,
     )
     app.state.model_runtime = (
         ModelRuntime(
@@ -534,25 +529,6 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     core,
                     runner,
                     workflow_log=workflow_log,
-                )
-                # 视频规划与写作共用模型并发门和计费授权，但使用独立任务语义。
-                handlers["video"] = VideoJobDispatcher(
-                    VideoPromptJobHandler(
-                        core,
-                        ModelVideoScenePlanner(
-                            model_runtime,
-                            max_output_tokens=settings.model_max_output_tokens,
-                        ),
-                        workflow_log=workflow_log,
-                    ),
-                    VideoAdaptationJobHandler(
-                        core,
-                        ModelVideoAdaptationPlanner(
-                            model_runtime,
-                            max_output_tokens=settings.model_max_output_tokens,
-                        ),
-                        workflow_log=workflow_log,
-                    ),
                 )
                 if settings.rag_index_enabled and embedding_provider is not None:
                     handlers["rag"] = RagJobHandler(core, embedding_provider)

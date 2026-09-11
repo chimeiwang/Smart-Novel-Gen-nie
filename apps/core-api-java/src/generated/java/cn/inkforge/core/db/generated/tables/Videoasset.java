@@ -327,17 +327,32 @@ public class Videoasset extends TableImpl<VideoassetRecord> {
         return _videoshotkeyframeversion;
     }
 
-    private transient VideoshottakePath _videoshottake;
+    private transient VideoshottakePath _videoshottakeAssetProjectFkey;
 
     /**
      * Get the implicit to-many join path to the
-     * <code>public.VideoShotTake</code> table
+     * <code>public.VideoShotTake</code> table, via the
+     * <code>VideoShotTake_asset_project_fkey</code> key
      */
-    public VideoshottakePath videoshottake() {
-        if (_videoshottake == null)
-            _videoshottake = new VideoshottakePath(this, null, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_ASSET_PROJECT_FKEY.getInverseKey());
+    public VideoshottakePath videoshottakeAssetProjectFkey() {
+        if (_videoshottakeAssetProjectFkey == null)
+            _videoshottakeAssetProjectFkey = new VideoshottakePath(this, null, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_ASSET_PROJECT_FKEY.getInverseKey());
 
-        return _videoshottake;
+        return _videoshottakeAssetProjectFkey;
+    }
+
+    private transient VideoshottakePath _videoshottakeLastFrameAssetFkey;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoShotTake</code> table, via the
+     * <code>VideoShotTake_last_frame_asset_fkey</code> key
+     */
+    public VideoshottakePath videoshottakeLastFrameAssetFkey() {
+        if (_videoshottakeLastFrameAssetFkey == null)
+            _videoshottakeLastFrameAssetFkey = new VideoshottakePath(this, null, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_LAST_FRAME_ASSET_FKEY.getInverseKey());
+
+        return _videoshottakeLastFrameAssetFkey;
     }
 
     private transient VideotakeframeextractionPath _videotakeframeextraction;

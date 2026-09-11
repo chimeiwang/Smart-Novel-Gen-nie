@@ -77,6 +77,7 @@ public record WorkflowStepUsage(
      *
      * <p>Provider 回调可能补齐未知字段，但不能把已知字段重新变成 {@code null}，也不能把累计数值倒退。
      */
+    /** 校验后续用量快照没有回退，未知值也不能覆盖已经观测的精确值。 */
     public WorkflowStepUsage requireMonotonicAfter(WorkflowStepUsage previous) {
         Objects.requireNonNull(previous, "上一份用量快照不能为空");
         if (usageRank(usageStatus) < usageRank(previous.usageStatus)) {

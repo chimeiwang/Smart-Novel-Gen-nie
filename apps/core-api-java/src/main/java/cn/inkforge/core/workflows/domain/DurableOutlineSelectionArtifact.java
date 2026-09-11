@@ -25,6 +25,7 @@ public final class DurableOutlineSelectionArtifact {
 
     private DurableOutlineSelectionArtifact() {}
 
+    /** 冻结大纲选区身份和替换文本，创建尚未物化的耐久草案。 */
     public static Stored create(
             String evidenceBundleId,
             String evidenceItemId,
@@ -87,6 +88,7 @@ public final class DurableOutlineSelectionArtifact {
         return new Stored(Map.copyOf(payload), Map.copyOf(value.diff()));
     }
 
+    /** 对照 Evidence 复验来源版本与选区哈希后重建完整候选。 */
     public static Materialized reconstruct(
             Map<String, Object> storedPayload,
             Map<String, Object> storedDiff,

@@ -57,6 +57,7 @@ public final class CliApplication {
         this.operatorTransportErrors = operatorTransportErrors;
     }
 
+    /** 从冻结命令注册表创建普通 CLI 运行时，并校验处理器完整性。 */
     public static CliApplication createDefault(CliDependencies dependencies) {
         return create(dependencies, false);
     }
@@ -99,6 +100,7 @@ public final class CliApplication {
         }
     }
 
+    /** 执行单个命令，并把所有预期失败收敛为稳定 JSON 和退出码。 */
     public int run(
             List<String> arguments,
             InputStream stdin,
@@ -197,6 +199,7 @@ public final class CliApplication {
         }
     }
 
+    /** 按命令规格读取输入、加载安全凭据并建立本次命令上下文。 */
     private Prepared prepare(
             CommandSpec spec, List<String> commandArguments, InputStream stdin) throws IOException {
         if (spec.inputMode() == CommandSpec.InputMode.ARGV_TTY) {
@@ -244,6 +247,7 @@ public final class CliApplication {
                 payload);
     }
 
+    /** 严格读取一个 UTF-8 JSON 对象，拒绝 BOM、替换字符和尾随数据。 */
     private static ObjectNode readPayload(InputStream input, ObjectMapper json) throws IOException {
         byte[] bytes = input.readAllBytes();
         String raw;
@@ -298,6 +302,7 @@ public final class CliApplication {
         return result;
     }
 
+    /** 将声明为文件输出的二进制响应原子落盘，并返回可打印的文件描述。 */
     private JsonNode applyFileOutput(
             CommandSpec spec, ObjectNode payload, JsonNode data) {
         if (!spec.name().startsWith("long.")

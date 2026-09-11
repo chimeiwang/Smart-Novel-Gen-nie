@@ -10,13 +10,15 @@
 与 Next.js Web。迁移规格为 `docs/specs/2026-08-24-core-java-replacement.md`，架构决策位于
 `docs/architecture-decisions/001-core-java-stack.md` 到 `003-core-java-single-cutover.md`。
 
-Java Core 已于 2026-08-26 替换同名生产容器并处于观察期，生产始终只允许一个 `core-api`；Python Core
-只保留为明确回滚镜像，不得与 Java 同时写同一数据库，也不得按路由渐进切流。
+Java Core 已于 2026-08-26 替换同名生产容器，生产始终只允许一个 `core-api`，不双 Core、不双写。
+现正式库已有 V2 Run，Python Core 仅保留历史镜像与公共契约来源，不再具有该库的回滚资格；禁止 DDL rollback，
+应用回滚必须保留 V2 查询和收敛能力，具体适用条件见 [V2 运维手册](../DURABLE_AGENT_V2_ROLLOUT.md)。
 
 Java 等价迁移本身没有增加手机号、短信、邮箱、支付、订单、订阅或新表。手机号认证于 2026-08-27 另立
-独立规格并实现代码；其具名迁移已获准并完成服务器 `novelwriterdev` 备份、两次幂等执行和真实 contract
-导出，但尚未获准对 `novelwriter` 正式库执行 DDL 或启用生产。Java 应用不得使用 JPA、Flyway、Liquibase
-或启动 SQL 自动修改结构；schema guard 继续只读，并在手机号双开关关闭时只精确投影掉手机号身份表。
+独立规格并实现代码；同日分阶段批准开发及正式迁移与生产手机号、真实短信开放，原有“仅获开发授权”说明已被取代。
+完整授权、迁移记录、生产启用和浏览器待验收范围见[手机号认证规格](../specs/2026-08-27-aliyun-phone-auth.md)，
+不由本段代替当前环境检查。Java 应用不得使用 JPA、Flyway、Liquibase 或启动 SQL 自动修改结构；
+schema guard 继续只读，并在手机号双开关关闭时只精确投影掉手机号身份表。
 
 ## 浏览器认证
 
@@ -115,6 +117,9 @@ AgentRuntime 为无效工具 JSON 或本地参数契约发起的一次显式协�
 
 ## 版本化数据迁移
 
+具名授权的目标环境、有效范围和规格入口统一见[数据变更授权清单](../DATA_CHANGE_AUTHORIZATIONS.md)。
+以下保留各次变更的需求与历史记录，不代表本轮实施指令；已有 V2 正式库的回滚禁令优先于历史回滚示例。
+
 2026-07-14 的 PostgreSQL schema 变更是用户明确批准的单次例外：新增 `WritingRunCommand`，为 `WritingStyle` 增加强制 `userId`，并为 `StylePortraitTask` 增加可空 `section`。迁移执行前必须完成可恢复备份；按已批准方案清空旧文风、文风参考和画像任务数据，同时保留用户、小说、章节、会话及其他正式数据。应用启动不得自动修改 schema。
 
 用户于 2026-08-21 另行明确批准的第一个版本化迁移为
@@ -168,8 +173,12 @@ profile 后，兼容镜像已先行发布，同一具名迁移已再次执行并
 
 Core 运行镜像包含发行版 FFmpeg、ffprobe 和中文字体；命令只能以参数数组读取数据库冻结的受控
 `storageKey`，不得执行 shell 或接受客户端服务器路径。单进程内的耐久导出领取并发固定为 1，缺少媒体工具时
-readiness 只阻断抽帧和导出，不能阻断历史版本读取。成片必须先流式归档为受控 `VideoAsset`，随后才能把导出任务
+readiness 阻断抽帧、导出和需要本地媒体工具的模拟生成，不能阻断历史版本读取。成片必须先流式归档为受控 `VideoAsset`，随后才能把导出任务
 标记成功；中断或失败不得留下伪成功记录。Agent Service 仍不接收数据库地址或素材卷。
+
+视频 V0.1／V0.2 默认 `SEEDANCE_EXECUTION_MODE=simulated`，Core 和 Agent 必须使用同一显式配置。模拟无需供应商密钥和公网素材传输，真实调用独立为函数且只能在 live 模式启用；模拟 taskId、结果标识与冻结清单严格匹配，不放宽真实 URL 归档策略。模拟媒体在 uploads 下专用工作目录生成，经 ffprobe 验证后归档，不虚构供应商用量或账单。
+
+本轮用户延期真实调用，因此只验收模拟链、传输替身和故障恢复。live 模式的 `feeConfirmed` 是单次试制确认，不代表已经实现商业预算预留、结算或公开收费。生产视频开关继续关闭，本轮不执行生产 DDL、不发布服务。字段复用现有版本和任务 JSON，本轮没有数据库迁移。
 
 ## 人工日志
 

@@ -52,6 +52,7 @@ public record WorkflowStepBudget(
         }
     }
 
+    /** 校验一次 Step 的调用、token、费用和墙钟用量均未超过冻结预算。 */
     public WorkflowStepUsage requireWithin(WorkflowStepUsage usage) {
         Objects.requireNonNull(usage, "步骤用量不能为空");
         if (usage.inputTokens() != null && usage.inputTokens() > maxInputTokens) {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-test("工作区保留统一三栏并按需挂载视频制作台", async () => {
+test("工作区保留写作外壳并按需挂载独立剧集工作台", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
@@ -17,7 +17,7 @@ test("工作区保留统一三栏并按需挂载视频制作台", async () => {
   assert.match(source, /workspace-primary-switcher/);
   assert.match(source, /"章节"/);
   assert.match(source, /"创作资料"/);
-  assert.match(source, /"视频制作"/);
+  assert.match(source, /"剧集制作"/);
   assert.doesNotMatch(source, /workspace-navigation-root/);
   assert.doesNotMatch(source, /workspace-chapter-mode-switcher/);
   assert.doesNotMatch(source, />AI 创作</);
@@ -47,6 +47,37 @@ test("工作区保留统一三栏并按需挂载视频制作台", async () => {
   assert.doesNotMatch(source, /check\.status === "pending" \|\| check\.status === "failed"/);
 });
 
+test("视频制作只有稳定分集工作台入口且生产代码不再依赖章节改编身份", async () => {
+  const workspaceUrl = new URL("../../video/video-workspace.tsx", import.meta.url);
+  const productionUrl = new URL("../../video/production/", import.meta.url);
+  const adaptationUrl = new URL("../../video/adaptation/", import.meta.url);
+  const [workspaceSource, productionFiles, adaptationFiles] = await Promise.all([
+    readFile(workspaceUrl, "utf8"),
+    readdir(productionUrl),
+    readdir(adaptationUrl),
+  ]);
+  const productionSource = (await Promise.all(
+    productionFiles
+      .filter((name) => /\.(ts|tsx)$/.test(name))
+      .map((name) => readFile(new URL(name, productionUrl), "utf8")),
+  )).join("\n");
+
+  assert.match(workspaceSource, /EpisodeWorkspace/);
+  assert.doesNotMatch(workspaceSource, /ChapterAdaptationWorkspace|currentChapter|selectionBridge/);
+  assert.doesNotMatch(productionSource, /chapter-adaptations|adaptationId|adaptation_id|episodeNo|episode_no/);
+  assert.deepEqual(
+    adaptationFiles.filter((name) => [
+      "adaptation-state.ts",
+      "chapter-adaptation-workspace.tsx",
+      "finish-workspace.tsx",
+      "keyframe-workspace.tsx",
+      "rough-cut-workspace.tsx",
+      "take-workspace.tsx",
+    ].includes(name)),
+    [],
+  );
+});
+
 test("中短篇作品只进入简化写作台且没有视频入口", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = (await readFile(shellUrl, "utf8")).replaceAll("\r\n", "\n");
@@ -62,7 +93,7 @@ test("中短篇作品只进入简化写作台且没有视频入口", async () =>
   assert.match(source, /\["chapters", "library", "video"\]/);
 });
 
-test("视频视图保留章节上下文并隐藏聊天栏", async () => {
+test("视频视图保留工作区外壳并隐藏聊天栏", async () => {
   const cssUrl = new URL("../../../app/globals.css", import.meta.url);
   const source = await readFile(cssUrl, "utf8");
 
@@ -191,13 +222,15 @@ test("审核托盘中的非当前会话产物也能进入返工流程", async ()
   assert.match(cardBody, /handleArtifactDecision\(artifact,\s*"revise"/);
 });
 
-test("工作区外壳跟随服务端 initialView", async () => {
+test("工作区外壳跟随服务端视图，视频历史导航先保存再恢复分集", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
   assert.match(source, /useEffect\([\s\S]*initialView/);
   assert.match(source, /previousInitialViewRef/);
-  assert.doesNotMatch(source, /addEventListener\("popstate"/);
+  assert.match(source, /addEventListener\("popstate"/);
+  assert.match(source, /flushEpisodeSaves\(novel\.id\)\.then/);
+  assert.match(source, /setEpisodeContext\(parseEpisodeRouteContext/);
   assert.doesNotMatch(source, /activeViewRef|popstateTransitionRef/);
 });
 

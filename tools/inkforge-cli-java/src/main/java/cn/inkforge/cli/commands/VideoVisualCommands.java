@@ -31,7 +31,6 @@ final class VideoVisualCommands {
         handlers.put("long.video.canon.list", VideoVisualCommands::list);
         handlers.put("long.video.canon.candidate.set", VideoVisualCommands::setCandidate);
         handlers.put("long.video.canon.approve", VideoVisualCommands::approve);
-        handlers.put("long.video.reference.save", VideoVisualCommands::saveReferences);
     }
 
     private static CommandResult list(CommandContext context, ObjectNode payload) {
@@ -49,6 +48,7 @@ final class VideoVisualCommands {
                 Set.of(
                         "projectId",
                         "clientRequestId",
+                        "expectedRevision",
                         "settingKind",
                         "settingId",
                         "duty",
@@ -75,6 +75,7 @@ final class VideoVisualCommands {
         ArrayNode exclude = features(context, payload, "excludeFeatures");
         ObjectNode body = context.dependencies().json().createObjectNode();
         body.put("clientRequestId", VideoPayloads.clientRequestId(payload));
+        body.put("expectedRevision", VideoPayloads.integer(payload, "expectedRevision", 0, null));
         body.put("settingKind", settingKind);
         body.put("settingId", VideoPayloads.string(payload, "settingId"));
         body.put("duty", duty);

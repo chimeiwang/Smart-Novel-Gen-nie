@@ -214,7 +214,7 @@ class VideoPostProductionRepository:
                         )
                     return await _keyframe_head_response(
                         session,
-                        shot_id=existing.shotId,
+                        shot_id=cast(str, existing.shotId),
                         role=existing.role,
                     )
 
@@ -607,8 +607,8 @@ class VideoPostProductionRepository:
                         )
                     return await _edit_head_response(
                         session,
-                        episode_plan_id=existing.episodePlanVersionId,
-                        episode_no=existing.episodeNo,
+                        episode_plan_id=cast(str, existing.episodePlanVersionId),
+                        episode_no=cast(int, existing.episodeNo),
                     )
 
                 context = await _require_context(
@@ -831,8 +831,8 @@ class VideoPostProductionRepository:
                         )
                     return await _mix_head_response(
                         session,
-                        episode_plan_id=existing.episodePlanVersionId,
-                        episode_no=existing.episodeNo,
+                        episode_plan_id=cast(str, existing.episodePlanVersionId),
+                        episode_no=cast(int, existing.episodeNo),
                     )
 
                 context = await _require_context(
@@ -1169,7 +1169,7 @@ class VideoPostProductionRepository:
                 context = await _require_context(
                     session,
                     user_id=user_id,
-                    adaptation_id=source.adaptationId,
+                    adaptation_id=cast(str, source.adaptationId),
                     lock=True,
                 )
                 if context.episode_plan.id != source.episodePlanVersionId:
@@ -1568,7 +1568,9 @@ async def _load_keyframe_workspace(
     heads_by_key = {(head.shotId, head.role): head for head in heads}
     versions_by_key: dict[tuple[str, str], list[VideoShotKeyframeVersion]] = {}
     for version in versions:
-        versions_by_key.setdefault((version.shotId, version.role), []).append(version)
+        versions_by_key.setdefault((cast(str, version.shotId), version.role), []).append(
+            version
+        )
 
     return [
         ShotPostProductionResponse(
@@ -1672,8 +1674,8 @@ def _keyframe_version_response(
 ) -> ShotKeyframeVersionResponse:
     return ShotKeyframeVersionResponse(
         id=version.id,
-        shotId=version.shotId,
-        shotPlanVersionId=version.shotPlanVersionId,
+        shotId=cast(str, version.shotId),
+        shotPlanVersionId=cast(str, version.shotPlanVersionId),
         role=cast(
             Literal["initial_state", "transition_anchor", "end_state"],
             version.role,
@@ -2078,12 +2080,12 @@ async def _edit_version_response(
     )
     return EpisodeEditVersionResponse(
         **_edit_summary(version).model_dump(),
-        adaptationId=version.adaptationId,
-        episodePlanVersionId=version.episodePlanVersionId,
-        shotPlanVersionId=version.shotPlanVersionId,
+        adaptationId=cast(str, version.adaptationId),
+        episodePlanVersionId=cast(str, version.episodePlanVersionId),
+        shotPlanVersionId=cast(str, version.shotPlanVersionId),
         clips=[
             EpisodeEditClipResponse(
-                shotId=clip.shotId,
+                shotId=cast(str, clip.shotId),
                 takeId=clip.takeId,
                 sourceInMs=clip.sourceInMs,
                 sourceOutMs=clip.sourceOutMs,
@@ -2101,7 +2103,7 @@ async def _edit_version_response(
 def _edit_summary(version: VideoEpisodeEditVersion) -> EpisodeEditVersionSummaryResponse:
     return EpisodeEditVersionSummaryResponse(
         id=version.id,
-        episodeNo=version.episodeNo,
+        episodeNo=cast(int, version.episodeNo),
         versionNo=version.versionNo,
         basedOnVersionId=version.basedOnVersionId,
         totalDurationMs=version.totalDurationMs,
@@ -2209,9 +2211,9 @@ async def _mix_version_response(
     )
     return EpisodeMixVersionResponse(
         **_mix_summary(version).model_dump(),
-        adaptationId=version.adaptationId,
-        episodePlanVersionId=version.episodePlanVersionId,
-        shotPlanVersionId=version.shotPlanVersionId,
+        adaptationId=cast(str, version.adaptationId),
+        episodePlanVersionId=cast(str, version.episodePlanVersionId),
+        shotPlanVersionId=cast(str, version.shotPlanVersionId),
         audioClips=[
             EpisodeAudioClipResponse(
                 trackKind=cast(
@@ -2248,7 +2250,7 @@ async def _mix_version_response(
 def _mix_summary(version: VideoEpisodeMixVersion) -> EpisodeMixVersionSummaryResponse:
     return EpisodeMixVersionSummaryResponse(
         id=version.id,
-        episodeNo=version.episodeNo,
+        episodeNo=cast(int, version.episodeNo),
         versionNo=version.versionNo,
         basedOnVersionId=version.basedOnVersionId,
         editVersionId=version.editVersionId,
@@ -2386,7 +2388,7 @@ async def _build_export_manifest(
         frozen_video.append(
             FrozenExportVideoClip(
                 ordinal=clip.ordinal,
-                shotId=clip.shotId,
+                shotId=cast(str, clip.shotId),
                 takeId=take.id,
                 asset=_frozen_asset(asset),
                 sourceInMs=clip.sourceInMs,
@@ -2536,7 +2538,7 @@ async def _export_task_response(
         )
         export_response = EpisodeExportResponse(
             id=exported.id,
-            episodeNo=exported.episodeNo,
+            episodeNo=cast(int, exported.episodeNo),
             versionNo=exported.versionNo,
             editVersionId=exported.editVersionId,
             mixVersionId=exported.mixVersionId,
@@ -2546,8 +2548,8 @@ async def _export_task_response(
         )
     return EpisodeExportTaskResponse(
         id=task.id,
-        adaptationId=task.adaptationId,
-        episodeNo=task.episodeNo,
+        adaptationId=cast(str, task.adaptationId),
+        episodeNo=cast(int, task.episodeNo),
         editVersionId=task.editVersionId,
         mixVersionId=task.mixVersionId,
         retryOfTaskId=task.retryOfTaskId,
@@ -2642,7 +2644,7 @@ def _asset_response(asset: VideoAsset) -> PostProductionAssetResponse:
 def _take_response(take: VideoShotTake, asset: VideoAsset) -> PostProductionTakeResponse:
     return PostProductionTakeResponse(
         id=take.id,
-        shotId=take.shotId,
+        shotId=cast(str, take.shotId),
         takeNo=take.takeNo,
         durationMs=asset.durationMs,
         createdAt=take.createdAt,

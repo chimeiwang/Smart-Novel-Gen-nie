@@ -7,122 +7,55 @@
 发生冲突时按以下顺序判断：
 
 1. 当前代码、`apps/core-api/src/inkforge_core/db/schema-contract.json`、共享服务契约、生成客户端和测试。
-2. 根级权威：`AGENTS.md`、`DOCS.md`、`DESIGN.md`。
-3. 当前架构与需求：`apps/agent-service/AGENTS.md`、`docs/requirements/00-overview.md` 到 `05-auth-billing-and-ops.md`、`docs/LANGGRAPH_STUDIO.md`、`docs/WORKFLOW_EVENT_LOG_FORMAT.md`。
-4. `docs/specs/**` 中尚未完成或曾用于实现的设计规格。
+2. 各自职责范围内的根级权威：`AGENTS.md`、`DOCS.md`、`DESIGN.md`。
+3. 当前架构与需求：`apps/agent-service/AGENTS.md`、`docs/requirements/00-overview.md` 到 `05-auth-billing-and-ops.md`，以及对应的架构、协议和运维文档。
+4. `docs/specs/**` 中适用于当前任务的设计规格；先读状态、非目标及取代关系。
 5. 计划、审计和 `docs/archive/**` 历史材料。
 
-铁律：项目事实高于文档历史。不得为了保留旧文档说法而改歪实现。
+项目事实高于文档历史，不得为了保留旧文档说法而改歪实现。这个排序用于判断已实现行为，不替代用户授权、
+开发约束或功能开放门禁；源码、已安装包和实际部署状态分别核对，不能互相代证。
 
-## 当前架构事实
+## 内容归属
 
-- Next.js 只负责页面、SSR/SEO 和浏览器交互。
-- Java Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE；FastAPI Core 仅保留历史镜像与公共契约来源。
-- FastAPI Agent Service 负责 LangGraph、模型和工具执行，不连接数据库。
-- macOS 本地、生产两份 Operator Skill 已完成实际 Java 入口切换与离线验收，由 shell 启动固定安装的 JAR，
-  不运行 Python 或 uv。普通 CLI 为126命令，Operator 保持45命令／三种 Operation，二者只访问 Core 公共 API；
-  Python CLI 保留为契约对照。生产账号登录、`auth.whoami` 与隔离小说 canary 已通过；Windows 实机
-  仍未验收，服务器部署状态不随本机入口切换。
-- Java Core 单体已于 2026-08-26 完成生产切换；生产不得双 Core 或双写。当前正式库已迁移并存在 V2 Run，
-  永久禁止 DDL rollback 和 V1-only Python Core 回滚，只允许保留 V2 收敛能力的兼容镜像恢复。
-- 耐久 Agent 生产 `8a1324c` 已完成 canary 和最终全量门禁，已开放业务的新请求使用 V2；配置为
-  `schemaReady=true / route=all / V1 fresh=false`，allowlist 已清空，视频仍关闭。小说成果保全，9条满7天的
-  旧已发布通知单列核验，完整证据见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。活动 Skill 白名单不变。
-- Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
-- 自然入口、同 Run 澄清及 Web/CLI 适配以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准；
-  源码、固定安装包和生产路由分别核对，不自动扩大 Operator 允许范围；当前现场进度以发布审计为准。
-- 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口；普通 Redis 承担可重建队列/认证事实，独立 AOF
-  execution Redis 只承担当次模型调用边界和未送达终态 journal。
-- 生产继续使用个人项目既有的 `.github/workflows/build.yml` 和 `scripts/deploy-production.sh`：CI 通过后由
-  `production` environment 的单一 SSH 身份上传精确提交的镜像与源码 bundle，服务器串行切换并在 smoke 失败时
-  恢复切换前的三服务镜像组合。普通部署不得自动执行 Durable Agent V2 DDL；V2 迁移、contract 复验、联合 drain
-  和 allowlist canary 仍是独立人工步骤。
-- PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
-  改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
-  `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对
-  服务器端 `novelwriterdev` 开发库执行视频控制面、批准命令、章节改编域以及该域内视觉设定版本和逐镜参考绑定，
-  不授权生产或完整 production_v2 schema。用户于 2026-08-23 另行批准
-  `20260823_production_video_adaptation_domain.sql` 只向服务器端 `novelwriter` 正式库晋升这套已验证结构，
-  不迁开发数据、不启用视频功能，也不授权完整 production_v2 schema。正式库当前保留视频结构，但
-  `VIDEO_PREVIEW_ENABLED` 仍关闭，结构晋升不等同于功能开放。另有用户于 2026-08-21 明确批准的
-  `20260821_token_usage_task_run.sql`，以及用户于 2026-08-23 明确批准的第二个迁移
-  `20260823_token_usage_details.sql`；后者只能为 `TokenUsage` 增加可空 `INTEGER`
-  `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
-  开发迁移只在服务器 dev PostgreSQL 受控执行并重复验证，随后从真实库只读导出
-  `schema-contract.json`；生产 forward/rollback 只能由已审核部署门禁调用。它们不构成以后任意迁移的授权。
-- `TokenUsage` 两个新增可空诊断字段已完成开发库迁移和真实库契约导出；生产迁移仍只允许使用固定
-  forward/rollback、备份和自动回滚流程，不能改写为任意 SQL。
-- 用户于 2026-08-24 批准的 `20260824_video_shot_render_p0.sql` 与
-  `20260824_video_post_production_p1_p3.sql` 只允许对服务器端 `novelwriterdev` 开发库增加逐镜生成、
-  Take、关键帧、粗剪、声音字幕和整集导出结构，并允许开发库 `VideoAsset.duty` 增加 `sfx` 与
-  `episode_export`；它们不授权正式库 DDL、开发数据晋升、生产视频开关、图片生成或 TTS。
-- 用户于 2026-08-27 先批准起草并在隔离 PostgreSQL 验证 `20260827_user_phone_identity.sql`，后进一步批准
-  该具名脚本只对服务器端 `novelwriterdev` 开发库执行。开发库已在备份后成功执行两次并验证幂等，真实开发库
-  contract 已导出；完整指纹为 `4f8cbf58820c7e601026012249f1896e4f8ad0231cfa6b9bd2fdad1c83c3d195`。
-  用户随后于同日进一步明确批准：先备份，再将同一具名脚本对服务器端 `novelwriter` 正式库执行，并开启手机号
-  登录和真实短信发送。脚本必须保持数据库名校验，正式库还必须提供精确确认令牌；该新增授权不包含其他生产
-  DDL、手机号数据删除、老账号绑定或账号合并。正式库已在受保护备份后完成两次幂等迁移；迁移表所有者已对齐
-  现有 `User` 表应用角色，真实正式库 contract 按“视频关闭、手机号开启”投影后与冻结契约零差异，指纹为
-  `b5d2c319303f1ca52d411b8f986aa98a5d48168338c75c65d675d23968c22c78`。生产手机号登录和真实发送已开启，
-  用户名新注册已关闭、旧密码登录保留；真实浏览器完整验证码登录仍须用户验收。
-
-## 文档类型
-
-| 类型 | 位置 | 规则 |
+| 内容 | 维护位置 | 维护规则 |
 | --- | --- | --- |
-| authority | 根目录 | 当前、简短、可执行 |
-| current-requirement | `docs/requirements/` | 只描述当前产品事实 |
-| architecture | `apps/agent-service/AGENTS.md`、`docs/*.md` | 必须与当前代码路径一致 |
-| architecture-decision | `docs/architecture-decisions/` | 记录已接受且仍生效的关键架构取舍；改变决策必须新增或取代 ADR |
-| spec | `docs/specs/` | 实现前写明目标、非目标、设计、影响和验收 |
-| plan | `docs/plans/` | 一次性执行步骤，完成后归档 |
-| audit | `docs/audits/` | 标明日期、状态和直接证据 |
-| archive | `docs/archive/` | 只作历史追溯，不作为当前实现依据 |
+| 仓库级开发指导 | [AGENTS.md](AGENTS.md) | 只保留可执行规则、关键禁令、必读入口与验证要求 |
+| 文档治理与分工 | 本文件 | 定义事实核对、文档归属和维护方式，不复制产品或发布快照 |
+| 前端设计 | [DESIGN.md](DESIGN.md) | 维护界面与交互规范 |
+| 产品能力、限制、数量基线 | [产品总览](docs/requirements/00-overview.md)及 `docs/requirements/01-05` | 区分实现、开发、生产、内部与历史兼容；数量按代码和契约重算 |
+| 服务架构与协议 | [Agent 指导](apps/agent-service/AGENTS.md)、`docs/*.md` | 与当前代码路径一致；局部实现约束放在相应领域 |
+| 架构取舍 | `docs/architecture-decisions/` | 记录已接受且仍生效的决策；改变决策时新增或取代 ADR |
+| 新需求与变更设计 | `docs/specs/` | 实现前写目标、非目标、设计、影响与验收，维护当前状态及取代关系 |
+| 数据变更授权 | [授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)及对应具名 spec | 索引记录对象、环境与范围，spec 保留完整授权和门禁；不因文档迁移扩大或撤销授权 |
+| 运维执行步骤 | `docs/*ROLLOUT.md`、`docs/*CUTOVER.md` 及专题运维文档 | 说明前置条件、适用环境、执行和恢复步骤；历史示例不自动适用于当前生产 |
+| 一次性计划 | `docs/plans/` | 维护执行步骤，完成后归档 |
+| 验收与发布证据 | `docs/audits/` | 标明日期、环境、状态和直接证据；部署 SHA、指纹、canary 结果在此追溯 |
+| 历史材料 | `docs/archive/`、已有 spec／计划中的历史记录 | 只作追溯，不作为当前实现或新一轮执行指令 |
+
+已有 spec 中的验收记录可原位保留并被索引引用，不为整理根文件再次复制。新验收记录优先放审计文档。
 
 ## 修改规则
 
 - 新需求先更新 spec，再修改代码或文档。
-- 修改 Agent、SSE、ReviewArtifact 或服务契约后，同步检查 Agent 架构文档和 03、04 号需求文档。
+- 根 `AGENTS.md` 只在通用开发规则改变时更新；不得追加产品清单、API／CLI 数量、部署 SHA、数据库指纹、
+  逐次授权或验收流水。产品规则变化更新需求；授权范围变化更新具名 spec 与授权清单；执行结果更新审计。
+- 本规则取代历史文档中“每次产品基线或持久化变更都必须更新根 AGENTS.md”的维护要求。
+  仅迁移规则的记录位置，原有内容保护、环境范围、迁移门禁及用户授权边界继续生效。
+- 修改 Agent、SSE、ReviewArtifact 或服务契约后，同步检查 Agent 指导和 03、04 号需求文档。
 - 修改日志、Studio 或部署入口后，同步检查日志文档、Studio 文档和 05 号需求文档。
-- 修改接口后重新生成 TypeScript 客户端并执行 `npm run api:check`。
-- 修改数据库访问代码时，除用户明确批准的版本化迁移外，只能核对现有结构契约；禁止自动数据
-  定义语句。批准的迁移也必须先备份、在隔离 PostgreSQL 验证，再受控执行并导出新的
-  `schema-contract.json`，迁移后的实际结构必须与该 contract 精确一致。
-- 历史归档只在被触及时修正受影响部分，不要求一次性翻译全部历史内容。
+- 修改公共接口后重新生成 TypeScript 客户端并执行 `npm run api:check`；同步受影响的产品基线，不能机械保留旧数字。
+- 数据库访问代码只核对现有结构契约；只有用户明确批准的具名迁移可改变结构。执行前按授权清单读取具体范围，
+  完成备份、隔离 PostgreSQL 验证及受控执行，随后从目标库导出并复验 `schema-contract.json`。应用不得自动 DDL。
+- 历史归档只在被触及时修正受影响部分，不要求一次性翻译或重写全部历史内容。
+- 文档修改检查链接、命令、状态口径和重复事实，运行 `git diff --check`；无代码改动时不要求无关应用测试。
 
-## 当前入口
+## 常用入口
 
-- 开发护栏：`AGENTS.md`
-- 前端设计：`DESIGN.md`
-- 项目概览：`README.md`
-- 文档索引：`docs/README.md`
-- Agent 架构：`apps/agent-service/AGENTS.md`
-- 当前需求：`docs/requirements/00-overview.md`
-- Java Core 替换规格：`docs/specs/2026-08-24-core-java-replacement.md`
-- Java Core 架构决策：`docs/architecture-decisions/001-core-java-stack.md` 到
-  `003-core-java-single-cutover.md`
-- Java Core 生产切换：`docs/JAVA_CORE_CUTOVER.md`
-- Agent 执行内核重构：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
-- Agent 执行架构决策：`docs/architecture-decisions/004-core-owned-durable-agent-execution.md`
-- Agent 执行实施计划：`docs/plans/2026-08-31-core-owned-durable-agent-execution.md`
-- CLI 与 Operator Skill 更新契约：`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
-- macOS Skill 的 Java CLI 入口切换：`docs/specs/2026-09-04-java-cli-operator-cutover.md`
-- V2 章节规划与 CLI 消费契约：`docs/specs/2026-09-04-durable-chapter-planning.md`
-- 普通聊天耐久意图与澄清（本地验收完成）：`docs/specs/2026-09-04-durable-natural-language-entry.md`
-- 整章审阅与场景/大纲选区改写（本地验收完成）：`docs/specs/2026-09-05-durable-review-and-rewrites.md`
-- 中短篇四操作耐久执行（仓内及隔离跨进程验收完成）：`docs/specs/2026-09-05-durable-short-medium-workflows.md`
-- 一致性终检耐久执行（仓内及隔离跨进程验收完成）：`docs/specs/2026-09-05-durable-consistency-quality.md`
-- 文风画像耐久执行（仓内及隔离跨进程验收完成）：`docs/specs/2026-09-05-durable-style-portrait.md`
-- 参考资料索引耐久执行（仓内及隔离跨进程验收完成）：`docs/specs/2026-09-05-durable-rag-embedding.md`
-- 开发视频模型耐久执行（仓内及隔离跨进程验收完成）：`docs/specs/2026-09-06-durable-video-model-workflows.md`
-- Java CLI 构建与使用：`tools/inkforge-cli-java/README.md`
-- V1/V2 联合 drain：`docs/specs/2026-09-01-durable-agent-joint-drain.md`
-- 个人项目 Agent 发布范围：`docs/specs/2026-09-04-personal-durable-agent-release-scope.md`
-- execution journal 容量与恢复演练：`docs/audits/2026-09-01-execution-journal-capacity.md`
-- 生产部署：`infra/compose.yaml`
-- 生产发布入口：`.github/workflows/build.yml`、`scripts/deploy-production.sh`
-- 运行中 Core 的结构探针进程隔离：`docs/specs/2026-09-06-schema-probe-memory-isolation.md`
-- Durable Agent 发布前现场检查：`docs/audits/2026-09-06-durable-agent-release-preflight.md`
-- 保全小说成果并退出旧执行：`docs/specs/2026-09-07-durable-release-preserve-novel-assets.md`
-- 模型调用前取消的耐久收尾：`docs/specs/2026-09-07-durable-cancel-before-provider-convergence.md`
-- Durable Agent V2 人工迁移与 canary：`docs/DURABLE_AGENT_V2_ROLLOUT.md`
+- [项目概览](README.md)与[完整文档索引](docs/README.md)
+- [开发指导](AGENTS.md)、[前端设计](DESIGN.md)、[产品总览](docs/requirements/00-overview.md)
+- [Agent 指导](apps/agent-service/AGENTS.md)、[日志格式](docs/WORKFLOW_EVENT_LOG_FORMAT.md)、[Studio](docs/LANGGRAPH_STUDIO.md)
+- [Java Core 替换规格](docs/specs/2026-08-24-core-java-replacement.md)、[架构决策目录](docs/architecture-decisions/)、[Java 切换手册](docs/JAVA_CORE_CUTOVER.md)
+- [耐久执行规格](docs/specs/2026-08-31-core-owned-durable-agent-execution.md)、[V2 运维手册](docs/DURABLE_AGENT_V2_ROLLOUT.md)
+- [Java CLI 文档](tools/inkforge-cli-java/README.md)、[Operator 更新契约](docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md)
+- [数据变更授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)、[运维需求](docs/requirements/05-auth-billing-and-ops.md)、[发布审计目录](docs/audits/)
+- [生产编排](infra/compose.yaml)、[构建流程](.github/workflows/build.yml)、[生产发布脚本](scripts/deploy-production.sh)

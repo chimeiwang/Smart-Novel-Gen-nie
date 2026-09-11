@@ -22,6 +22,7 @@ public final class OperatorApiFactory {
 
     private OperatorApiFactory() {}
 
+    /** 只为当前 Operator 模式绑定的固定 origin 创建 Core 客户端。 */
     public static CoreApi create(
             String mode,
             Map<String, String> environment,
@@ -53,6 +54,7 @@ public final class OperatorApiFactory {
                 .build();
     }
 
+    /** 解析代理与 no_proxy；不支持的协议或凭据配置明确失败。 */
     static Proxy configuredProxy(URI destination, Map<String, String> environment) {
         if (bypass(destination, value(environment, "no_proxy"))) return Proxy.NO_PROXY;
         String configured = value(environment, destination.getScheme().toLowerCase(Locale.ROOT) + "_proxy");
@@ -97,6 +99,7 @@ public final class OperatorApiFactory {
         return raw == null ? "" : raw.trim();
     }
 
+    /** 判断目标是否匹配 no_proxy 的主机、子域、端口或协议规则。 */
     private static boolean bypass(URI destination, String exclusions) {
         String host = bareHost(destination.getHost());
         int port = destination.getPort() == -1

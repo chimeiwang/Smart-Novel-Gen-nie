@@ -62,6 +62,7 @@ public final class WritingRunStatusProjector {
         this.clock = Objects.requireNonNull(clock);
     }
 
+    /** 从任务、命令和草案三类持久事实投影唯一公开状态与可执行动作。 */
     public WritingRunStatusResponse project(
             WritingtaskRecord task,
             List<WritingruncommandRecord> commandValues,

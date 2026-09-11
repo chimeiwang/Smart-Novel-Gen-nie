@@ -4,38 +4,20 @@ import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.video.application.ProviderAssetTokenCodec;
-import cn.inkforge.core.video.application.LegacyVideoPlanDispatchStore;
-import cn.inkforge.core.video.application.LegacyVideoPlanDispatcher;
-import cn.inkforge.core.video.application.LegacyVideoPlanService;
-import cn.inkforge.core.video.application.LegacyVideoPlanStore;
 import cn.inkforge.core.video.application.VideoAssetStore;
-import cn.inkforge.core.video.application.VideoAdaptationRepository;
-import cn.inkforge.core.video.application.VideoAdaptationDecisionStore;
-import cn.inkforge.core.video.application.VideoAdaptationService;
-import cn.inkforge.core.video.application.VideoAdaptationTaskStore;
-import cn.inkforge.core.video.application.VideoAdaptationTaskDispatcher;
-import cn.inkforge.core.video.application.VideoAdaptationTaskSubmitter;
+import cn.inkforge.core.video.application.VideoEpisodePostProductionReconciler;
+import cn.inkforge.core.video.application.VideoEpisodePostProductionService;
 import cn.inkforge.core.video.application.VideoIdGenerator;
 import cn.inkforge.core.video.application.VideoMediaProbe;
 import cn.inkforge.core.video.application.VideoProjectRepository;
 import cn.inkforge.core.video.application.VideoProjectService;
 import cn.inkforge.core.video.application.VideoPostProductionMediaProcessor;
-import cn.inkforge.core.video.application.VideoPostProductionReconciler;
-import cn.inkforge.core.video.application.VideoPostProductionRepository;
-import cn.inkforge.core.video.application.VideoPostProductionService;
-import cn.inkforge.core.video.application.VideoRenderGateway;
-import cn.inkforge.core.video.application.VideoRenderReconciler;
-import cn.inkforge.core.video.application.VideoRenderRepository;
 import cn.inkforge.core.video.application.VideoRenderResultArchiver;
-import cn.inkforge.core.video.application.VideoRenderService;
+import cn.inkforge.core.video.application.VideoRenderSimulator;
 import cn.inkforge.core.video.application.VideoVisualCanonRepository;
 import cn.inkforge.core.video.application.VideoVisualCanonService;
-import cn.inkforge.core.workflows.application.DurableWorkflowService;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import java.time.Duration;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
@@ -52,6 +34,44 @@ import tools.jackson.databind.ObjectMapper;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class VideoConfiguration {
+
+    @Bean
+    JooqVideoEpisodeRepository videoEpisodeRepository(CoreDatabase database, CuidV1Generator ids,
+            Clock coreClock, ObjectMapper json) {
+        return new JooqVideoEpisodeRepository(database, ids, coreClock, json);
+    }
+
+    @Bean
+    cn.inkforge.core.video.application.VideoEpisodeService videoEpisodeService(
+            JooqVideoEpisodeRepository repository, CoreSettings settings) {
+        return new cn.inkforge.core.video.application.VideoEpisodeService(repository, settings.videoPreviewEnabled());
+    }
+
+    @Bean
+    JooqVideoEpisodeProductionRepository videoEpisodeProductionRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock coreClock,
+            ObjectMapper json,
+            CoreSettings settings) {
+        return new JooqVideoEpisodeProductionRepository(
+                database,
+                ids,
+                coreClock,
+                json,
+                settings.seedanceModel(),
+                settings.seedanceExecutionMode(),
+                settings.seedanceConfigured(),
+                settings.seedanceEnabled(),
+                settings.videoPreviewEnabled());
+    }
+
+    @Bean
+    cn.inkforge.core.video.application.VideoEpisodeProductionService videoEpisodeProductionService(
+            JooqVideoEpisodeProductionRepository repository, CoreSettings settings) {
+        return new cn.inkforge.core.video.application.VideoEpisodeProductionService(
+                repository, settings.videoPreviewEnabled());
+    }
 
     @Bean
     VideoAssetStore videoAssetStore(CoreSettings settings) {
@@ -73,69 +93,6 @@ class VideoConfiguration {
     VideoProjectRepository videoProjectRepository(
             CoreDatabase database, CuidV1Generator ids, Clock coreClock) {
         return new JooqVideoProjectRepository(database, ids, coreClock);
-    }
-
-    @Bean
-    VideoAdaptationRepository videoAdaptationRepository(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper json,
-            JooqVideoVisualCanonRepository visualCanons) {
-        return new JooqVideoAdaptationRepository(database, ids, coreClock, json, visualCanons);
-    }
-
-    @Bean
-    VideoAdaptationService videoAdaptationService(
-            VideoAdaptationRepository repository,
-            VideoAdaptationDecisionStore decisions,
-            VideoAdaptationTaskStore tasks,
-            CoreSettings settings) {
-        return new VideoAdaptationService(
-                repository, decisions, tasks, settings.videoPreviewEnabled());
-    }
-
-    @Bean
-    VideoAdaptationDecisionStore videoAdaptationDecisionStore(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper json,
-            JooqVideoVisualCanonRepository visualCanons) {
-        return new JooqVideoAdaptationDecisionStore(
-                database, ids, coreClock, json, visualCanons);
-    }
-
-    @Bean
-    JooqVideoAdaptationTaskStore videoAdaptationTaskStore(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper json,
-            JooqVideoVisualCanonRepository visualCanons,
-            CoreSettings settings,
-            ExecutionRegistry registry,
-            ObjectProvider<DurableWorkflowService> workflows) {
-        return new JooqVideoAdaptationTaskStore(
-                database,
-                ids,
-                coreClock,
-                json,
-                visualCanons,
-                settings.videoDispatchNamespace(), settings, registry, workflows::getIfAvailable);
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "VIDEO_DISPATCH_ENABLED", havingValue = "true")
-    VideoAdaptationTaskDispatcher videoAdaptationTaskDispatcher(
-            VideoAdaptationTaskStore tasks,
-            ObjectProvider<VideoAdaptationTaskSubmitter> submitters) {
-        // 每轮最多领取 20 条、失败后 5 秒退避；持久化租约和重试计数仍由 TaskStore 掌权。
-        return new VideoAdaptationTaskDispatcher(
-                tasks,
-                new ProviderVideoAdaptationTaskSubmitter(submitters),
-                20,
-                Duration.ofSeconds(5));
     }
 
     @Bean
@@ -171,56 +128,6 @@ class VideoConfiguration {
     }
 
     @Bean
-    LegacyVideoPlanStore legacyVideoPlanStore(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper json,
-            CoreSettings settings) {
-        return new JooqLegacyVideoPlanStore(
-                database,
-                ids,
-                coreClock,
-                json);
-    }
-
-    @Bean
-    LegacyVideoPlanDispatchStore legacyVideoPlanDispatchStore(
-            CoreDatabase database,
-            Clock coreClock,
-            ObjectMapper json,
-            CoreSettings settings) {
-        return new JooqLegacyVideoPlanDispatchStore(
-                database,
-                coreClock,
-                json,
-                settings.videoDispatchNamespace());
-    }
-
-    @Bean
-    LegacyVideoPlanService legacyVideoPlanService(LegacyVideoPlanStore store) {
-        return new LegacyVideoPlanService(store);
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "VIDEO_DISPATCH_ENABLED", havingValue = "true")
-    LegacyVideoPlanDispatcher legacyVideoPlanDispatcher(
-            LegacyVideoPlanDispatchStore store,
-            ObjectProvider<VideoAdaptationTaskSubmitter> submitters) {
-        return new LegacyVideoPlanDispatcher(
-                store,
-                new ProviderVideoAdaptationTaskSubmitter(submitters),
-                20,
-                Duration.ofSeconds(5));
-    }
-
-    @Bean
-    VideoRenderRepository videoRenderRepository(
-            CoreDatabase database, CuidV1Generator ids, Clock coreClock, ObjectMapper json) {
-        return new JooqVideoRenderRepository(database, ids, coreClock, json);
-    }
-
-    @Bean
     @Conditional(ProviderAssetTokenConfiguredCondition.class)
     ProviderAssetTokenCodec providerAssetTokenCodec(
             CoreSettings settings, Clock coreClock, ObjectMapper json) {
@@ -233,55 +140,19 @@ class VideoConfiguration {
     }
 
     @Bean
-    VideoRenderService videoRenderService(
-            VideoRenderRepository repository,
-            VideoAssetStore storage,
-            CoreSettings settings,
-            ObjectProvider<ProviderAssetTokenCodec> tokens) {
-        return new VideoRenderService(
-                repository,
-                storage,
-                settings.seedanceConfigured(),
-                settings.seedanceEnabled(),
-                settings.seedanceModel(),
-                settings.videoProviderMediaBaseUrl(),
-                tokens.getIfAvailable());
-    }
-
-    @Bean
-    @ConditionalOnProperty(name = "SEEDANCE_ENABLED", havingValue = "true")
     VideoRenderResultArchiver videoRenderResultArchiver(
-            VideoAssetStore storage, CoreSettings settings) {
+            VideoAssetStore storage, CoreSettings settings, VideoMediaProbe mediaProbe) {
         return new SeedanceResultArchiver(
-                storage, settings.seedanceResultAllowedHostSuffixes());
+                storage, settings.seedanceResultAllowedHostSuffixes(), mediaProbe);
     }
 
     @Bean
-    @ConditionalOnBean({VideoRenderGateway.class, VideoRenderResultArchiver.class})
-    @ConditionalOnProperty(name = "SEEDANCE_ENABLED", havingValue = "true")
-    VideoRenderReconciler videoRenderReconciler(
-            VideoRenderRepository repository,
-            VideoRenderGateway gateway,
-            VideoRenderResultArchiver archiver,
-            VideoAssetStore storage,
-            CoreSettings settings,
-            ObjectProvider<ProviderAssetTokenCodec> tokens) {
-        // 只有网关与受控归档器同时存在才轮询；并发 3、3 秒循环是单机资源上限，不是业务状态来源。
-        return new VideoRenderReconciler(
-                repository,
-                gateway,
-                archiver,
-                storage,
-                settings.videoProviderMediaBaseUrl(),
-                tokens.getIfAvailable(),
-                3,
-                Duration.ofSeconds(3));
-    }
-
-    @Bean
-    VideoPostProductionRepository videoPostProductionRepository(
-            CoreDatabase database, CuidV1Generator ids, Clock coreClock, ObjectMapper json) {
-        return new JooqVideoPostProductionRepository(database, ids, coreClock, json);
+    VideoRenderSimulator videoRenderSimulator(
+            VideoAssetStore storage, CoreSettings settings, VideoMediaProbe mediaProbe) {
+        return new FfmpegVideoRenderSimulator(
+                FfprobeVideoMediaProbe.findExecutable("ffmpeg", System.getenv("PATH")),
+                settings.uploadsRoot().resolve("video-simulation-work"),
+                storage, mediaProbe, Duration.ofMinutes(2));
     }
 
     @Bean
@@ -295,21 +166,29 @@ class VideoConfiguration {
     }
 
     @Bean
-    VideoPostProductionService videoPostProductionService(
-            VideoPostProductionRepository repository,
+    JooqVideoEpisodePostProductionRepository videoEpisodePostProductionRepository(
+            CoreDatabase database, CuidV1Generator ids, Clock coreClock, ObjectMapper json) {
+        return new JooqVideoEpisodePostProductionRepository(database, ids, coreClock, json);
+    }
+
+    @Bean
+    VideoEpisodePostProductionService videoEpisodePostProductionService(
+            JooqVideoEpisodePostProductionRepository repository,
             VideoAssetStore storage,
-            VideoPostProductionMediaProcessor media) {
-        return new VideoPostProductionService(repository, storage, media);
+            VideoPostProductionMediaProcessor media,
+            CoreSettings settings) {
+        return new VideoEpisodePostProductionService(
+                repository, storage, media, settings.videoPreviewEnabled());
     }
 
     @Bean
     @ConditionalOnProperty(name = "VIDEO_PREVIEW_ENABLED", havingValue = "true")
-    VideoPostProductionReconciler videoPostProductionReconciler(
-            VideoPostProductionRepository repository,
+    VideoEpisodePostProductionReconciler videoEpisodePostProductionReconciler(
+            JooqVideoEpisodePostProductionRepository repository,
             VideoPostProductionMediaProcessor media,
             VideoAssetStore storage) {
-        // 生产默认关闭预览；单并发避免 2 核 2 GB 部署上多个 FFmpeg 同时挤占内存。
-        return new VideoPostProductionReconciler(
+        return new VideoEpisodePostProductionReconciler(
                 repository, media, storage, 1, Duration.ofSeconds(3));
     }
+
 }

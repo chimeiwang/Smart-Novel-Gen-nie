@@ -28,6 +28,9 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.db.PostgresConnectionSettings;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
+import cn.inkforge.core.lore.infrastructure.JooqLoreRepository;
+import cn.inkforge.core.lore.domain.LoreEntityKind;
+import cn.inkforge.core.lore.domain.LoreEntityData;
 import cn.inkforge.core.video.application.VisualCanonApproval;
 import cn.inkforge.core.video.application.VisualCanonCandidateCommand;
 import cn.inkforge.core.video.application.ShotVisualReferenceSelection;
@@ -41,6 +44,12 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -152,6 +161,117 @@ class JooqVideoVisualCanonRepositoryTest {
     }
 
     @Test
+    void 人物地点道具的候选视觉槽也必须阻止设定删除() {
+        String owner = user("canon-delete-owner");
+        fixture(owner, "canon-delete-novel", "canon-delete-project", "unused-character");
+        JooqLoreRepository lore = new JooqLoreRepository(database, new CuidV1Generator(CLOCK), CLOCK);
+        for (LoreEntityKind kind : List.of(LoreEntityKind.CHARACTERS, LoreEntityKind.LOCATIONS, LoreEntityKind.ITEMS)) {
+            String settingKind = switch (kind) {
+                case CHARACTERS -> "character";
+                case LOCATIONS -> "location";
+                case ITEMS -> "item";
+                default -> throw new AssertionError();
+            };
+            String duty = switch (kind) {
+                case CHARACTERS -> "identity";
+                case LOCATIONS -> "scene";
+                case ITEMS -> "prop";
+                default -> throw new AssertionError();
+            };
+            var entity = lore.createEntity("canon-delete-novel", owner, kind, "create-" + settingKind,
+                    new LoreEntityData(Map.of("name", "需保全" + settingKind))).entity();
+            asset("delete-" + settingKind, "canon-delete-project", duty, "confirmed", INITIAL);
+            repository.setCandidate(owner, "canon-delete-project", new VisualCanonCandidateCommand(
+                    settingKind, entity.id(), duty, "default", "已选候选", "delete-" + settingKind,
+                    List.of(), List.of(), 70, 0));
+            assertThatThrownBy(() -> lore.deleteEntity("canon-delete-novel", owner, kind, entity.id(), entity.updatedAt()))
+                    .isInstanceOfSatisfying(ApiException.class, error -> {
+                        assertThat(error.code()).isEqualTo("LORE_ENTITY_REFERENCED");
+                        assertThat(error.details()).isEqualTo(Map.of("videoVisualCanons", 1));
+                    });
+        }
+    }
+
+    @Test
+    void 视觉候选先获得锁时并发删除必须等待并看见已提交引用() throws Exception {
+        String owner = user("canon-create-race-owner");
+        fixture(owner, "canon-create-race-novel", "canon-create-race-project", "canon-create-race-character");
+        asset("canon-create-race-asset", "canon-create-race-project", "identity", "confirmed", INITIAL);
+        JooqLoreRepository lore = new JooqLoreRepository(database, new CuidV1Generator(CLOCK), CLOCK);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var candidate = workers.submit(() -> database.transactionResult(transaction -> {
+                var result = repository.setCandidate(owner, "canon-create-race-project",
+                        command("canon-create-race-asset", "canon-create-race-character"));
+                locked.countDown();
+                await(release);
+                return result;
+            }));
+            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+            var deletion = workers.submit(() -> lore.deleteEntity("canon-create-race-novel", owner,
+                    LoreEntityKind.CHARACTERS, "canon-create-race-character", INITIAL.atOffset(ZoneOffset.UTC)));
+            try {
+                assertThatThrownBy(() -> deletion.get(150, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            } finally {
+                release.countDown();
+            }
+            candidate.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> deletion.get(5, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .hasCauseInstanceOf(ApiException.class)
+                    .satisfies(error -> assertThat(((ApiException) error.getCause()).code()).isEqualTo("LORE_ENTITY_REFERENCED"));
+            assertThat(repository.list(owner, "canon-create-race-project").getCanons()).hasSize(1);
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void 设定删除先获得锁时并发视觉候选不得创建孤儿引用() throws Exception {
+        String owner = user("canon-delete-race-owner");
+        fixture(owner, "canon-delete-race-novel", "canon-delete-race-project", "canon-delete-race-character");
+        asset("canon-delete-race-asset", "canon-delete-race-project", "identity", "confirmed", INITIAL);
+        JooqLoreRepository lore = new JooqLoreRepository(database, new CuidV1Generator(CLOCK), CLOCK);
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var deletion = workers.submit(() -> database.transactionResult(transaction -> {
+                var result = lore.deleteEntity("canon-delete-race-novel", owner,
+                        LoreEntityKind.CHARACTERS, "canon-delete-race-character", INITIAL.atOffset(ZoneOffset.UTC));
+                locked.countDown();
+                await(release);
+                return result;
+            }));
+            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+            var candidate = workers.submit(() -> repository.setCandidate(owner, "canon-delete-race-project",
+                    command("canon-delete-race-asset", "canon-delete-race-character")));
+            try {
+                assertThatThrownBy(() -> candidate.get(150, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            } finally {
+                release.countDown();
+            }
+            deletion.get(5, TimeUnit.SECONDS);
+            assertThatThrownBy(() -> candidate.get(5, TimeUnit.SECONDS))
+                    .isInstanceOf(ExecutionException.class)
+                    .hasCauseInstanceOf(ApiException.class)
+                    .satisfies(error -> assertThat(((ApiException) error.getCause()).code()).isEqualTo("VIDEO_VISUAL_SETTING_NOT_FOUND"));
+            assertThat(repository.list(owner, "canon-delete-race-project").getCanons()).isEmpty();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) throw new AssertionError("并发验证等待释放超时");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(exception);
+        }
+    }
+
+    @Test
     void 候选必须引用归属文字设定和已确认职责匹配图片且同值不推进revision() {
         String owner = user("canon-owner-1");
         fixture(owner, "canon-novel-1", "project-1", "character-1");
@@ -187,7 +307,7 @@ class JooqVideoVisualCanonRepositoryTest {
                 "asset-1",
                 List.of(),
                 List.of(),
-                70);
+                70, 0);
         assertCode(
                 () -> repository.setCandidate(owner, "project-1", missingSetting),
                 "VIDEO_VISUAL_SETTING_NOT_FOUND");
@@ -243,10 +363,14 @@ class JooqVideoVisualCanonRepositoryTest {
                 "asset-3",
                 List.of("侧脸"),
                 List.of(),
-                80);
+                80, first.getRevision());
         var second = repository.setCandidate(owner, "project-3", changed);
 
         assertThat(second.getRevision()).isEqualTo(first.getRevision() + 1);
+        assertCode(() -> repository.setCandidate(owner, "project-3", command("asset-3", "character-3")),
+                "VIDEO_VISUAL_CANON_REVISION_CONFLICT");
+        assertThat(repository.setCandidate(owner, "project-3", changed).getRevision())
+                .as("相同完整候选可在响应丢失后安全重放").isEqualTo(second.getRevision());
         assertCode(
                 () -> repository.approve(
                         owner,
@@ -266,7 +390,7 @@ class JooqVideoVisualCanonRepositoryTest {
                 owner, "project-4", command("asset-4", "character-4"));
         repository.approve(owner, candidate.getId(), new VisualCanonApproval(1, "asset-4"));
         var secondCandidate = repository.setCandidate(
-                owner, "project-4", command("asset-4", "character-4"));
+                owner, "project-4", command("asset-4", "character-4", 2));
         var second = repository.approve(
                 owner,
                 secondCandidate.getId(),
@@ -538,6 +662,10 @@ class JooqVideoVisualCanonRepositoryTest {
     }
 
     private static VisualCanonCandidateCommand command(String assetId, String settingId) {
+        return command(assetId, settingId, 0);
+    }
+
+    private static VisualCanonCandidateCommand command(String assetId, String settingId, int expectedRevision) {
         return new VisualCanonCandidateCommand(
                 "character",
                 settingId,
@@ -547,7 +675,7 @@ class JooqVideoVisualCanonRepositoryTest {
                 assetId,
                 List.of("正脸", "黑发"),
                 List.of("现代服装"),
-                70);
+                70, expectedRevision);
     }
 
     private static String sha256(String value) throws Exception {

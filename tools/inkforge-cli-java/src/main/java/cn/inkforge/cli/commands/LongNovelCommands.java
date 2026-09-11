@@ -10,6 +10,7 @@ import java.util.TreeSet;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册长篇小说的创建、读取和简介更新命令。 */
 final class LongNovelCommands {
 
     private static final List<String> TEXT_FIELDS = List.of(

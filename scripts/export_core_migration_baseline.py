@@ -363,6 +363,12 @@ def _java_openapi(
             return
         if not isinstance(value, dict):
             return
+        if "default" in value and value["default"] is None:
+            # OpenAPI Generator 7.24 会把对象响应属性的 JSON null default 错误强转为
+            # ObjectNode 并输出 ClassCastException。响应字段是否必显由 required 决定；
+            # Java 投影移除该无行为差异的 default，并保留来源事实供契约审计。
+            value.pop("default")
+            value["x-inkforge-source-default-null"] = True
         if value.get("nullable") is True:
             # OpenAPI Generator 会在解析带同级扩展的 $ref 时丢失属性扩展。先用
             # allOf 包住引用，确保“响应必显但值可空”的标记能进入 CodegenProperty，
@@ -435,13 +441,45 @@ def _java_openapi(
         (str(item["path"]), str(item["method"]).lower()): str(item["productModule"])
         for item in routes
     }
+    def java_tag(path: str, product_module: str) -> str:
+        # 独立剧集仍属于 video 产品模块，但按用例边界生成小接口，避免新域迫使旧
+        # VideoController 或剧集编辑控制器注入所有媒体、后期与审核协作者。
+        if product_module == "video" and path.startswith("/api/v1/video/episodes/"):
+            if "/impact-reviews" in path:
+                return "videoepisodeimpacts"
+            if "/render-tasks" in path or path.endswith("/takes/{take_id}/content"):
+                return "videoepisoderenders"
+            if any(
+                segment in path
+                for segment in ("/edit-versions", "/mix-versions", "/export-tasks", "/exports/")
+            ):
+                return "videoepisodepostproduction"
+            if (
+                "/storyboard/" in path
+                or "/take-adoptions" in path
+                or path.endswith("/takes")
+                or "/production-baselines" in path
+            ):
+                return "videoproduction"
+        if product_module == "video" and path == "/api/v1/video/production-capabilities":
+            return "videoproduction"
+        if product_module == "video" and (
+            path.startswith("/api/v1/video/episodes/")
+            or path.startswith("/api/v1/video/projects/{project_id}/episodes")
+            or path.startswith("/api/v1/video/projects/{project_id}/episode-commands/")
+        ):
+            return "videoepisodes"
+        return product_module
+
+    java_tags: set[str] = set()
     for path, path_item in java_openapi["paths"].items():
         for method, operation in path_item.items():
             product_module = route_modules.get((path, method))
             if product_module is not None:
-                operation["tags"] = [product_module]
-    product_modules = sorted(set(route_modules.values()))
-    java_openapi["tags"] = [{"name": name} for name in product_modules]
+                tag = java_tag(path, product_module)
+                operation["tags"] = [tag]
+                java_tags.add(tag)
+    java_openapi["tags"] = [{"name": name} for name in sorted(java_tags)]
     return java_openapi
 
 

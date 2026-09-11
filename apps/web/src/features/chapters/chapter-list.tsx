@@ -18,6 +18,7 @@ type ChapterListProps = {
   activeChapterId: string;
   view: WorkspaceView;
   onChapterChangeReady?: () => void;
+  beforeChapterChange?: () => boolean;
   chapters: Array<{
     id: string;
     title: string;
@@ -38,6 +39,7 @@ export function ChapterList({
   chapters,
   view,
   onChapterChangeReady,
+  beforeChapterChange,
 }: ChapterListProps) {
   const router = useRouter();
   const [creating, startCreatingTransition] = useTransition();
@@ -46,6 +48,7 @@ export function ChapterList({
   const [navigationError, setNavigationError] = useState<string | null>(null);
 
   const handleCreateChapter = () => {
+    if (beforeChapterChange && !beforeChapterChange()) return;
     startCreatingTransition(async () => {
       setNavigationError(null);
       try {
@@ -82,6 +85,7 @@ export function ChapterList({
     }
     event.preventDefault();
     if (navigatingChapterId === chapterId) return;
+    if (beforeChapterChange && !beforeChapterChange()) return;
     setNavigatingChapterId(chapterId);
     startNavigationTransition(async () => {
       setNavigationError(null);

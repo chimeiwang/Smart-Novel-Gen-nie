@@ -1,0 +1,54 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeScriptReviewFinding/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "enum": [
+        "source",
+        "continuity",
+        "dialogue",
+        "clarity"
+      ],
+      "title": "Code",
+      "type": "string"
+    },
+    "lineId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Lineid"
+    },
+    "message": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "sceneId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Sceneid"
+    }
+  },
+  "required": [
+    "code",
+    "sceneId",
+    "lineId",
+    "message"
+  ],
+  "title": "VideoEpisodeScriptReviewFinding",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeScriptReviewFinding"
+}

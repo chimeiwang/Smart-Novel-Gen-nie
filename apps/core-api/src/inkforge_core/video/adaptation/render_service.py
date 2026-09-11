@@ -53,6 +53,7 @@ class VideoShotRenderService:
         if not transport_configured:
             blockers.append("视觉参考图公网短时传输尚未配置；无参考图镜头不受影响")
         return VideoRenderReadinessResponse(
+            executionMode="live",
             configured=self._configured,
             enabled=self._enabled,
             referenceTransportConfigured=transport_configured,

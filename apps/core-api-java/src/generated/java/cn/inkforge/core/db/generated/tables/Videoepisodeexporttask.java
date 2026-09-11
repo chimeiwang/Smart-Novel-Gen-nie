@@ -12,6 +12,7 @@ import cn.inkforge.core.db.generated.tables.User.UserPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion.VideoepisodeeditversionPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeexport.VideoepisodeexportPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodemixversion.VideoepisodemixversionPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
 import cn.inkforge.core.db.generated.tables.records.VideoepisodeexporttaskRecord;
 
 import java.time.LocalDateTime;
@@ -87,7 +88,7 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
     /**
      * The column <code>public.VideoEpisodeExportTask.adaptationId</code>.
      */
-    public final TableField<VideoepisodeexporttaskRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeexporttaskRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExportTask.projectId</code>.
@@ -103,17 +104,17 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
      * The column
      * <code>public.VideoEpisodeExportTask.episodePlanVersionId</code>.
      */
-    public final TableField<VideoepisodeexporttaskRecord, String> EPISODEPLANVERSIONID = createField(DSL.name("episodePlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeexporttaskRecord, String> EPISODEPLANVERSIONID = createField(DSL.name("episodePlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExportTask.shotPlanVersionId</code>.
      */
-    public final TableField<VideoepisodeexporttaskRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeexporttaskRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExportTask.episodeNo</code>.
      */
-    public final TableField<VideoepisodeexporttaskRecord, Integer> EPISODENO = createField(DSL.name("episodeNo"), SQLDataType.INTEGER.nullable(false), this, "");
+    public final TableField<VideoepisodeexporttaskRecord, Integer> EPISODENO = createField(DSL.name("episodeNo"), SQLDataType.INTEGER, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExportTask.editVersionId</code>.
@@ -206,6 +207,17 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
      */
     public final TableField<VideoepisodeexporttaskRecord, LocalDateTime> COMPLETEDAT = createField(DSL.name("completedAt"), SQLDataType.LOCALDATETIME(3), this, "");
 
+    /**
+     * The column <code>public.VideoEpisodeExportTask.videoEpisodeId</code>.
+     */
+    public final TableField<VideoepisodeexporttaskRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoEpisodeExportTask.productionBaselineId</code>.
+     */
+    public final TableField<VideoepisodeexporttaskRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
+
     private Videoepisodeexporttask(Name alias, Table<VideoepisodeexporttaskRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -284,7 +296,7 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.VIDEOEPISODEEXPORTTASK_ACTIVE_EPISODE_KEY, Indexes.VIDEOEPISODEEXPORTTASK_DUE_IDX, Indexes.VIDEOEPISODEEXPORTTASK_USER_REQUEST_KEY);
+        return Arrays.asList(Indexes.VIDEOEPISODEEXPORTTASK_ACTIVE_EPISODE_KEY, Indexes.VIDEOEPISODEEXPORTTASK_DUE_IDX, Indexes.VIDEOEPISODEEXPORTTASK_NEW_ACTIVE_EPISODE_KEY, Indexes.VIDEOEPISODEEXPORTTASK_NEW_EPISODE_IDX, Indexes.VIDEOEPISODEEXPORTTASK_USER_REQUEST_KEY);
     }
 
     @Override
@@ -294,38 +306,81 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
 
     @Override
     public List<UniqueKey<VideoepisodeexporttaskRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.VIDEOEPISODEEXPORTTASK_ID_SCOPE_KEY);
+        return Arrays.asList(Keys.VIDEOEPISODEEXPORTTASK_ID_SCOPE_KEY, Keys.VIDEOEPISODEEXPORTTASK_ID_VIDEO_EPISODE_KEY);
     }
 
     @Override
     public List<ForeignKey<VideoepisodeexporttaskRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_EDIT_VERSION_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_MIX_VERSION_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_NOVEL_OWNER_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_RETRY_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_USER_FKEY);
+        return Arrays.asList(Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_BASELINE_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_EDIT_NEW_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_EDIT_VERSION_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_MIX_NEW_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_MIX_VERSION_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_NOVEL_OWNER_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_RETRY_EPISODE_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_RETRY_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_USER_FKEY);
     }
 
-    private transient VideoepisodeeditversionPath _videoepisodeeditversion;
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoEpisodeEditVersion</code> table.
+     * <code>public.VideoProductionBaseline</code> table.
      */
-    public VideoepisodeeditversionPath videoepisodeeditversion() {
-        if (_videoepisodeeditversion == null)
-            _videoepisodeeditversion = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_EDIT_VERSION_FKEY, null);
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_BASELINE_SCOPE_FKEY, null);
 
-        return _videoepisodeeditversion;
+        return _videoproductionbaseline;
     }
 
-    private transient VideoepisodemixversionPath _videoepisodemixversion;
+    private transient VideoepisodeeditversionPath _videoepisodeexporttaskEditNewScopeFkey;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoEpisodeMixVersion</code> table.
+     * <code>public.VideoEpisodeEditVersion</code> table, via the
+     * <code>VideoEpisodeExportTask_edit_new_scope_fkey</code> key.
      */
-    public VideoepisodemixversionPath videoepisodemixversion() {
-        if (_videoepisodemixversion == null)
-            _videoepisodemixversion = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_MIX_VERSION_FKEY, null);
+    public VideoepisodeeditversionPath videoepisodeexporttaskEditNewScopeFkey() {
+        if (_videoepisodeexporttaskEditNewScopeFkey == null)
+            _videoepisodeexporttaskEditNewScopeFkey = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_EDIT_NEW_SCOPE_FKEY, null);
 
-        return _videoepisodemixversion;
+        return _videoepisodeexporttaskEditNewScopeFkey;
+    }
+
+    private transient VideoepisodeeditversionPath _videoepisodeexporttaskEditVersionFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeEditVersion</code> table, via the
+     * <code>VideoEpisodeExportTask_edit_version_fkey</code> key.
+     */
+    public VideoepisodeeditversionPath videoepisodeexporttaskEditVersionFkey() {
+        if (_videoepisodeexporttaskEditVersionFkey == null)
+            _videoepisodeexporttaskEditVersionFkey = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_EDIT_VERSION_FKEY, null);
+
+        return _videoepisodeexporttaskEditVersionFkey;
+    }
+
+    private transient VideoepisodemixversionPath _videoepisodeexporttaskMixNewScopeFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeMixVersion</code> table, via the
+     * <code>VideoEpisodeExportTask_mix_new_scope_fkey</code> key.
+     */
+    public VideoepisodemixversionPath videoepisodeexporttaskMixNewScopeFkey() {
+        if (_videoepisodeexporttaskMixNewScopeFkey == null)
+            _videoepisodeexporttaskMixNewScopeFkey = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_MIX_NEW_SCOPE_FKEY, null);
+
+        return _videoepisodeexporttaskMixNewScopeFkey;
+    }
+
+    private transient VideoepisodemixversionPath _videoepisodeexporttaskMixVersionFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeMixVersion</code> table, via the
+     * <code>VideoEpisodeExportTask_mix_version_fkey</code> key.
+     */
+    public VideoepisodemixversionPath videoepisodeexporttaskMixVersionFkey() {
+        if (_videoepisodeexporttaskMixVersionFkey == null)
+            _videoepisodeexporttaskMixVersionFkey = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_MIX_VERSION_FKEY, null);
+
+        return _videoepisodeexporttaskMixVersionFkey;
     }
 
     private transient NovelPath _novel;
@@ -340,17 +395,32 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
         return _novel;
     }
 
-    private transient VideoepisodeexporttaskPath _videoepisodeexporttask;
+    private transient VideoepisodeexporttaskPath _videoepisodeexporttaskRetryEpisodeFkey;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoEpisodeExportTask</code> table.
+     * <code>public.VideoEpisodeExportTask</code> table, via the
+     * <code>VideoEpisodeExportTask_retry_episode_fkey</code> key.
      */
-    public VideoepisodeexporttaskPath videoepisodeexporttask() {
-        if (_videoepisodeexporttask == null)
-            _videoepisodeexporttask = new VideoepisodeexporttaskPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_RETRY_SCOPE_FKEY, null);
+    public VideoepisodeexporttaskPath videoepisodeexporttaskRetryEpisodeFkey() {
+        if (_videoepisodeexporttaskRetryEpisodeFkey == null)
+            _videoepisodeexporttaskRetryEpisodeFkey = new VideoepisodeexporttaskPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_RETRY_EPISODE_FKEY, null);
 
-        return _videoepisodeexporttask;
+        return _videoepisodeexporttaskRetryEpisodeFkey;
+    }
+
+    private transient VideoepisodeexporttaskPath _videoepisodeexporttaskRetryScopeFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeExportTask</code> table, via the
+     * <code>VideoEpisodeExportTask_retry_scope_fkey</code> key.
+     */
+    public VideoepisodeexporttaskPath videoepisodeexporttaskRetryScopeFkey() {
+        if (_videoepisodeexporttaskRetryScopeFkey == null)
+            _videoepisodeexporttaskRetryScopeFkey = new VideoepisodeexporttaskPath(this, Keys.VIDEOEPISODEEXPORTTASK__VIDEOEPISODEEXPORTTASK_RETRY_SCOPE_FKEY, null);
+
+        return _videoepisodeexporttaskRetryScopeFkey;
     }
 
     private transient UserPath _user;
@@ -365,17 +435,32 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
         return _user;
     }
 
-    private transient VideoepisodeexportPath _videoepisodeexport;
+    private transient VideoepisodeexportPath _videoepisodeexportTaskNewScopeFkey;
 
     /**
      * Get the implicit to-many join path to the
-     * <code>public.VideoEpisodeExport</code> table
+     * <code>public.VideoEpisodeExport</code> table, via the
+     * <code>VideoEpisodeExport_task_new_scope_fkey</code> key
      */
-    public VideoepisodeexportPath videoepisodeexport() {
-        if (_videoepisodeexport == null)
-            _videoepisodeexport = new VideoepisodeexportPath(this, null, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_SCOPE_FKEY.getInverseKey());
+    public VideoepisodeexportPath videoepisodeexportTaskNewScopeFkey() {
+        if (_videoepisodeexportTaskNewScopeFkey == null)
+            _videoepisodeexportTaskNewScopeFkey = new VideoepisodeexportPath(this, null, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_NEW_SCOPE_FKEY.getInverseKey());
 
-        return _videoepisodeexport;
+        return _videoepisodeexportTaskNewScopeFkey;
+    }
+
+    private transient VideoepisodeexportPath _videoepisodeexportTaskScopeFkey;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeExport</code> table, via the
+     * <code>VideoEpisodeExport_task_scope_fkey</code> key
+     */
+    public VideoepisodeexportPath videoepisodeexportTaskScopeFkey() {
+        if (_videoepisodeexportTaskScopeFkey == null)
+            _videoepisodeexportTaskScopeFkey = new VideoepisodeexportPath(this, null, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_SCOPE_FKEY.getInverseKey());
+
+        return _videoepisodeexportTaskScopeFkey;
     }
 
     @Override
@@ -386,6 +471,7 @@ public class Videoepisodeexporttask extends TableImpl<VideoepisodeexporttaskReco
             Internal.createCheck(this, DSL.name("VideoEpisodeExportTask_numbers_check"), "(((\"episodeNo\" > 0) AND (\"attemptCount\" >= 0)))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeExportTask_output_check"), "(((resolution = ANY (ARRAY['720p'::text, '1080p'::text])) AND (\"framesPerSecond\" = ANY (ARRAY[24, 25, 30]))))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeExportTask_request_check"), "((btrim(\"clientRequestId\") <> ''::text))", true),
+            Internal.createCheck(this, DSL.name("VideoEpisodeExportTask_scope_branch_check"), "((((\"adaptationId\" IS NOT NULL) AND (\"episodePlanVersionId\" IS NOT NULL) AND (\"shotPlanVersionId\" IS NOT NULL) AND (\"episodeNo\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"adaptationId\" IS NULL) AND (\"episodePlanVersionId\" IS NULL) AND (\"shotPlanVersionId\" IS NULL) AND (\"episodeNo\" IS NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeExportTask_status_check"), "((status = ANY (ARRAY['pending'::text, 'rendering'::text, 'succeeded'::text, 'failed'::text])))", true)
         );
     }

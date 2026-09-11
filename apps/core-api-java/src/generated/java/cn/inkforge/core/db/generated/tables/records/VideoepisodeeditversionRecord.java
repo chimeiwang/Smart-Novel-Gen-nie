@@ -241,6 +241,50 @@ public class VideoepisodeeditversionRecord extends UpdatableRecordImpl<Videoepis
         return (LocalDateTime) get(14);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeEditVersion.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(15, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditVersion.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(15);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeEditVersion.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(16, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeEditVersion.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(16);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeEditVersion.omissionsJson</code>.
+     */
+    public void setOmissionsjson(String value) {
+        set(17, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeEditVersion.omissionsJson</code>.
+     */
+    public String getOmissionsjson() {
+        return (String) get(17);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -264,7 +308,7 @@ public class VideoepisodeeditversionRecord extends UpdatableRecordImpl<Videoepis
     /**
      * Create a detached, initialised VideoepisodeeditversionRecord
      */
-    public VideoepisodeeditversionRecord(String id, String adaptationid, String projectid, String novelid, String episodeplanversionid, String shotplanversionid, Integer episodeno, Integer versionno, String basedonversionid, Integer totaldurationms, String clientrequestid, String requesthash, String contenthash, String createdbyuserid, LocalDateTime createdat) {
+    public VideoepisodeeditversionRecord(String id, String adaptationid, String projectid, String novelid, String episodeplanversionid, String shotplanversionid, Integer episodeno, Integer versionno, String basedonversionid, Integer totaldurationms, String clientrequestid, String requesthash, String contenthash, String createdbyuserid, LocalDateTime createdat, String videoepisodeid, String productionbaselineid, String omissionsjson) {
         super(Videoepisodeeditversion.VIDEOEPISODEEDITVERSION);
 
         setId(id);
@@ -282,6 +326,9 @@ public class VideoepisodeeditversionRecord extends UpdatableRecordImpl<Videoepis
         setContenthash(contenthash);
         setCreatedbyuserid(createdbyuserid);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
+        setOmissionsjson(omissionsjson);
         resetTouchedOnNotNull();
     }
 }

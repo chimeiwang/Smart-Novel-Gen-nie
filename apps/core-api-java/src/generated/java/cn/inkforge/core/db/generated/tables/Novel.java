@@ -25,6 +25,7 @@ import cn.inkforge.core.db.generated.tables.Reviewartifact.ReviewartifactPath;
 import cn.inkforge.core.db.generated.tables.Storybackground.StorybackgroundPath;
 import cn.inkforge.core.db.generated.tables.User.UserPath;
 import cn.inkforge.core.db.generated.tables.Videoadaptationdecisioncommand.VideoadaptationdecisioncommandPath;
+import cn.inkforge.core.db.generated.tables.Videoepisodecommand.VideoepisodecommandPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeexporttask.VideoepisodeexporttaskPath;
 import cn.inkforge.core.db.generated.tables.Videoproject.VideoprojectPath;
 import cn.inkforge.core.db.generated.tables.Videoreviewdecisioncommand.VideoreviewdecisioncommandPath;
@@ -474,6 +475,19 @@ public class Novel extends TableImpl<NovelRecord> {
             _videoadaptationdecisioncommand = new VideoadaptationdecisioncommandPath(this, null, Keys.VIDEOADAPTATIONDECISIONCOMMAND__VIDEOADAPTATIONDECISIONCOMMAND_NOVEL_OWNER_FKEY.getInverseKey());
 
         return _videoadaptationdecisioncommand;
+    }
+
+    private transient VideoepisodecommandPath _videoepisodecommand;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeCommand</code> table
+     */
+    public VideoepisodecommandPath videoepisodecommand() {
+        if (_videoepisodecommand == null)
+            _videoepisodecommand = new VideoepisodecommandPath(this, null, Keys.VIDEOEPISODECOMMAND__VIDEOEPISODECOMMAND_NOVEL_OWNER_FKEY.getInverseKey());
+
+        return _videoepisodecommand;
     }
 
     private transient VideoepisodeexporttaskPath _videoepisodeexporttask;

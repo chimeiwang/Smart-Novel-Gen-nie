@@ -22,6 +22,7 @@ final class VideoPayloads {
 
     private VideoPayloads() {}
 
+    /** 按命令声明检查必填、可选和文件输出字段，不接受额外输入。 */
     static void fields(
             ObjectNode payload,
             Set<String> required,
@@ -191,6 +192,7 @@ final class VideoPayloads {
         return result;
     }
 
+    /** 从内联值或 UTF-8 文件二选一读取完整 JSON 对象。 */
     static ObjectNode jsonSource(
             CommandContext context,
             ObjectNode payload,
@@ -221,6 +223,7 @@ final class VideoPayloads {
         return object.deepCopy();
     }
 
+    /** 从内联值或 UTF-8 文件二选一读取非空文本。 */
     static String textSource(
             ObjectNode payload,
             String inlineField,
@@ -271,6 +274,7 @@ final class VideoPayloads {
         return object;
     }
 
+    /** 下载二进制到指定本地文件，并只向 stdout 返回文件描述。 */
     static CommandResult download(
             CommandContext context,
             ObjectNode payload,

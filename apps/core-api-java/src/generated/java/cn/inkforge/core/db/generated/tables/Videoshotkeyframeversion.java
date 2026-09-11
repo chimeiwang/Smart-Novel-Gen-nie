@@ -9,8 +9,11 @@ import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.User.UserPath;
 import cn.inkforge.core.db.generated.tables.Videoasset.VideoassetPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaselineshot.VideoproductionbaselineshotPath;
 import cn.inkforge.core.db.generated.tables.Videoproject.VideoprojectPath;
 import cn.inkforge.core.db.generated.tables.Videoshotkeyframehead.VideoshotkeyframeheadPath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
 import cn.inkforge.core.db.generated.tables.Videotakeframeextraction.VideotakeframeextractionPath;
 import cn.inkforge.core.db.generated.tables.records.VideoshotkeyframeversionRecord;
 
@@ -82,7 +85,7 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
     /**
      * The column <code>public.VideoShotKeyframeVersion.adaptationId</code>.
      */
-    public final TableField<VideoshotkeyframeversionRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotkeyframeversionRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotKeyframeVersion.projectId</code>.
@@ -97,13 +100,13 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
     /**
      * The column <code>public.VideoShotKeyframeVersion.shotId</code>.
      */
-    public final TableField<VideoshotkeyframeversionRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotkeyframeversionRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column
      * <code>public.VideoShotKeyframeVersion.shotPlanVersionId</code>.
      */
-    public final TableField<VideoshotkeyframeversionRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotkeyframeversionRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotKeyframeVersion.role</code>.
@@ -164,6 +167,28 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
      * The column <code>public.VideoShotKeyframeVersion.createdAt</code>.
      */
     public final TableField<VideoshotkeyframeversionRecord, LocalDateTime> CREATEDAT = createField(DSL.name("createdAt"), SQLDataType.LOCALDATETIME(3).nullable(false).defaultValue(DSL.field(DSL.raw("CURRENT_TIMESTAMP"), SQLDataType.LOCALDATETIME)), this, "");
+
+    /**
+     * The column <code>public.VideoShotKeyframeVersion.videoEpisodeId</code>.
+     */
+    public final TableField<VideoshotkeyframeversionRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotKeyframeVersion.episodeShotId</code>.
+     */
+    public final TableField<VideoshotkeyframeversionRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoShotKeyframeVersion.episodeShotVersionId</code>.
+     */
+    public final TableField<VideoshotkeyframeversionRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoShotKeyframeVersion.productionBaselineId</code>.
+     */
+    public final TableField<VideoshotkeyframeversionRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
 
     private Videoshotkeyframeversion(Name alias, Table<VideoshotkeyframeversionRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -243,7 +268,7 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.VIDEOSHOTKEYFRAMEVERSION_SHOT_CREATED_IDX, Indexes.VIDEOSHOTKEYFRAMEVERSION_SHOT_ROLE_VERSION_KEY, Indexes.VIDEOSHOTKEYFRAMEVERSION_USER_REQUEST_KEY);
+        return Arrays.asList(Indexes.VIDEOSHOTKEYFRAMEVERSION_EPISODE_VERSION_IDX, Indexes.VIDEOSHOTKEYFRAMEVERSION_NEW_SHOT_ROLE_VERSION_KEY, Indexes.VIDEOSHOTKEYFRAMEVERSION_SHOT_CREATED_IDX, Indexes.VIDEOSHOTKEYFRAMEVERSION_SHOT_ROLE_VERSION_KEY, Indexes.VIDEOSHOTKEYFRAMEVERSION_USER_REQUEST_KEY);
     }
 
     @Override
@@ -253,12 +278,12 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
 
     @Override
     public List<UniqueKey<VideoshotkeyframeversionRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.VIDEOSHOTKEYFRAMEVERSION_ID_SHOT_ROLE_KEY);
+        return Arrays.asList(Keys.VIDEOSHOTKEYFRAMEVERSION_ID_EPISODE_ROLE_KEY, Keys.VIDEOSHOTKEYFRAMEVERSION_ID_SHOT_ROLE_KEY);
     }
 
     @Override
     public List<ForeignKey<VideoshotkeyframeversionRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_ASSET_PROJECT_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASED_ON_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_EXTRACTION_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_PROJECT_NOVEL_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_USER_FKEY);
+        return Arrays.asList(Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_ASSET_PROJECT_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASED_ON_EPISODE_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASED_ON_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASELINE_INPUT_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASELINE_SCOPE_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_EPISODE_SCOPE_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_EXTRACTION_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_PROJECT_NOVEL_FKEY, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_USER_FKEY);
     }
 
     private transient VideoassetPath _videoasset;
@@ -273,17 +298,71 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
         return _videoasset;
     }
 
-    private transient VideoshotkeyframeversionPath _videoshotkeyframeversion;
+    private transient VideoshotkeyframeversionPath _videoshotkeyframeversionBasedOnEpisodeFkey;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoShotKeyframeVersion</code> table.
+     * <code>public.VideoShotKeyframeVersion</code> table, via the
+     * <code>VideoShotKeyframeVersion_based_on_episode_fkey</code> key.
      */
-    public VideoshotkeyframeversionPath videoshotkeyframeversion() {
-        if (_videoshotkeyframeversion == null)
-            _videoshotkeyframeversion = new VideoshotkeyframeversionPath(this, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASED_ON_FKEY, null);
+    public VideoshotkeyframeversionPath videoshotkeyframeversionBasedOnEpisodeFkey() {
+        if (_videoshotkeyframeversionBasedOnEpisodeFkey == null)
+            _videoshotkeyframeversionBasedOnEpisodeFkey = new VideoshotkeyframeversionPath(this, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASED_ON_EPISODE_FKEY, null);
 
-        return _videoshotkeyframeversion;
+        return _videoshotkeyframeversionBasedOnEpisodeFkey;
+    }
+
+    private transient VideoshotkeyframeversionPath _videoshotkeyframeversionBasedOnFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoShotKeyframeVersion</code> table, via the
+     * <code>VideoShotKeyframeVersion_based_on_fkey</code> key.
+     */
+    public VideoshotkeyframeversionPath videoshotkeyframeversionBasedOnFkey() {
+        if (_videoshotkeyframeversionBasedOnFkey == null)
+            _videoshotkeyframeversionBasedOnFkey = new VideoshotkeyframeversionPath(this, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASED_ON_FKEY, null);
+
+        return _videoshotkeyframeversionBasedOnFkey;
+    }
+
+    private transient VideoproductionbaselineshotPath _videoproductionbaselineshot;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaselineShot</code> table.
+     */
+    public VideoproductionbaselineshotPath videoproductionbaselineshot() {
+        if (_videoproductionbaselineshot == null)
+            _videoproductionbaselineshot = new VideoproductionbaselineshotPath(this, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASELINE_INPUT_FKEY, null);
+
+        return _videoproductionbaselineshot;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOSHOTKEYFRAMEVERSION__VIDEOSHOTKEYFRAMEVERSION_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
     }
 
     private transient VideotakeframeextractionPath _videotakeframeextraction;
@@ -342,6 +421,7 @@ public class Videoshotkeyframeversion extends TableImpl<Videoshotkeyframeversion
             Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_hash_check"), "(((\"requestHash\" ~ '^[0-9a-f]{64}$'::text) AND (\"contentHash\" ~ '^[0-9a-f]{64}$'::text)))", true),
             Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_request_check"), "((btrim(\"clientRequestId\") <> ''::text))", true),
             Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_role_check"), "((role = ANY (ARRAY['initial_state'::text, 'transition_anchor'::text, 'end_state'::text])))", true),
+            Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_scope_branch_check"), "((((\"adaptationId\" IS NOT NULL) AND (\"shotId\" IS NOT NULL) AND (\"shotPlanVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"adaptationId\" IS NULL) AND (\"shotId\" IS NULL) AND (\"shotPlanVersionId\" IS NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true),
             Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_source_check"), "((((\"sourceKind\" = 'cleared'::text) AND (\"assetId\" IS NULL) AND (\"sourceTakeId\" IS NULL) AND (\"sourceTimeMs\" IS NULL)) OR ((\"sourceKind\" = 'asset'::text) AND (\"assetId\" IS NOT NULL) AND (\"sourceTakeId\" IS NULL) AND (\"sourceTimeMs\" IS NULL)) OR ((\"sourceKind\" = 'take_frame'::text) AND (\"assetId\" IS NOT NULL) AND (\"sourceTakeId\" IS NOT NULL) AND (\"sourceTimeMs\" >= 0))))", true),
             Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_source_kind_check"), "((\"sourceKind\" = ANY (ARRAY['asset'::text, 'take_frame'::text, 'cleared'::text])))", true),
             Internal.createCheck(this, DSL.name("VideoShotKeyframeVersion_version_check"), "((\"versionNo\" > 0))", true)

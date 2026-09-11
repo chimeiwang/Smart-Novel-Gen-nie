@@ -106,6 +106,7 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
         this.manifests = new VideoRenderManifestCodec(json);
     }
 
+    /** 在同一事务中冻结镜头、提示词、参考素材和执行参数并创建渲染任务。 */
     @Override
     public ShotRenderTaskResponse createTask(
             String userId,
@@ -113,7 +114,8 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             String shotId,
             StartShotRenderRequest request,
             String model,
-            boolean referenceTransportConfigured) {
+            boolean referenceTransportConfigured,
+            String executionMode) {
         String requestId = requestId(request.getClientRequestId());
         return database.transactionResult(transaction -> {
             // advisory lock 先串行化同镜头同请求；随后再查重，避免并发创建两条供应商计费任务。
@@ -125,6 +127,7 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                 validateStartReplay(existing, manifest, adaptationId, request);
                 return taskResponse(existing, manifest);
             }
+            requireControlledInput(request, executionMode);
             var context = VideoDatabaseAccess.ownedAdaptation(
                     transaction, userId, adaptationId, true);
             String planId = context.head().getCurrentshotplanversionid();
@@ -189,6 +192,11 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             List<ShotRenderReferenceManifest> references =
                     promptReferences(transaction, prompt.getId());
             List<ShotRenderKeyframeManifest> keyframes = keyframes(transaction, shotId);
+            int imageCount = references.size() + keyframes.size();
+            if (imageCount < 1 || imageCount > 20) {
+                throw new ApiException(422, "VIDEO_RENDER_REFERENCE_COUNT_INVALID",
+                        "本次图片参考试制必须选择 1～20 张已确认图片（含关键帧）");
+            }
             if ((!references.isEmpty() || !keyframes.isEmpty())
                     && !referenceTransportConfigured) {
                 throw new ApiException(
@@ -219,11 +227,14 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                     planId,
                     shot.getTimelinedurationms());
             manifest.setSchemaVersion(
-                    VideoShotRenderManifest.SchemaVersionEnum.VIDEO_SHOT_RENDER_MANIFEST_1_1);
+                    VideoShotRenderManifest.SchemaVersionEnum.VIDEO_SHOT_RENDER_MANIFEST_1_2);
+            manifest.setGenerationMode("reference");
+            manifest.setExecutionMode(VideoShotRenderManifest.ExecutionModeEnum.fromValue(executionMode));
+            manifest.setFeeConfirmed("live".equals(executionMode));
             manifest.setProvider("seedance");
             manifest.setProviderPromptText(keyframes.isEmpty() ? null : providerPrompt);
             manifest.setResolution(VideoShotRenderManifest.ResolutionEnum.fromValue(
-                    request.getResolution().getValue()));
+                    request.getResolution()));
             manifest.setGenerateAudio(request.getGenerateAudio());
             manifest.setWatermark(request.getWatermark());
             manifest.setReferences(references);
@@ -260,12 +271,14 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
         });
     }
 
+    /** 从指定失败任务复制不可变 manifest，创建具有新身份的重试任务。 */
     @Override
     public ShotRenderTaskResponse retryTask(
             String userId,
             String taskId,
             RetryShotRenderRequest request,
-            boolean referenceTransportConfigured) {
+            boolean referenceTransportConfigured,
+            String executionMode) {
         String requestId = requestId(request.getClientRequestId());
         return database.transactionResult(transaction -> {
             VideoshotrendertaskRecord source = ownedTask(transaction, userId, taskId, true);
@@ -286,6 +299,10 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                         409,
                         "VIDEO_RENDER_TASK_STILL_ACTIVE",
                         "当前任务仍在执行，不能重复提交同一输入");
+            }
+            if ("submission_unknown".equals(source.getStatus())) {
+                throw new ApiException(409, "VIDEO_RENDER_SUBMISSION_UNRESOLVED",
+                        "原任务提交结果尚待核查，不能按普通失败重新生成");
             }
             var context = VideoDatabaseAccess.ownedAdaptation(
                     transaction, userId, source.getAdaptationid(), true);
@@ -308,6 +325,17 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             requireNoActiveTask(transaction, source.getShotid());
             // “重试”重放原任务的不可变输入，而不是用当前 Head 重新拼装；想采用新设定必须新建任务。
             VideoShotRenderManifest manifest = manifest(source);
+            if (manifest.getSchemaVersion()
+                    != VideoShotRenderManifest.SchemaVersionEnum.VIDEO_SHOT_RENDER_MANIFEST_1_2) {
+                throw new ApiException(409, "VIDEO_RENDER_RETRY_PROFILE_UNSUPPORTED",
+                        "原任务不属于当前试制范围，请从当前镜头确认输入后新建任务");
+            }
+            if (manifest.getExecutionMode() == null
+                    || !executionMode.equals(manifest.getExecutionMode().getValue())) {
+                throw new ApiException(409, "VIDEO_RENDER_EXECUTION_MODE_CONFLICT",
+                        "当前执行模式与原任务不同，不能把模拟结果切换为真实生成");
+            }
+            requireFeeConfirmation(executionMode, request.getFeeConfirmed());
             if ((!list(manifest.getReferences()).isEmpty()
                             || !list(manifest.getKeyframes()).isEmpty())
                     && !referenceTransportConfigured) {
@@ -409,6 +437,7 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                 taskRows.stream().map(task -> taskResponse(task, manifest(task))).toList());
     }
 
+    /** 记录可幂等重放的选片决定，并用 revision CAS 更新 Take Head。 */
     @Override
     public ShotTakeDecisionResponse confirmTake(
             String userId,
@@ -562,6 +591,7 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
         return new VideoAssetFile(asset.getStoragekey(), asset.getMimetype(), asset.getName());
     }
 
+    /** 使用数据库租约领取到期提交、查询或归档任务。 */
     @Override
     public List<VideoRenderClaim> claimDue(int limit) {
         if (limit < 1) throw new IllegalArgumentException("逐镜渲染任务领取数量必须为正整数");
@@ -571,6 +601,8 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             // 每次领取都先在数据库续租；SKIP LOCKED 允许多个 reconciler 安全并行。
             List<VideoshotrendertaskRecord> tasks = transaction.selectFrom(VIDEOSHOTRENDERTASK)
                     .where(
+                            VIDEOSHOTRENDERTASK.ADAPTATIONID.isNotNull(),
+                            VIDEOSHOTRENDERTASK.VIDEOEPISODEID.isNull(),
                             VIDEOSHOTRENDERTASK.STATUS.in(
                                     "pending", "submitting", "queued", "running", "archiving"),
                             VIDEOSHOTRENDERTASK.NEXTATTEMPTAT.le(now))
@@ -664,7 +696,7 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             if (task == null || !QUERY.contains(task.getStatus())) return null;
             LocalDateTime now = DatabaseTimestamp.now(clock);
             transaction.update(VIDEOSHOTRENDERTASK)
-                    .set(VIDEOSHOTRENDERTASK.STATUS, status)
+                    .set(VIDEOSHOTRENDERTASK.STATUS, "archiving".equals(task.getStatus()) ? "archiving" : status)
                     .set(VIDEOSHOTRENDERTASK.NEXTATTEMPTAT, now.plusSeconds(pollBackoff(task.getPollcount())))
                     .set(VIDEOSHOTRENDERTASK.LASTERRORCODE, (String) null)
                     .set(VIDEOSHOTRENDERTASK.LASTERRORMESSAGE, (String) null)
@@ -714,19 +746,45 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
         if (!Set.of("failed", "expired", "cancelled").contains(status)) {
             throw new IllegalArgumentException("Seedance 终态无效");
         }
-        finishTask(taskId, QUERY, status, code, message);
+        database.transactionResult(transaction -> {
+            VideoshotrendertaskRecord task = lockTask(transaction, taskId);
+            if (task == null) return null;
+            if ("archiving".equals(task.getStatus())) {
+                // 已观察到供应商成功，后来的过期/异常不能抹去已生成事实并开放再次付费重试。
+                LocalDateTime now = DatabaseTimestamp.now(clock);
+                transaction.update(VIDEOSHOTRENDERTASK)
+                        .set(VIDEOSHOTRENDERTASK.LASTERRORCODE, "SEEDANCE_GENERATED_RESULT_UNAVAILABLE")
+                        .set(VIDEOSHOTRENDERTASK.LASTERRORMESSAGE, "视频已生成，但供应商结果暂时不可用，继续核查原任务")
+                        .set(VIDEOSHOTRENDERTASK.NEXTATTEMPTAT, now.plusMinutes(5))
+                        .set(VIDEOSHOTRENDERTASK.UPDATEDAT, now)
+                        .where(VIDEOSHOTRENDERTASK.ID.eq(taskId)).execute();
+            } else {
+                finish(transaction, task, QUERY, status, code, message);
+            }
+            return null;
+        });
     }
 
+    /** 归档失败时恢复同一任务；超过上限后明确终结，不能另建任务绕过。 */
     @Override
-    public boolean failArchiving(String taskId, String message) {
-        return finishTaskResult(
-                taskId,
-                Set.of("archiving"),
-                "failed",
-                "SEEDANCE_RESULT_ARCHIVE_FAILED",
-                message);
+    public boolean retryArchiving(String taskId, String message) {
+        return database.transactionResult(transaction -> {
+            VideoshotrendertaskRecord task = lockTask(transaction, taskId);
+            if (task == null || !"archiving".equals(task.getStatus())) return false;
+            LocalDateTime now = DatabaseTimestamp.now(clock);
+            transaction.update(VIDEOSHOTRENDERTASK)
+                    .set(VIDEOSHOTRENDERTASK.ATTEMPTCOUNT, task.getAttemptcount() + 1)
+                    .set(VIDEOSHOTRENDERTASK.NEXTATTEMPTAT, now.plusSeconds(pollBackoff(task.getPollcount())))
+                    .set(VIDEOSHOTRENDERTASK.LASTERRORCODE, "SEEDANCE_RESULT_ARCHIVE_RETRY")
+                    .set(VIDEOSHOTRENDERTASK.LASTERRORMESSAGE, message)
+                    .set(VIDEOSHOTRENDERTASK.UPDATEDAT, now)
+                    .where(VIDEOSHOTRENDERTASK.ID.eq(taskId))
+                    .execute();
+            return true;
+        });
     }
 
+    /** 在同一事务中登记受控素材、不可变 Take 并完成原渲染任务。 */
     @Override
     public void completeTake(String taskId, CompletedVideoTake completed) {
         database.transactionResult(transaction -> {
@@ -754,6 +812,10 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             int takeNo = (maximum == null ? 0 : maximum) + 1;
             VideoShotRenderManifest manifest = manifest(task);
             LocalDateTime now = DatabaseTimestamp.now(clock);
+            String sourceKind = manifest.getExecutionMode()
+                            == VideoShotRenderManifest.ExecutionModeEnum.SIMULATED
+                    ? "virtual"
+                    : "model_generated";
             // Asset、不可变 Take 与任务成功必须同事务提交；缺少任一事实都不能对外宣称渲染完成。
             transaction.insertInto(VIDEOASSET)
                     .set(VIDEOASSET.ID, completed.assetId())
@@ -766,12 +828,32 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                     .set(VIDEOASSET.BYTESIZE, completed.stored().byteSize())
                     .set(VIDEOASSET.DURATIONMS, completed.durationMs())
                     .set(VIDEOASSET.SHA256, completed.stored().sha256())
-                    .set(VIDEOASSET.SOURCEKIND, "model_generated")
+                    .set(VIDEOASSET.SOURCEKIND, sourceKind)
                     .set(VIDEOASSET.RIGHTSSTATUS, "confirmed")
                     .set(VIDEOASSET.LOCKEDAT, now)
                     .set(VIDEOASSET.CREATEDAT, now)
                     .set(VIDEOASSET.UPDATEDAT, now)
                     .execute();
+            if (completed.lastFrame() != null) {
+                var frame = completed.lastFrame();
+                transaction.insertInto(VIDEOASSET)
+                        .set(VIDEOASSET.ID, frame.assetId())
+                        .set(VIDEOASSET.PROJECTID, task.getProjectid())
+                        .set(VIDEOASSET.NAME, manifest.getShotKey() + " · Take " + takeNo + " 尾帧")
+                        .set(VIDEOASSET.MODALITY, "image")
+                        .set(VIDEOASSET.DUTY, "keyframe")
+                        .set(VIDEOASSET.STORAGEKEY, frame.stored().storageKey())
+                        .set(VIDEOASSET.MIMETYPE, frame.stored().mimeType())
+                        .set(VIDEOASSET.BYTESIZE, frame.stored().byteSize())
+                        .set(VIDEOASSET.DURATIONMS, (Integer) null)
+                        .set(VIDEOASSET.SHA256, frame.stored().sha256())
+                        .set(VIDEOASSET.SOURCEKIND, sourceKind)
+                        .set(VIDEOASSET.RIGHTSSTATUS, "confirmed")
+                        .set(VIDEOASSET.LOCKEDAT, now)
+                        .set(VIDEOASSET.CREATEDAT, now)
+                        .set(VIDEOASSET.UPDATEDAT, now)
+                        .execute();
+            }
             transaction.insertInto(VIDEOSHOTTAKE)
                     .set(VIDEOSHOTTAKE.ID, ids.next())
                     .set(VIDEOSHOTTAKE.TASKID, taskId)
@@ -787,6 +869,11 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                     .set(VIDEOSHOTTAKE.MODEL, task.getModel())
                     .set(VIDEOSHOTTAKE.PROVIDERTASKID, task.getProvidertaskid())
                     .set(VIDEOSHOTTAKE.INPUTHASH, task.getInputhash())
+                    .set(
+                            VIDEOSHOTTAKE.LASTFRAMEASSETID,
+                            completed.lastFrame() == null
+                                    ? null
+                                    : completed.lastFrame().assetId())
                     .set(
                             VIDEOSHOTTAKE.PROVIDERMETADATAJSON,
                             canonicalJson(completed.providerMetadata()))
@@ -985,7 +1072,7 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
             StartShotRenderRequest request) {
         if (!task.getAdaptationid().equals(adaptationId)
                 || !manifest.getDurationSeconds().equals(request.getDurationSeconds())
-                || !manifest.getResolution().getValue().equals(request.getResolution().getValue())
+                || !manifest.getResolution().getValue().equals(request.getResolution())
                 || !manifest.getGenerateAudio().equals(request.getGenerateAudio())
                 || !manifest.getWatermark().equals(request.getWatermark())) {
             throw clientRequestReused("clientRequestId 已用于不同的视频生成请求");
@@ -993,6 +1080,14 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
     }
 
     private static void requireNoActiveTask(DSLContext context, String shotId) {
+        if (context.fetchExists(VIDEOSHOTRENDERTASK,
+                VIDEOSHOTRENDERTASK.SHOTID.eq(shotId)
+                        .and(VIDEOSHOTRENDERTASK.STATUS.eq("submission_unknown")))) {
+            throw new ApiException(
+                    409,
+                    "VIDEO_RENDER_SUBMISSION_UNRESOLVED",
+                    "当前镜头有提交结果待核查的任务，请先核实供应商结果，不能再次生成");
+        }
         String active = context.select(VIDEOSHOTRENDERTASK.ID)
                 .from(VIDEOSHOTRENDERTASK)
                 .where(
@@ -1004,6 +1099,31 @@ public final class JooqVideoRenderRepository implements VideoRenderRepository {
                     409,
                     "VIDEO_RENDER_SHOT_TASK_ACTIVE",
                     "当前镜头已有生成任务在执行，请等待完成后再创建新候选");
+        }
+    }
+
+    private static void requireControlledInput(StartShotRenderRequest request, String executionMode) {
+        if (!Set.of("simulated", "live").contains(executionMode)) {
+            throw new IllegalArgumentException("视频执行模式无效");
+        }
+        if (request.getGenerationMode() == null
+                || !"reference".equals(request.getGenerationMode())) {
+            throw new ApiException(422, "VIDEO_RENDER_GENERATION_MODE_INVALID", "当前只开放图片参考试制");
+        }
+        if (request.getDurationSeconds() == null
+                || request.getDurationSeconds() < 4 || request.getDurationSeconds() > 12) {
+            throw new ApiException(422, "VIDEO_RENDER_DURATION_INVALID", "本次试制时长须为 4～12 秒");
+        }
+        if (request.getResolution() == null || !"720p".equals(request.getResolution())) {
+            throw new ApiException(422, "VIDEO_RENDER_RESOLUTION_INVALID", "本次试制只开放 720p");
+        }
+        requireFeeConfirmation(executionMode, request.getFeeConfirmed());
+    }
+
+    private static void requireFeeConfirmation(String executionMode, Boolean feeConfirmed) {
+        if ("live".equals(executionMode) && !Boolean.TRUE.equals(feeConfirmed)) {
+            throw new ApiException(422, "VIDEO_RENDER_FEE_CONFIRMATION_REQUIRED",
+                    "真实生成可能产生供应商费用，请明确确认后再提交");
         }
     }
 

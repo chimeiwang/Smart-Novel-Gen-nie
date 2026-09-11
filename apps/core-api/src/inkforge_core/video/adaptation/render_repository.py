@@ -221,7 +221,10 @@ class VideoShotRenderRepository:
                         ),
                     )
                 manifest = VideoShotRenderManifest(
-                    schemaVersion="video-shot-render-manifest/1.1",
+                    schemaVersion="video-shot-render-manifest/1.2",
+                    generationMode=request.generationMode,
+                    executionMode="live",
+                    feeConfirmed=request.feeConfirmed,
                     adaptationId=adaptation.id,
                     projectId=project.id,
                     novelId=adaptation.novelId,
@@ -287,7 +290,7 @@ class VideoShotRenderRepository:
                 await _lock_render_request(
                     session,
                     namespace="render-task",
-                    identity=source.shotId,
+                    identity=cast(str, source.shotId),
                     client_request_id=request.clientRequestId,
                 )
                 existing = await session.scalar(
@@ -313,7 +316,7 @@ class VideoShotRenderRepository:
                 _adaptation, _project, adaptation_head = await _require_owned_context(
                     session,
                     user_id=user_id,
-                    adaptation_id=source.adaptationId,
+                    adaptation_id=cast(str, source.adaptationId),
                     lock=True,
                 )
                 if adaptation_head.currentShotPlanVersionId != source.shotPlanVersionId:
@@ -332,7 +335,7 @@ class VideoShotRenderRepository:
                 )
                 if locked_shot is None:
                     raise RuntimeError("原逐镜视频任务引用的正式镜头不存在")
-                await _require_no_active_task(session, source.shotId)
+                await _require_no_active_task(session, cast(str, source.shotId))
                 manifest = _parse_manifest(source)
                 if (
                     manifest.references or manifest.keyframes
@@ -1147,10 +1150,10 @@ def _task_response(
 ) -> ShotRenderTaskResponse:
     return ShotRenderTaskResponse(
         id=task.id,
-        adaptationId=task.adaptationId,
-        shotId=task.shotId,
-        shotPlanVersionId=task.shotPlanVersionId,
-        promptVersionId=task.promptVersionId,
+        adaptationId=cast(str, task.adaptationId),
+        shotId=cast(str, task.shotId),
+        shotPlanVersionId=cast(str, task.shotPlanVersionId),
+        promptVersionId=cast(str, task.promptVersionId),
         retryOfTaskId=task.retryOfTaskId,
         provider=cast(Literal["seedance"], task.provider),
         model=task.model,
@@ -1176,10 +1179,10 @@ def _take_response(take: VideoShotTake, asset: VideoAsset) -> ShotTakeResponse:
     return ShotTakeResponse(
         id=take.id,
         taskId=take.taskId,
-        adaptationId=take.adaptationId,
-        shotId=take.shotId,
-        shotPlanVersionId=take.shotPlanVersionId,
-        promptVersionId=take.promptVersionId,
+        adaptationId=cast(str, take.adaptationId),
+        shotId=cast(str, take.shotId),
+        shotPlanVersionId=cast(str, take.shotPlanVersionId),
+        promptVersionId=cast(str, take.promptVersionId),
         takeNo=take.takeNo,
         provider=cast(Literal["seedance"], take.provider),
         model=take.model,

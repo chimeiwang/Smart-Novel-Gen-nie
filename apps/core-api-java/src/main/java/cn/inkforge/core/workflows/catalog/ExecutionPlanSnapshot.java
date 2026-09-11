@@ -327,6 +327,7 @@ public final class ExecutionPlanSnapshot {
         }
     }
 
+    /** 交叉校验操作、模型 Profile、评审策略、视频阶段和预算引用。 */
     private void validateCrossReferences() {
         if (!operation.key().equals(operation.workflow() + "." + operation.operation())) {
             throw invalid("执行计划 Operation key 与 workflow/operation 不一致");

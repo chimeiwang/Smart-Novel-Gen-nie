@@ -72,6 +72,7 @@ public final class CoreSettings {
     private final String videoDispatchNamespace;
     private final boolean seedanceConfigured;
     private final boolean seedanceEnabled;
+    private final String seedanceExecutionMode;
     private final String seedanceModel;
     private final URI videoProviderMediaBaseUrl;
     private final SecretValue videoProviderMediaTokenSecret;
@@ -132,6 +133,8 @@ public final class CoreSettings {
         this.videoDispatchNamespace = optional(value.apply("VIDEO_DISPATCH_NAMESPACE"));
         this.seedanceConfigured = bool(value, "SEEDANCE_CONFIGURED", false);
         this.seedanceEnabled = bool(value, "SEEDANCE_ENABLED", false);
+        this.seedanceExecutionMode = nonBlankOrDefault(
+                value.apply("SEEDANCE_EXECUTION_MODE"), "simulated");
         this.seedanceModel = nonBlankOrDefault(
                 value.apply("SEEDANCE_MODEL"), "doubao-seedance-2-5-260628");
         this.videoProviderMediaBaseUrl = optionalHttpUri(
@@ -332,6 +335,10 @@ public final class CoreSettings {
         return seedanceConfigured;
     }
 
+    public String seedanceExecutionMode() {
+        return seedanceExecutionMode;
+    }
+
     public String seedanceModel() {
         return seedanceModel;
     }
@@ -348,6 +355,7 @@ public final class CoreSettings {
         return seedanceResultAllowedHostSuffixes;
     }
 
+    /** 联合校验能力开关、依赖配置和生产环境禁止组合。 */
     private void validate() {
         if (phoneAuthSendEnabled && !phoneAuthEnabled) {
             throw new IllegalArgumentException("开启真实短信发送前必须先开启手机号认证");
@@ -399,7 +407,10 @@ public final class CoreSettings {
                 && !VIDEO_NAMESPACE.matcher(videoDispatchNamespace).matches()) {
             throw new IllegalArgumentException("视频调度命名空间格式无效");
         }
-        if (seedanceEnabled && !seedanceConfigured) {
+        if (!Set.of("simulated", "live").contains(seedanceExecutionMode)) {
+            throw new IllegalArgumentException("Seedance 执行模式必须为 simulated 或 live");
+        }
+        if ("live".equals(seedanceExecutionMode) && seedanceEnabled && !seedanceConfigured) {
             throw new IllegalArgumentException("开启 Seedance 前必须先确认供应商已配置");
         }
         if ((videoProviderMediaBaseUrl == null) != (videoProviderMediaTokenSecret == null)) {
@@ -423,6 +434,7 @@ public final class CoreSettings {
         if (durableAgentRouteMode == DurableAgentRouteMode.ALL && v1FreshAgentStartsEnabled) {
             throw new IllegalArgumentException("耐久 Agent 全量路由必须关闭 V1 新建入口");
         }
+        // 以下限制只针对生产；开发仍可在具名迁移和功能门禁下验收视频能力。
         if (environment != EnvironmentName.PRODUCTION) {
             return;
         }

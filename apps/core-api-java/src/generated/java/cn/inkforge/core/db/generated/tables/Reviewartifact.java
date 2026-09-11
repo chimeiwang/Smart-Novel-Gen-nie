@@ -14,8 +14,11 @@ import cn.inkforge.core.db.generated.tables.Novel.NovelPath;
 import cn.inkforge.core.db.generated.tables.Reviewartifactevaluation.ReviewartifactevaluationPath;
 import cn.inkforge.core.db.generated.tables.Reviewartifactrevision.ReviewartifactrevisionPath;
 import cn.inkforge.core.db.generated.tables.Videochapteradaptation.VideochapteradaptationPath;
+import cn.inkforge.core.db.generated.tables.Videoepisode.VideoepisodePath;
+import cn.inkforge.core.db.generated.tables.Videoepisodescriptversion.VideoepisodescriptversionPath;
 import cn.inkforge.core.db.generated.tables.Videoreviewdecisioncommand.VideoreviewdecisioncommandPath;
 import cn.inkforge.core.db.generated.tables.Videoscene.VideoscenePath;
+import cn.inkforge.core.db.generated.tables.Videostoryboardversion.VideostoryboardversionPath;
 import cn.inkforge.core.db.generated.tables.Workflowrun.WorkflowrunPath;
 import cn.inkforge.core.db.generated.tables.Writingtask.WritingtaskPath;
 import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
@@ -192,6 +195,11 @@ public class Reviewartifact extends TableImpl<ReviewartifactRecord> {
      */
     public final TableField<ReviewartifactRecord, String> VIDEOADAPTATIONTASKID = createField(DSL.name("videoAdaptationTaskId"), SQLDataType.CLOB, this, "产生章节影视化候选的耐久来源任务");
 
+    /**
+     * The column <code>public.ReviewArtifact.videoEpisodeId</code>.
+     */
+    public final TableField<ReviewartifactRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
     private Reviewartifact(Name alias, Table<ReviewartifactRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -268,7 +276,7 @@ public class Reviewartifact extends TableImpl<ReviewartifactRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.REVIEWARTIFACT_ARTIFACTKEY_IDX, Indexes.REVIEWARTIFACT_CHAPTERID_STATUS_IDX, Indexes.REVIEWARTIFACT_ID_VIDEOADAPTATIONID_KEY, Indexes.REVIEWARTIFACT_NOVELID_STATUS_IDX, Indexes.REVIEWARTIFACT_TASKID_IDX, Indexes.REVIEWARTIFACT_VIDEOADAPTATIONID_STATUS_IDX, Indexes.REVIEWARTIFACT_VIDEOSCENEID_STATUS_IDX, Indexes.REVIEWARTIFACT_WORKFLOWRUNID_IDX);
+        return Arrays.asList(Indexes.REVIEWARTIFACT_ARTIFACTKEY_IDX, Indexes.REVIEWARTIFACT_CHAPTERID_STATUS_IDX, Indexes.REVIEWARTIFACT_ID_VIDEOADAPTATIONID_KEY, Indexes.REVIEWARTIFACT_ID_VIDEOEPISODEID_KEY, Indexes.REVIEWARTIFACT_NOVELID_STATUS_IDX, Indexes.REVIEWARTIFACT_TASKID_IDX, Indexes.REVIEWARTIFACT_VIDEOADAPTATIONID_STATUS_IDX, Indexes.REVIEWARTIFACT_VIDEOEPISODEID_STATUS_IDX, Indexes.REVIEWARTIFACT_VIDEOSCENEID_STATUS_IDX, Indexes.REVIEWARTIFACT_WORKFLOWRUNID_IDX);
     }
 
     @Override
@@ -283,7 +291,7 @@ public class Reviewartifact extends TableImpl<ReviewartifactRecord> {
 
     @Override
     public List<ForeignKey<ReviewartifactRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.REVIEWARTIFACT__REVIEWARTIFACT_CHAPTERID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_NOVELID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_TASKID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEO_SCENE_NOVEL_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEOADAPTATIONID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEOSCENEID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_WORKFLOWRUNID_FKEY);
+        return Arrays.asList(Keys.REVIEWARTIFACT__REVIEWARTIFACT_CHAPTERID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_NOVELID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_TASKID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEO_EPISODE_NOVEL_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEO_SCENE_NOVEL_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEOADAPTATIONID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEOSCENEID_FKEY, Keys.REVIEWARTIFACT__REVIEWARTIFACT_WORKFLOWRUNID_FKEY);
     }
 
     private transient ChapterPath _chapter;
@@ -320,6 +328,18 @@ public class Reviewartifact extends TableImpl<ReviewartifactRecord> {
             _writingtask = new WritingtaskPath(this, Keys.REVIEWARTIFACT__REVIEWARTIFACT_TASKID_FKEY, null);
 
         return _writingtask;
+    }
+
+    private transient VideoepisodePath _videoepisode;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoEpisode</code> table.
+     */
+    public VideoepisodePath videoepisode() {
+        if (_videoepisode == null)
+            _videoepisode = new VideoepisodePath(this, Keys.REVIEWARTIFACT__REVIEWARTIFACT_VIDEO_EPISODE_NOVEL_FKEY, null);
+
+        return _videoepisode;
     }
 
     private transient VideoscenePath _reviewartifactVideoSceneNovelFkey;
@@ -399,6 +419,19 @@ public class Reviewartifact extends TableImpl<ReviewartifactRecord> {
         return _reviewartifactrevision;
     }
 
+    private transient VideoepisodescriptversionPath _videoepisodescriptversion;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeScriptVersion</code> table
+     */
+    public VideoepisodescriptversionPath videoepisodescriptversion() {
+        if (_videoepisodescriptversion == null)
+            _videoepisodescriptversion = new VideoepisodescriptversionPath(this, null, Keys.VIDEOEPISODESCRIPTVERSION__VIDEOEPISODESCRIPTVERSION_REVIEWARTIFACTID_FKEY.getInverseKey());
+
+        return _videoepisodescriptversion;
+    }
+
     private transient VideoreviewdecisioncommandPath _videoreviewdecisioncommandArtifactSceneFkey;
 
     /**
@@ -427,10 +460,24 @@ public class Reviewartifact extends TableImpl<ReviewartifactRecord> {
         return _videoreviewdecisioncommandArtifactidFkey;
     }
 
+    private transient VideostoryboardversionPath _videostoryboardversion;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoStoryboardVersion</code> table
+     */
+    public VideostoryboardversionPath videostoryboardversion() {
+        if (_videostoryboardversion == null)
+            _videostoryboardversion = new VideostoryboardversionPath(this, null, Keys.VIDEOSTORYBOARDVERSION__VIDEOSTORYBOARDVERSION_REVIEWARTIFACTID_FKEY.getInverseKey());
+
+        return _videostoryboardversion;
+    }
+
     @Override
     public List<Check<ReviewartifactRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("ReviewArtifact_video_adaptation_kind_check"), "((((kind)::text <> 'video_adaptation_plan'::text) OR ((\"videoAdaptationId\" IS NOT NULL) AND (\"videoAdaptationTaskId\" IS NOT NULL) AND (\"videoSceneId\" IS NULL) AND (\"taskId\" IS NULL))))", true),
+            Internal.createCheck(this, DSL.name("ReviewArtifact_video_episode_target_check"), "((((\"videoEpisodeId\" IS NULL) AND ((kind)::text <> ALL (ARRAY['video_episode_script'::text, 'video_episode_storyboard'::text]))) OR ((\"videoEpisodeId\" IS NOT NULL) AND ((kind)::text = ANY (ARRAY['video_episode_script'::text, 'video_episode_storyboard'::text])) AND (\"chapterId\" IS NULL) AND (\"taskId\" IS NULL) AND (\"videoSceneId\" IS NULL) AND (\"videoAdaptationId\" IS NULL) AND (\"videoAdaptationTaskId\" IS NULL))))", true),
             Internal.createCheck(this, DSL.name("ReviewArtifact_video_target_exclusive_check"), "((NOT ((\"videoSceneId\" IS NOT NULL) AND (\"videoAdaptationId\" IS NOT NULL))))", true)
         );
     }

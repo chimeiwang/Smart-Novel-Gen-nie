@@ -98,6 +98,12 @@ async def submit_run(
         run_id=body.runId,
         novel_id=body.novelId,
     )
+    if body.kind == "video":
+        # 旧章节视频队列已退役；新 Episode 剧本／分镜只走 V2 execution 入口。
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="旧章节视频任务入口已退役",
+        )
     queued = await queue.enqueue(
         QueueJob(
             jobId=body.jobId,

@@ -283,6 +283,66 @@ public class VideoshotkeyframeversionRecord extends UpdatableRecordImpl<Videosho
         return (LocalDateTime) get(17);
     }
 
+    /**
+     * Setter for <code>public.VideoShotKeyframeVersion.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(18, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotKeyframeVersion.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(18);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotKeyframeVersion.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(19, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotKeyframeVersion.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(19);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoShotKeyframeVersion.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(20, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoShotKeyframeVersion.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(20);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoShotKeyframeVersion.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(21, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoShotKeyframeVersion.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(21);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -306,7 +366,7 @@ public class VideoshotkeyframeversionRecord extends UpdatableRecordImpl<Videosho
     /**
      * Create a detached, initialised VideoshotkeyframeversionRecord
      */
-    public VideoshotkeyframeversionRecord(String id, String adaptationid, String projectid, String novelid, String shotid, String shotplanversionid, String role, Integer versionno, String basedonversionid, String assetid, String sourcekind, String sourcetakeid, Integer sourcetimems, String clientrequestid, String requesthash, String contenthash, String createdbyuserid, LocalDateTime createdat) {
+    public VideoshotkeyframeversionRecord(String id, String adaptationid, String projectid, String novelid, String shotid, String shotplanversionid, String role, Integer versionno, String basedonversionid, String assetid, String sourcekind, String sourcetakeid, Integer sourcetimems, String clientrequestid, String requesthash, String contenthash, String createdbyuserid, LocalDateTime createdat, String videoepisodeid, String episodeshotid, String episodeshotversionid, String productionbaselineid) {
         super(Videoshotkeyframeversion.VIDEOSHOTKEYFRAMEVERSION);
 
         setId(id);
@@ -327,6 +387,10 @@ public class VideoshotkeyframeversionRecord extends UpdatableRecordImpl<Videosho
         setContenthash(contenthash);
         setCreatedbyuserid(createdbyuserid);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

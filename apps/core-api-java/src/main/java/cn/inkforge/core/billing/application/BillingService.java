@@ -43,6 +43,7 @@ public final class BillingService {
         this.requestIdSupplier = Objects.requireNonNull(requestIdSupplier);
     }
 
+    /** 校验任务归属和余额后签发一次有输出上限的短期模型授权。 */
     public AuthorizeModelCallResponse authorize(AuthorizeModelCallRequest request) {
         ModelGrantCodec codec = requireCodec();
         String provider = request.getProvider().getValue();
@@ -57,6 +58,7 @@ public final class BillingService {
         }
         int maxOutputTokens = request.getRequestedMaxOutputTokens();
         if (billable) {
+            // 先为完整输入预留成本，再用剩余余额反推出可承担的最大输出，避免先调用后超扣。
             long available = context.balanceMicros()
                     - request.getEstimatedPromptTokens()
                             * BillingPricing.UNCACHED_INPUT_MICROS_PER_TOKEN;
@@ -97,6 +99,7 @@ public final class BillingService {
         return response;
     }
 
+    /** 复验 grant 与实际用量后执行幂等结算。 */
     public UsageChargeResponse charge(ReportModelUsageRequest request) {
         Integer promptCacheMiss = nullable(request.getPromptCacheMissTokens());
         Integer reasoning = nullable(request.getReasoningTokens());
@@ -126,6 +129,7 @@ public final class BillingService {
                     "模型输出用量超过授权上限");
         }
         if (!claims.billable()) {
+            // fake provider 用于隔离验收：保留用量协议但不写付费账本。
             Long balance = repository.balance(claims.userId());
             return response(claims.requestId(), 0, balance == null ? 0 : balance, false, false);
         }
@@ -192,6 +196,7 @@ public final class BillingService {
                     "WRITING_TASK_NOT_FOUND",
                     "写作任务不存在或无权访问");
         }
+        // 历史调用缺少细分字段时整组标记不完整，不能把未知值按零汇总。
         boolean detailsComplete = !calls.isEmpty() && calls.stream().allMatch(call ->
                 call.promptCacheMissTokens() != null && call.reasoningTokens() != null);
         TaskModelUsageResponse response = new TaskModelUsageResponse();

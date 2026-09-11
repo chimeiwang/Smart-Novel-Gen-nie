@@ -7,6 +7,11 @@ package cn.inkforge.core.db.generated.tables;
 import cn.inkforge.core.db.generated.Indexes;
 import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
+import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion.VideoepisodeeditversionPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaselineshot.VideoproductionbaselineshotPath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
+import cn.inkforge.core.db.generated.tables.Videotakeadoption.VideotakeadoptionPath;
 import cn.inkforge.core.db.generated.tables.records.VideoepisodeeditclipRecord;
 
 import java.util.Arrays;
@@ -18,10 +23,14 @@ import javax.annotation.processing.Generated;
 import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
+import org.jooq.ForeignKey;
 import org.jooq.Index;
+import org.jooq.InverseForeignKey;
 import org.jooq.Name;
+import org.jooq.Path;
 import org.jooq.PlainSQL;
 import org.jooq.QueryPart;
+import org.jooq.Record;
 import org.jooq.SQL;
 import org.jooq.Schema;
 import org.jooq.Stringly;
@@ -72,12 +81,12 @@ public class Videoepisodeeditclip extends TableImpl<VideoepisodeeditclipRecord> 
     /**
      * The column <code>public.VideoEpisodeEditClip.shotPlanVersionId</code>.
      */
-    public final TableField<VideoepisodeeditclipRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeeditclipRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeEditClip.shotId</code>.
      */
-    public final TableField<VideoepisodeeditclipRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeeditclipRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeEditClip.takeId</code>.
@@ -119,6 +128,41 @@ public class Videoepisodeeditclip extends TableImpl<VideoepisodeeditclipRecord> 
      */
     public final TableField<VideoepisodeeditclipRecord, Integer> TRANSITIONDURATIONMS = createField(DSL.name("transitionDurationMs"), SQLDataType.INTEGER.nullable(false).defaultValue(DSL.field(DSL.raw("0"), SQLDataType.INTEGER)), this, "");
 
+    /**
+     * The column <code>public.VideoEpisodeEditClip.videoEpisodeId</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeEditClip.productionBaselineId</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeEditClip.episodeShotId</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeEditClip.episodeShotVersionId</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeEditClip.adoptionId</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> ADOPTIONID = createField(DSL.name("adoptionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeEditClip.sourceAudioMode</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> SOURCEAUDIOMODE = createField(DSL.name("sourceAudioMode"), SQLDataType.CLOB.nullable(false).defaultValue(DSL.field(DSL.raw("'keep'::text"), SQLDataType.CLOB)), this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeEditClip.clipId</code>.
+     */
+    public final TableField<VideoepisodeeditclipRecord, String> CLIPID = createField(DSL.name("clipId"), SQLDataType.CLOB, this, "");
+
     private Videoepisodeeditclip(Name alias, Table<VideoepisodeeditclipRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -150,6 +194,46 @@ public class Videoepisodeeditclip extends TableImpl<VideoepisodeeditclipRecord> 
         this(DSL.name("VideoEpisodeEditClip"), null);
     }
 
+    public <O extends Record> Videoepisodeeditclip(Table<O> path, ForeignKey<O, VideoepisodeeditclipRecord> childPath, InverseForeignKey<O, VideoepisodeeditclipRecord> parentPath) {
+        super(path, childPath, parentPath, VIDEOEPISODEEDITCLIP);
+    }
+
+    /**
+     * A subtype implementing {@link Path} for simplified path-based joins.
+     */
+    @Generated(
+        value = {
+            "https://www.jooq.org",
+            "jOOQ version:3.21.7"
+        },
+        comments = "This class is generated by jOOQ"
+    )
+    public static class VideoepisodeeditclipPath extends Videoepisodeeditclip implements Path<VideoepisodeeditclipRecord> {
+
+        private static final long serialVersionUID = 1L;
+        public <O extends Record> VideoepisodeeditclipPath(Table<O> path, ForeignKey<O, VideoepisodeeditclipRecord> childPath, InverseForeignKey<O, VideoepisodeeditclipRecord> parentPath) {
+            super(path, childPath, parentPath);
+        }
+        private VideoepisodeeditclipPath(Name alias, Table<VideoepisodeeditclipRecord> aliased) {
+            super(alias, aliased);
+        }
+
+        @Override
+        public VideoepisodeeditclipPath as(String alias) {
+            return new VideoepisodeeditclipPath(DSL.name(alias), this);
+        }
+
+        @Override
+        public VideoepisodeeditclipPath as(Name alias) {
+            return new VideoepisodeeditclipPath(alias, this);
+        }
+
+        @Override
+        public VideoepisodeeditclipPath as(Table<?> alias) {
+            return new VideoepisodeeditclipPath(alias.getQualifiedName(), this);
+        }
+    }
+
     @Override
     public Schema getSchema() {
         return aliased() ? null : Public.PUBLIC;
@@ -166,9 +250,99 @@ public class Videoepisodeeditclip extends TableImpl<VideoepisodeeditclipRecord> 
     }
 
     @Override
+    public List<UniqueKey<VideoepisodeeditclipRecord>> getUniqueKeys() {
+        return Arrays.asList(Keys.VIDEOEPISODEEDITCLIP_CLIPID_KEY);
+    }
+
+    @Override
+    public List<ForeignKey<VideoepisodeeditclipRecord, ?>> getReferences() {
+        return Arrays.asList(Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_ADOPTION_SCOPE_FKEY, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_ADOPTION_TAKE_FKEY, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_BASELINE_INPUT_FKEY, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_BASELINE_SCOPE_FKEY, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_EDIT_NEW_SCOPE_FKEY, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_EPISODE_SCOPE_FKEY);
+    }
+
+    private transient VideotakeadoptionPath _videoepisodeeditclipAdoptionScopeFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoTakeAdoption</code>
+     * table, via the <code>VideoEpisodeEditClip_adoption_scope_fkey</code> key.
+     */
+    public VideotakeadoptionPath videoepisodeeditclipAdoptionScopeFkey() {
+        if (_videoepisodeeditclipAdoptionScopeFkey == null)
+            _videoepisodeeditclipAdoptionScopeFkey = new VideotakeadoptionPath(this, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_ADOPTION_SCOPE_FKEY, null);
+
+        return _videoepisodeeditclipAdoptionScopeFkey;
+    }
+
+    private transient VideotakeadoptionPath _videoepisodeeditclipAdoptionTakeFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoTakeAdoption</code>
+     * table, via the <code>VideoEpisodeEditClip_adoption_take_fkey</code> key.
+     */
+    public VideotakeadoptionPath videoepisodeeditclipAdoptionTakeFkey() {
+        if (_videoepisodeeditclipAdoptionTakeFkey == null)
+            _videoepisodeeditclipAdoptionTakeFkey = new VideotakeadoptionPath(this, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_ADOPTION_TAKE_FKEY, null);
+
+        return _videoepisodeeditclipAdoptionTakeFkey;
+    }
+
+    private transient VideoproductionbaselineshotPath _videoproductionbaselineshot;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaselineShot</code> table.
+     */
+    public VideoproductionbaselineshotPath videoproductionbaselineshot() {
+        if (_videoproductionbaselineshot == null)
+            _videoproductionbaselineshot = new VideoproductionbaselineshotPath(this, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_BASELINE_INPUT_FKEY, null);
+
+        return _videoproductionbaselineshot;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
+    }
+
+    private transient VideoepisodeeditversionPath _videoepisodeeditversion;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeEditVersion</code> table.
+     */
+    public VideoepisodeeditversionPath videoepisodeeditversion() {
+        if (_videoepisodeeditversion == null)
+            _videoepisodeeditversion = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_EDIT_NEW_SCOPE_FKEY, null);
+
+        return _videoepisodeeditversion;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOEPISODEEDITCLIP__VIDEOEPISODEEDITCLIP_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
+    }
+
+    @Override
     public List<Check<VideoepisodeeditclipRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("VideoEpisodeEditClip_ordinal_check"), "((ordinal > 0))", true),
+            Internal.createCheck(this, DSL.name("VideoEpisodeEditClip_scope_branch_check"), "((((\"shotId\" IS NOT NULL) AND (\"shotPlanVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"productionBaselineId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL) AND (\"adoptionId\" IS NULL)) OR ((\"shotId\" IS NULL) AND (\"shotPlanVersionId\" IS NULL) AND (\"clipId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL) AND (\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL) AND (\"takeId\" IS NOT NULL) AND (\"adoptionId\" IS NOT NULL))))", true),
+            Internal.createCheck(this, DSL.name("VideoEpisodeEditClip_source_audio_mode_check"), "((\"sourceAudioMode\" = ANY (ARRAY['keep'::text, 'mute'::text])))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeEditClip_source_check"), "((((\"takeId\" IS NULL) AND (\"sourceInMs\" IS NULL) AND (\"sourceOutMs\" IS NULL)) OR ((\"takeId\" IS NOT NULL) AND (\"sourceInMs\" >= 0) AND (\"sourceOutMs\" > \"sourceInMs\") AND (\"outputDurationMs\" = (\"sourceOutMs\" - \"sourceInMs\")))))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeEditClip_timeline_check"), "(((\"timelineStartMs\" >= 0) AND (\"outputDurationMs\" >= 500)))", true),
             Internal.createCheck(this, DSL.name("VideoEpisodeEditClip_transition_check"), "((((\"transitionAfter\" = 'cut'::text) AND (\"transitionDurationMs\" = 0)) OR ((\"transitionAfter\" = 'fade_black'::text) AND (\"transitionDurationMs\" > 0) AND ((\"transitionDurationMs\" * 2) <= \"outputDurationMs\"))))", true)

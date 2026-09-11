@@ -197,6 +197,34 @@ public class VideoepisodeexportRecord extends UpdatableRecordImpl<Videoepisodeex
         return (LocalDateTime) get(11);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeExport.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeExport.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(12);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeExport.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeExport.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(13);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -220,7 +248,7 @@ public class VideoepisodeexportRecord extends UpdatableRecordImpl<Videoepisodeex
     /**
      * Create a detached, initialised VideoepisodeexportRecord
      */
-    public VideoepisodeexportRecord(String id, String taskid, String adaptationid, String projectid, String episodeplanversionid, Integer episodeno, String editversionid, String mixversionid, String assetid, Integer versionno, String inputhash, LocalDateTime createdat) {
+    public VideoepisodeexportRecord(String id, String taskid, String adaptationid, String projectid, String episodeplanversionid, Integer episodeno, String editversionid, String mixversionid, String assetid, Integer versionno, String inputhash, LocalDateTime createdat, String videoepisodeid, String productionbaselineid) {
         super(Videoepisodeexport.VIDEOEPISODEEXPORT);
 
         setId(id);
@@ -235,6 +263,8 @@ public class VideoepisodeexportRecord extends UpdatableRecordImpl<Videoepisodeex
         setVersionno(versionno);
         setInputhash(inputhash);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

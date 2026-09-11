@@ -25,7 +25,7 @@ class VideoRenderAgentGatewayTest {
         SeedanceRenderSubmitResponse submitResponse =
                 new SeedanceRenderSubmitResponse("provider-1", "task-1");
         SeedanceRenderQueryRequest queryRequest =
-                new SeedanceRenderQueryRequest("novel-1", 1, "provider-1", "task-1");
+                new SeedanceRenderQueryRequest(SeedanceRenderQueryRequest.ExecutionModeEnum.LIVE, "novel-1", 1, "provider-1", "task-1");
         SeedanceRenderQueryResponse queryResponse = new SeedanceRenderQueryResponse(
                 "provider-1",
                 SeedanceRenderQueryResponse.StatusEnum.RUNNING,

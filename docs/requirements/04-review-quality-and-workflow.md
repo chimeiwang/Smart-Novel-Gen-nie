@@ -1,51 +1,38 @@
 # 草案审核、质量检查与工作流需求
 
-## 长篇章节影视化方案审核
+## Episode 视频候选、正式确认与制作决定
 
-电影化镜头候选遵循 `proposal -> ReviewArtifact -> 作者结构编辑 -> 用户确认 -> Core 应用`。
-Artifact 使用 `kind=video_adaptation_plan`，并通过 `videoAdaptationId + videoAdaptationTaskId` 外键绑定改编根和
-来源任务。候选确认前不得创建正式 `VideoShotPlanVersion`、`VideoCinematicScene`、`VideoDramaticBeat`、
-`VideoShot` 或来源锚点。
+Episode 剧本和分镜都遵循 `proposal -> ReviewArtifact -> 作者编辑／采用到工作稿 -> 独立正式确认 -> Core 创建不可变版本`。
+活动 Artifact 使用 `video_episode_script` 或 `video_episode_storyboard`，以 `videoEpisodeId` 绑定确切 Episode，
+并通过 `workflowRunId`、Evidence、基础版本和 revision 解释候选来源。Agent Run 完成不代表候选已采用，采用到工作稿
+也不代表正式版本已确认。
 
-确认请求携带完整编辑后候选、`expectedArtifactRevision`、`expectedAdaptationRevision` 和稳定
-`clientRequestId`。Core 锁定 Artifact、AdaptationHead 和来源任务，重新校验不可变章节哈希、Unicode 范围、
-Scene/Beat/Goal/Shot 父子关系、连续 Key、镜头职责和切镜理由，然后在同一事务物化全部关系行、创建空 PromptHead、
-标记 Artifact applied、切换当前 ShotPlan 指针并写 `VideoAdaptationDecisionCommand`。任一步失败整体回滚。
+剧本工作稿和分镜工作稿分别使用 revision CAS。确认请求冻结作者正在查看的完整文档、来源集合、基础正式版本、
+Artifact revision、业务 head revision 和稳定 `clientRequestId`。Core 在同一事务校验稳定 sceneId／lineId／shotId、
+来源范围、依赖、顺序、lineage 与内容哈希，创建不可变正式版本、标记确认 Artifact applied、更新对应 head 并写领域命令回执。
+任何一步失败整体回滚；相同幂等键不同请求体必须冲突。
 
-电影语法和节奏评估以 `reviewSummary + reviewFindings` 随候选进入人工审核。未覆盖目标、空间关系、平均时长、
-慢镜比例、景别单调、相邻重复和生成可执行性都只能作为有证据的 notice/warning；不能禁用作者确认。硬门禁只负责
-来源、版本、时间线、Key、父子引用、字段完整性和单镜时长合法性。正式方案修订任务必须绑定当前
-`baseShotPlanVersionId`，确认后创建新版本并保留旧版本不变。
+AI 局部修订只允许修改请求声明的稳定节点。Core 从冻结基础文档合并候选并保留范围外内容，不能依赖模型自报
+“其余未变”。镜头移动和改文案保留稳定 shotId；复制、替换、拆分或合并必须产生新身份及类型化 lineage。
+电影语法、平均镜头时长、景别多样性和连续性属于带证据的软提示，不能替代作者确认或成为无依据硬门禁。
 
-分集边界是独立不可变 `VideoEpisodePlanVersion`；逐镜 AI 提示词先保存在 `VideoAdaptationTask` 候选，只有用户
-明确编辑并保存后才创建 `VideoShotPromptVersion` 和切换 PromptHead。Agent 回调不得直接覆盖正式提示词。
+正式剧本更新只创建新的影响复核事实，不清空现有分镜、制作基线、粗剪、声音或交付。直接依赖、可能影响和作者
+沿用决定分别保存；依据 revision 变化后旧决定不能继续应用。跨集承接必须冻结生产 Episode、正式剧本版本、状态 key、
+消费节点、叙事时间和哈希，回忆不会自动继承当前时间线状态。
 
-视觉设定图片先进入项目内候选槽。只有用户确认素材权利并点击批准后，Core 才创建不可变
-`VideoVisualCanonVersion` 并切换当前版本；AI 不得自行批准。镜头参考集合使用独立 revision CAS。若用户从 AI 候选
-保存提示词，PromptVersion 必须复制来源任务冻结的视觉版本；没有候选时复制保存时的当前镜头集合，后续换图不得
-静默改变旧提示词依据。
+视觉定妆、关键帧、Prompt、Take 和采用决定分层保存。只有同项目、权利状态为 `confirmed` 且已经锁定的素材才能进入
+正式 Canon、制作基线、音轨或供应商请求。制作输入 `video-production-shot-input/1.2` 还冻结规范 UTC `lockedAt`；
+渲染前必须重新核对数据库权利与锁定事实。生成成功只创建不可变候选 Take，作者以 `VideoTakeAdoption` 明确采用后
+才能进入新的 ProductionBaseline；不得修改原 Take 的生成依据或把成功生成视为自动选片。
 
-长篇 CLI 通过具名 `long.video.*` 命令复用同一组 `/api/v1/video/**` 公共接口，覆盖项目、章节改编、
-候选确认、分集、素材、视觉设定、逐镜参考、提示词保存、逐镜生成、候选 Take、选片确认、关键帧、
-粗剪、声音字幕和整集导出。CLI 确认镜头方案前必须回读完整候选并核对
-Artifact 与 Adaptation 双 revision；候选可从完整 JSON 文件提交，提示词可从完整 UTF-8 文本文件提交，
-不得截断。改编 watcher 只轮询公共改编聚合，渲染 watcher 只轮询公共逐镜任务；停止观察不取消任务。Core 已删除旧 `VideoScene` 选区规划
-公共接口，CLI 不连接数据库或内部接口，也不能绕过视频功能开关、人工确认、素材权利或 CAS。
+粗剪、声音字幕和交付引用确切 Episode 与 ProductionBaseline。clipId 独立于 shotId，同一素材可以明确重复或裁切，
+省略镜头必须保存原因；每个片段明确 `sourceAudioMode=keep|mute`。字幕绑定稳定 scriptLineId，附加音频继续执行同项目、
+权利和媒体时长校验。导出冻结基线、粗剪、混音、素材哈希与 FFmpeg 参数；成片、Asset、Export、任务完成和 Episode
+交付 head 在闭合事务中推进，失败重试复用原清单。
 
-逐镜生成只允许从镜头当前正式 PromptHead 创建任务，并冻结对应 PromptVersion 的视觉参考快照。每个成功任务最多
-创建一个不可变 Take；用户选片通过 `clientRequestId + expectedTakeRevision` 切换 `VideoShotTakeHead`，旧 Take 和
-旧命令结果必须保留。两个并发确认只有一个 CAS 成功，冲突命令也要持久化稳定回执。此选片确认不属于小说正文
-ReviewArtifact 应用，也不得反向覆盖正式镜头或提示词。
-
-关键帧按镜头和角色保存不可变版本；粗剪按正式分集保存完整镜头集合、Take、入出点和基础转场；声音字幕版本
-必须固定引用一个粗剪版本。三类当前 head 分别使用 revision CAS，历史版本不随 head 切换而变化。整集导出只接受
-没有占位镜头的粗剪，冻结素材哈希、输出参数和声音字幕决定后进入耐久任务；失败重试创建新任务并复用旧清单，
-不得覆盖旧成片。以上制作决定不写回小说正文，也不以自动评分代替用户审片。
-
-前端同时存在待审镜头候选与当前正式方案时，审镜步骤只展示候选指标，分集、视觉设定和提示词步骤只操作并标明
-正式版本；不得用候选镜头数量或 Key 冒充正式上下文。提示词候选/正式版本继续展示自身冻结参考，若当前镜头参考
-已经变化，页面必须说明历史快照不会自动更新，并由用户显式重新生成候选。高成本视觉效果没有正式依据时先进入
-一次提示词纠正，纠正后仍存在只显示非阻断质量提醒，不得自动修改已确认镜头或正式提示词。
+普通 `long.video.*` CLI 和唯一 Web 工作区只调用 Episode 公共 API，不能访问内部接口或数据库，也不能绕过视频开关、
+ReviewArtifact、CAS、素材权利与明确费用确认。旧 `video_scene_plan`／`video_adaptation_plan`、旧章节改编批准、
+watcher 和任务 handler 已退出活动路径；服务器物理退役前只保留未装配结构投影，不得复活为兼容入口。
 
 ## 长篇选区 ReviewArtifact 应用
 
@@ -128,26 +115,26 @@ stateDiagram-v2
 | chapter_content | 章节正文 |
 | beat_plan | 结构化 Beat Plan |
 | freeform_markdown | 自由 Markdown 文本 |
-| video_scene_plan | 仅用于历史 VideoScene 任务与数据库快照兼容的场景方案 |
-| video_adaptation_plan | 仅限服务器 dev 库章节影视化 v2 的 Scene/Beat/Shot 关系化方案候选 |
+| video_scene_plan | 仅作服务器尚未物理退役结构中的历史类型；活动入口禁止新建 |
+| video_adaptation_plan | 仅作服务器尚未物理退役结构中的历史类型；活动入口禁止新建 |
+| video_episode_script | Episode 剧本 AI 候选或人工确认稿，绑定确切 Episode 与来源／工作稿依据 |
+| video_episode_storyboard | Episode 分镜 AI 候选或人工确认稿，绑定确切正式剧本与分镜工作稿依据 |
 
-`video_scene_plan` 不构成生产视频 schema 授权。旧 `VideoScene` 公共创建、查询、重试、返工、批准和
-提示词预览入口已经删除；历史表、Artifact、`VideoReviewDecisionCommand`、内部回调和 Agent handler 仅用于
-已有任务与结构契约兼容，不得重新形成公开准入或批准路径。完整删除这些历史结构必须另行获得版本化数据库迁移授权。
-
-`video_adaptation_plan` 同样只属于具名 `novelwriterdev` 章节改编域，不授权生产迁移或真实视频渲染。
-其批准入口使用独立 `VideoAdaptationDecisionCommand`，不得借用 `VideoReviewDecisionCommand.sceneId` 或
-把正式层级重新塞回 `VideoScene.planJson`。
+`video_scene_plan` 与 `video_adaptation_plan` 没有公共／内部创建、批准、回调、Catalog、dispatcher 或 Agent
+handler。P4 retirement 要求目标库零旧 Artifact／Run 引用后才能物理删除相关结构，并须另行获得具名服务器迁移
+授权；不能为了兼容重新开放旧批准命令。当前 Episode 类型只允许与 `videoEpisodeId` 同时存在，不能混用旧
+chapter／scene／adaptation 目标列。
 
 ### V2 结构化资料候选接线状态
 
 2026-09-05 工作分支已实现 agent_updates 的 Core 审核读取与决定适配。原始 summary/updates 保存到精确
 Artifact revision；展示的完整 Diff 和采用 payload 由 Core 从冻结来源派生，不信任模型自报旧值，也不从当前
 作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通；中短篇与一致性终检阶段 Catalog 为 17/21，
-文风画像达到 18/21，加入 RAG 接线后为 19/21；开发视频两项完成仓内与隔离跨进程验收后为 21/21，证据见
-`docs/specs/2026-09-06-durable-video-model-workflows.md`。它们保留原 Task→视频候选→作者确认流程，
-领域审镜不冒充通用 Artifact Reviewer，不自动写入正式方案或 PromptHead。RAG 验收状态以独立规格为准；结构化五项的隔离公共 HTTP
-接线已验证，实际 Agent/供应商、全量门禁和生产状态分别以结构化资料迁移规格记录为准。
+文风画像达到 18/21，加入 RAG 接线后为 19/21；2026-09-06 的旧章节视频两项曾使当时 Catalog 达到 21/21，
+历史证据见 `docs/specs/2026-09-06-durable-video-model-workflows.md`。当前已删除那两项活动定义，并加入四项 Episode
+剧本／分镜操作，Catalog 为 23 项。Episode 候选采用到工作稿和正式确认分开，领域审镜不冒充通用 Artifact
+Reviewer。RAG 验收状态以独立规格为准；结构化五项的隔离公共 HTTP 接线已验证，实际 Agent／供应商、全量门禁和
+生产状态分别以当前规格与验收记录为准。
 
 新冻结复审策略只在完整 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，
 允许最多一次完整自动返工；返工绑定原指令、上一精确 summary/updates 和同一冻结来源，再次专用复审。

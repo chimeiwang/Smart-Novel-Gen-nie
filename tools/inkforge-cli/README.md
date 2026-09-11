@@ -5,12 +5,12 @@
 
 ## 当前入口与本地启动
 
-本文件保留完整126命令的共享契约（原125命令及2026-09-07补齐的会话创建）。macOS 本地与生产两份 Operator Skill 已完成实际入口切换及离线验收，
+本文件保留完整143命令的共享契约。2026-09-10 新增20个独立分集／剧本命令，并关闭3个旧章节改编启动命令；macOS 本地与生产两份 Operator Skill 已完成实际入口切换及离线验收，
 执行链为 `scripts/run.sh → Java Operator → Java CLI → Core 公共 API`；新版 Skill 不再运行
 Python 或 uv。构建、安装及真实 Skill 入口见 `tools/inkforge-cli-java/README.md`，本次切换规格见
 `docs/specs/2026-09-04-java-cli-operator-cutover.md`。
 
-Java CLI 实现同一注册表中的126个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包只携带独立
+Java CLI 实现同一注册表中的143个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包只携带独立
 CLI 运行时，不依赖 Spring Core、数据库驱动或 Agent。直接 CLI 的构建和本地运行方式如下：
 
 ```bash
@@ -97,7 +97,7 @@ Skills 和服务器未随源码更新。后续 Skill 说明更新见 `docs/specs
 用 `long.session.list/get` 按小说／章节／具名标题核对，不自动再次创建，也不伪造 clientRequestId 支持。
 
 此命令属于完整公共 CLI，不加入两份日常 Operator的45命令白名单。以下历次迁移段落中的125命令是
-对应日期的历史计数，当前命令总数以注册表126为准。
+对应日期的历史计数，当前命令总数以注册表143为准。
 
 ### 运行与候选
 
@@ -243,49 +243,45 @@ Operator 以 `OPERATOR_INPUT_MODE_NOT_ALLOWED` / 退出码 2 拒绝，即使同�
 
 ## 长篇章节影视化边界
 
-`long.video.*` 覆盖当前“章节 → 镜头候选 → 人工编辑确认 → 分集 → 视觉设定 → 逐镜提示词 →
-关键帧 → 逐镜生成 → 候选 Take → 选片确认 → 分集粗剪 → 声音字幕 → 整集导出”主链，
-不暴露已经被当前产品方案替代的旧 `VideoScene` 选区规划命令。所有命令只调用 Core
-`/api/v1/video/**`，不连接 PostgreSQL、Agent Service 或内部接口。
+`long.video.episode.*` 是2026-09-10起的制作主入口，覆盖独立分集、跨章节来源集、剧本工作稿、
+V2剧本候选、作者采用、正式确认和版本历史。所有命令只调用 Core `/api/v1/**` 公共接口，
+不连接 PostgreSQL、Agent Service 或内部接口。生产仍关闭视频功能，仓内命令存在不表示生产已经开放。
+
+旧 `long.video.adaptation.create`、`long.video.plan.start` 和 `long.video.prompt.start` 已退出普通CLI。
+章节改编历史读取、候选确认／丢弃、旧分集保存和已有提示词保存暂时保留，用于既有对象收敛，不能作为
+新制作入口。旧 `long.video.episode.save` 保存的是章节改编的镜头断点；新剧本工作稿使用
+`long.video.episode.script.draft.save`，两者语义不得混用。后续视觉、渲染和后期命令仍按其现有历史对象契约运行。
 
 典型顺序：
 
 ```text
 long.video.project.create
-long.video.adaptation.create
-long.video.plan.start
-long.video.adaptation.watch
-long.video.adaptation.get
-long.video.plan.confirm
-long.video.episode.save
-long.video.asset.upload
-long.video.asset.rights
-long.video.canon.candidate.set
-long.video.canon.approve
-long.video.reference.save
-long.video.prompt.start
-long.video.adaptation.watch
-long.video.prompt.save
-long.video.render.list
-long.video.render.start
-long.video.render.get
-long.video.render.watch
-long.video.render.retry
-long.video.take.confirm
-long.video.take.download
-long.video.post.show
-long.video.keyframe.set
-long.video.edit.save
-long.video.edit.get
-long.video.mix.save
-long.video.mix.get
-long.video.export.start
-long.video.export.watch
-long.video.export.download
+long.video.episode.create
+long.video.episode.source.create
+long.video.episode.script.draft.get
+long.video.episode.script.draft.save
+long.video.episode.script.run.start
+long.video.episode.script.run.get
+long.video.episode.script.candidate.adopt
+long.video.episode.script.confirmation.prepare
+long.video.episode.script.confirmation.get
+long.video.episode.script.confirmation.approve
+long.video.episode.script.version.get
 ```
 
+- `source.create` 用 `sources` 或 `sourcesFile` 提交1～40章的完整来源选择；每章冻结
+  `expectedUpdatedAt`、SHA-256和Unicode码点半开区间，不把选区正文当作权威来源。
+- `script.draft.save` 用 `document` 或UTF-8 `documentFile` 提交完整强类型剧本，携带工作稿CAS、
+  来源集版本和可空正式剧本基线，不截断首尾空白、换行或Unicode字符。
+- `script.run.start` 只启动 `episode_script_generate` 或 `episode_script_revise`。局部修订必须显式列出
+  `selectedSceneIds`；启动成功只表示V2 Run已受理，使用 `script.run.get` 回读结果。需要取消时复用
+  `long.task.cancel` 和同一 `runId`，不新增绕过通用工作流的取消命令。
+- `script.candidate.adopt` 只把指定 Artifact revision 采用到工作稿；正式版本仍须依次执行
+  `confirmation.prepare`、读取完整确认记录、核对 `confirmationHash`，再执行 `confirmation.approve`。
+- 所有分集写命令使用16～128字符的稳定 `clientRequestId`。网络响应不确定时不得换请求号重写：
+  分集创建用 `episode.project-command.get`，其余领域写命令用 `episode.command.get` 查询已完成回执。
 - `long.video.plan.confirm` 用 `plan` 或 `planFile` 提交完整编辑后候选；命令先回读 Artifact 与改编
-  revision，冲突时不发确认请求。
+  revision，冲突时不发确认请求；它只用于旧章节改编收敛。
 - `long.video.prompt.save` 用 `currentPrompt` 或 `currentPromptFile` 保存完整提示词，不截断。
 - `long.video.asset.upload` 保持文件原始字节；`long.video.asset.download` 必须显式指定
   `outputFile`，二进制不会写入 stdout。
@@ -314,24 +310,41 @@ long.video.export.download
 | `long.video.asset.rights` | `assetId`, `rightsStatus` | 无 |
 | `long.video.asset.download` | `assetId`, `outputFile` | 无 |
 | `long.video.asset.preview` | `assetId`, `outputFile` | 无 |
+| `long.video.episode.list` | `projectId` | `outputFile` |
+| `long.video.episode.get` | `episodeId` | `outputFile` |
+| `long.video.episode.create` | `projectId`, `clientRequestId`, `title` | `creativeIntent`, `targetDurationSeconds` |
+| `long.video.episode.update` | `episodeId`, `clientRequestId`, `expectedRevision` | `title`, `creativeIntent`, `targetDurationSeconds`；后两项可显式为 `null` |
+| `long.video.episode.reorder` | `projectId`, `clientRequestId`, `expectedProjectRevision`, `episodeIds` | 无 |
+| `long.video.episode.source.create` | `episodeId`, `clientRequestId`, `expectedRevision`, `sources`/`sourcesFile` 二选一 | `basedOnVersionId` |
+| `long.video.episode.source.list` | `episodeId` | `outputFile` |
+| `long.video.episode.source.get` | `episodeId`, `versionId` | `outputFile` |
+| `long.video.episode.script.draft.get` | `episodeId` | `outputFile` |
+| `long.video.episode.script.draft.save` | `episodeId`, `clientRequestId`, `expectedRevision`, `sourceSetVersionId`, `baseScriptVersionId`, `document`/`documentFile` 二选一 | 无 |
+| `long.video.episode.script.run.start` | `episodeId`, `clientRequestId`, `expectedDraftRevision`, `operation`, `instruction` | `selectedSceneIds` |
+| `long.video.episode.script.run.get` | `episodeId`, `runId` | `outputFile` |
+| `long.video.episode.script.candidate.adopt` | `episodeId`, `artifactId`, `clientRequestId`, `expectedArtifactRevision`, `expectedDraftRevision` | 无 |
+| `long.video.episode.script.confirmation.prepare` | `episodeId`, `clientRequestId`, `expectedDraftRevision`, `expectedEpisodeRevision` | 无 |
+| `long.video.episode.script.confirmation.get` | `episodeId`, `artifactId` | `outputFile` |
+| `long.video.episode.script.confirmation.approve` | `episodeId`, `artifactId`, `clientRequestId`, `expectedArtifactRevision`, `expectedDraftRevision`, `expectedEpisodeRevision`, `confirmationHash` | 无 |
+| `long.video.episode.script.version.list` | `episodeId` | `outputFile` |
+| `long.video.episode.script.version.get` | `episodeId`, `versionId` | `outputFile` |
+| `long.video.episode.command.get` | `episodeId`, `clientRequestId` | `outputFile` |
+| `long.video.episode.project-command.get` | `projectId`, `clientRequestId` | `outputFile` |
 | `long.video.adaptation.list` | `projectId` | `outputFile` |
 | `long.video.adaptation.get` | `adaptationId` | `outputFile` |
-| `long.video.adaptation.create` | `projectId`, `chapterId`, `expectedChapterUpdatedAt`, `clientRequestId` | 无 |
 | `long.video.adaptation.watch` | `adaptationId`, `taskId` | 无 |
-| `long.video.plan.start` | `adaptationId`, `clientRequestId` | `pacingPreset`, `targetEpisodeSeconds`, `baseShotPlanVersionId`, `revisionBrief` |
 | `long.video.plan.confirm` | `adaptationId`, `clientRequestId`, `expectedArtifactRevision`, `expectedAdaptationRevision`, `plan`/`planFile` 二选一 | 无 |
 | `long.video.plan.discard` | `adaptationId`, `clientRequestId`, `expectedArtifactRevision`, `expectedAdaptationRevision` | 无 |
 | `long.video.episode.save` | `adaptationId`, `clientRequestId`, `expectedAdaptationRevision`, `shotPlanVersionId`, `breakAfterShotIds` | 无 |
-| `long.video.prompt.start` | `adaptationId`, `clientRequestId`, `expectedAdaptationRevision`, `shotPlanVersionId` | `shotIds` |
 | `long.video.prompt.save` | `adaptationId`, `shotId`, `expectedPromptRevision`, `currentPrompt`/`currentPromptFile` 二选一 | `candidateTaskId` |
 | `long.video.canon.list` | `projectId` | `outputFile` |
-| `long.video.canon.candidate.set` | `projectId`, `clientRequestId`, `settingKind`, `settingId`, `duty`, `variantKey`, `label`, `candidateAssetId` | `includeFeatures`, `excludeFeatures`, `defaultStrength` |
+| `long.video.canon.candidate.set` | `projectId`, `clientRequestId`, `expectedRevision`, `settingKind`, `settingId`, `duty`, `variantKey`, `label`, `candidateAssetId` | `includeFeatures`, `excludeFeatures`, `defaultStrength` |
 | `long.video.canon.approve` | `canonId`, `clientRequestId`, `expectedRevision`, `candidateAssetId` | 无 |
 | `long.video.reference.save` | `adaptationId`, `shotId`, `expectedRevision`, `references` | 无 |
 | `long.video.render.list` | `adaptationId` | `outputFile` |
-| `long.video.render.start` | `adaptationId`, `shotId`, `clientRequestId`, `expectedPromptRevision`, `durationSeconds` | `resolution`, `generateAudio`, `watermark` |
+| `long.video.render.start` | `adaptationId`, `shotId`, `clientRequestId`, `expectedPromptRevision`, `generationMode`, `durationSeconds` | `resolution`, `generateAudio`, `watermark`, `feeConfirmed` |
 | `long.video.render.get` | `taskId` | `outputFile` |
-| `long.video.render.retry` | `taskId`, `clientRequestId` | 无 |
+| `long.video.render.retry` | `taskId`, `clientRequestId` | `feeConfirmed` |
 | `long.video.render.watch` | `taskId` | 无 |
 | `long.video.take.confirm` | `adaptationId`, `shotId`, `takeId`, `clientRequestId`, `expectedTakeRevision` | 无 |
 | `long.video.take.download` | `takeId`, `outputFile` | 无 |
@@ -457,39 +470,69 @@ long.video.asset.upload
 long.video.asset.rights
 long.video.asset.download
 long.video.asset.preview
-long.video.adaptation.list
-long.video.adaptation.get
-long.video.adaptation.create
-long.video.adaptation.watch
-long.video.plan.start
-long.video.plan.confirm
-long.video.plan.discard
-long.video.episode.save
-long.video.prompt.start
-long.video.prompt.save
+long.video.episode.list
+long.video.episode.get
+long.video.episode.create
+long.video.episode.update
+long.video.episode.reorder
+long.video.episode.source.create
+long.video.episode.source.list
+long.video.episode.source.get
+long.video.episode.script.draft.get
+long.video.episode.script.draft.save
+long.video.episode.script.run.start
+long.video.episode.script.run.get
+long.video.episode.script.candidate.adopt
+long.video.episode.script.confirmation.prepare
+long.video.episode.script.confirmation.get
+long.video.episode.script.confirmation.approve
+long.video.episode.script.version.list
+long.video.episode.script.version.get
+long.video.episode.command.get
+long.video.episode.project-command.get
 long.video.canon.list
 long.video.canon.candidate.set
 long.video.canon.approve
-long.video.reference.save
-long.video.render.list
-long.video.render.start
-long.video.render.get
-long.video.render.retry
-long.video.render.watch
-long.video.take.confirm
-long.video.take.download
-long.video.post.show
-long.video.keyframe.set
-long.video.keyframe.clear
-long.video.keyframe.extract
-long.video.edit.save
-long.video.edit.get
-long.video.mix.save
-long.video.mix.get
-long.video.export.start
-long.video.export.get
-long.video.export.retry
-long.video.export.watch
-long.video.export.download
+long.video.production.capabilities.get
+long.video.episode.storyboard.draft.get
+long.video.episode.storyboard.draft.save
+long.video.episode.storyboard.run.start
+long.video.episode.storyboard.run.list
+long.video.episode.storyboard.run.get
+long.video.episode.storyboard.candidate.get
+long.video.episode.storyboard.candidate.adopt
+long.video.episode.storyboard.confirmation.prepare
+long.video.episode.storyboard.confirmation.get
+long.video.episode.storyboard.confirmation.approve
+long.video.episode.storyboard.version.list
+long.video.episode.storyboard.version.get
+long.video.episode.take.list
+long.video.episode.take.download
+long.video.episode.adoption.create
+long.video.episode.adoption.get
+long.video.episode.baseline.create
+long.video.episode.baseline.list
+long.video.episode.baseline.get
+long.video.episode.impact.list
+long.video.episode.impact.get
+long.video.episode.impact.decide
+long.video.episode.render.start
+long.video.episode.render.get
+long.video.episode.render.retry
+long.video.episode.edit.create
+long.video.episode.edit.list
+long.video.episode.edit.get
+long.video.episode.mix.create
+long.video.episode.mix.list
+long.video.episode.mix.get
+long.video.episode.export.start
+long.video.episode.export.get
+long.video.episode.export.retry
+long.video.episode.delivery.get
+long.video.episode.delivery.download
 ```
 <!-- command-list:end -->
+
+### 视频 V0.1／V0.2 输入
+
+定妆候选必须显式填写 `expectedRevision`：新变体为 0，已有变体使用回读版本。单镜生成必须填写 `generationMode=reference`，支持 4～12 秒和 720p。默认模拟无供应商费用；真实模式的新建及重试须显式 `feeConfirmed=true`，不能从提交未知任务直接重试。停止观察不取消任务。

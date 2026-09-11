@@ -156,6 +156,7 @@ public final class ServiceTokenVerifier {
         if (!claims.scope().contains(request.requiredScope())) {
             throw ServiceAuthException.scope();
         }
+        // 先完成签名、请求和资源校验，再消费 jti；无效请求不能耗掉合法请求的重放凭据。
         if (replayPolicy == ReplayPolicy.ALL_SCOPES || WRITE_SCOPES.contains(request.requiredScope())) {
             boolean consumed;
             try {
@@ -177,6 +178,7 @@ public final class ServiceTokenVerifier {
                 throw ServiceAuthException.authentication("服务身份认证失败");
             }
             JsonNode header = OBJECT_MAPPER.readTree(BASE64_URL.decode(parts[0]));
+            // JWT 字段集合必须精确匹配，拒绝验证端尚未理解的新声明或算法降级字段。
             if (!header.isObject()
                     || !Set.copyOf(header.propertyNames()).equals(HEADER_FIELDS)
                     || !"EdDSA".equals(header.path("alg").asString())
@@ -283,6 +285,7 @@ public final class ServiceTokenVerifier {
         if (Math.abs(now - timestamp) > clockSkewSeconds) {
             throw ServiceAuthException.binding("服务请求时间超出允许偏差");
         }
+        // 同时比对实际正文、绑定头和 JWT 声明，防止中间层只替换其中一份摘要。
         String bodyDigest = ServiceAuthCanonical.sha256(request.body());
         String queryDigest = ServiceAuthCanonical.sha256(request.queryString());
         if (!ServiceAuthCanonical.digestEquals(request.bodySha256(), bodyDigest)

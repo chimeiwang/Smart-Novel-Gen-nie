@@ -288,59 +288,6 @@ class WatchCommandsTest {
         }
     }
 
-    @Test
-    void 改编观察仅在签名变化时输出进度并由任务状态决定退出码() {
-        WatchApi api = new WatchApi(json);
-        api.response(adaptation("pending", "none", "v1", "task-1"));
-        api.response(adaptation("processing", "dramatic", "v2", "task-1"));
-        api.response(adaptation("completed", "completed", "v3", "task-1"));
-        FakeClock clock = new FakeClock();
-        Invocation result = invoke(
-                "long.video.adaptation.watch",
-                "{\"adaptationId\":\"ad1\",\"taskId\":\"task-1\"}",
-                api,
-                clock);
-        assertThat(result.exit()).isZero();
-        assertThat(result.frames()).extracting(frame -> frame.get("type").textValue())
-                .containsExactly("snapshot", "progress", "progress", "terminal");
-        assertThat(clock.sleeps).containsExactly(0.5, 1.0);
-    }
-
-    @Test
-    void 渲染与导出观察输出快照进度终态并保留失败退出码() {
-        WatchApi renderApi = new WatchApi(json);
-        renderApi.response(json.readTree("{\"id\":\"r1\",\"status\":\"queued\",\"pollCount\":0,\"updatedAt\":\"v1\"}"));
-        renderApi.response(json.readTree("{\"id\":\"r1\",\"status\":\"succeeded\",\"pollCount\":1,\"updatedAt\":\"v2\"}"));
-        Invocation render = invoke(
-                "long.video.render.watch", "{\"taskId\":\"r1\"}", renderApi, new FakeClock());
-        assertThat(render.exit()).isZero();
-        assertThat(render.frames()).extracting(frame -> frame.get("type").textValue())
-                .containsExactly("snapshot", "progress", "terminal");
-
-        WatchApi exportApi = new WatchApi(json);
-        exportApi.response(json.readTree("{\"id\":\"e1\",\"status\":\"pending\",\"attemptCount\":0,\"updatedAt\":\"v1\"}"));
-        exportApi.response(json.readTree("{\"id\":\"e1\",\"status\":\"failed\",\"attemptCount\":1,\"updatedAt\":\"v2\"}"));
-        Invocation export = invoke(
-                "long.video.export.watch", "{\"taskId\":\"e1\"}", exportApi, new FakeClock());
-        assertThat(export.exit()).isEqualTo(5);
-        assertThat(export.frames()).extracting(frame -> frame.get("type").textValue())
-                .containsExactly("snapshot", "progress", "terminal");
-    }
-
-    @Test
-    void 连续不可达超过三百秒只停止观察不取消服务端任务() {
-        WatchApi api = new WatchApi(json);
-        api.repeatFailure = new CoreTransportException();
-        FakeClock clock = new FakeClock();
-        Invocation result = invoke(
-                "long.video.render.watch", "{\"taskId\":\"r1\"}", api, clock);
-        assertThat(result.exit()).isEqualTo(5);
-        assertThat(result.frames().getLast().at("/error/code").textValue())
-                .isEqualTo("WATCH_CORE_UNREACHABLE");
-        assertThat(clock.now).isGreaterThan(300.0);
-        assertThat(clock.sleeps).allMatch(value -> value <= 10.0);
-    }
-
     private JsonNode status(String state, String artifactId) {
         String result = artifactId == null
                 ? "{\"kind\":\"none\",\"ready\":false,\"id\":null}"

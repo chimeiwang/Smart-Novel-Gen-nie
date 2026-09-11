@@ -1,0 +1,1018 @@
+{
+  "$defs": {
+    "VideoEpisodeDependencyInput": {
+      "additionalProperties": false,
+      "properties": {
+        "consumerLineId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Consumerlineid"
+        },
+        "consumerSceneId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Consumersceneid",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Narrativetime",
+          "type": "string"
+        },
+        "producerEpisodeId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Producerepisodeid",
+          "type": "string"
+        },
+        "producerScriptVersionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Producerscriptversionid",
+          "type": "string"
+        },
+        "producerStateKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Producerstatekey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "producerEpisodeId",
+        "producerScriptVersionId",
+        "producerStateKey",
+        "consumerSceneId",
+        "narrativeTime",
+        "description"
+      ],
+      "title": "VideoEpisodeDependencyInput",
+      "type": "object"
+    },
+    "VideoEpisodeEndingState": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "entityIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Entityids",
+          "type": "array"
+        },
+        "key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Key",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "default": "",
+          "maxLength": 400,
+          "title": "Narrativetime",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "description"
+      ],
+      "title": "VideoEpisodeEndingState",
+      "type": "object"
+    },
+    "VideoEpisodeScriptDocument": {
+      "additionalProperties": false,
+      "description": "工作稿和正式版共用完整结构；空工作稿不冒充已经确认的剧本。",
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeDependencyInput"
+          },
+          "maxItems": 200,
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "endingStates": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeEndingState"
+          },
+          "maxItems": 100,
+          "title": "Endingstates",
+          "type": "array"
+        },
+        "overview": {
+          "$ref": "#/$defs/VideoEpisodeScriptOverview"
+        },
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeScriptScene"
+          },
+          "maxItems": 60,
+          "title": "Scenes",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "video-episode-script/1.0",
+          "default": "video-episode-script/1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        }
+      },
+      "title": "VideoEpisodeScriptDocument",
+      "type": "object"
+    },
+    "VideoEpisodeScriptLine": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "kind": {
+          "enum": [
+            "action",
+            "dialogue",
+            "narration"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sourceRefs": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeSourceRef"
+          },
+          "maxItems": 40,
+          "title": "Sourcerefs",
+          "type": "array"
+        },
+        "speakerId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speakerid"
+        },
+        "tempKey": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tempkey"
+        },
+        "text": {
+          "maxLength": 8000,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "VideoEpisodeScriptLine",
+      "type": "object"
+    },
+    "VideoEpisodeScriptOverview": {
+      "additionalProperties": false,
+      "properties": {
+        "creativeIntent": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Creativeintent",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "targetDurationSeconds": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Targetdurationseconds"
+        }
+      },
+      "title": "VideoEpisodeScriptOverview",
+      "type": "object"
+    },
+    "VideoEpisodeScriptScene": {
+      "additionalProperties": false,
+      "properties": {
+        "characterIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Characterids",
+          "type": "array"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeScriptLine"
+          },
+          "maxItems": 500,
+          "title": "Lines",
+          "type": "array"
+        },
+        "locationLabel": {
+          "maxLength": 240,
+          "title": "Locationlabel",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "maxLength": 400,
+          "title": "Narrativetime",
+          "type": "string"
+        },
+        "tempKey": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tempkey"
+        },
+        "timeLabel": {
+          "maxLength": 160,
+          "title": "Timelabel",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 160,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "locationLabel",
+        "timeLabel",
+        "narrativeTime"
+      ],
+      "title": "VideoEpisodeScriptScene",
+      "type": "object"
+    },
+    "VideoEpisodeSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "minimum": 1,
+          "title": "End",
+          "type": "integer"
+        },
+        "sourceSnapshotId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Sourcesnapshotid",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sourceSnapshotId",
+        "start",
+        "end"
+      ],
+      "title": "VideoEpisodeSourceRef",
+      "type": "object"
+    },
+    "VideoStoryboardDocument": {
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "video-episode-storyboard/1.0",
+          "default": "video-episode-storyboard/1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "shots": {
+          "items": {
+            "$ref": "#/$defs/VideoStoryboardShot"
+          },
+          "maxItems": 300,
+          "title": "Shots",
+          "type": "array"
+        }
+      },
+      "title": "VideoStoryboardDocument",
+      "type": "object"
+    },
+    "VideoStoryboardLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "relation": {
+          "enum": [
+            "replacement",
+            "copy",
+            "split",
+            "merge"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "sourceShotId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Sourceshotid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceShotId",
+        "relation"
+      ],
+      "title": "VideoStoryboardLineage",
+      "type": "object"
+    },
+    "VideoStoryboardProductionDefaults": {
+      "additionalProperties": false,
+      "description": "AI 候选固定为模拟制作输入，不能代表用户确认真实供应商费用。",
+      "properties": {
+        "executionMode": {
+          "const": "simulated",
+          "default": "simulated",
+          "title": "Executionmode",
+          "type": "string"
+        },
+        "feeConfirmed": {
+          "const": false,
+          "default": false,
+          "title": "Feeconfirmed",
+          "type": "boolean"
+        },
+        "generateAudio": {
+          "default": true,
+          "title": "Generateaudio",
+          "type": "boolean"
+        },
+        "generationMode": {
+          "const": "reference",
+          "default": "reference",
+          "title": "Generationmode",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "outputFormat": {
+          "const": "mp4",
+          "default": "mp4",
+          "title": "Outputformat",
+          "type": "string"
+        },
+        "provider": {
+          "const": "seedance",
+          "default": "seedance",
+          "title": "Provider",
+          "type": "string"
+        },
+        "ratio": {
+          "enum": [
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9",
+            "adaptive"
+          ],
+          "title": "Ratio",
+          "type": "string"
+        },
+        "resolution": {
+          "const": "720p",
+          "default": "720p",
+          "title": "Resolution",
+          "type": "string"
+        },
+        "watermark": {
+          "default": false,
+          "title": "Watermark",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "ratio"
+      ],
+      "title": "VideoStoryboardProductionDefaults",
+      "type": "object"
+    },
+    "VideoStoryboardProductionIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "durationSeconds": {
+          "maximum": 12,
+          "minimum": 4,
+          "title": "Durationseconds",
+          "type": "integer"
+        },
+        "executionMode": {
+          "const": "simulated",
+          "default": "simulated",
+          "title": "Executionmode",
+          "type": "string"
+        },
+        "feeConfirmed": {
+          "const": false,
+          "default": false,
+          "title": "Feeconfirmed",
+          "type": "boolean"
+        },
+        "generateAudio": {
+          "default": true,
+          "title": "Generateaudio",
+          "type": "boolean"
+        },
+        "generationMode": {
+          "const": "reference",
+          "default": "reference",
+          "title": "Generationmode",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "outputFormat": {
+          "const": "mp4",
+          "default": "mp4",
+          "title": "Outputformat",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 2500,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "provider": {
+          "const": "seedance",
+          "default": "seedance",
+          "title": "Provider",
+          "type": "string"
+        },
+        "ratio": {
+          "enum": [
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9",
+            "adaptive"
+          ],
+          "title": "Ratio",
+          "type": "string"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/VideoStoryboardReferenceSnapshot"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "References",
+          "type": "array"
+        },
+        "resolution": {
+          "const": "720p",
+          "default": "720p",
+          "title": "Resolution",
+          "type": "string"
+        },
+        "watermark": {
+          "default": false,
+          "title": "Watermark",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "ratio",
+        "prompt",
+        "durationSeconds",
+        "references"
+      ],
+      "title": "VideoStoryboardProductionIntent",
+      "type": "object"
+    },
+    "VideoStoryboardReferenceEvidence": {
+      "additionalProperties": false,
+      "description": "Core 冻结的已批准视觉版本与已核验图片事实。",
+      "properties": {
+        "assetId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "canonContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Canoncontenthash",
+          "type": "string"
+        },
+        "canonVersionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Canonversionid",
+          "type": "string"
+        },
+        "defaultStrength": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Defaultstrength",
+          "type": "integer"
+        },
+        "duty": {
+          "enum": [
+            "identity",
+            "costume",
+            "scene",
+            "prop"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "excludeFeatures": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Excludefeatures",
+          "type": "array"
+        },
+        "includeFeatures": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Includefeatures",
+          "type": "array"
+        },
+        "label": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "mimeType": {
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "settingName": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Settingname",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "canonVersionId",
+        "canonContentHash",
+        "assetId",
+        "sha256",
+        "mimeType",
+        "duty",
+        "defaultStrength",
+        "settingName",
+        "label"
+      ],
+      "title": "VideoStoryboardReferenceEvidence",
+      "type": "object"
+    },
+    "VideoStoryboardReferenceSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "assetId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "canonContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Canoncontenthash",
+          "type": "string"
+        },
+        "canonVersionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Canonversionid",
+          "type": "string"
+        },
+        "duty": {
+          "enum": [
+            "identity",
+            "costume",
+            "scene",
+            "prop"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "mimeType": {
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "strength": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Strength",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "canonVersionId",
+        "canonContentHash",
+        "assetId",
+        "sha256",
+        "mimeType",
+        "duty",
+        "strength"
+      ],
+      "title": "VideoStoryboardReferenceSnapshot",
+      "type": "object"
+    },
+    "VideoStoryboardShot": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "cameraMovement": {
+          "enum": [
+            "static",
+            "pan",
+            "tilt",
+            "dolly",
+            "truck",
+            "crane",
+            "handheld",
+            "orbit",
+            "zoom"
+          ],
+          "title": "Cameramovement",
+          "type": "string"
+        },
+        "durationMs": {
+          "maximum": 12000,
+          "minimum": 4000,
+          "title": "Durationms",
+          "type": "integer"
+        },
+        "framing": {
+          "enum": [
+            "extreme_wide",
+            "wide",
+            "medium",
+            "close_up",
+            "detail",
+            "over_shoulder",
+            "pov"
+          ],
+          "title": "Framing",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "lineage": {
+          "items": {
+            "$ref": "#/$defs/VideoStoryboardLineage"
+          },
+          "maxItems": 20,
+          "title": "Lineage",
+          "type": "array"
+        },
+        "productionIntent": {
+          "$ref": "#/$defs/VideoStoryboardProductionIntent"
+        },
+        "scriptLineIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Scriptlineids",
+          "type": "array"
+        },
+        "scriptSceneId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Scriptsceneid",
+          "type": "string"
+        },
+        "tempKey": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tempkey"
+        },
+        "title": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scriptSceneId",
+        "title",
+        "action",
+        "framing",
+        "cameraMovement",
+        "durationMs",
+        "productionIntent"
+      ],
+      "title": "VideoStoryboardShot",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardContext/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "availableReferences": {
+      "items": {
+        "$ref": "#/$defs/VideoStoryboardReferenceEvidence"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Availablereferences",
+      "type": "array"
+    },
+    "baseStoryboardVersionId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Basestoryboardversionid"
+    },
+    "draft": {
+      "$ref": "#/$defs/VideoStoryboardDocument"
+    },
+    "draftContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Draftcontenthash",
+      "type": "string"
+    },
+    "draftRevision": {
+      "minimum": 1,
+      "title": "Draftrevision",
+      "type": "integer"
+    },
+    "episodeId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Episodeid",
+      "type": "string"
+    },
+    "episodeTitle": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Episodetitle",
+      "type": "string"
+    },
+    "instruction": {
+      "maxLength": 8000,
+      "minLength": 1,
+      "title": "Instruction",
+      "type": "string"
+    },
+    "novelId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "operation": {
+      "enum": [
+        "episode_storyboard_generate",
+        "episode_storyboard_revise"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "productionDefaults": {
+      "$ref": "#/$defs/VideoStoryboardProductionDefaults"
+    },
+    "projectId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "video-episode-storyboard-context/1.0",
+      "default": "video-episode-storyboard-context/1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "script": {
+      "$ref": "#/$defs/VideoEpisodeScriptDocument"
+    },
+    "scriptContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Scriptcontenthash",
+      "type": "string"
+    },
+    "scriptVersionId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Scriptversionid",
+      "type": "string"
+    },
+    "selectedShotIds": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 300,
+      "title": "Selectedshotids",
+      "type": "array"
+    },
+    "stableShotIds": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 300,
+      "title": "Stableshotids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "episodeId",
+    "projectId",
+    "novelId",
+    "episodeTitle",
+    "operation",
+    "draftRevision",
+    "draftContentHash",
+    "scriptVersionId",
+    "scriptContentHash",
+    "baseStoryboardVersionId",
+    "script",
+    "draft",
+    "stableShotIds",
+    "selectedShotIds",
+    "productionDefaults",
+    "availableReferences",
+    "instruction"
+  ],
+  "title": "VideoStoryboardContext",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardContext"
+}

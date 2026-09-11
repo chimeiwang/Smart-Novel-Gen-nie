@@ -21,6 +21,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** 按数据库、Redis、会话密钥和手机号开关装配身份认证能力。 */
 @Configuration(proxyBeanMethods = false)
 class IdentityConfiguration {
 

@@ -65,6 +65,28 @@
           "default": null,
           "title": "Generateaudio"
         },
+        "lastFrameUrl": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastframeurl"
+        },
+        "mediaKind": {
+          "enum": [
+            "provider_media",
+            "simulated_placeholder"
+          ],
+          "title": "Mediakind",
+          "type": "string"
+        },
         "ratio": {
           "anyOf": [
             {
@@ -106,7 +128,8 @@
         }
       },
       "required": [
-        "videoUrl"
+        "videoUrl",
+        "mediaKind"
       ],
       "title": "SeedanceRenderOutput",
       "type": "object"

@@ -19,6 +19,8 @@ import { countUnhandledQualityChecks } from "@/features/editor/quality-presentat
 import { countTextLength } from "@/shared/lib/word-count";
 import { ShortMediumWorkspace } from "@/features/short-medium/short-medium-workspace";
 import { VideoWorkspace } from "@/features/video/video-workspace";
+import { confirmVisualEditorLeave } from "@/features/video/adaptation/visual-editor-leave-guard";
+import { flushEpisodeSaves, hasPendingEpisodeSave } from "@/features/video/production/episode-save-navigation";
 import {
   LIBRARY_GROUPS,
   LibraryNavigation,
@@ -30,6 +32,10 @@ import { formatWorkspaceViewSaveError } from "./workspace-shell-state";
 import { WorkspaceDialog } from "./workspace-dialog";
 import {
   resolveWorkspaceViewForProfile,
+  buildWorkspaceEpisodeHref,
+  parseEpisodeRouteContext,
+  parseWorkspaceView,
+  type EpisodeRouteContext,
   type WorkspaceView,
 } from "./workspace-view";
 
@@ -37,6 +43,7 @@ type WorkspaceShellProps = {
   bootstrap: components["schemas"]["WorkspaceBootstrapResponse"];
   currentUser: components["schemas"]["UserResponse"];
   initialView: WorkspaceView;
+  initialEpisodeContext?: EpisodeRouteContext;
 };
 
 type WorkspaceSection = "chapters" | "library" | "video";
@@ -52,6 +59,7 @@ export function WorkspaceShell({
   bootstrap,
   currentUser,
   initialView,
+  initialEpisodeContext = { projectId: null, episodeId: null, surface: "script" },
 }: WorkspaceShellProps) {
   const { novel, chapters, currentChapter } = bootstrap;
   const resolvedInitialView = resolveWorkspaceViewForProfile(
@@ -66,6 +74,8 @@ export function WorkspaceShell({
         : "chapters",
   );
   const [activeLibraryItem, setActiveLibraryItem] = useState<LibraryItem>("characters");
+  const [episodeContext, setEpisodeContext] = useState(initialEpisodeContext);
+  const navigationUrl = useRef<string | null>(null);
   const [libraryDialogOpen, setLibraryDialogOpen] = useState(
     resolvedInitialView === "library",
   );
@@ -114,6 +124,7 @@ export function WorkspaceShell({
       },
     }));
   }, []);
+
 
   const captureSelection = useCallback(async (input: SelectionCaptureInput) => {
     const generation = ++selectionGenerationRef.current;
@@ -214,6 +225,34 @@ export function WorkspaceShell({
   }, []);
 
   useEffect(() => {
+    navigationUrl.current = window.location.href;
+    let generation = 0;
+    const restoreRoute = () => {
+      const request = ++generation;
+      const previous = navigationUrl.current;
+      const target = window.location.href;
+      void flushEpisodeSaves(novel.id).then(async () => {
+        if (request !== generation) return;
+        await flushActiveChapterSave();
+        if (!confirmVisualEditorLeave(novel.id)) throw new Error("当前修改尚未提交，已保留原工作区");
+        if (request !== generation) return;
+        const url = new URL(target);
+        applyInitialView(resolveWorkspaceViewForProfile(parseWorkspaceView(url.searchParams.get("view")), novel.storyLengthProfile));
+        setEpisodeContext(parseEpisodeRouteContext({ projectId: url.searchParams.get("projectId"), episodeId: url.searchParams.get("episodeId"), surface: url.searchParams.get("surface") }));
+        navigationUrl.current = target;
+      }).catch((error) => {
+        if (request !== generation) return;
+        if (previous) window.history.replaceState(window.history.state, "", previous);
+        setViewError(error instanceof Error ? error.message : "剧本尚未保存，已保留当前集");
+      });
+    };
+    const beforeUnload = (event: BeforeUnloadEvent) => { if (hasPendingEpisodeSave(novel.id)) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("popstate", restoreRoute);
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => { generation += 1; window.removeEventListener("popstate", restoreRoute); window.removeEventListener("beforeunload", beforeUnload); };
+  }, [applyInitialView, novel.id, novel.storyLengthProfile]);
+
+  useEffect(() => {
     // 修正非长篇的非法视频深链，保证地址栏与实际工作区一致。
     if (initialView !== resolvedInitialView) {
       const url = new URL(window.location.href);
@@ -236,19 +275,18 @@ export function WorkspaceShell({
       section === "library" ? "library" : section === "video" ? "video" : "studio",
     );
     window.history.replaceState(window.history.state, "", url);
+    navigationUrl.current = url.href;
   };
 
   const selectSection = async (section: WorkspaceSection) => {
     if (switchingView || section === activeSection) return;
-    if (section !== "video") {
-      commitSection(section);
-      return;
-    }
+    if (!confirmVisualEditorLeave(novel.id)) return;
     setViewError(null);
-    setSwitchingView("video");
+    setSwitchingView(section === "video" ? "video" : section === "library" ? "library" : "studio");
     try {
       await flushActiveChapterSave();
-      commitSection("video");
+      await flushEpisodeSaves(novel.id);
+      commitSection(section);
     } catch (error) {
       setViewError(formatWorkspaceViewSaveError(error));
     } finally {
@@ -258,17 +296,21 @@ export function WorkspaceShell({
 
   const selectLibraryItem = async (item: LibraryItem) => {
     if (switchingView) return;
+    if (libraryDialogOpen && item === activeLibraryItem) return;
+    if (!confirmVisualEditorLeave(novel.id)) return;
     clearTransientSelection();
     setViewError(null);
     setSwitchingView("library");
     try {
       await flushActiveChapterSave();
+      await flushEpisodeSaves(novel.id);
       setActiveSection("library");
       setActiveLibraryItem(item);
       setLibraryDialogOpen(true);
       const url = new URL(window.location.href);
       url.searchParams.set("view", "library");
       window.history.replaceState(window.history.state, "", url);
+      navigationUrl.current = url.href;
     } catch (error) {
       setViewError(formatWorkspaceViewSaveError(error));
     } finally {
@@ -276,12 +318,21 @@ export function WorkspaceShell({
     }
   };
 
+  const leaveWorkspace = async () => {
+    if (!confirmVisualEditorLeave(novel.id)) return;
+    try {
+      await flushActiveChapterSave();
+      await flushEpisodeSaves(novel.id);
+      window.location.assign("/");
+    } catch (error) { setViewError(error instanceof Error ? error.message : "内容尚未保存，已保留当前工作区"); }
+  };
+
   if (novel.storyLengthProfile === "short_medium") {
     return (
       <main className="page stack workspace-page">
         <header className="panel workspace-shell-header">
           <div className="workspace-shell-summary">
-            <Link href="/" className="muted">← 返回</Link>
+            <Link href="/" className="muted" onClick={(event) => { event.preventDefault(); void leaveWorkspace(); }}>← 返回</Link>
             <div>
               <h1 className="title-lg">{novel.name}</h1>
               <div className="meta">
@@ -331,7 +382,7 @@ export function WorkspaceShell({
     <main className="page stack workspace-page">
       <header className="panel workspace-shell-header">
         <div className="workspace-shell-summary">
-          <Link href="/" className="muted">← 返回</Link>
+          <Link href="/" className="muted" onClick={(event) => { event.preventDefault(); void leaveWorkspace(); }}>← 返回</Link>
           <div>
             <h1 className="title-lg">{novel.name}</h1>
             <div className="meta">
@@ -362,26 +413,27 @@ export function WorkspaceShell({
                   ? "章节"
                   : section === "library"
                     ? "创作资料"
-                    : "视频制作"}
+                    : "剧集制作"}
               </button>
             ))}
           </div>
 
           <div className="workspace-primary-navigation-content">
-            {activeSection !== "library" ? (
+            {activeSection === "chapters" ? (
               <ChapterList
                 novelId={novel.id}
                 activeChapterId={currentChapter?.id ?? ""}
                 chapters={visibleChapters}
-                view={activeSection === "video" ? "video" : "studio"}
+                view="studio"
                 onChapterChangeReady={clearAllSelection}
+                beforeChapterChange={() => confirmVisualEditorLeave(novel.id)}
               />
-            ) : (
+            ) : activeSection === "library" ? (
               <LibraryNavigation
                 activeItem={activeLibraryItem}
                 onSelect={(item) => void selectLibraryItem(item)}
               />
-            )}
+            ) : <p className="muted">每集独立取材、写剧本，再进入分镜与制作。小说章节不会决定当前集。</p>}
           </div>
         </aside>
 
@@ -391,13 +443,15 @@ export function WorkspaceShell({
               <VideoWorkspace
                 novelId={novel.id}
                 novelName={novel.name}
-                currentChapter={visibleCurrentChapter ? {
-                  id: visibleCurrentChapter.id,
-                  title: visibleCurrentChapter.title,
-                  content: visibleCurrentChapter.content,
-                  updatedAt: visibleCurrentChapter.updatedAt,
-                } : undefined}
-                selectionBridge={selectionBridge}
+                episodeContext={episodeContext}
+                onEpisodeNavigate={async (context) => {
+                  await flushEpisodeSaves(novel.id);
+                  if (!confirmVisualEditorLeave(novel.id)) return;
+                  const href = buildWorkspaceEpisodeHref(novel.id, context);
+                  window.history.pushState(window.history.state, "", href);
+                  navigationUrl.current = window.location.href;
+                  setEpisodeContext(context);
+                }}
               />
             </section>
           ) : (
@@ -448,10 +502,12 @@ export function WorkspaceShell({
         title={LIBRARY_GROUPS.flatMap((group) => group.items).find((item) => item.key === activeLibraryItem)?.label ?? "创作资料"}
         description="编辑当前作品的设定、规划与写作素材"
         variant="library"
-        onClose={() => setLibraryDialogOpen(false)}
+        onClose={() => { if (confirmVisualEditorLeave(novel.id)) setLibraryDialogOpen(false); }}
       >
         <LibraryPane
           novelId={novel.id}
+          novelName={novel.name}
+          allowVisuals={true}
           appliedStyleId={novel.appliedStyleId}
           active={libraryDialogOpen}
           activeItem={activeLibraryItem}

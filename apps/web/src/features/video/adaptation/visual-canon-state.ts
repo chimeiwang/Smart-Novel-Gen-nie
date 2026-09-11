@@ -1,100 +1,73 @@
 import type {
-  FormalPlan,
-  FormalShot,
-  ShotVisualReference,
   VisualCanon,
   VisualCanonVersion,
+  VideoProject,
 } from "./types";
 
-export type VisualReferenceSelection = {
-  canonVersionId: string;
-  strength: number;
+/** 设定卡的界面投影；业务字段仍来自生成的公共契约。 */
+export type VisualSetting = {
+  id: string;
+  kind: VisualCanon["settingKind"];
+  name: string;
+  summary: string;
 };
 
-const DUTY_ORDER = { identity: 0, costume: 1, scene: 2, prop: 3 } as const;
+export type VisualCandidateDraft = {
+  clientRequestId: string;
+  canonId: string | null;
+  expectedRevision: number;
+  duty: VisualCanon["duty"];
+  variantKey: string;
+  label: string;
+  includeFeatures: string;
+  excludeFeatures: string;
+  defaultStrength: number;
+};
+
+export function createVisualCandidateDraft(duty: VisualCanon["duty"], requestId: string, canon?: VisualCanon): VisualCandidateDraft {
+  const current = canon ? currentCanonVersion(canon) : null;
+  return {
+    clientRequestId: requestId,
+    canonId: canon?.id ?? null,
+    expectedRevision: canon?.revision ?? 0,
+    duty,
+    variantKey: canon?.variantKey ?? visualVariantKey(requestId),
+    label: canon?.label ?? ({ identity: "标准定妆", costume: "日常服装", scene: "场景主视图", prop: "道具外形" }[duty]),
+    includeFeatures: (canon?.candidateAsset ? canon.candidateIncludeFeatures : current?.includeFeatures ?? []).join("，"),
+    excludeFeatures: (canon?.candidateAsset ? canon.candidateExcludeFeatures : current?.excludeFeatures ?? []).join("，"),
+    defaultStrength: canon?.candidateDefaultStrength ?? current?.defaultStrength ?? 70,
+  };
+}
+
+export function rebaseVisualCandidateDraft(draft: VisualCandidateDraft, latest: VisualCanon, requestId: string): VisualCandidateDraft {
+  if (latest.duty !== draft.duty || latest.variantKey !== draft.variantKey || (draft.canonId !== null && latest.id !== draft.canonId)) {
+    throw new Error("不能把候选修改保存到另一个定妆变体。");
+  }
+  return { ...draft, canonId: latest.id, expectedRevision: latest.revision, clientRequestId: requestId };
+}
+
+export function visualDuties(kind: VisualSetting["kind"]): VisualCanon["duty"][] {
+  return kind === "character" ? ["identity", "costume"] : kind === "location" ? ["scene"] : ["prop"];
+}
+
+export function selectSeriesProject(projects: VideoProject[], selectedId?: string | null): VideoProject | null {
+  const series = projects.filter((project) => project.mode === "series");
+  return series.find((project) => project.id === selectedId) ?? series[0] ?? null;
+}
+
+export function visualVariantKey(requestId: string): string {
+  return `variant_${requestId.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
+}
+
+export function parseVisualFeatures(value: string): string[] {
+  const features = [...new Set(value.split(/[，,\n]/).map((part) => part.trim()).filter(Boolean))];
+  if (features.length > 20) throw new Error("保留或排除特征各最多填写 20 项，请精简后保存。");
+  if (features.some((feature) => Array.from(feature).length > 120)) throw new Error("每项视觉特征最多 120 字，请拆分或精简后保存。");
+  return features;
+}
 
 export function currentCanonVersion(canon: VisualCanon): VisualCanonVersion | null {
   return canon.versions.find((version) => version.id === canon.currentVersionId) ?? null;
-}
-
-export function visualShotContext(plan: FormalPlan, shot: FormalShot): string {
-  for (const scene of plan.scenes) {
-    for (const beat of scene.beats) {
-      if (!beat.shots.some((item) => item.id === shot.id)) continue;
-      return [
-        scene.title,
-        scene.locationLabel,
-        beat.title,
-        beat.dramaticTurn,
-        shot.title,
-        shot.storyFunction,
-        shot.audienceGain,
-        shot.visualIntent,
-        shot.spokenText ?? "",
-        ...shot.sourceRanges.map((range) => range.sourceText),
-      ].join("\n");
-    }
-  }
-  return [shot.title, shot.storyFunction, shot.audienceGain, shot.visualIntent].join("\n");
-}
-
-export function recommendedVisualReferences(
-  canons: VisualCanon[],
-  context: string,
-): VisualReferenceSelection[] {
-  const normalized = normalize(context);
-  return canons
-    .map((canon) => ({ canon, version: currentCanonVersion(canon) }))
-    .filter(({ canon, version }) => version && normalized.includes(normalize(canon.settingName)))
-    .sort((left, right) => (
-      DUTY_ORDER[left.canon.duty] - DUTY_ORDER[right.canon.duty]
-      || left.canon.settingName.localeCompare(right.canon.settingName, "zh-CN")
-      || left.canon.variantKey.localeCompare(right.canon.variantKey)
-    ))
-    .map(({ version }) => ({
-      canonVersionId: version!.id,
-      strength: version!.defaultStrength,
-    }));
-}
-
-export function visualReferenceWarnings(
-  canons: VisualCanon[],
-  context: string,
-  references: ShotVisualReference[],
-): string[] {
-  const normalized = normalize(context);
-  const matched = canons.filter((canon) => normalized.includes(normalize(canon.settingName)));
-  const warnings: string[] = [];
-  for (const canon of matched) {
-    const current = currentCanonVersion(canon);
-    if (!current) {
-      warnings.push(`${canon.settingName}的${dutyLabel(canon.duty)}还没有批准版本`);
-      continue;
-    }
-    const bound = references.some((reference) => (
-      reference.settingId === canon.settingId && reference.duty === canon.duty
-    ));
-    if (!bound && canon.duty !== "costume") {
-      warnings.push(`${canon.settingName}的${dutyLabel(canon.duty)}尚未绑定到本镜`);
-    }
-  }
-  return Array.from(new Set(warnings));
-}
-
-export function sameVisualReferences(
-  left: ShotVisualReference[],
-  right: ShotVisualReference[],
-): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((reference, index) => {
-    const other = right[index];
-    return Boolean(
-      other
-      && reference.canonVersionId === other.canonVersionId
-      && reference.assetId === other.assetId
-      && reference.strength === other.strength
-    );
-  });
 }
 
 export function dutyLabel(duty: VisualCanon["duty"]): string {
@@ -108,8 +81,4 @@ export function dutyLabel(duty: VisualCanon["duty"]): string {
 
 export function assetPreviewUrl(assetId: string): string {
   return `/api/v1/video/assets/${encodeURIComponent(assetId)}/preview`;
-}
-
-function normalize(value: string): string {
-  return value.replace(/\s+/g, "").toLocaleLowerCase("zh-CN");
 }

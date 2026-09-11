@@ -1,0 +1,32 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeCharacterEvidence/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "default": "",
+      "maxLength": 20000,
+      "title": "Description",
+      "type": "string"
+    },
+    "id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "title": "VideoEpisodeCharacterEvidence",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeCharacterEvidence"
+}

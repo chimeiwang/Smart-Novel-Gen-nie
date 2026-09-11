@@ -116,6 +116,7 @@ services:
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-}
       # Core 只读取状态开关，绝不接收火山 API Key。
       SEEDANCE_CONFIGURED: ${SEEDANCE_CONFIGURED:-false}
+      SEEDANCE_EXECUTION_MODE: ${SEEDANCE_EXECUTION_MODE:-simulated}
       SEEDANCE_ENABLED: ${SEEDANCE_ENABLED:-false}
       SEEDANCE_MODEL: ${SEEDANCE_MODEL:-doubao-seedance-2-5-260628}
       VIDEO_PROVIDER_MEDIA_BASE_URL: ${VIDEO_PROVIDER_MEDIA_BASE_URL:-}
@@ -191,6 +192,7 @@ services:
       RAG_INDEX_ENABLED: ${RAG_INDEX_ENABLED:-false}
       # 供应商密钥只进入 Agent；默认门禁禁止真实付费请求。
       SEEDANCE_API_KEY: ${SEEDANCE_API_KEY:-}
+      SEEDANCE_EXECUTION_MODE: ${SEEDANCE_EXECUTION_MODE:-simulated}
       SEEDANCE_BASE_URL: ${SEEDANCE_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
       SEEDANCE_MODEL: ${SEEDANCE_MODEL:-doubao-seedance-2-5-260628}
       SEEDANCE_ENABLED: ${SEEDANCE_ENABLED:-false}

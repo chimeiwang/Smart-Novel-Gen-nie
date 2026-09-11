@@ -8,6 +8,7 @@ from inkforge_contracts.video_render import (
     SeedanceRenderQueryResponse,
     SeedanceRenderSubmitRequest,
     SeedanceRenderSubmitResponse,
+    ShotRenderReferenceManifest,
     VideoShotRenderManifest,
 )
 from inkforge_core.agent_client import SeedanceSubmissionUnknownError
@@ -16,6 +17,7 @@ from inkforge_core.video.adaptation.render_repository import (
     CompletedTakeInput,
     ShotRenderClaim,
 )
+from inkforge_core.video.adaptation.render_security import ProviderAssetTokenCodec
 from inkforge_core.video.adaptation.render_storage import ArchivedRenderResult
 from inkforge_core.video.storage import StoredVideoAsset
 
@@ -30,6 +32,9 @@ def _manifest() -> VideoShotRenderManifest:
         shotPlanVersionId="plan-1",
         promptVersionId="prompt-1",
         promptContentHash="a" * 64,
+        generationMode="reference",
+        executionMode="live",
+        feeConfirmed=True,
         promptText="雨夜，人物回头，镜头缓慢推进。",
         sourceTimelineDurationMs=5_000,
         model="seedance-test",
@@ -38,7 +43,17 @@ def _manifest() -> VideoShotRenderManifest:
         resolution="720p",
         generateAudio=True,
         watermark=False,
-        references=[],
+        references=[
+            ShotRenderReferenceManifest(
+                ordinal=1,
+                canonVersionId="canon-1",
+                assetId="asset-1",
+                sha256="b" * 64,
+                mimeType="image/png",
+                duty="identity",
+                strength=70,
+            )
+        ],
     )
 
 
@@ -96,8 +111,8 @@ async def test_submit_unknown_never_turns_into_automatic_resubmit() -> None:
         gateway,  # type: ignore[arg-type]
         _UnusedArchiver(),  # type: ignore[arg-type]
         _Storage(),  # type: ignore[arg-type]
-        provider_media_base_url=None,
-        provider_asset_token_codec=None,
+        provider_media_base_url="https://assets.example",
+        provider_asset_token_codec=ProviderAssetTokenCodec("x" * 32),
     )
 
     assert await reconciler.run_once() == 1
@@ -135,8 +150,8 @@ async def test_submit_success_persists_provider_identity() -> None:
         Gateway(),  # type: ignore[arg-type]
         _UnusedArchiver(),  # type: ignore[arg-type]
         _Storage(),  # type: ignore[arg-type]
-        provider_media_base_url=None,
-        provider_asset_token_codec=None,
+        provider_media_base_url="https://assets.example",
+        provider_asset_token_codec=ProviderAssetTokenCodec("x" * 32),
     )
 
     await reconciler.run_once()
@@ -174,6 +189,7 @@ async def test_successful_query_archives_before_creating_take() -> None:
                 status="succeeded",
                 output=SeedanceRenderOutput(
                     videoUrl="https://result.example/video.mp4",
+                    mediaKind="provider_media",
                     durationSeconds=5.25,
                     usage={"frames": 126},
                 ),
@@ -214,6 +230,7 @@ async def test_successful_query_archives_before_creating_take() -> None:
         "ratio": None,
         "framesPerSecond": None,
         "generateAudio": None,
+        "mediaKind": "provider_media",
         "usage": {"frames": 126},
     }
     assert storage.deleted == ["project-1/task-1.mp4"]
@@ -243,6 +260,7 @@ async def test_archive_failure_does_not_create_take_and_cleans_exact_file() -> N
                 status="succeeded",
                 output=SeedanceRenderOutput(
                     videoUrl="https://result.example/video.mp4",
+                    mediaKind="provider_media",
                 ),
             )
 
@@ -290,7 +308,10 @@ async def test_take_commit_response_loss_preserves_already_registered_file() -> 
                 taskId="task-1",
                 providerTaskId="provider-1",
                 status="succeeded",
-                output=SeedanceRenderOutput(videoUrl="https://result.example/video.mp4"),
+                output=SeedanceRenderOutput(
+                    videoUrl="https://result.example/video.mp4",
+                    mediaKind="provider_media",
+                ),
             )
 
     class Archiver:

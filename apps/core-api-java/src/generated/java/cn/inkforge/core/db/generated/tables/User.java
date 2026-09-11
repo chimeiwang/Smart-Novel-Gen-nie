@@ -16,11 +16,17 @@ import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion.Videoepisode
 import cn.inkforge.core.db.generated.tables.Videoepisodeexporttask.VideoepisodeexporttaskPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodemixversion.VideoepisodemixversionPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeplanversion.VideoepisodeplanversionPath;
+import cn.inkforge.core.db.generated.tables.Videoepisodescriptversion.VideoepisodescriptversionPath;
+import cn.inkforge.core.db.generated.tables.Videoepisodeshot.VideoepisodeshotPath;
+import cn.inkforge.core.db.generated.tables.Videoepisodesourcesetversion.VideoepisodesourcesetversionPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
 import cn.inkforge.core.db.generated.tables.Videoreviewdecisioncommand.VideoreviewdecisioncommandPath;
 import cn.inkforge.core.db.generated.tables.Videoshotkeyframeversion.VideoshotkeyframeversionPath;
 import cn.inkforge.core.db.generated.tables.Videoshotplanversion.VideoshotplanversionPath;
 import cn.inkforge.core.db.generated.tables.Videoshotpromptversion.VideoshotpromptversionPath;
 import cn.inkforge.core.db.generated.tables.Videoshottakedecisioncommand.VideoshottakedecisioncommandPath;
+import cn.inkforge.core.db.generated.tables.Videostoryboardversion.VideostoryboardversionPath;
+import cn.inkforge.core.db.generated.tables.Videotakeadoption.VideotakeadoptionPath;
 import cn.inkforge.core.db.generated.tables.Videotakeframeextraction.VideotakeframeextractionPath;
 import cn.inkforge.core.db.generated.tables.Videovisualcanonversion.VideovisualcanonversionPath;
 import cn.inkforge.core.db.generated.tables.Writingstyle.WritingstylePath;
@@ -315,6 +321,58 @@ public class User extends TableImpl<UserRecord> {
         return _videoepisodeplanversion;
     }
 
+    private transient VideoepisodescriptversionPath _videoepisodescriptversion;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeScriptVersion</code> table
+     */
+    public VideoepisodescriptversionPath videoepisodescriptversion() {
+        if (_videoepisodescriptversion == null)
+            _videoepisodescriptversion = new VideoepisodescriptversionPath(this, null, Keys.VIDEOEPISODESCRIPTVERSION__VIDEOEPISODESCRIPTVERSION_APPROVEDBYUSERID_FKEY.getInverseKey());
+
+        return _videoepisodescriptversion;
+    }
+
+    private transient VideoepisodeshotPath _videoepisodeshot;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeShot</code> table
+     */
+    public VideoepisodeshotPath videoepisodeshot() {
+        if (_videoepisodeshot == null)
+            _videoepisodeshot = new VideoepisodeshotPath(this, null, Keys.VIDEOEPISODESHOT__VIDEOEPISODESHOT_CREATEDBYUSERID_FKEY.getInverseKey());
+
+        return _videoepisodeshot;
+    }
+
+    private transient VideoepisodesourcesetversionPath _videoepisodesourcesetversion;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeSourceSetVersion</code> table
+     */
+    public VideoepisodesourcesetversionPath videoepisodesourcesetversion() {
+        if (_videoepisodesourcesetversion == null)
+            _videoepisodesourcesetversion = new VideoepisodesourcesetversionPath(this, null, Keys.VIDEOEPISODESOURCESETVERSION__VIDEOEPISODESOURCESETVERSION_CREATEDBYUSERID_FKEY.getInverseKey());
+
+        return _videoepisodesourcesetversion;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoProductionBaseline</code> table
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, null, Keys.VIDEOPRODUCTIONBASELINE__VIDEOPRODUCTIONBASELINE_CREATEDBYUSERID_FKEY.getInverseKey());
+
+        return _videoproductionbaseline;
+    }
+
     private transient VideoreviewdecisioncommandPath _videoreviewdecisioncommand;
 
     /**
@@ -378,6 +436,32 @@ public class User extends TableImpl<UserRecord> {
             _videoshottakedecisioncommand = new VideoshottakedecisioncommandPath(this, null, Keys.VIDEOSHOTTAKEDECISIONCOMMAND__VIDEOSHOTTAKEDECISIONCOMMAND_USER_FKEY.getInverseKey());
 
         return _videoshottakedecisioncommand;
+    }
+
+    private transient VideostoryboardversionPath _videostoryboardversion;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoStoryboardVersion</code> table
+     */
+    public VideostoryboardversionPath videostoryboardversion() {
+        if (_videostoryboardversion == null)
+            _videostoryboardversion = new VideostoryboardversionPath(this, null, Keys.VIDEOSTORYBOARDVERSION__VIDEOSTORYBOARDVERSION_APPROVEDBYUSERID_FKEY.getInverseKey());
+
+        return _videostoryboardversion;
+    }
+
+    private transient VideotakeadoptionPath _videotakeadoption;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoTakeAdoption</code> table
+     */
+    public VideotakeadoptionPath videotakeadoption() {
+        if (_videotakeadoption == null)
+            _videotakeadoption = new VideotakeadoptionPath(this, null, Keys.VIDEOTAKEADOPTION__VIDEOTAKEADOPTION_CREATEDBYUSERID_FKEY.getInverseKey());
+
+        return _videotakeadoption;
     }
 
     private transient VideotakeframeextractionPath _videotakeframeextraction;

@@ -8,6 +8,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_contracts.video_render import (
+    SeedanceRenderError,
+    SeedanceRenderOutput,
     SeedanceRenderQueryRequest,
     SeedanceRenderQueryResponse,
     SeedanceRenderSubmitRequest,
@@ -15,7 +17,16 @@ from inkforge_contracts.video_render import (
 )
 
 from ..runs.router import CoreRequestVerifier, _verify, get_verifier
-from .seedance import SeedanceProvider
+from .seedance import (
+    SeedanceSubmissionRejectedError,
+    SeedanceSubmissionUnknownError,
+)
+from .video_generation import (
+    VideoGenerationProvider,
+    VideoGenerationQuery,
+    VideoGenerationReference,
+    VideoGenerationRequest,
+)
 
 router = APIRouter(
     prefix="/internal/v1/video/seedance/tasks",
@@ -25,9 +36,9 @@ router = APIRouter(
 Verifier = Annotated[CoreRequestVerifier, Depends(get_verifier)]
 
 
-def _provider(request: Request) -> SeedanceProvider:
+def _provider(request: Request) -> VideoGenerationProvider:
     provider = cast(
-        SeedanceProvider | None,
+        VideoGenerationProvider | None,
         getattr(request.app.state, "seedance_provider", None),
     )
     if provider is None:
@@ -54,11 +65,48 @@ async def submit_seedance_task(
         novel_id=body.novelId,
     )
     try:
-        return await _provider(request).submit_render(body)
+        result = await _provider(request).submit_generation(
+            VideoGenerationRequest(
+                task_id=body.taskId,
+                input_hash=body.inputHash,
+                generation_mode=body.generationMode,
+                input_profile="image_reference_v1",
+                execution_mode=body.executionMode,
+                model=body.model,
+                prompt_text=body.promptText,
+                ratio=body.ratio,
+                duration_seconds=body.durationSeconds,
+                resolution=body.resolution,
+                output_format="mp4",
+                generate_audio=body.generateAudio,
+                watermark=body.watermark,
+                references=[
+                    VideoGenerationReference(
+                        ordinal=item.ordinal,
+                        asset_id=item.assetId,
+                        modality="image",
+                        mime_type=item.mimeType,
+                        transport_url=item.url,
+                        usage_role=item.usageRole,
+                    )
+                    for item in body.references
+                ],
+            )
+        )
+        return SeedanceRenderSubmitResponse(
+            taskId=result.task_id,
+            providerTaskId=result.provider_task_id,
+        )
+    except SeedanceSubmissionUnknownError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except SeedanceSubmissionRejectedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:
-        if 400 <= exc.response.status_code < 500:
+        if 400 <= exc.response.status_code < 500 and exc.response.status_code != 408:
             raise HTTPException(
                 status_code=422,
                 detail="Seedance 明确拒绝创建任务",
@@ -89,10 +137,41 @@ async def query_seedance_task(
         novel_id=body.novelId,
     )
     try:
-        return await _provider(request).query_render(
-            task_id=body.taskId,
-            provider_task_id=provider_task_id,
+        result = await _provider(request).query_generation(
+            VideoGenerationQuery(
+                task_id=body.taskId,
+                provider_task_id=provider_task_id,
+                execution_mode=body.executionMode,
+            )
         )
+        output: SeedanceRenderOutput | None = None
+        if result.output is not None:
+            output = SeedanceRenderOutput(
+                videoUrl=result.output.video_url,
+                lastFrameUrl=result.output.last_frame_url,
+                mediaKind=result.output.media_kind,
+                durationSeconds=result.output.duration_seconds,
+                resolution=result.output.resolution,
+                ratio=result.output.ratio,
+                framesPerSecond=result.output.frames_per_second,
+                generateAudio=result.output.generate_audio,
+                usage=result.output.usage,
+            )
+        error: SeedanceRenderError | None = None
+        if result.error is not None:
+            error = SeedanceRenderError(
+                code=result.error.code,
+                message=result.error.message,
+            )
+        return SeedanceRenderQueryResponse(
+            taskId=result.task_id,
+            providerTaskId=result.provider_task_id,
+            status=result.status,
+            output=output,
+            error=error,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except httpx.HTTPStatusError as exc:

@@ -137,7 +137,7 @@ class PostgresCompatibilityTest {
                                 + "to_regclass('public.\"VideoEpisodeExport\"') IS NOT NULL, "
                                 + "to_regclass('public.\"WritingTask\"') IS NOT NULL")) {
             assertThat(result.next()).isTrue();
-            assertThat(result.getInt(1)).isEqualTo(86);
+            assertThat(result.getInt(1)).isEqualTo(104);
             assertThat(result.getInt(2)).isEqualTo(22);
             assertThat(result.getBoolean(3)).isTrue();
             assertThat(result.getBoolean(4)).isTrue();

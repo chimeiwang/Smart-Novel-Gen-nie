@@ -1164,6 +1164,21 @@
             "title": "Generateaudio",
             "type": "boolean"
           },
+          "lastFrameUrl": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "nullable": true,
+            "title": "Lastframeurl",
+            "type": "string"
+          },
+          "mediaKind": {
+            "enum": [
+              "provider_media",
+              "simulated_placeholder"
+            ],
+            "title": "Mediakind",
+            "type": "string"
+          },
           "ratio": {
             "maxLength": 80,
             "nullable": true,
@@ -1191,7 +1206,8 @@
           }
         },
         "required": [
-          "videoUrl"
+          "videoUrl",
+          "mediaKind"
         ],
         "title": "SeedanceRenderOutput",
         "type": "object"
@@ -1199,6 +1215,14 @@
       "SeedanceRenderQueryRequest": {
         "additionalProperties": false,
         "properties": {
+          "executionMode": {
+            "enum": [
+              "simulated",
+              "live"
+            ],
+            "title": "Executionmode",
+            "type": "string"
+          },
           "novelId": {
             "minLength": 1,
             "title": "Novelid",
@@ -1224,6 +1248,7 @@
           "taskId",
           "novelId",
           "providerTaskId",
+          "executionMode",
           "pollCount"
         ],
         "title": "SeedanceRenderQueryRequest",
@@ -1275,13 +1300,26 @@
         "properties": {
           "durationSeconds": {
             "maximum": 12.0,
-            "minimum": 2.0,
+            "minimum": 4.0,
             "title": "Durationseconds",
             "type": "integer"
+          },
+          "executionMode": {
+            "enum": [
+              "simulated",
+              "live"
+            ],
+            "title": "Executionmode",
+            "type": "string"
           },
           "generateAudio": {
             "title": "Generateaudio",
             "type": "boolean"
+          },
+          "generationMode": {
+            "title": "Generationmode",
+            "type": "string",
+            "x-inkforge-const": "reference"
           },
           "inputHash": {
             "pattern": "^[0-9a-f]{64}$",
@@ -1300,7 +1338,7 @@
             "type": "string"
           },
           "promptText": {
-            "maxLength": 2000,
+            "maxLength": 2500,
             "minLength": 1,
             "title": "Prompttext",
             "type": "string"
@@ -1323,17 +1361,14 @@
               "$ref": "#/components/schemas/SeedanceRuntimeReference"
             },
             "maxItems": 20,
+            "minItems": 1,
             "title": "References",
             "type": "array"
           },
           "resolution": {
-            "enum": [
-              "480p",
-              "720p",
-              "1080p"
-            ],
             "title": "Resolution",
-            "type": "string"
+            "type": "string",
+            "x-inkforge-const": "720p"
           },
           "taskId": {
             "minLength": 1,
@@ -1349,13 +1384,16 @@
           "taskId",
           "novelId",
           "inputHash",
+          "generationMode",
+          "executionMode",
           "model",
           "promptText",
           "ratio",
           "durationSeconds",
           "resolution",
           "generateAudio",
-          "watermark"
+          "watermark",
+          "references"
         ],
         "title": "SeedanceRenderSubmitRequest",
         "type": "object"

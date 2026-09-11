@@ -1,0 +1,43 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeEndingState/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "entityIds": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 40,
+      "title": "Entityids",
+      "type": "array"
+    },
+    "key": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Key",
+      "type": "string"
+    },
+    "narrativeTime": {
+      "default": "",
+      "maxLength": 400,
+      "title": "Narrativetime",
+      "type": "string"
+    }
+  },
+  "required": [
+    "key",
+    "description"
+  ],
+  "title": "VideoEpisodeEndingState",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeEndingState"
+}

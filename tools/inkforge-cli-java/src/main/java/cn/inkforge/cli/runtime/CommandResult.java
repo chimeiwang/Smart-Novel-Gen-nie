@@ -2,6 +2,7 @@ package cn.inkforge.cli.runtime;
 
 import tools.jackson.databind.JsonNode;
 
+/** 区分一次性 JSON 结果与可持续发送的 JSONL 观察结果。 */
 public sealed interface CommandResult permits CommandResult.JsonResult, CommandResult.JsonlResult {
 
     record JsonResult(JsonNode data) implements CommandResult {}

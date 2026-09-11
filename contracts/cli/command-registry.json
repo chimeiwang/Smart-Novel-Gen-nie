@@ -1296,9 +1296,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.adaptation.list",
+      "name": "long.video.episode.list",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:list_adaptations",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:list_episodes",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1310,9 +1310,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.adaptation.get",
+      "name": "long.video.episode.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:get_adaptation",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_episode",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1324,9 +1324,9 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.adaptation.create",
+      "name": "long.video.episode.create",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:create_adaptation",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:create_episode",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1334,13 +1334,83 @@
       "fileOutput": {
         "field": null,
         "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:update_episode",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.reorder",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:reorder_episodes",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.source.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:create_source_set",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
         "mediaType": null
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.adaptation.watch",
-      "outputMode": "jsonl",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:watch_adaptation",
+      "name": "long.video.episode.source.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:list_source_sets",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.source.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_source_set",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.script.draft.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_script_draft",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1352,9 +1422,9 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.plan.start",
+      "name": "long.video.episode.script.draft.save",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:start_plan",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:save_script_draft",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1366,9 +1436,37 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.plan.confirm",
+      "name": "long.video.episode.script.run.start",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:confirm_plan",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:start_script_run",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.script.run.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_script_run",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.script.candidate.adopt",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:adopt_script_candidate",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1380,10 +1478,24 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.plan.discard",
+      "name": "long.video.episode.script.confirmation.prepare",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:discard_plan_candidate",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:prepare_script_confirmation",
       "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.script.confirmation.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_script_confirmation",
+      "requiresClientRequestId": false,
       "requiresIdentity": true
     },
     {
@@ -1394,37 +1506,65 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.episode.save",
+      "name": "long.video.episode.script.confirmation.approve",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:save_episode_plan",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:approve_script_confirmation",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
     {
       "fileOutput": {
         "field": null,
-        "kind": "none",
+        "kind": "data_json",
         "mediaType": null
       },
       "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.prompt.start",
+      "mutation": false,
+      "name": "long.video.episode.script.version.list",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:start_prompts",
-      "requiresClientRequestId": true,
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:list_script_versions",
+      "requiresClientRequestId": false,
       "requiresIdentity": true
     },
     {
       "fileOutput": {
         "field": null,
-        "kind": "none",
+        "kind": "data_json",
         "mediaType": null
       },
       "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.prompt.save",
+      "mutation": false,
+      "name": "long.video.episode.script.version.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:save_prompt",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_script_version",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.command.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_episode_command",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.project-command.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episodes:get_project_episode_command",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1473,14 +1613,14 @@
     {
       "fileOutput": {
         "field": null,
-        "kind": "none",
+        "kind": "data_json",
         "mediaType": null
       },
       "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.reference.save",
+      "mutation": false,
+      "name": "long.video.production.capabilities.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.visuals:save_references",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_capabilities",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1492,9 +1632,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.render.list",
+      "name": "long.video.episode.storyboard.draft.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:list_renders",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_storyboard_draft",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1506,9 +1646,23 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.render.start",
+      "name": "long.video.episode.storyboard.draft.save",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:start_render",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:save_storyboard_draft",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.storyboard.run.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:start_storyboard_run",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1520,65 +1674,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.render.get",
+      "name": "long.video.episode.storyboard.run.list",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:get_render",
-      "requiresClientRequestId": false,
-      "requiresIdentity": true
-    },
-    {
-      "fileOutput": {
-        "field": null,
-        "kind": "none",
-        "mediaType": null
-      },
-      "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.render.retry",
-      "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:retry_render",
-      "requiresClientRequestId": true,
-      "requiresIdentity": true
-    },
-    {
-      "fileOutput": {
-        "field": null,
-        "kind": "none",
-        "mediaType": null
-      },
-      "inputMode": "json",
-      "mutation": false,
-      "name": "long.video.render.watch",
-      "outputMode": "jsonl",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:watch_render",
-      "requiresClientRequestId": false,
-      "requiresIdentity": true
-    },
-    {
-      "fileOutput": {
-        "field": null,
-        "kind": "none",
-        "mediaType": null
-      },
-      "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.take.confirm",
-      "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:confirm_take",
-      "requiresClientRequestId": true,
-      "requiresIdentity": true
-    },
-    {
-      "fileOutput": {
-        "field": null,
-        "kind": "none",
-        "mediaType": null
-      },
-      "inputMode": "json",
-      "mutation": false,
-      "name": "long.video.take.download",
-      "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.renders:download_take",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_storyboard_runs",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1590,9 +1688,23 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.post.show",
+      "name": "long.video.episode.storyboard.run.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:show_post_production",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_storyboard_run",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.storyboard.candidate.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_storyboard_candidate",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1604,9 +1716,9 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.keyframe.set",
+      "name": "long.video.episode.storyboard.candidate.adopt",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:set_keyframe",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:adopt_storyboard_candidate",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1618,37 +1730,9 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.keyframe.clear",
+      "name": "long.video.episode.storyboard.confirmation.prepare",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:clear_keyframe",
-      "requiresClientRequestId": true,
-      "requiresIdentity": true
-    },
-    {
-      "fileOutput": {
-        "field": null,
-        "kind": "none",
-        "mediaType": null
-      },
-      "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.keyframe.extract",
-      "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:extract_keyframe",
-      "requiresClientRequestId": true,
-      "requiresIdentity": true
-    },
-    {
-      "fileOutput": {
-        "field": null,
-        "kind": "none",
-        "mediaType": null
-      },
-      "inputMode": "json",
-      "mutation": true,
-      "name": "long.video.edit.save",
-      "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:save_edit",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:prepare_storyboard_confirmation",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1660,9 +1744,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.edit.get",
+      "name": "long.video.episode.storyboard.confirmation.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:get_edit",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_storyboard_confirmation",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1674,9 +1758,9 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.mix.save",
+      "name": "long.video.episode.storyboard.confirmation.approve",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:save_mix",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:approve_storyboard_confirmation",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1688,9 +1772,51 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.mix.get",
+      "name": "long.video.episode.storyboard.version.list",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:get_mix",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_storyboard_versions",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.storyboard.version.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_storyboard_version",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.take.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_takes",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.take.download",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:download_take",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1702,9 +1828,9 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.export.start",
+      "name": "long.video.episode.adoption.create",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:start_export",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:create_adoption",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1716,9 +1842,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.export.get",
+      "name": "long.video.episode.adoption.get",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:get_export",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_adoption",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1730,9 +1856,79 @@
       },
       "inputMode": "json",
       "mutation": true,
-      "name": "long.video.export.retry",
+      "name": "long.video.episode.baseline.create",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:retry_export",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:create_baseline",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.baseline.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_baselines",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.baseline.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_baseline",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.impact.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_impacts",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.impact.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_impact",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.impact.decide",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:decide_impact",
       "requiresClientRequestId": true,
       "requiresIdentity": true
     },
@@ -1743,10 +1939,178 @@
         "mediaType": null
       },
       "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.render.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:start_render",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
       "mutation": false,
-      "name": "long.video.export.watch",
-      "outputMode": "jsonl",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:watch_export",
+      "name": "long.video.episode.render.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_render",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.render.retry",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:retry_render",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.edit.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:create_edit",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.edit.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_edits",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.edit.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_edit",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.mix.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:create_mix",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.mix.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:list_mixes",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.mix.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_mix",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.export.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:start_export",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.export.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_export",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.export.retry",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:retry_export",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.episode.delivery.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:get_delivery",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     },
@@ -1758,9 +2122,9 @@
       },
       "inputMode": "json",
       "mutation": false,
-      "name": "long.video.export.download",
+      "name": "long.video.episode.delivery.download",
       "outputMode": "json",
-      "pythonHandler": "inkforge_cli.commands.long.video.post_production:download_export",
+      "pythonHandler": "inkforge_cli.commands.long.video.episode_production:download_delivery",
       "requiresClientRequestId": false,
       "requiresIdentity": true
     }

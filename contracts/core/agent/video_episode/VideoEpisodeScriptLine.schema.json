@@ -1,0 +1,109 @@
+{
+  "$defs": {
+    "VideoEpisodeSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "minimum": 1,
+          "title": "End",
+          "type": "integer"
+        },
+        "sourceSnapshotId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Sourcesnapshotid",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sourceSnapshotId",
+        "start",
+        "end"
+      ],
+      "title": "VideoEpisodeSourceRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeScriptLine/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Id"
+    },
+    "kind": {
+      "enum": [
+        "action",
+        "dialogue",
+        "narration"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "sourceRefs": {
+      "items": {
+        "$ref": "#/$defs/VideoEpisodeSourceRef"
+      },
+      "maxItems": 40,
+      "title": "Sourcerefs",
+      "type": "array"
+    },
+    "speakerId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Speakerid"
+    },
+    "tempKey": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tempkey"
+    },
+    "text": {
+      "maxLength": 8000,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "text"
+  ],
+  "title": "VideoEpisodeScriptLine",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeScriptLine"
+}

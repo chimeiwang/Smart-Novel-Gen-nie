@@ -391,7 +391,7 @@ class AgentServiceClientTest {
             assertThat(client.submitSeedanceRender(seedanceSubmit()).getProviderTaskId())
                     .isEqualTo("provider-1");
             assertThat(client.querySeedanceRender(
-                            new SeedanceRenderQueryRequest("novel-1", 1, "provider-1", "task-1"))
+                            new SeedanceRenderQueryRequest(SeedanceRenderQueryRequest.ExecutionModeEnum.LIVE, "novel-1", 1, "provider-1", "task-1"))
                             .getStatus())
                     .isEqualTo(cn.inkforge.contracts.agent.SeedanceRenderQueryResponse.StatusEnum.RUNNING);
         } finally {
@@ -487,13 +487,16 @@ class AgentServiceClientTest {
     private SeedanceRenderSubmitRequest seedanceSubmit() {
         return new SeedanceRenderSubmitRequest(
                 5,
+                SeedanceRenderSubmitRequest.ExecutionModeEnum.LIVE,
                 false,
+                "reference",
                 "a".repeat(64),
                 "doubao-seedance-2-5-260628",
                 "novel-1",
                 "电影感镜头",
                 SeedanceRenderSubmitRequest.RatioEnum._9_16,
-                SeedanceRenderSubmitRequest.ResolutionEnum._720P,
+                List.of(),
+                "720p",
                 "task-1",
                 false);
     }

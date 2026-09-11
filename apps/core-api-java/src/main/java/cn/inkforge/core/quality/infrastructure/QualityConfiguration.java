@@ -20,6 +20,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
+/** 装配质量检查的持久化、V1 投递和 V2 耐久完成链路。 */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class QualityConfiguration {
@@ -39,6 +40,7 @@ class QualityConfiguration {
     QualityRunDispatcher qualityRunDispatcher(
             QualityRepository repository,
             ObjectProvider<QualityRunSubmitter> submitters) {
+        // 未配置 Agent 时不创建后台投递器，质量查询仍可使用数据库中的既有结果。
         QualityRunSubmitter submitter = submitters.getIfAvailable();
         if (submitter == null) return null;
         return new QualityRunDispatcher(

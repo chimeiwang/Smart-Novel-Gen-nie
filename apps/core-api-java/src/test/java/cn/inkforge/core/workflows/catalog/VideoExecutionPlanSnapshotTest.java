@@ -16,11 +16,11 @@ class VideoExecutionPlanSnapshotTest {
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
-    void 四阶段分别冻结完整身份并可离线恢复() {
-        var plan = registry().freezePlan("video.chapter_cinematic_adaptation_v2", true);
+    void Episode分镜两阶段分别冻结完整身份并可离线恢复() {
+        var plan = registry().freezePlan("video.episode_storyboard_revise", true);
         assertThat(plan.stageSteps()).extracting(ExecutionPlanSnapshot.StageStep::stageKey)
-                .containsExactly("dramatic_structure", "shot_design", "missing_beat_shots", "cinematic_review");
-        assertThat(plan.stageSteps()).extracting(ExecutionPlanSnapshot.StageStep::maxInvocations).containsExactly(2, 3, 3, 2);
+                .containsExactly("episode_storyboard", "episode_storyboard_review");
+        assertThat(plan.stageSteps()).extracting(ExecutionPlanSnapshot.StageStep::maxInvocations).containsExactly(2, 2);
         assertThat(plan.generator()).isEqualTo(plan.stageSteps().getFirst().step());
         assertThat(plan.reviewers()).isEmpty();
         assertThat(plan.systemSteps()).isEmpty();
@@ -50,8 +50,8 @@ class VideoExecutionPlanSnapshotTest {
     }
 
     @Test
-    void 重算哈希也不能增添节点放大次数或把电影化审镜变成通用Reviewer() {
-        var original = registry().freezePlan("video.chapter_cinematic_adaptation_v2", true);
+    void 重算哈希也不能增添节点放大次数或换回旧章节视频策略() {
+        var original = registry().freezePlan("video.episode_storyboard_revise", true);
         for (String mutation : List.of("count", "order", "policy", "missing")) {
             Map<String, Object> root = copy(original.stored());
             Map<String, Object> plan = object(root.get("plan"));

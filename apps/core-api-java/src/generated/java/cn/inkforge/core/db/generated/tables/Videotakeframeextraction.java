@@ -10,7 +10,10 @@ import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.Novel.NovelPath;
 import cn.inkforge.core.db.generated.tables.User.UserPath;
 import cn.inkforge.core.db.generated.tables.Videoasset.VideoassetPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
 import cn.inkforge.core.db.generated.tables.Videoshotkeyframeversion.VideoshotkeyframeversionPath;
+import cn.inkforge.core.db.generated.tables.Videoshottake.VideoshottakePath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
 import cn.inkforge.core.db.generated.tables.records.VideotakeframeextractionRecord;
 
 import java.time.LocalDateTime;
@@ -86,12 +89,12 @@ public class Videotakeframeextraction extends TableImpl<Videotakeframeextraction
     /**
      * The column <code>public.VideoTakeFrameExtraction.shotId</code>.
      */
-    public final TableField<VideotakeframeextractionRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideotakeframeextractionRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoTakeFrameExtraction.adaptationId</code>.
      */
-    public final TableField<VideotakeframeextractionRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideotakeframeextractionRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoTakeFrameExtraction.projectId</code>.
@@ -128,6 +131,28 @@ public class Videotakeframeextraction extends TableImpl<Videotakeframeextraction
      * The column <code>public.VideoTakeFrameExtraction.createdAt</code>.
      */
     public final TableField<VideotakeframeextractionRecord, LocalDateTime> CREATEDAT = createField(DSL.name("createdAt"), SQLDataType.LOCALDATETIME(3).nullable(false).defaultValue(DSL.field(DSL.raw("CURRENT_TIMESTAMP"), SQLDataType.LOCALDATETIME)), this, "");
+
+    /**
+     * The column <code>public.VideoTakeFrameExtraction.videoEpisodeId</code>.
+     */
+    public final TableField<VideotakeframeextractionRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoTakeFrameExtraction.episodeShotId</code>.
+     */
+    public final TableField<VideotakeframeextractionRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoTakeFrameExtraction.episodeShotVersionId</code>.
+     */
+    public final TableField<VideotakeframeextractionRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoTakeFrameExtraction.productionBaselineId</code>.
+     */
+    public final TableField<VideotakeframeextractionRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
 
     private Videotakeframeextraction(Name alias, Table<VideotakeframeextractionRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -222,7 +247,7 @@ public class Videotakeframeextraction extends TableImpl<Videotakeframeextraction
 
     @Override
     public List<ForeignKey<VideotakeframeextractionRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_ASSET_PROJECT_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_NOVEL_OWNER_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_USER_FKEY);
+        return Arrays.asList(Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_ASSET_PROJECT_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_BASELINE_SCOPE_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_EPISODE_SCOPE_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_NOVEL_OWNER_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_TAKE_EPISODE_SCOPE_FKEY, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_USER_FKEY);
     }
 
     private transient VideoassetPath _videoasset;
@@ -237,6 +262,32 @@ public class Videotakeframeextraction extends TableImpl<Videotakeframeextraction
         return _videoasset;
     }
 
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
+    }
+
     private transient NovelPath _novel;
 
     /**
@@ -247,6 +298,19 @@ public class Videotakeframeextraction extends TableImpl<Videotakeframeextraction
             _novel = new NovelPath(this, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_NOVEL_OWNER_FKEY, null);
 
         return _novel;
+    }
+
+    private transient VideoshottakePath _videoshottake;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotTake</code>
+     * table.
+     */
+    public VideoshottakePath videoshottake() {
+        if (_videoshottake == null)
+            _videoshottake = new VideoshottakePath(this, Keys.VIDEOTAKEFRAMEEXTRACTION__VIDEOTAKEFRAMEEXTRACTION_TAKE_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshottake;
     }
 
     private transient UserPath _user;
@@ -279,6 +343,7 @@ public class Videotakeframeextraction extends TableImpl<Videotakeframeextraction
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("VideoTakeFrameExtraction_hash_check"), "((\"requestHash\" ~ '^[0-9a-f]{64}$'::text))", true),
             Internal.createCheck(this, DSL.name("VideoTakeFrameExtraction_request_check"), "((btrim(\"clientRequestId\") <> ''::text))", true),
+            Internal.createCheck(this, DSL.name("VideoTakeFrameExtraction_scope_branch_check"), "((((\"adaptationId\" IS NOT NULL) AND (\"shotId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"adaptationId\" IS NULL) AND (\"shotId\" IS NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true),
             Internal.createCheck(this, DSL.name("VideoTakeFrameExtraction_time_check"), "((\"timestampMs\" >= 0))", true)
         );
     }

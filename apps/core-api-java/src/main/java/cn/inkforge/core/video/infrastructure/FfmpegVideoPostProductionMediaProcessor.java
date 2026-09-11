@@ -40,6 +40,7 @@ final class FfmpegVideoPostProductionMediaProcessor
     private final Duration timeout;
     private final ObjectMapper json;
 
+    /** 从显式名称或 PATH 发现 FFmpeg/ffprobe，并创建可报告不可用状态的处理器。 */
     static FfmpegVideoPostProductionMediaProcessor discover(
             String ffmpegName,
             String ffprobeName,
@@ -69,6 +70,7 @@ final class FfmpegVideoPostProductionMediaProcessor
         return new MediaToolReadiness(available(ffmpeg), available(ffprobe));
     }
 
+    /** 复验来源 Take 哈希后抽取单帧，并仅把成功结果写入受控存储。 */
     @Override
     public StoredVideoAsset extractFrame(
             Path sourcePath,
@@ -124,6 +126,7 @@ final class FfmpegVideoPostProductionMediaProcessor
         }
     }
 
+    /** 按冻结导出清单生成滤镜图、混合音轨和字幕，输出一份整集 MP4。 */
     @Override
     public StoredVideoAsset renderEpisode(
             VideoEpisodeExportManifest manifest,
@@ -175,6 +178,7 @@ final class FfmpegVideoPostProductionMediaProcessor
                 command.add("-i");
                 command.add(path.toString());
             });
+            var encoding = manifest.ffmpeg();
             command.addAll(List.of(
                     "-filter_complex_script",
                     filter.toString(),
@@ -183,19 +187,21 @@ final class FfmpegVideoPostProductionMediaProcessor
                     "-map",
                     "[outa]",
                     "-c:v",
-                    "libx264",
+                    encoding.videoCodec(),
                     "-preset",
-                    "medium",
+                    encoding.videoPreset(),
                     "-crf",
-                    "20",
+                    Integer.toString(encoding.videoCrf()),
                     "-pix_fmt",
-                    "yuv420p",
+                    encoding.pixelFormat(),
                     "-c:a",
-                    "aac",
+                    encoding.audioCodec(),
                     "-b:a",
-                    "192k",
-                    "-movflags",
-                    "+faststart",
+                    encoding.audioBitrate()));
+            if (encoding.fastStart()) {
+                command.addAll(List.of("-movflags", "+faststart"));
+            }
+            command.addAll(List.of(
                     "-t",
                     VideoEpisodeFfmpegPlan.seconds(manifest.totalDurationMs()),
                     output.toString()));
@@ -219,6 +225,7 @@ final class FfmpegVideoPostProductionMediaProcessor
         }
     }
 
+    /** 将存储键解析为受控文件，并复验其冻结 SHA-256。 */
     private Path resolveAndVerify(
             VideoAssetStore storage, String storageKey, String expectedSha256) {
         Path path = storage.resolve(storageKey);
@@ -261,6 +268,7 @@ final class FfmpegVideoPostProductionMediaProcessor
         }
     }
 
+    /** 无 shell 执行媒体命令，限制输出、强制超时并返回 stdout。 */
     private String run(List<String> command, Path workingDirectory, String errorCode) {
         Path stdout = workingDirectory.resolve("process-stdout-" + System.nanoTime() + ".log");
         Path stderr = workingDirectory.resolve("process-stderr-" + System.nanoTime() + ".log");

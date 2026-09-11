@@ -47,9 +47,9 @@ class CrossLanguageCliInputParityTest {
     private Path temporaryDirectory;
 
     @Test
-    void 全部一百二十六个命令的最小输入与错误边界必须和Python一致() throws Exception {
+    void 全部命令的最小输入与错误边界必须和Python一致() throws Exception {
         List<String> commands = commandNames();
-        assertThat(commands).hasSize(126);
+        assertThat(commands).hasSize(152);
 
         ArrayNode cases = json.createArrayNode();
         commands.forEach(command -> {
@@ -204,7 +204,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 五个观察命令的七条JSONL场景请求顺序和终态退出码必须和Python一致() throws Exception {
+    void 两个观察命令的四条JSONL场景请求顺序和终态退出码必须和Python一致() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-watch-cases.json")) {
@@ -214,7 +214,7 @@ class CrossLanguageCliInputParityTest {
         assertThat(fixture.get("schemaVersion").textValue())
                 .isEqualTo("inkforge-cli-parity-watch/1.0");
         ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
-        assertThat(sourceCases.size()).isEqualTo(7);
+        assertThat(sourceCases.size()).isEqualTo(4);
 
         ArrayNode probeCases = json.createArrayNode();
         sourceCases.forEach(value -> {
@@ -278,7 +278,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 十条文件链路的输入输出字节描述符和传输映射必须和Python一致() throws Exception {
+    void 十一条文件链路的输入输出字节描述符和传输映射必须和Python一致() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-file-cases.json")) {
@@ -288,7 +288,7 @@ class CrossLanguageCliInputParityTest {
         assertThat(fixture.get("schemaVersion").textValue())
                 .isEqualTo("inkforge-cli-parity-file/1.0");
         ArrayNode sourceCases = (ArrayNode) fixture.get("cases");
-        assertThat(sourceCases.size()).isEqualTo(10);
+        assertThat(sourceCases.size()).isEqualTo(11);
 
         ArrayNode probeCases = json.createArrayNode();
         sourceCases.forEach(value -> {

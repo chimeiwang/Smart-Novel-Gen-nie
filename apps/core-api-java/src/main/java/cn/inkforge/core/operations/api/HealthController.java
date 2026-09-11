@@ -17,6 +17,7 @@ public final class HealthController {
         this.readiness = readiness;
     }
 
+    /** 存活检查只确认 HTTP 服务可以响应；外部依赖的可用性由就绪检查报告。 */
     @GetMapping(value = "/api/v1/health/live", produces = MediaType.APPLICATION_JSON_VALUE)
     public LiveHealthResponse live() {
         return new LiveHealthResponse("ok", "core-api");
@@ -25,6 +26,7 @@ public final class HealthController {
     @GetMapping(value = "/api/v1/health/ready", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ReadyHealthResponse> ready() {
         ReadinessRegistry.Snapshot snapshot = readiness.evaluate();
+        // 沿用公共契约：无后台诊断时省略 backgroundTasks 字段，因此用 null 配合 NON_NULL 序列化。
         ReadyHealthResponse response = new ReadyHealthResponse(
                 snapshot.ready() ? "ready" : "not_ready",
                 "core-api",

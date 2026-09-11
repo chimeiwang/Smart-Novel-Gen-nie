@@ -31,6 +31,24 @@ class FfprobeVideoMediaProbeTest {
     }
 
     @Test
+    void 归档视频必须有实际画面且不能用音频容器时长冒充成功() throws Exception {
+        Path media = temporaryDirectory.resolve("render.mp4");
+        Files.write(media, new byte[] {1});
+        Path video = executable("video", "#!/bin/sh\nprintf '%s' "
+                + "'{\"format\":{\"duration\":\"4.875\"},\"streams\":[{\"codec_type\":\"video\",\"width\":1280,\"height\":720,\"nb_read_frames\":\"117\"}]}'\n");
+        assertThat(new FfprobeVideoMediaProbe(video, Duration.ofSeconds(1), new ObjectMapper())
+                .probeVideoDurationMs(media)).isEqualTo(4_875);
+        Path audioOnly = executable("audio-only", "#!/bin/sh\nprintf '%s' "
+                + "'{\"format\":{\"duration\":\"5\"},\"streams\":[]}'\n");
+        assertThatThrownBy(() -> new FfprobeVideoMediaProbe(audioOnly, Duration.ofSeconds(1), new ObjectMapper())
+                .probeVideoDurationMs(media)).isInstanceOf(VideoMediaProbeException.class);
+        Path damaged = executable("damaged", "#!/bin/sh\nprintf '%s' 'decode failed' >&2\n"
+                + "printf '%s' '{\"format\":{\"duration\":\"5\"},\"streams\":[{\"codec_type\":\"video\",\"width\":1280,\"height\":720,\"nb_read_frames\":\"1\"}]}'\n");
+        assertThatThrownBy(() -> new FfprobeVideoMediaProbe(damaged, Duration.ofSeconds(1), new ObjectMapper())
+                .probeVideoDurationMs(media)).isInstanceOf(VideoMediaProbeException.class);
+    }
+
+    @Test
     void 非零退出畸形输出和非正时长必须拒绝为不可信事实() throws Exception {
         Path media = temporaryDirectory.resolve("asset.mp4");
         Files.write(media, new byte[] {1});

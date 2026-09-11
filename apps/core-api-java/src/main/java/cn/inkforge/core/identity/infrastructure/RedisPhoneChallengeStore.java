@@ -188,6 +188,7 @@ public final class RedisPhoneChallengeStore implements PhoneChallengeStore {
         this.keyPrefix = keyPrefix;
     }
 
+    /** 按请求摘要幂等创建短信挑战，并返回已有挑战的可恢复状态。 */
     @Override
     public Creation create(
             String requestDigest,
@@ -230,6 +231,7 @@ public final class RedisPhoneChallengeStore implements PhoneChallengeStore {
         transition(challengeId, "CREATING", "SEND_FAILED");
     }
 
+    /** 原子领取验证码核验租约，避免同一挑战并发调用供应商。 */
     @Override
     public Claim claimVerification(
             String challengeId,
@@ -305,6 +307,7 @@ public final class RedisPhoneChallengeStore implements PhoneChallengeStore {
         List<String> state = eval(
                 READ_STATE_SCRIPT, List.of(challengeKey(challengeId)), List.of());
         requireSize(state, 1);
+        // 发送失败无法证明短信未送达，因此只返回 delivery unknown，不自动创建第二条短信。
         return switch (state.getFirst()) {
             case "CREATING" -> new Creation(CreationStatus.IN_PROGRESS, challengeId);
             case "SEND_FAILED", "MISSING" ->
@@ -337,6 +340,7 @@ public final class RedisPhoneChallengeStore implements PhoneChallengeStore {
         } catch (ApiException exception) {
             throw exception;
         } catch (RuntimeException exception) {
+            // Redis 协议或响应异常统一失败关闭，避免认证状态机绕过原子脚本继续推进。
             throw unavailable();
         }
     }

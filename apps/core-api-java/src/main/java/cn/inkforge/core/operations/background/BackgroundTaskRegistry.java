@@ -57,6 +57,7 @@ public final class BackgroundTaskRegistry implements AutoCloseable {
                 Thread.ofVirtual().name("inkforge-background-supervisor-", 0).factory());
     }
 
+    /** 注册并启动一个独占监督循环；同名任务只能存在一份。 */
     public void start(String name, BackgroundWorker worker) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("后台任务名称无效");
@@ -118,6 +119,7 @@ public final class BackgroundTaskRegistry implements AutoCloseable {
         return Map.copyOf(errors);
     }
 
+    /** 在统一期限内先请求协作停止，再中断仍未退出的监督线程。 */
     public void stopAll(Duration timeout) {
         Duration boundedTimeout = positive(timeout, "后台任务停止超时");
         synchronized (lifecycleLock) {
@@ -178,6 +180,7 @@ public final class BackgroundTaskRegistry implements AutoCloseable {
                     registration.state = State.STOPPED;
                     return;
                 }
+                // 连续稳定运行达到窗口后清零旧失败，短暂成功不能掩盖反复崩溃。
                 if (ranFor >= stabilityWindow.toNanos()) {
                     registration.consecutiveFailures = 0;
                 }

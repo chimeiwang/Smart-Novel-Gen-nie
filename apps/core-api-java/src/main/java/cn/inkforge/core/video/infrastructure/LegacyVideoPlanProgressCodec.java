@@ -61,6 +61,7 @@ final class LegacyVideoPlanProgressCodec {
                 "empty", null, null, attempt(0, 0, null), List.of(), null, null);
     }
 
+    /** 解析并复验仍可继续的旧视频规划进度及其调用预留账本。 */
     LegacyVideoPlanProgress decodeActiveProgress(String serialized) {
         if (serialized == null) return emptyProgress();
         JsonNode root = object(serialized, "视频规划进度必须是 JSON 对象");
@@ -133,6 +134,7 @@ final class LegacyVideoPlanProgressCodec {
                 inheritedFingerprint);
     }
 
+    /** 将旧规划进度规范化为稳定 JSON，保存连续的调用预留事实。 */
     String encodeProgress(LegacyVideoPlanProgress progress) {
         Objects.requireNonNull(progress);
         validatePlanShape(
@@ -174,6 +176,7 @@ final class LegacyVideoPlanProgressCodec {
         return canonical(value);
     }
 
+    /** 把最后进度和业务结果封装为不可重复包装的终态信封。 */
     String encodeTerminal(
             String progressJson,
             String status,
@@ -198,6 +201,7 @@ final class LegacyVideoPlanProgressCodec {
         return canonical(envelope);
     }
 
+    /** 识别并严格解析旧视频规划终态；普通活动进度返回 null。 */
     TerminalResult decodeTerminal(String serialized) {
         if (serialized == null) return null;
         JsonNode root = parse(serialized);
@@ -224,6 +228,7 @@ final class LegacyVideoPlanProgressCodec {
                 progress == null || progress.isNull() ? null : progress.deepCopy());
     }
 
+    /** 从活动或终态载荷恢复安全的调用计数，损坏历史数据按零计数收敛。 */
     VideoPlanAttemptState terminalAttemptState(String serialized) {
         try {
             TerminalResult terminal = decodeTerminal(serialized);
@@ -240,6 +245,7 @@ final class LegacyVideoPlanProgressCodec {
         }
     }
 
+    /** 解析旧任务冻结输入并补齐仅用于兼容读取的历史默认值。 */
     FrozenPayload parseFrozenPayload(String serialized) {
         JsonNode root = object(serialized, "视频规划冻结任务必须是 JSON 对象");
         LinkedHashMap<String, Object> value = json.convertValue(

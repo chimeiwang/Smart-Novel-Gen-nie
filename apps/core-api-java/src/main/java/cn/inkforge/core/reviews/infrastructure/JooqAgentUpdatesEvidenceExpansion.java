@@ -38,6 +38,7 @@ final class JooqAgentUpdatesEvidenceExpansion {
         this.reader = Objects.requireNonNull(reader);
     }
 
+    /** 在原冻结名录内按需补齐目标、删除影响或完整大纲树来源。 */
     List<WorkflowEvidenceItemPlan> expand(DSLContext tx, String userId, String novelId, String runId,
             String bundleId, EvidenceExpansionRequest request) {
         if (request == null || !Objects.equals(bundleId, request.getSourceBundleId())

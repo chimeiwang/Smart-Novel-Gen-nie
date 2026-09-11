@@ -10,10 +10,8 @@ public final class VideoCommands {
 
     public static void register(Map<String, CommandHandler> handlers) {
         VideoProjectCommands.register(handlers);
-        VideoAdaptationCommands.register(handlers);
+        VideoEpisodeCommands.register(handlers);
         VideoVisualCommands.register(handlers);
-        VideoRenderCommands.register(handlers);
-        VideoPostProductionCommands.register(handlers);
-        VideoWatchCommands.register(handlers);
+        VideoEpisodeProductionCommands.register(handlers);
     }
 }

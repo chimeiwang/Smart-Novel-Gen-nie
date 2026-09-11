@@ -9,6 +9,7 @@ import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册参考资料、索引重建和语义检索命令。 */
 final class LongReferenceCommands {
 
     private static final Set<String> TYPES = Set.of("note", "web", "book", "image", "custom");

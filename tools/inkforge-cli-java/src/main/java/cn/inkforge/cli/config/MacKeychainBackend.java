@@ -1,5 +1,6 @@
 package cn.inkforge.cli.config;
 
+/** macOS Keychain 的最小系统调用边界。 */
 interface MacKeychainBackend {
 
     String get(String service, String account);

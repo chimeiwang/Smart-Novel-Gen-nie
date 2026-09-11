@@ -68,6 +68,7 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
         this.json = Objects.requireNonNull(json);
     }
 
+    /** 在同一可重复读事务中生成 Run 快照及其精确 baseSequence。 */
     @Override
     public Optional<SnapshotRead> readSnapshot(String userId, String runId) {
         return database.transactionResult(transaction -> {
@@ -112,6 +113,7 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
         return readTails(runs, new DatabaseQueryCancellation());
     }
 
+    /** 批量读取多个 Run 的权威尾状态，并支持主动取消数据库查询。 */
     @Override
     public Map<RunKey, TailState> readTails(
             List<RunKey> runs, DatabaseQueryCancellation cancellation) {
@@ -167,6 +169,7 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
                 });
     }
 
+    /** 批量读取各 Run 游标后的有界事件尾部，保持任务内序号顺序。 */
     @Override
     public Map<RunKey, List<WorkflowEventEnvelope>> readEventTails(
             List<EventTailRequest> requests, int limitPerRun) {
@@ -249,6 +252,7 @@ final class JooqWorkflowEventStreamRepository implements WorkflowEventStreamRepo
                 });
     }
 
+    /** 读取单个 Run 游标后的事件，并复核用户归属和连续序号。 */
     public List<WorkflowEventEnvelope> readAfter(
             String userId, String runId, long afterSequence, int limit) {
         if (afterSequence < 0 || limit < 1 || limit > 1_000) {

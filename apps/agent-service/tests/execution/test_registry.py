@@ -13,6 +13,7 @@ from inkforge_agents.app import create_app
 from inkforge_agents.execution import (
     ExecutionOperationDisabledError,
     ExecutionOperationEnvironmentError,
+    ExecutionOperationNotFoundError,
     ExecutionRegistryError,
     load_execution_registry,
     resolve_execution_contract_dir,
@@ -68,7 +69,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "920ca5f4a4b98e078bdf620dcc4f1b2e943d2290029718aa3aa749277ad15b75"
+        "deca55c153c26ba9072f66b0a838f394c1c57f3453889708f2ff7cf4f98114f7"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -216,11 +217,16 @@ def test_deployment_authorization_binds_transport_capability_and_environment() -
         )
 
 
-def test_loader_rejects_disabled_and_environment_forbidden_operations(contract_copy: Path) -> None:
+def test_loader_rejects_disabled_environment_and_retired_video_operations(
+    contract_copy: Path,
+) -> None:
     catalog_path = contract_copy / "operation-catalog.v1.json"
     catalog = _read_json(catalog_path)
-    selected = next(item for item in catalog["operations"]
-                    if item["key"] == "long_serial.create_outline")
+    selected = next(
+        item
+        for item in catalog["operations"]
+        if item["key"] == "long_serial.create_outline"
+    )
     assert selected["v2Enabled"] is True
     selected["v2Enabled"] = False
     _write_json(catalog_path, catalog)
@@ -228,25 +234,22 @@ def test_loader_rejects_disabled_and_environment_forbidden_operations(contract_c
     production = load_execution_registry(contract_copy, environment="production")
     with pytest.raises(ExecutionOperationDisabledError):
         production.resolve("long_serial", "create_outline")
-    with pytest.raises(ExecutionOperationEnvironmentError):
-        production.resolve("video", "chapter_cinematic_adaptation_v2")
+
+    for environment in ("production", "dev", "test"):
+        registry = load_execution_registry(CONTRACT_ROOT, environment=environment)
+        with pytest.raises(ExecutionOperationNotFoundError, match="未知 V2 Operation"):
+            registry.resolve("video", "chapter_cinematic_adaptation_v2")
+        with pytest.raises(ExecutionOperationNotFoundError, match="未知 V2 Operation"):
+            registry.resolve("video", "chapter_shot_prompt_v2")
 
     development = load_execution_registry(CONTRACT_ROOT, environment="dev")
-    video = development.resolve("video", "chapter_cinematic_adaptation_v2")
-    assert video.operation.v2_enabled
-    assert video.operation.review_policy.mode == "none"
-    assert [(stage.stage_key, stage.max_invocations) for stage in video.operation.stage_steps] == [
-        ("dramatic_structure", 2), ("shot_design", 3),
-        ("missing_beat_shots", 3), ("cinematic_review", 2)
-    ]
-    selected = next(item for item in catalog["operations"]
-                    if item["key"] == "video.chapter_cinematic_adaptation_v2")
-    selected["v2Enabled"] = False
-    _write_json(catalog_path, catalog)
-    _refresh_manifest_hash(contract_copy, "catalog")
-    with pytest.raises(ExecutionOperationDisabledError):
-        load_execution_registry(contract_copy, environment="dev").resolve(
-            "video", "chapter_cinematic_adaptation_v2")
+    episode = development.resolve("video", "episode_storyboard_revise")
+    assert episode.operation.v2_enabled
+    assert episode.operation.video_stage_policy == "video.episode-storyboard-stages.v1"
+    with pytest.raises(ExecutionOperationEnvironmentError):
+        load_execution_registry(CONTRACT_ROOT, environment="production").resolve(
+            "video", "episode_storyboard_revise"
+        )
 
 
 def test_enabled_no_review_operation_rejects_hidden_reviewer_execution_refs(

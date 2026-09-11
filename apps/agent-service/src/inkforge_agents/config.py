@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     seedance_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     seedance_model: str = "doubao-seedance-2-5-260628"
     seedance_enabled: bool = False
+    seedance_execution_mode: Literal["simulated", "live"] = "simulated"
 
     @field_validator("openai_strict_base_url", mode="before")
     @classmethod

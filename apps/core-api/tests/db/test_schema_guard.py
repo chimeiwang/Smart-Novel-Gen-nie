@@ -344,18 +344,27 @@ def test_without_video_preview_projection_only_removes_named_preview_structure()
                 "columns": [
                     {"name": "id"},
                     {"name": "videoSceneId"},
+                    {"name": "videoEpisodeId"},
                 ],
                 "primaryKey": None,
                 "foreignKeys": [
                     {
                         "name": "ReviewArtifact_videoSceneId_fkey",
                         "columns": ["videoSceneId"],
+                    },
+                    {
+                        "name": "ReviewArtifact_video_episode_novel_fkey",
+                        "columns": ["videoEpisodeId", "novelId"],
                     }
                 ],
                 "uniqueConstraints": [
                     {
                         "name": "ReviewArtifact_id_videoSceneId_key",
                         "columns": ["id", "videoSceneId"],
+                    },
+                    {
+                        "name": "ReviewArtifact_id_videoEpisodeId_key",
+                        "columns": ["id", "videoEpisodeId"],
                     }
                 ],
                 "checkConstraints": [
@@ -366,6 +375,10 @@ def test_without_video_preview_projection_only_removes_named_preview_structure()
                     {
                         "name": "ReviewArtifact_revision_check",
                         "definition": 'CHECK ("revision" > 0)',
+                    },
+                    {
+                        "name": "ReviewArtifact_video_episode_target_check",
+                        "definition": 'CHECK ("videoEpisodeId" IS NULL)',
                     },
                 ],
                 "indexes": [
@@ -379,10 +392,24 @@ def test_without_video_preview_projection_only_removes_named_preview_structure()
                         "keyItems": [{"column": "novelId"}],
                         "includeColumns": [],
                     },
+                    {
+                        "name": "ReviewArtifact_videoEpisodeId_status_idx",
+                        "keyItems": [{"column": "videoEpisodeId"}],
+                        "includeColumns": [],
+                    },
                 ],
             },
             {
                 "name": "VideoScene",
+                "columns": [],
+                "primaryKey": None,
+                "foreignKeys": [],
+                "uniqueConstraints": [],
+                "checkConstraints": [],
+                "indexes": [],
+            },
+            {
+                "name": "VideoEpisode",
                 "columns": [],
                 "primaryKey": None,
                 "foreignKeys": [],
@@ -395,7 +422,7 @@ def test_without_video_preview_projection_only_removes_named_preview_structure()
     contract["enums"].append(
         {
             "name": "ReviewArtifactKind",
-            "values": ["chapter_draft", "video_scene_plan"],
+            "values": ["chapter_draft", "video_scene_plan", "video_episode_script"],
         }
     )
 
@@ -403,6 +430,7 @@ def test_without_video_preview_projection_only_removes_named_preview_structure()
 
     projected_tables = {table["name"]: table for table in projected["tables"]}
     assert "VideoScene" not in projected_tables
+    assert "VideoEpisode" not in projected_tables
     assert {item["name"] for item in projected_tables["Novel"]["uniqueConstraints"]} == {
         "Novel_userId_key"
     }
@@ -439,7 +467,7 @@ def test_without_video_preview_projection_removes_every_checked_in_video_table()
     projected = project_schema_contract(contract, "without_video_preview")
     projected_table_names = {table["name"] for table in projected["tables"]}
 
-    assert len(contract["tables"]) == 86
+    assert len(contract["tables"]) == 104
     assert len(projected_table_names) == 45
     assert not any(name.startswith("Video") for name in projected_table_names)
     assert "UserPhoneIdentity" in projected_table_names
@@ -460,7 +488,7 @@ def test_phone_auth_projection_only_removes_the_named_identity_table() -> None:
     projected = project_schema_contract(contract, "without_phone_auth")
     projected_table_names = {table["name"] for table in projected["tables"]}
 
-    assert len(projected_table_names) == 85
+    assert len(projected_table_names) == 103
     assert "UserPhoneIdentity" not in projected_table_names
     assert "VideoShotRenderTask" in projected_table_names
     assert projected["fingerprint"] == canonical_fingerprint(projected)
@@ -585,6 +613,26 @@ def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() 
         "VideoEpisodeMixHead",
         "VideoEpisodeExportTask",
         "VideoEpisodeExport",
+        # P1 分集剧本域以 Episode 为根，来源、草稿、正式版本和影响审查均保留不可变证据。
+        "VideoEpisode",
+        "VideoEpisodeSourceSetVersion",
+        "VideoEpisodeSourceSnapshot",
+        "VideoEpisodeScriptDraft",
+        "VideoEpisodeScriptVersion",
+        "VideoEpisodeDependency",
+        "VideoImpactReview",
+        "VideoEpisodeCommand",
+        # P2 分镜版本、镜头谱系、选片采用与制作基线构成新的生产控制面。
+        "VideoEpisodeShot",
+        "VideoShotLineage",
+        "VideoStoryboardDraft",
+        "VideoStoryboardVersion",
+        "VideoShotVersion",
+        "VideoProductionBaseline",
+        "VideoTakeAdoption",
+        "VideoProductionBaselineShot",
+        "VideoProductionEditHead",
+        "VideoProductionMixHead",
         "_FactionTerritories",
         "_prisma_migrations",
     }

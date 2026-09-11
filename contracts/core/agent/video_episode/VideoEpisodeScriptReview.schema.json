@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "VideoEpisodeScriptReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "source",
+            "continuity",
+            "dialogue",
+            "clarity"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "lineId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lineid"
+        },
+        "message": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "sceneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sceneid"
+        }
+      },
+      "required": [
+        "code",
+        "sceneId",
+        "lineId",
+        "message"
+      ],
+      "title": "VideoEpisodeScriptReviewFinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeScriptReview/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "enum": [
+        "pass",
+        "revise"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/VideoEpisodeScriptReviewFinding"
+      },
+      "maxItems": 100,
+      "title": "Findings",
+      "type": "array"
+    },
+    "requiredChanges": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Requiredchanges",
+      "type": "array"
+    },
+    "summary": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "summary",
+    "requiredChanges",
+    "findings"
+  ],
+  "title": "VideoEpisodeScriptReview",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeScriptReview"
+}

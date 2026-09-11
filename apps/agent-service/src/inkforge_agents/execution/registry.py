@@ -152,7 +152,15 @@ class _RunBudgetDocument(_StrictModel):
 
 class _VideoStageDocument(_StrictModel):
     stageKey: Literal[
-        "dramatic_structure", "shot_design", "missing_beat_shots", "cinematic_review", "shot_prompt"
+        "dramatic_structure",
+        "shot_design",
+        "missing_beat_shots",
+        "cinematic_review",
+        "shot_prompt",
+        "episode_script",
+        "episode_script_review",
+        "episode_storyboard",
+        "episode_storyboard_review",
     ]
     modelProfile: str
     outputSchema: str
@@ -180,9 +188,13 @@ class _OperationDocument(_StrictModel):
     runBudgetProfile: _RunBudgetDocument
     lane: Lane
     stageSteps: list[_VideoStageDocument] | None = None
-    videoStagePolicy: Literal["video.cinematic-stages.v1", "video.shot-prompt-stages.v1"] | None = (
-        None
-    )
+    videoStagePolicy: (
+        Literal[
+            "video.episode-script-stages.v1",
+            "video.episode-storyboard-stages.v1",
+        ]
+        | None
+    ) = None
 
 
 class _CatalogDocument(_StrictModel):
@@ -1255,16 +1267,22 @@ def _validate_video_stages(
     if not operation.stage_steps and operation.video_stage_policy is None:
         return
     expected = {
-        "video.chapter_cinematic_adaptation_v2": (
-            "video.cinematic-stages.v1",
-            (
-                ("dramatic_structure", 2),
-                ("shot_design", 3),
-                ("missing_beat_shots", 3),
-                ("cinematic_review", 2),
-            ),
+        "video.episode_script_generate": (
+            "video.episode-script-stages.v1",
+            (("episode_script", 2), ("episode_script_review", 2)),
         ),
-        "video.chapter_shot_prompt_v2": ("video.shot-prompt-stages.v1", (("shot_prompt", 2),)),
+        "video.episode_script_revise": (
+            "video.episode-script-stages.v1",
+            (("episode_script", 2), ("episode_script_review", 2)),
+        ),
+        "video.episode_storyboard_generate": (
+            "video.episode-storyboard-stages.v1",
+            (("episode_storyboard", 2), ("episode_storyboard_review", 2)),
+        ),
+        "video.episode_storyboard_revise": (
+            "video.episode-storyboard-stages.v1",
+            (("episode_storyboard", 2), ("episode_storyboard_review", 2)),
+        ),
     }.get(operation.key)
     if (
         expected is None

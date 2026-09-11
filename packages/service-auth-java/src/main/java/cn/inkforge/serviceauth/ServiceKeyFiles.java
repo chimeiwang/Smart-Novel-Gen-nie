@@ -19,6 +19,7 @@ import java.util.Set;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+/** 有界读取本地服务密钥，并拒绝符号链接及不安全的私钥权限。 */
 final class ServiceKeyFiles {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -28,6 +29,7 @@ final class ServiceKeyFiles {
 
     static PrivateKey readPrivateKey(Path path) {
         try {
+            // 读取前后比较文件身份，避免校验和实际使用落在不同私钥文件上。
             BasicFileAttributes before = attributes(path);
             validateRegular(before);
             validatePosixPermissions(path);
@@ -53,6 +55,7 @@ final class ServiceKeyFiles {
 
     static JsonNode readJwks(Path path) {
         try {
+            // 公钥集合也禁止跟随链接并限制大小，防止配置路径越界或无界读取。
             BasicFileAttributes attributes = attributes(path);
             validateRegular(attributes);
             return OBJECT_MAPPER.readTree(readBoundedWithoutFollowing(path));

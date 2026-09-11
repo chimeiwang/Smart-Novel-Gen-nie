@@ -56,13 +56,26 @@
   "properties": {
     "durationSeconds": {
       "maximum": 12,
-      "minimum": 2,
+      "minimum": 4,
       "title": "Durationseconds",
       "type": "integer"
+    },
+    "executionMode": {
+      "enum": [
+        "simulated",
+        "live"
+      ],
+      "title": "Executionmode",
+      "type": "string"
     },
     "generateAudio": {
       "title": "Generateaudio",
       "type": "boolean"
+    },
+    "generationMode": {
+      "const": "reference",
+      "title": "Generationmode",
+      "type": "string"
     },
     "inputHash": {
       "pattern": "^[0-9a-f]{64}$",
@@ -81,7 +94,7 @@
       "type": "string"
     },
     "promptText": {
-      "maxLength": 2000,
+      "maxLength": 2500,
       "minLength": 1,
       "title": "Prompttext",
       "type": "string"
@@ -104,15 +117,12 @@
         "$ref": "#/$defs/SeedanceRuntimeReference"
       },
       "maxItems": 20,
+      "minItems": 1,
       "title": "References",
       "type": "array"
     },
     "resolution": {
-      "enum": [
-        "480p",
-        "720p",
-        "1080p"
-      ],
+      "const": "720p",
       "title": "Resolution",
       "type": "string"
     },
@@ -130,13 +140,16 @@
     "taskId",
     "novelId",
     "inputHash",
+    "generationMode",
+    "executionMode",
     "model",
     "promptText",
     "ratio",
     "durationSeconds",
     "resolution",
     "generateAudio",
-    "watermark"
+    "watermark",
+    "references"
   ],
   "title": "SeedanceRenderSubmitRequest",
   "type": "object",

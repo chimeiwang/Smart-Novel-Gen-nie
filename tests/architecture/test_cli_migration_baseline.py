@@ -23,15 +23,15 @@ def test_cli_command_registry_baseline_is_complete() -> None:
     names = [command["name"] for command in commands]
 
     assert document["schemaVersion"] == "inkforge-cli-command-registry/1.0"
-    assert len(commands) == 126
+    assert len(commands) == 152
     assert len(names) == len(set(names))
     assert names[0] == "auth.login"
-    assert names[-1] == "long.video.export.download"
-    assert sum(command["outputMode"] == "jsonl" for command in commands) == 5
+    assert names[-1] == "long.video.episode.delivery.download"
+    assert sum(command["outputMode"] == "jsonl" for command in commands) == 2
     assert sum(
         command["name"].startswith("long.") and command["mutation"]
         for command in commands
-    ) == 75
+    ) == 80
     session_create = next(
         command for command in commands if command["name"] == "long.session.create"
     )
@@ -111,7 +111,7 @@ def test_cli_watch_parity_fixture_covers_every_jsonl_command() -> None:
     cases = fixture["cases"]
 
     assert fixture["schemaVersion"] == "inkforge-cli-parity-watch/1.0"
-    assert len(cases) == 7
+    assert len(cases) == 4
     assert {case["command"] for case in cases} == expected
     assert all(case.get("fakeClock") is True for case in cases)
     assert all(isinstance(case.get("responses"), list) for case in cases)
@@ -288,16 +288,16 @@ def test_cli_file_parity_fixture_covers_text_json_upload_and_download_bytes() ->
     names = [case["command"] for case in cases]
 
     assert fixture["schemaVersion"] == "inkforge-cli-parity-file/1.0"
-    assert len(cases) == 10
+    assert len(cases) == 11
     assert len(names) == len(set(names))
     assert set(names) <= registered
-    assert sum("files" in case for case in cases) == 3
+    assert sum("files" in case for case in cases) == 4
     assert sum("captureFiles" in case for case in cases) == 7
     assert {
         "long.video.asset.upload",
         "long.video.asset.download",
-        "long.video.take.download",
-        "long.video.export.download",
+        "long.video.episode.take.download",
+        "long.video.episode.delivery.download",
     } <= set(names)
 
     for case in cases:

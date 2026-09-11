@@ -12,12 +12,28 @@ import cn.inkforge.contracts.api.ShotTakeDecisionResponse;
 import cn.inkforge.contracts.api.StartShotRenderRequest;
 import cn.inkforge.core.platform.http.ApiException;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 class VideoRenderServiceTest {
 
     private final VideoRenderRepository repository = mock(VideoRenderRepository.class);
     private final VideoAssetStore storage = mock(VideoAssetStore.class);
+
+    @Test
+    void 默认模拟不要求供应商密钥但必须有媒体工具和任务网关() {
+        AtomicBoolean available = new AtomicBoolean(false);
+        var service = new VideoRenderService(repository, storage, false, false, "seedance-model", null, null,
+                "simulated", true, available::get);
+        assertThat(service.readiness().getExecutionMode().getValue()).isEqualTo("simulated");
+        assertThat(service.readiness().getEnabled()).isFalse();
+        var request = new StartShotRenderRequest("simulated-request", 5, 1, "reference");
+        assertCode(() -> service.createTask("user", "adaptation", "shot", request), "VIDEO_RENDER_GATEWAY_UNAVAILABLE");
+        available.set(true);
+        assertThat(service.readiness().getEnabled()).isTrue();
+        service.createTask("user", "adaptation", "shot", request);
+        verify(repository).createTask("user", "adaptation", "shot", request, "seedance-model", true, "simulated");
+    }
 
     @Test
     void 就绪信息与真实调用门禁互相独立() {
@@ -31,7 +47,7 @@ class VideoRenderServiceTest {
                         "视觉参考图公网短时传输尚未配置；无参考图镜头不受影响");
         assertCode(
                 () -> service.createTask(
-                        "user", "adaptation", "shot", new StartShotRenderRequest("request", 5, 1)),
+                        "user", "adaptation", "shot", new StartShotRenderRequest("request", 5, 1, "reference").feeConfirmed(true)),
                 "SEEDANCE_NOT_CONFIGURED");
     }
 
@@ -72,16 +88,16 @@ class VideoRenderServiceTest {
     void 创建任务冻结服务端模型与参考图传输能力() {
         VideoRenderService service = new VideoRenderService(
                 repository, storage, true, true, "seedance-model", null, null);
-        StartShotRenderRequest request = new StartShotRenderRequest("request", 5, 1);
+        StartShotRenderRequest request = new StartShotRenderRequest("request", 5, 1, "reference").feeConfirmed(true);
         ShotRenderTaskResponse expected = mock(ShotRenderTaskResponse.class);
         when(repository.createTask(
-                        "user", "adaptation", "shot", request, "seedance-model", false))
+                        "user", "adaptation", "shot", request, "seedance-model", false, "live"))
                 .thenReturn(expected);
 
         assertThat(service.createTask("user", "adaptation", "shot", request))
                 .isSameAs(expected);
         verify(repository).createTask(
-                "user", "adaptation", "shot", request, "seedance-model", false);
+                "user", "adaptation", "shot", request, "seedance-model", false, "live");
     }
 
     private static void assertCode(Runnable action, String code) {

@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { WorkspaceShell } from "@/features/workspace/workspace-shell";
 import {
   parseWorkspaceView,
+  parseEpisodeRouteContext,
   resolveWorkspaceViewForProfile,
 } from "@/features/workspace/workspace-view";
 import { createServerApiClient } from "@/lib/api/server";
@@ -11,7 +12,7 @@ import { CoreApiPageError, requireApiData } from "@/lib/api/response";
 
 type WorkspacePageProps = {
   params: Promise<{ novelId: string }>;
-  searchParams: Promise<{ chapterId?: string; view?: string | string[] }>;
+  searchParams: Promise<{ chapterId?: string; view?: string | string[]; projectId?: string | string[]; episodeId?: string | string[]; surface?: string | string[] }>;
 };
 
 export default async function WorkspacePage({
@@ -19,7 +20,7 @@ export default async function WorkspacePage({
   searchParams,
 }: WorkspacePageProps) {
   const { novelId } = await params;
-  const { chapterId, view } = await searchParams;
+  const { chapterId, view, projectId, episodeId, surface } = await searchParams;
   const requestedWorkspaceView = parseWorkspaceView(view);
   let workspace: components["schemas"]["WorkspaceBootstrapResponse"];
   let currentUser: components["schemas"]["UserResponse"];
@@ -62,6 +63,7 @@ export default async function WorkspacePage({
       bootstrap={workspace}
       currentUser={currentUser}
       initialView={workspaceView}
+      initialEpisodeContext={parseEpisodeRouteContext({ projectId, episodeId, surface })}
     />
   );
 }

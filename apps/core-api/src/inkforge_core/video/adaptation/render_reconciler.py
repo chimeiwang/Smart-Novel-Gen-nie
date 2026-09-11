@@ -106,19 +106,29 @@ class VideoShotRenderReconciler:
 
     async def _submit(self, claim: ShotRenderClaim) -> None:
         try:
+            manifest = claim.manifest
+            if (
+                manifest.schemaVersion != "video-shot-render-manifest/1.2"
+                or manifest.generationMode is None
+                or manifest.executionMode is None
+                or manifest.resolution != "720p"
+            ):
+                raise ValueError("VIDEO_RENDER_MODE_NOT_FROZEN：旧清单不能创建新的供应商任务")
             references = self._runtime_references(claim)
             response = await self._gateway.submit_seedance_render(
                 SeedanceRenderSubmitRequest(
                     taskId=claim.task_id,
                     novelId=claim.novel_id,
                     inputHash=_claim_hash(claim),
+                    generationMode=manifest.generationMode,
+                    executionMode=manifest.executionMode,
                     model=claim.manifest.model,
                     promptText=(
                         claim.manifest.providerPromptText or claim.manifest.promptText
                     ),
                     ratio=claim.manifest.ratio,
                     durationSeconds=claim.manifest.durationSeconds,
-                    resolution=claim.manifest.resolution,
+                    resolution=manifest.resolution,
                     generateAudio=claim.manifest.generateAudio,
                     watermark=claim.manifest.watermark,
                     references=references,
@@ -147,6 +157,15 @@ class VideoShotRenderReconciler:
         await self._repository.mark_submitted(claim.task_id, response.providerTaskId)
 
     async def _query(self, claim: ShotRenderClaim) -> None:
+        execution_mode = claim.manifest.executionMode
+        if execution_mode is None:
+            await self._repository.mark_provider_terminal(
+                claim.task_id,
+                status="failed",
+                code="VIDEO_RENDER_MODE_NOT_FROZEN",
+                message="旧清单未冻结执行模式，不能推断供应商调用方式",
+            )
+            return
         if claim.provider_task_id is None:
             await self._repository.mark_provider_terminal(
                 claim.task_id,
@@ -161,6 +180,7 @@ class VideoShotRenderReconciler:
                     taskId=claim.task_id,
                     novelId=claim.novel_id,
                     providerTaskId=claim.provider_task_id,
+                    executionMode=execution_mode,
                     pollCount=max(claim.poll_count, 1),
                 )
             )
@@ -210,7 +230,10 @@ class VideoShotRenderReconciler:
                 asset_id=asset_id,
                 video_url=response.output.videoUrl,
             )
-            metadata = response.output.model_dump(mode="json", exclude={"videoUrl"})
+            # 供应商 URL 只供当次受控归档；不可变 Take 只保存媒体来源和用量事实。
+            metadata = response.output.model_dump(
+                mode="json", exclude={"videoUrl", "lastFrameUrl"}
+            )
             duration_ms = (
                 round(response.output.durationSeconds * 1_000)
                 if response.output.durationSeconds is not None

@@ -336,19 +336,55 @@
           "$ref": "#/$defs/versionedIdentifier"
         },
         "videoStagePolicy": {
-          "enum": ["video.cinematic-stages.v1", "video.shot-prompt-stages.v1"]
+          "enum": [
+            "video.cinematic-stages.v1",
+            "video.shot-prompt-stages.v1",
+            "video.episode-script-stages.v1",
+            "video.episode-storyboard-stages.v1"
+          ]
         },
         "stageSteps": {
-          "type": "array", "minItems": 1, "maxItems": 4,
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
           "items": {
-            "type": "object", "additionalProperties": false,
-            "required": ["stageKey", "modelProfile", "outputSchema", "stepBudgetProfile", "maxInvocations"],
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "stageKey",
+              "modelProfile",
+              "outputSchema",
+              "stepBudgetProfile",
+              "maxInvocations"
+            ],
             "properties": {
-              "stageKey": {"enum": ["dramatic_structure", "shot_design", "missing_beat_shots", "cinematic_review", "shot_prompt"]},
-              "modelProfile": {"$ref": "#/$defs/versionedIdentifier"},
-              "outputSchema": {"$ref": "#/$defs/versionedIdentifier"},
-              "stepBudgetProfile": {"$ref": "#/$defs/versionedIdentifier"},
-              "maxInvocations": {"type": "integer", "minimum": 1, "maximum": 3}
+              "stageKey": {
+                "enum": [
+                  "dramatic_structure",
+                  "shot_design",
+                  "missing_beat_shots",
+                  "cinematic_review",
+                  "shot_prompt",
+                  "episode_script",
+                  "episode_script_review",
+                  "episode_storyboard",
+                  "episode_storyboard_review"
+                ]
+              },
+              "modelProfile": {
+                "$ref": "#/$defs/versionedIdentifier"
+              },
+              "outputSchema": {
+                "$ref": "#/$defs/versionedIdentifier"
+              },
+              "stepBudgetProfile": {
+                "$ref": "#/$defs/versionedIdentifier"
+              },
+              "maxInvocations": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              }
             }
           }
         },

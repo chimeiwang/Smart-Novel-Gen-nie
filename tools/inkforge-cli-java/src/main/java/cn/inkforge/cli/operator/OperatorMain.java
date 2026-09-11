@@ -74,6 +74,7 @@ public final class OperatorMain {
         System.exit(exit);
     }
 
+    /** 执行受固定环境、来源包、身份和命令白名单约束的 Operator 调用。 */
     static int run(List<String> arguments, InputStream stdin, OutputStream stdout, OutputStream stderr, Host host) {
         String currentCommand = "";
         try {
@@ -148,6 +149,7 @@ public final class OperatorMain {
             if (args.size() != 1) throw input("INVALID_ARGUMENTS", "非登录命令不接受额外命令行参数");
             ObjectNode payload = bind(readPayload(stdin, host.json()), config, command.equals("auth.whoami"));
             if (!command.startsWith("auth.")) {
+                // 每个业务命令先实时确认身份，避免沿用与配置绑定用户名不一致的旧会话。
                 ObjectNode identity = bind(host.json().createObjectNode(), config, true);
                 ByteArrayOutputStream preflightOut = new ByteArrayOutputStream();
                 ByteArrayOutputStream preflightErr = new ByteArrayOutputStream();

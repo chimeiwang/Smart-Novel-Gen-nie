@@ -139,6 +139,80 @@ public class VideoepisodesubtitlecueRecord extends UpdatableRecordImpl<Videoepis
         return (String) get(7);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeSubtitleCue.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(8, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeSubtitleCue.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(8);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeSubtitleCue.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(9, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeSubtitleCue.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(9);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeSubtitleCue.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(10, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeSubtitleCue.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(10);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeSubtitleCue.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeSubtitleCue.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(11);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeSubtitleCue.scriptLineId</code>.
+     */
+    public void setScriptlineid(String value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeSubtitleCue.scriptLineId</code>.
+     */
+    public String getScriptlineid() {
+        return (String) get(12);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -162,7 +236,7 @@ public class VideoepisodesubtitlecueRecord extends UpdatableRecordImpl<Videoepis
     /**
      * Create a detached, initialised VideoepisodesubtitlecueRecord
      */
-    public VideoepisodesubtitlecueRecord(String mixversionid, String shotplanversionid, Integer ordinal, String shotid, Integer startms, Integer endms, String speaker, String text) {
+    public VideoepisodesubtitlecueRecord(String mixversionid, String shotplanversionid, Integer ordinal, String shotid, Integer startms, Integer endms, String speaker, String text, String videoepisodeid, String productionbaselineid, String episodeshotid, String episodeshotversionid, String scriptlineid) {
         super(Videoepisodesubtitlecue.VIDEOEPISODESUBTITLECUE);
 
         setMixversionid(mixversionid);
@@ -173,6 +247,11 @@ public class VideoepisodesubtitlecueRecord extends UpdatableRecordImpl<Videoepis
         setEndms(endms);
         setSpeaker(speaker);
         setText(text);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setScriptlineid(scriptlineid);
         resetTouchedOnNotNull();
     }
 }

@@ -139,7 +139,6 @@ class AgentGatewayConfiguration {
 
     @Bean
     @ConditionalOnBean(AgentServiceClient.class)
-    @ConditionalOnProperty(name = "SEEDANCE_ENABLED", havingValue = "true")
     VideoRenderGateway videoRenderGateway(AgentServiceClient agentServiceClient) {
         return new VideoRenderAgentGateway(agentServiceClient);
     }

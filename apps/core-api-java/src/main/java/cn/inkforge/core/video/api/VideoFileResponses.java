@@ -11,7 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-/** 统一五个视频文件入口的流式响应，禁止把媒体整体读入 JVM 堆。 */
+/** 统一视频文件入口的流式响应，禁止把媒体整体读入 JVM 堆。 */
 final class VideoFileResponses {
 
     private VideoFileResponses() {}

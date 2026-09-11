@@ -22,7 +22,7 @@ from .support import (
 
 _NO_FILE = FileOutputSpec(kind="none")
 _DATA_JSON = FileOutputSpec(kind="data_json")
-_RESOLUTIONS = frozenset({"480p", "720p", "1080p"})
+_RESOLUTIONS = frozenset({"720p"})
 _ACTIVE_STATUSES = frozenset({"pending", "submitting", "queued", "running", "archiving"})
 _SUCCESS_STATUSES = frozenset({"succeeded"})
 _FAILED_STATUSES = frozenset(
@@ -51,9 +51,10 @@ def start_render(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
             "shotId",
             "clientRequestId",
             "expectedPromptRevision",
+            "generationMode",
             "durationSeconds",
         },
-        optional={"resolution", "generateAudio", "watermark"},
+        optional={"resolution", "generateAudio", "watermark", "feeConfirmed"},
     )
     adaptation_id = encode_id(require_string(payload, "adaptationId"))
     shot_id = encode_id(require_string(payload, "shotId"))
@@ -68,10 +69,12 @@ def start_render(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
                 "expectedPromptRevision",
                 minimum=1,
             ),
+            "generationMode": enum_value(payload, "generationMode", frozenset({"reference"})),
+            "feeConfirmed": _optional_bool(payload, "feeConfirmed", default=False),
             "durationSeconds": require_int(
                 payload,
                 "durationSeconds",
-                minimum=2,
+                minimum=4,
                 maximum=12,
             ),
             "resolution": enum_value(
@@ -92,13 +95,16 @@ def get_render(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
 
 
 def retry_render(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
-    require_fields(payload, required={"taskId", "clientRequestId"})
+    require_fields(payload, required={"taskId", "clientRequestId"}, optional={"feeConfirmed"})
     task_id = encode_id(require_string(payload, "taskId"))
     return request_json(
         runtime,
         "POST",
         f"/api/v1/video/render-tasks/{task_id}/retry",
-        json={"clientRequestId": require_client_request_id(payload)},
+        json={
+            "clientRequestId": require_client_request_id(payload),
+            "feeConfirmed": _optional_bool(payload, "feeConfirmed", default=False),
+        },
     )
 
 

@@ -3,2842 +3,6 @@
   "hashAlgorithm": "inkforge-canonical-json/1",
   "schemas": [
     {
-      "key": "output.video_shot_prompt_stage.v2",
-      "version": 2,
-      "supported": true,
-      "purpose": "generation",
-      "sha256": "de313bb606675617744cebfa7ea7be47039ed8c5549884b4af64b95e1be316d7",
-      "jsonSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "properties": {
-          "validationFindings": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "enum": [
-                    "protocol_invalid",
-                    "dramatic_protocol",
-                    "dramatic_materialization",
-                    "design_protocol",
-                    "design_materialization",
-                    "prompt_schema",
-                    "prompt_target_order",
-                    "prompt_performance",
-                    "prompt_continuity",
-                    "prompt_metadata",
-                    "prompt_neighbor",
-                    "prompt_scale",
-                    "prompt_action_count",
-                    "prompt_expression_invisible",
-                    "prompt_expression_micro",
-                    "prompt_expression_interpretation",
-                    "prompt_action_interpretation",
-                    "prompt_effects",
-                    "prompt_affirmative_effects",
-                    "prompt_unconfirmed_action",
-                    "prompt_required_hand_blocked",
-                    "prompt_required_subject_blocked",
-                    "prompt_required_hand_missing",
-                    "prompt_repeated_fields",
-                    "prompt_compile",
-                    "prompt_budget"
-                  ],
-                  "type": "string"
-                },
-                "shotKey": {
-                  "anyOf": [
-                    {
-                      "pattern": "^S[0-9]{2,3}$",
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "parameters": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {},
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "maximum": 15000,
-                          "minimum": 500,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum",
-                        "durationMs"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "requiredScale": {
-                          "enum": [
-                            "过肩镜头",
-                            "双人镜头",
-                            "主观镜头",
-                            "大特写",
-                            "中近景",
-                            "大全景",
-                            "大远景",
-                            "特写",
-                            "近景",
-                            "中景",
-                            "全景",
-                            "远景"
-                          ],
-                          "type": "string"
-                        },
-                        "conflictingScales": {
-                          "items": {
-                            "enum": [
-                              "过肩镜头",
-                              "双人镜头",
-                              "主观镜头",
-                              "大特写",
-                              "中近景",
-                              "大全景",
-                              "大远景",
-                              "特写",
-                              "近景",
-                              "中景",
-                              "全景",
-                              "远景"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "requiredScale",
-                        "conflictingScales"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "effects": {
-                          "items": {
-                            "enum": [
-                              "火花",
-                              "火焰",
-                              "爆炸",
-                              "闪电或电弧",
-                              "粒子效果",
-                              "光束或光柱",
-                              "浓烟",
-                              "雨雪",
-                              "血迹"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 9,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "effects"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "markers": {
-                          "items": {
-                            "enum": [
-                              "凝成",
-                              "亮起",
-                              "熄灭",
-                              "弹开",
-                              "打开",
-                              "关闭",
-                              "碎裂",
-                              "破裂",
-                              "加速",
-                              "减速",
-                              "转为",
-                              "变成",
-                              "显现",
-                              "消失",
-                              "再次",
-                              "再度",
-                              "又一次",
-                              "反复",
-                              "继续",
-                              "重试",
-                              "回拧",
-                              "反向",
-                              "转动",
-                              "旋转"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "markers"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fields": {
-                          "items": {
-                            "enum": [
-                              "subjectAndScene",
-                              "visibleAction",
-                              "expressionAndGaze",
-                              "camera",
-                              "audio"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 2,
-                          "minItems": 2,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "fields"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "blocking": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "code",
-                "shotKey",
-                "parameters",
-                "blocking"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "stageKey": {
-            "const": "shot_prompt",
-            "type": "string"
-          },
-          "outcome": {
-            "enum": [
-              "ready",
-              "needs_correction"
-            ],
-            "type": "string"
-          },
-          "promptBatch": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "schemaVersion": {
-                    "const": "shot_prompt_spec_batch_v2",
-                    "type": "string"
-                  },
-                  "prompts": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "shotKey": {
-                          "pattern": "^S[0-9]{2,3}$",
-                          "type": "string"
-                        },
-                        "spec": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "subjectAndScene": {
-                              "maxLength": 600,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "visibleAction": {
-                              "maxLength": 600,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "performance": {
-                              "anyOf": [
-                                {
-                                  "maxLength": 500,
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "expressionAndGaze": {
-                              "anyOf": [
-                                {
-                                  "maxLength": 500,
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "camera": {
-                              "maxLength": 500,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "audio": {
-                              "maxLength": 500,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "continuity": {
-                              "anyOf": [
-                                {
-                                  "maxLength": 500,
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "negativeConstraints": {
-                              "items": {
-                                "maxLength": 240,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "maxItems": 12,
-                              "type": "array"
-                            }
-                          },
-                          "required": [
-                            "subjectAndScene",
-                            "visibleAction",
-                            "camera",
-                            "audio"
-                          ],
-                          "type": "object"
-                        },
-                        "qualityWarnings": {
-                          "items": {
-                            "maxLength": 300,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "maxItems": 12,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "shotKey",
-                        "spec"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 120,
-                    "minItems": 1,
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "prompts"
-                ],
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "validationFindings",
-          "stageKey",
-          "outcome",
-          "promptBatch"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "key": "output.video_cinematic_review_stage.v2",
-      "version": 2,
-      "supported": true,
-      "purpose": "generation",
-      "sha256": "c77b0295c60d88c4d55257849049e37f621e9c676ba838fdf88863f5e4c588ac",
-      "jsonSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "properties": {
-          "validationFindings": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "enum": [
-                    "protocol_invalid",
-                    "dramatic_protocol",
-                    "dramatic_materialization",
-                    "design_protocol",
-                    "design_materialization",
-                    "prompt_schema",
-                    "prompt_target_order",
-                    "prompt_performance",
-                    "prompt_continuity",
-                    "prompt_metadata",
-                    "prompt_neighbor",
-                    "prompt_scale",
-                    "prompt_action_count",
-                    "prompt_expression_invisible",
-                    "prompt_expression_micro",
-                    "prompt_expression_interpretation",
-                    "prompt_action_interpretation",
-                    "prompt_effects",
-                    "prompt_affirmative_effects",
-                    "prompt_unconfirmed_action",
-                    "prompt_required_hand_blocked",
-                    "prompt_required_subject_blocked",
-                    "prompt_required_hand_missing",
-                    "prompt_repeated_fields",
-                    "prompt_compile",
-                    "prompt_budget"
-                  ],
-                  "type": "string"
-                },
-                "shotKey": {
-                  "anyOf": [
-                    {
-                      "pattern": "^S[0-9]{2,3}$",
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "parameters": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {},
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "maximum": 15000,
-                          "minimum": 500,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum",
-                        "durationMs"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "requiredScale": {
-                          "enum": [
-                            "过肩镜头",
-                            "双人镜头",
-                            "主观镜头",
-                            "大特写",
-                            "中近景",
-                            "大全景",
-                            "大远景",
-                            "特写",
-                            "近景",
-                            "中景",
-                            "全景",
-                            "远景"
-                          ],
-                          "type": "string"
-                        },
-                        "conflictingScales": {
-                          "items": {
-                            "enum": [
-                              "过肩镜头",
-                              "双人镜头",
-                              "主观镜头",
-                              "大特写",
-                              "中近景",
-                              "大全景",
-                              "大远景",
-                              "特写",
-                              "近景",
-                              "中景",
-                              "全景",
-                              "远景"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "requiredScale",
-                        "conflictingScales"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "effects": {
-                          "items": {
-                            "enum": [
-                              "火花",
-                              "火焰",
-                              "爆炸",
-                              "闪电或电弧",
-                              "粒子效果",
-                              "光束或光柱",
-                              "浓烟",
-                              "雨雪",
-                              "血迹"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 9,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "effects"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "markers": {
-                          "items": {
-                            "enum": [
-                              "凝成",
-                              "亮起",
-                              "熄灭",
-                              "弹开",
-                              "打开",
-                              "关闭",
-                              "碎裂",
-                              "破裂",
-                              "加速",
-                              "减速",
-                              "转为",
-                              "变成",
-                              "显现",
-                              "消失",
-                              "再次",
-                              "再度",
-                              "又一次",
-                              "反复",
-                              "继续",
-                              "重试",
-                              "回拧",
-                              "反向",
-                              "转动",
-                              "旋转"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "markers"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fields": {
-                          "items": {
-                            "enum": [
-                              "subjectAndScene",
-                              "visibleAction",
-                              "expressionAndGaze",
-                              "camera",
-                              "audio"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 2,
-                          "minItems": 2,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "fields"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "blocking": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "code",
-                "shotKey",
-                "parameters",
-                "blocking"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "stageKey": {
-            "const": "cinematic_review",
-            "type": "string"
-          },
-          "outcome": {
-            "const": "ready",
-            "type": "string"
-          },
-          "review": {
-            "additionalProperties": false,
-            "properties": {
-              "decision": {
-                "enum": [
-                  "pass",
-                  "revise"
-                ],
-                "type": "string"
-              },
-              "summary": {
-                "maxLength": 1200,
-                "minLength": 1,
-                "type": "string"
-              },
-              "requiredChanges": {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 20,
-                "type": "array"
-              },
-              "findings": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "severity": {
-                      "enum": [
-                        "notice",
-                        "warning"
-                      ],
-                      "type": "string"
-                    },
-                    "scope": {
-                      "enum": [
-                        "plan",
-                        "scene",
-                        "beat",
-                        "shot"
-                      ],
-                      "type": "string"
-                    },
-                    "scopeKey": {
-                      "anyOf": [
-                        {
-                          "maxLength": 16,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "message": {
-                      "maxLength": 600,
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "evidence": {
-                      "maxLength": 800,
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "suggestion": {
-                      "maxLength": 800,
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "severity",
-                    "scope",
-                    "message",
-                    "evidence",
-                    "suggestion"
-                  ],
-                  "type": "object"
-                },
-                "maxItems": 1203,
-                "type": "array"
-              }
-            },
-            "required": [
-              "decision",
-              "summary",
-              "findings"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "validationFindings",
-          "stageKey",
-          "outcome",
-          "review"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "key": "output.video_missing_beat_shots_stage.v2",
-      "version": 2,
-      "supported": true,
-      "purpose": "generation",
-      "sha256": "35ccf9756351a7cfe64a88621d072225f51444565dbb9b7a23d8d57bccefd89b",
-      "jsonSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "properties": {
-          "validationFindings": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "enum": [
-                    "protocol_invalid",
-                    "dramatic_protocol",
-                    "dramatic_materialization",
-                    "design_protocol",
-                    "design_materialization",
-                    "prompt_schema",
-                    "prompt_target_order",
-                    "prompt_performance",
-                    "prompt_continuity",
-                    "prompt_metadata",
-                    "prompt_neighbor",
-                    "prompt_scale",
-                    "prompt_action_count",
-                    "prompt_expression_invisible",
-                    "prompt_expression_micro",
-                    "prompt_expression_interpretation",
-                    "prompt_action_interpretation",
-                    "prompt_effects",
-                    "prompt_affirmative_effects",
-                    "prompt_unconfirmed_action",
-                    "prompt_required_hand_blocked",
-                    "prompt_required_subject_blocked",
-                    "prompt_required_hand_missing",
-                    "prompt_repeated_fields",
-                    "prompt_compile",
-                    "prompt_budget"
-                  ],
-                  "type": "string"
-                },
-                "shotKey": {
-                  "anyOf": [
-                    {
-                      "pattern": "^S[0-9]{2,3}$",
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "parameters": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {},
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "maximum": 15000,
-                          "minimum": 500,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum",
-                        "durationMs"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "requiredScale": {
-                          "enum": [
-                            "过肩镜头",
-                            "双人镜头",
-                            "主观镜头",
-                            "大特写",
-                            "中近景",
-                            "大全景",
-                            "大远景",
-                            "特写",
-                            "近景",
-                            "中景",
-                            "全景",
-                            "远景"
-                          ],
-                          "type": "string"
-                        },
-                        "conflictingScales": {
-                          "items": {
-                            "enum": [
-                              "过肩镜头",
-                              "双人镜头",
-                              "主观镜头",
-                              "大特写",
-                              "中近景",
-                              "大全景",
-                              "大远景",
-                              "特写",
-                              "近景",
-                              "中景",
-                              "全景",
-                              "远景"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "requiredScale",
-                        "conflictingScales"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "effects": {
-                          "items": {
-                            "enum": [
-                              "火花",
-                              "火焰",
-                              "爆炸",
-                              "闪电或电弧",
-                              "粒子效果",
-                              "光束或光柱",
-                              "浓烟",
-                              "雨雪",
-                              "血迹"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 9,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "effects"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "markers": {
-                          "items": {
-                            "enum": [
-                              "凝成",
-                              "亮起",
-                              "熄灭",
-                              "弹开",
-                              "打开",
-                              "关闭",
-                              "碎裂",
-                              "破裂",
-                              "加速",
-                              "减速",
-                              "转为",
-                              "变成",
-                              "显现",
-                              "消失",
-                              "再次",
-                              "再度",
-                              "又一次",
-                              "反复",
-                              "继续",
-                              "重试",
-                              "回拧",
-                              "反向",
-                              "转动",
-                              "旋转"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "markers"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fields": {
-                          "items": {
-                            "enum": [
-                              "subjectAndScene",
-                              "visibleAction",
-                              "expressionAndGaze",
-                              "camera",
-                              "audio"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 2,
-                          "minItems": 2,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "fields"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "blocking": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "code",
-                "shotKey",
-                "parameters",
-                "blocking"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "stageKey": {
-            "const": "missing_beat_shots",
-            "type": "string"
-          },
-          "outcome": {
-            "enum": [
-              "ready",
-              "needs_correction"
-            ],
-            "type": "string"
-          },
-          "candidate": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "schemaVersion": {
-                    "const": "chapter_adaptation_plan_v3",
-                    "type": "string"
-                  },
-                  "adaptationId": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "sourceHash": {
-                    "pattern": "^[0-9a-f]{64}$",
-                    "type": "string"
-                  },
-                  "scenes": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "sceneKey": {
-                          "pattern": "^SC[0-9]{2,3}$",
-                          "type": "string"
-                        },
-                        "title": {
-                          "maxLength": 160,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "locationLabel": {
-                          "maxLength": 160,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "timeLabel": {
-                          "maxLength": 120,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "objective": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "changeSummary": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "beats": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "beatKey": {
-                                "pattern": "^B[0-9]{2,3}$",
-                                "type": "string"
-                              },
-                              "title": {
-                                "maxLength": 160,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "dramaticTurn": {
-                                "maxLength": 800,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "visualStrategy": {
-                                "maxLength": 800,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "coverageGoals": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "goalKey": {
-                                      "pattern": "^G[0-9]{2,3}$",
-                                      "type": "string"
-                                    },
-                                    "kind": {
-                                      "enum": [
-                                        "story_information",
-                                        "action",
-                                        "emotion",
-                                        "space",
-                                        "relationship",
-                                        "motif",
-                                        "transition"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "priority": {
-                                      "enum": [
-                                        "essential",
-                                        "supporting"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "description": {
-                                      "maxLength": 500,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "goalKey",
-                                    "kind",
-                                    "priority",
-                                    "description"
-                                  ],
-                                  "type": "object"
-                                },
-                                "maxItems": 12,
-                                "minItems": 1,
-                                "type": "array"
-                              },
-                              "sourceRanges": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "start": {
-                                      "minimum": 0,
-                                      "type": "integer"
-                                    },
-                                    "end": {
-                                      "minimum": 1,
-                                      "type": "integer"
-                                    },
-                                    "sourceText": {
-                                      "maxLength": 120000,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "start",
-                                    "end",
-                                    "sourceText"
-                                  ],
-                                  "type": "object"
-                                },
-                                "maxItems": 24,
-                                "minItems": 1,
-                                "type": "array"
-                              },
-                              "shots": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "shotKey": {
-                                      "pattern": "^S[0-9]{2,3}$",
-                                      "type": "string"
-                                    },
-                                    "title": {
-                                      "maxLength": 120,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "narrativePurpose": {
-                                      "enum": [
-                                        "establishing",
-                                        "action",
-                                        "dialogue",
-                                        "reaction",
-                                        "reveal",
-                                        "insert",
-                                        "transition",
-                                        "atmosphere"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "storyFunction": {
-                                      "maxLength": 800,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "audienceGain": {
-                                      "maxLength": 800,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "coveredGoalKeys": {
-                                      "items": {
-                                        "type": "string"
-                                      },
-                                      "maxItems": 12,
-                                      "type": "array"
-                                    },
-                                    "sourceRelation": {
-                                      "enum": [
-                                        "direct",
-                                        "derived",
-                                        "supplemental"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "shotScale": {
-                                      "enum": [
-                                        "extreme_long",
-                                        "long",
-                                        "medium",
-                                        "medium_close",
-                                        "close",
-                                        "extreme_close",
-                                        "over_shoulder",
-                                        "two_shot",
-                                        "pov"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "cameraAngle": {
-                                      "enum": [
-                                        "eye_level",
-                                        "high_angle",
-                                        "low_angle",
-                                        "overhead",
-                                        "dutch_angle"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "cameraMovement": {
-                                      "enum": [
-                                        "locked",
-                                        "pan",
-                                        "tilt",
-                                        "push_in",
-                                        "pull_out",
-                                        "tracking",
-                                        "arc",
-                                        "handheld",
-                                        "focus_shift"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "visualIntent": {
-                                      "maxLength": 1200,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "speechMode": {
-                                      "enum": [
-                                        "none",
-                                        "sync",
-                                        "offscreen",
-                                        "voiceover"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "spokenText": {
-                                      "anyOf": [
-                                        {
-                                          "maxLength": 800,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        {
-                                          "type": "null"
-                                        }
-                                      ]
-                                    },
-                                    "soundDesign": {
-                                      "maxLength": 600,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "cutReason": {
-                                      "maxLength": 600,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "timelineDurationMs": {
-                                      "maximum": 15000,
-                                      "minimum": 500,
-                                      "type": "integer"
-                                    },
-                                    "sourceRanges": {
-                                      "items": {
-                                        "additionalProperties": false,
-                                        "properties": {
-                                          "start": {
-                                            "minimum": 0,
-                                            "type": "integer"
-                                          },
-                                          "end": {
-                                            "minimum": 1,
-                                            "type": "integer"
-                                          },
-                                          "sourceText": {
-                                            "maxLength": 120000,
-                                            "minLength": 1,
-                                            "type": "string"
-                                          }
-                                        },
-                                        "required": [
-                                          "start",
-                                          "end",
-                                          "sourceText"
-                                        ],
-                                        "type": "object"
-                                      },
-                                      "maxItems": 12,
-                                      "type": "array"
-                                    }
-                                  },
-                                  "required": [
-                                    "shotKey",
-                                    "title",
-                                    "narrativePurpose",
-                                    "storyFunction",
-                                    "audienceGain",
-                                    "sourceRelation",
-                                    "shotScale",
-                                    "cameraAngle",
-                                    "cameraMovement",
-                                    "visualIntent",
-                                    "speechMode",
-                                    "soundDesign",
-                                    "cutReason",
-                                    "timelineDurationMs",
-                                    "sourceRanges"
-                                  ],
-                                  "type": "object"
-                                },
-                                "maxItems": 40,
-                                "minItems": 1,
-                                "type": "array"
-                              }
-                            },
-                            "required": [
-                              "beatKey",
-                              "title",
-                              "dramaticTurn",
-                              "visualStrategy",
-                              "coverageGoals",
-                              "sourceRanges",
-                              "shots"
-                            ],
-                            "type": "object"
-                          },
-                          "maxItems": 40,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "sceneKey",
-                        "title",
-                        "locationLabel",
-                        "timeLabel",
-                        "objective",
-                        "changeSummary",
-                        "beats"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 30,
-                    "minItems": 1,
-                    "type": "array"
-                  },
-                  "suggestedEpisodeBreakAfterShotKeys": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "maxItems": 119,
-                    "type": "array"
-                  },
-                  "reviewSummary": {
-                    "anyOf": [
-                      {
-                        "maxLength": 1200,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "reviewFindings": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "severity": {
-                          "enum": [
-                            "notice",
-                            "warning"
-                          ],
-                          "type": "string"
-                        },
-                        "scope": {
-                          "enum": [
-                            "plan",
-                            "scene",
-                            "beat",
-                            "shot"
-                          ],
-                          "type": "string"
-                        },
-                        "scopeKey": {
-                          "anyOf": [
-                            {
-                              "maxLength": 16,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "message": {
-                          "maxLength": 600,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "evidence": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "suggestion": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "severity",
-                        "scope",
-                        "message",
-                        "evidence",
-                        "suggestion"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 480,
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "schemaVersion",
-                  "adaptationId",
-                  "sourceHash",
-                  "scenes"
-                ],
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "validationFindings",
-          "stageKey",
-          "outcome",
-          "candidate"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "key": "output.video_shot_design_stage.v2",
-      "version": 2,
-      "supported": true,
-      "purpose": "generation",
-      "sha256": "d17cbc3fac08a775425fcee086dcaf54812c528a46ca76ae0ff0ec34f61615d4",
-      "jsonSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "properties": {
-          "validationFindings": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "enum": [
-                    "protocol_invalid",
-                    "dramatic_protocol",
-                    "dramatic_materialization",
-                    "design_protocol",
-                    "design_materialization",
-                    "prompt_schema",
-                    "prompt_target_order",
-                    "prompt_performance",
-                    "prompt_continuity",
-                    "prompt_metadata",
-                    "prompt_neighbor",
-                    "prompt_scale",
-                    "prompt_action_count",
-                    "prompt_expression_invisible",
-                    "prompt_expression_micro",
-                    "prompt_expression_interpretation",
-                    "prompt_action_interpretation",
-                    "prompt_effects",
-                    "prompt_affirmative_effects",
-                    "prompt_unconfirmed_action",
-                    "prompt_required_hand_blocked",
-                    "prompt_required_subject_blocked",
-                    "prompt_required_hand_missing",
-                    "prompt_repeated_fields",
-                    "prompt_compile",
-                    "prompt_budget"
-                  ],
-                  "type": "string"
-                },
-                "shotKey": {
-                  "anyOf": [
-                    {
-                      "pattern": "^S[0-9]{2,3}$",
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "parameters": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {},
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "maximum": 15000,
-                          "minimum": 500,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum",
-                        "durationMs"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "requiredScale": {
-                          "enum": [
-                            "过肩镜头",
-                            "双人镜头",
-                            "主观镜头",
-                            "大特写",
-                            "中近景",
-                            "大全景",
-                            "大远景",
-                            "特写",
-                            "近景",
-                            "中景",
-                            "全景",
-                            "远景"
-                          ],
-                          "type": "string"
-                        },
-                        "conflictingScales": {
-                          "items": {
-                            "enum": [
-                              "过肩镜头",
-                              "双人镜头",
-                              "主观镜头",
-                              "大特写",
-                              "中近景",
-                              "大全景",
-                              "大远景",
-                              "特写",
-                              "近景",
-                              "中景",
-                              "全景",
-                              "远景"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "requiredScale",
-                        "conflictingScales"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "effects": {
-                          "items": {
-                            "enum": [
-                              "火花",
-                              "火焰",
-                              "爆炸",
-                              "闪电或电弧",
-                              "粒子效果",
-                              "光束或光柱",
-                              "浓烟",
-                              "雨雪",
-                              "血迹"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 9,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "effects"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "markers": {
-                          "items": {
-                            "enum": [
-                              "凝成",
-                              "亮起",
-                              "熄灭",
-                              "弹开",
-                              "打开",
-                              "关闭",
-                              "碎裂",
-                              "破裂",
-                              "加速",
-                              "减速",
-                              "转为",
-                              "变成",
-                              "显现",
-                              "消失",
-                              "再次",
-                              "再度",
-                              "又一次",
-                              "反复",
-                              "继续",
-                              "重试",
-                              "回拧",
-                              "反向",
-                              "转动",
-                              "旋转"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "markers"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fields": {
-                          "items": {
-                            "enum": [
-                              "subjectAndScene",
-                              "visibleAction",
-                              "expressionAndGaze",
-                              "camera",
-                              "audio"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 2,
-                          "minItems": 2,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "fields"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "blocking": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "code",
-                "shotKey",
-                "parameters",
-                "blocking"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "stageKey": {
-            "const": "shot_design",
-            "type": "string"
-          },
-          "outcome": {
-            "enum": [
-              "ready",
-              "needs_correction",
-              "needs_supplement"
-            ],
-            "type": "string"
-          },
-          "design": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "beatsByKey": {
-                    "additionalProperties": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "title": {
-                            "maxLength": 120,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "narrativePurpose": {
-                            "maxLength": 80,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "storyFunction": {
-                            "maxLength": 800,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "audienceGain": {
-                            "maxLength": 800,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "coveredGoalKeys": {
-                            "items": {
-                              "type": "string"
-                            },
-                            "maxItems": 12,
-                            "minItems": 1,
-                            "type": "array"
-                          },
-                          "sourceRelation": {
-                            "maxLength": 80,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "shotScale": {
-                            "maxLength": 80,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "cameraAngle": {
-                            "maxLength": 80,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "cameraMovement": {
-                            "maxLength": 80,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "visualIntent": {
-                            "maxLength": 1200,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "speechMode": {
-                            "maxLength": 80,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "spokenText": {
-                            "anyOf": [
-                              {
-                                "maxLength": 800,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "soundDesign": {
-                            "maxLength": 600,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "cutReason": {
-                            "maxLength": 600,
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "timelineDurationMs": {
-                            "anyOf": [
-                              {
-                                "type": "integer"
-                              },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ]
-                          },
-                          "sourceUnitIds": {
-                            "items": {
-                              "type": "string"
-                            },
-                            "type": "array"
-                          }
-                        },
-                        "required": [
-                          "title",
-                          "narrativePurpose",
-                          "storyFunction",
-                          "audienceGain",
-                          "coveredGoalKeys",
-                          "sourceRelation",
-                          "shotScale",
-                          "cameraAngle",
-                          "cameraMovement",
-                          "visualIntent",
-                          "speechMode",
-                          "soundDesign",
-                          "cutReason",
-                          "timelineDurationMs",
-                          "sourceUnitIds"
-                        ],
-                        "type": "object"
-                      },
-                      "type": "array"
-                    },
-                    "type": "object"
-                  },
-                  "suggestedEpisodeBreakAfterShotNumbers": {
-                    "items": {
-                      "type": "integer"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "beatsByKey"
-                ],
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "candidate": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "schemaVersion": {
-                    "const": "chapter_adaptation_plan_v3",
-                    "type": "string"
-                  },
-                  "adaptationId": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "sourceHash": {
-                    "pattern": "^[0-9a-f]{64}$",
-                    "type": "string"
-                  },
-                  "scenes": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "sceneKey": {
-                          "pattern": "^SC[0-9]{2,3}$",
-                          "type": "string"
-                        },
-                        "title": {
-                          "maxLength": 160,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "locationLabel": {
-                          "maxLength": 160,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "timeLabel": {
-                          "maxLength": 120,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "objective": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "changeSummary": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "beats": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "beatKey": {
-                                "pattern": "^B[0-9]{2,3}$",
-                                "type": "string"
-                              },
-                              "title": {
-                                "maxLength": 160,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "dramaticTurn": {
-                                "maxLength": 800,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "visualStrategy": {
-                                "maxLength": 800,
-                                "minLength": 1,
-                                "type": "string"
-                              },
-                              "coverageGoals": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "goalKey": {
-                                      "pattern": "^G[0-9]{2,3}$",
-                                      "type": "string"
-                                    },
-                                    "kind": {
-                                      "enum": [
-                                        "story_information",
-                                        "action",
-                                        "emotion",
-                                        "space",
-                                        "relationship",
-                                        "motif",
-                                        "transition"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "priority": {
-                                      "enum": [
-                                        "essential",
-                                        "supporting"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "description": {
-                                      "maxLength": 500,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "goalKey",
-                                    "kind",
-                                    "priority",
-                                    "description"
-                                  ],
-                                  "type": "object"
-                                },
-                                "maxItems": 12,
-                                "minItems": 1,
-                                "type": "array"
-                              },
-                              "sourceRanges": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "start": {
-                                      "minimum": 0,
-                                      "type": "integer"
-                                    },
-                                    "end": {
-                                      "minimum": 1,
-                                      "type": "integer"
-                                    },
-                                    "sourceText": {
-                                      "maxLength": 120000,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "start",
-                                    "end",
-                                    "sourceText"
-                                  ],
-                                  "type": "object"
-                                },
-                                "maxItems": 24,
-                                "minItems": 1,
-                                "type": "array"
-                              },
-                              "shots": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "shotKey": {
-                                      "pattern": "^S[0-9]{2,3}$",
-                                      "type": "string"
-                                    },
-                                    "title": {
-                                      "maxLength": 120,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "narrativePurpose": {
-                                      "enum": [
-                                        "establishing",
-                                        "action",
-                                        "dialogue",
-                                        "reaction",
-                                        "reveal",
-                                        "insert",
-                                        "transition",
-                                        "atmosphere"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "storyFunction": {
-                                      "maxLength": 800,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "audienceGain": {
-                                      "maxLength": 800,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "coveredGoalKeys": {
-                                      "items": {
-                                        "type": "string"
-                                      },
-                                      "maxItems": 12,
-                                      "type": "array"
-                                    },
-                                    "sourceRelation": {
-                                      "enum": [
-                                        "direct",
-                                        "derived",
-                                        "supplemental"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "shotScale": {
-                                      "enum": [
-                                        "extreme_long",
-                                        "long",
-                                        "medium",
-                                        "medium_close",
-                                        "close",
-                                        "extreme_close",
-                                        "over_shoulder",
-                                        "two_shot",
-                                        "pov"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "cameraAngle": {
-                                      "enum": [
-                                        "eye_level",
-                                        "high_angle",
-                                        "low_angle",
-                                        "overhead",
-                                        "dutch_angle"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "cameraMovement": {
-                                      "enum": [
-                                        "locked",
-                                        "pan",
-                                        "tilt",
-                                        "push_in",
-                                        "pull_out",
-                                        "tracking",
-                                        "arc",
-                                        "handheld",
-                                        "focus_shift"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "visualIntent": {
-                                      "maxLength": 1200,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "speechMode": {
-                                      "enum": [
-                                        "none",
-                                        "sync",
-                                        "offscreen",
-                                        "voiceover"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "spokenText": {
-                                      "anyOf": [
-                                        {
-                                          "maxLength": 800,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        {
-                                          "type": "null"
-                                        }
-                                      ]
-                                    },
-                                    "soundDesign": {
-                                      "maxLength": 600,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "cutReason": {
-                                      "maxLength": 600,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    },
-                                    "timelineDurationMs": {
-                                      "maximum": 15000,
-                                      "minimum": 500,
-                                      "type": "integer"
-                                    },
-                                    "sourceRanges": {
-                                      "items": {
-                                        "additionalProperties": false,
-                                        "properties": {
-                                          "start": {
-                                            "minimum": 0,
-                                            "type": "integer"
-                                          },
-                                          "end": {
-                                            "minimum": 1,
-                                            "type": "integer"
-                                          },
-                                          "sourceText": {
-                                            "maxLength": 120000,
-                                            "minLength": 1,
-                                            "type": "string"
-                                          }
-                                        },
-                                        "required": [
-                                          "start",
-                                          "end",
-                                          "sourceText"
-                                        ],
-                                        "type": "object"
-                                      },
-                                      "maxItems": 12,
-                                      "type": "array"
-                                    }
-                                  },
-                                  "required": [
-                                    "shotKey",
-                                    "title",
-                                    "narrativePurpose",
-                                    "storyFunction",
-                                    "audienceGain",
-                                    "sourceRelation",
-                                    "shotScale",
-                                    "cameraAngle",
-                                    "cameraMovement",
-                                    "visualIntent",
-                                    "speechMode",
-                                    "soundDesign",
-                                    "cutReason",
-                                    "timelineDurationMs",
-                                    "sourceRanges"
-                                  ],
-                                  "type": "object"
-                                },
-                                "maxItems": 40,
-                                "minItems": 1,
-                                "type": "array"
-                              }
-                            },
-                            "required": [
-                              "beatKey",
-                              "title",
-                              "dramaticTurn",
-                              "visualStrategy",
-                              "coverageGoals",
-                              "sourceRanges",
-                              "shots"
-                            ],
-                            "type": "object"
-                          },
-                          "maxItems": 40,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "sceneKey",
-                        "title",
-                        "locationLabel",
-                        "timeLabel",
-                        "objective",
-                        "changeSummary",
-                        "beats"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 30,
-                    "minItems": 1,
-                    "type": "array"
-                  },
-                  "suggestedEpisodeBreakAfterShotKeys": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "maxItems": 119,
-                    "type": "array"
-                  },
-                  "reviewSummary": {
-                    "anyOf": [
-                      {
-                        "maxLength": 1200,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "reviewFindings": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "severity": {
-                          "enum": [
-                            "notice",
-                            "warning"
-                          ],
-                          "type": "string"
-                        },
-                        "scope": {
-                          "enum": [
-                            "plan",
-                            "scene",
-                            "beat",
-                            "shot"
-                          ],
-                          "type": "string"
-                        },
-                        "scopeKey": {
-                          "anyOf": [
-                            {
-                              "maxLength": 16,
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "message": {
-                          "maxLength": 600,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "evidence": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "suggestion": {
-                          "maxLength": 800,
-                          "minLength": 1,
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "severity",
-                        "scope",
-                        "message",
-                        "evidence",
-                        "suggestion"
-                      ],
-                      "type": "object"
-                    },
-                    "maxItems": 480,
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "schemaVersion",
-                  "adaptationId",
-                  "sourceHash",
-                  "scenes"
-                ],
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "missingBeatKeys": {
-            "items": {
-              "pattern": "^B[0-9]{2,3}$",
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "validationFindings",
-          "stageKey",
-          "outcome",
-          "design",
-          "candidate",
-          "missingBeatKeys"
-        ],
-        "type": "object"
-      }
-    },
-    {
-      "key": "output.video_dramatic_structure_stage.v2",
-      "version": 2,
-      "supported": true,
-      "purpose": "generation",
-      "sha256": "e2081efe946574210616f17e5447ece6f286ee2a0d7af45b522f8b5537505a62",
-      "jsonSchema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "properties": {
-          "validationFindings": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "enum": [
-                    "protocol_invalid",
-                    "dramatic_protocol",
-                    "dramatic_materialization",
-                    "design_protocol",
-                    "design_materialization",
-                    "prompt_schema",
-                    "prompt_target_order",
-                    "prompt_performance",
-                    "prompt_continuity",
-                    "prompt_metadata",
-                    "prompt_neighbor",
-                    "prompt_scale",
-                    "prompt_action_count",
-                    "prompt_expression_invisible",
-                    "prompt_expression_micro",
-                    "prompt_expression_interpretation",
-                    "prompt_action_interpretation",
-                    "prompt_effects",
-                    "prompt_affirmative_effects",
-                    "prompt_unconfirmed_action",
-                    "prompt_required_hand_blocked",
-                    "prompt_required_subject_blocked",
-                    "prompt_required_hand_missing",
-                    "prompt_repeated_fields",
-                    "prompt_compile",
-                    "prompt_budget"
-                  ],
-                  "type": "string"
-                },
-                "shotKey": {
-                  "anyOf": [
-                    {
-                      "pattern": "^S[0-9]{2,3}$",
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "parameters": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {},
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "durationMs": {
-                          "maximum": 15000,
-                          "minimum": 500,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum",
-                        "durationMs"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "actual": {
-                          "minimum": 0,
-                          "type": "integer"
-                        },
-                        "maximum": {
-                          "minimum": 1,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "actual",
-                        "maximum"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "requiredScale": {
-                          "enum": [
-                            "过肩镜头",
-                            "双人镜头",
-                            "主观镜头",
-                            "大特写",
-                            "中近景",
-                            "大全景",
-                            "大远景",
-                            "特写",
-                            "近景",
-                            "中景",
-                            "全景",
-                            "远景"
-                          ],
-                          "type": "string"
-                        },
-                        "conflictingScales": {
-                          "items": {
-                            "enum": [
-                              "过肩镜头",
-                              "双人镜头",
-                              "主观镜头",
-                              "大特写",
-                              "中近景",
-                              "大全景",
-                              "大远景",
-                              "特写",
-                              "近景",
-                              "中景",
-                              "全景",
-                              "远景"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "requiredScale",
-                        "conflictingScales"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "effects": {
-                          "items": {
-                            "enum": [
-                              "火花",
-                              "火焰",
-                              "爆炸",
-                              "闪电或电弧",
-                              "粒子效果",
-                              "光束或光柱",
-                              "浓烟",
-                              "雨雪",
-                              "血迹"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 9,
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "effects"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "markers": {
-                          "items": {
-                            "enum": [
-                              "凝成",
-                              "亮起",
-                              "熄灭",
-                              "弹开",
-                              "打开",
-                              "关闭",
-                              "碎裂",
-                              "破裂",
-                              "加速",
-                              "减速",
-                              "转为",
-                              "变成",
-                              "显现",
-                              "消失",
-                              "再次",
-                              "再度",
-                              "又一次",
-                              "反复",
-                              "继续",
-                              "重试",
-                              "回拧",
-                              "反向",
-                              "转动",
-                              "旋转"
-                            ],
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "markers"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fields": {
-                          "items": {
-                            "enum": [
-                              "subjectAndScene",
-                              "visibleAction",
-                              "expressionAndGaze",
-                              "camera",
-                              "audio"
-                            ],
-                            "type": "string"
-                          },
-                          "maxItems": 2,
-                          "minItems": 2,
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "fields"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "blocking": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "code",
-                "shotKey",
-                "parameters",
-                "blocking"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "stageKey": {
-            "const": "dramatic_structure",
-            "type": "string"
-          },
-          "outcome": {
-            "enum": [
-              "ready",
-              "needs_correction"
-            ],
-            "type": "string"
-          },
-          "checkpoint": {
-            "anyOf": [
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "schemaVersion": {
-                    "const": "dramatic_structure_v3",
-                    "type": "string"
-                  },
-                  "scenes": {
-                    "items": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "sceneKey": {
-                          "pattern": "^SC[0-9]{2,3}$",
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "locationLabel": {
-                          "type": "string"
-                        },
-                        "timeLabel": {
-                          "type": "string"
-                        },
-                        "objective": {
-                          "type": "string"
-                        },
-                        "changeSummary": {
-                          "type": "string"
-                        },
-                        "beats": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "beatKey": {
-                                "pattern": "^B[0-9]{2,3}$",
-                                "type": "string"
-                              },
-                              "title": {
-                                "type": "string"
-                              },
-                              "sourceUnitIds": {
-                                "items": {
-                                  "type": "string"
-                                },
-                                "type": "array"
-                              },
-                              "dramaticTurn": {
-                                "type": "string"
-                              },
-                              "visualStrategy": {
-                                "type": "string"
-                              },
-                              "coverageGoals": {
-                                "items": {
-                                  "additionalProperties": false,
-                                  "properties": {
-                                    "goalKey": {
-                                      "pattern": "^G[0-9]{2,3}$",
-                                      "type": "string"
-                                    },
-                                    "kind": {
-                                      "enum": [
-                                        "story_information",
-                                        "action",
-                                        "emotion",
-                                        "space",
-                                        "relationship",
-                                        "motif",
-                                        "transition"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "priority": {
-                                      "enum": [
-                                        "essential",
-                                        "supporting"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "description": {
-                                      "maxLength": 500,
-                                      "minLength": 1,
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "goalKey",
-                                    "kind",
-                                    "priority",
-                                    "description"
-                                  ],
-                                  "type": "object"
-                                },
-                                "type": "array"
-                              }
-                            },
-                            "required": [
-                              "beatKey",
-                              "title",
-                              "sourceUnitIds",
-                              "dramaticTurn",
-                              "visualStrategy",
-                              "coverageGoals"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "sceneKey",
-                        "title",
-                        "locationLabel",
-                        "timeLabel",
-                        "objective",
-                        "changeSummary",
-                        "beats"
-                      ],
-                      "type": "object"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "scenes"
-                ],
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "validationFindings",
-          "stageKey",
-          "outcome",
-          "checkpoint"
-        ],
-        "type": "object"
-      }
-    },
-    {
       "key": "output.embedding_batch.v2",
       "version": 2,
       "supported": true,
@@ -7893,6 +5057,854 @@
         },
         "required": [
           "text"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "key": "output.video_episode_script_stage.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "34dd259d81d23988185c9d32c2e2dc01304bef30c63f11d303daab9fe7f11ff0",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "stageKey": {
+            "const": "episode_script",
+            "type": "string"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "overview": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "summary": {
+                            "maxLength": 4000,
+                            "type": "string"
+                          },
+                          "creativeIntent": {
+                            "maxLength": 4000,
+                            "type": "string"
+                          },
+                          "targetDurationSeconds": {
+                            "anyOf": [
+                              {
+                                "maximum": 86400,
+                                "minimum": 1,
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scenes": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tempKey": {
+                          "anyOf": [
+                            {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9_-]+$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "title": {
+                          "maxLength": 160,
+                          "type": "string"
+                        },
+                        "locationLabel": {
+                          "maxLength": 240,
+                          "type": "string"
+                        },
+                        "timeLabel": {
+                          "maxLength": 160,
+                          "type": "string"
+                        },
+                        "narrativeTime": {
+                          "maxLength": 400,
+                          "type": "string"
+                        },
+                        "characterIds": {
+                          "items": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 40,
+                          "type": "array"
+                        },
+                        "lines": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "id": {
+                                "anyOf": [
+                                  {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "tempKey": {
+                                "anyOf": [
+                                  {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "pattern": "^[A-Za-z0-9_-]+$",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "enum": [
+                                  "action",
+                                  "dialogue",
+                                  "narration"
+                                ],
+                                "type": "string"
+                              },
+                              "speakerId": {
+                                "anyOf": [
+                                  {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "text": {
+                                "maxLength": 8000,
+                                "type": "string"
+                              },
+                              "sourceRefs": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "sourceSnapshotId": {
+                                      "maxLength": 128,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "start": {
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "end": {
+                                      "minimum": 1,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "sourceSnapshotId",
+                                    "start",
+                                    "end"
+                                  ],
+                                  "type": "object"
+                                },
+                                "maxItems": 40,
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 500,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "title",
+                        "locationLabel",
+                        "timeLabel",
+                        "narrativeTime"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 60,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "endingStates": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "key": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9_-]+$",
+                              "type": "string"
+                            },
+                            "description": {
+                              "maxLength": 2000,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "entityIds": {
+                              "items": {
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "maxItems": 40,
+                              "type": "array"
+                            },
+                            "narrativeTime": {
+                              "maxLength": 400,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "description"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "dependencies": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "producerEpisodeId": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "producerScriptVersionId": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "producerStateKey": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9_-]+$",
+                              "type": "string"
+                            },
+                            "consumerSceneId": {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "consumerLineId": {
+                              "anyOf": [
+                                {
+                                  "maxLength": 128,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "narrativeTime": {
+                              "maxLength": 400,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "description": {
+                              "maxLength": 2000,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "producerEpisodeId",
+                            "producerScriptVersionId",
+                            "producerStateKey",
+                            "consumerSceneId",
+                            "narrativeTime",
+                            "description"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "overview",
+                  "scenes",
+                  "endingStates",
+                  "dependencies"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "stageKey",
+          "candidate",
+          "review"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "key": "output.video_episode_script_review_stage.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "727e23b9cbdc4def31b66bf0341fedd4d0735a7e7c71f7d3a578ad1fce813c1f",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "stageKey": {
+            "const": "episode_script_review",
+            "type": "string"
+          },
+          "candidate": {
+            "type": "null"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "pass",
+                      "revise"
+                    ],
+                    "type": "string"
+                  },
+                  "summary": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "requiredChanges": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "source",
+                            "continuity",
+                            "dialogue",
+                            "clarity"
+                          ],
+                          "type": "string"
+                        },
+                        "sceneId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lineId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "maxLength": 2000,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "sceneId",
+                        "lineId",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 100,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "decision",
+                  "summary",
+                  "requiredChanges",
+                  "findings"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "stageKey",
+          "candidate",
+          "review"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "key": "output.video_episode_storyboard_stage.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "195bd7b5a4d1c2eb42af268054e1ba16c71eedcc7f32376212755da265d13c98",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "stageKey": {
+            "const": "episode_storyboard",
+            "type": "string"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "shots": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "anyOf": [
+                            {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tempKey": {
+                          "anyOf": [
+                            {
+                              "maxLength": 128,
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9_-]+$",
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lineage": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "sourceShotId": {
+                                "maxLength": 128,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "relation": {
+                                "enum": [
+                                  "replacement",
+                                  "copy",
+                                  "split",
+                                  "merge"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "sourceShotId",
+                              "relation"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 20,
+                          "type": "array"
+                        },
+                        "scriptSceneId": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "scriptLineIds": {
+                          "items": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "type": "array"
+                        },
+                        "title": {
+                          "maxLength": 240,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "action": {
+                          "maxLength": 4000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "framing": {
+                          "enum": [
+                            "extreme_wide",
+                            "wide",
+                            "medium",
+                            "close_up",
+                            "detail",
+                            "over_shoulder",
+                            "pov"
+                          ],
+                          "type": "string"
+                        },
+                        "cameraMovement": {
+                          "enum": [
+                            "static",
+                            "pan",
+                            "tilt",
+                            "dolly",
+                            "truck",
+                            "crane",
+                            "handheld",
+                            "orbit",
+                            "zoom"
+                          ],
+                          "type": "string"
+                        },
+                        "durationMs": {
+                          "maximum": 12000,
+                          "minimum": 4000,
+                          "type": "integer"
+                        },
+                        "productionIntent": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "provider": {
+                              "const": "seedance",
+                              "type": "string"
+                            },
+                            "model": {
+                              "maxLength": 200,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "generationMode": {
+                              "const": "reference",
+                              "type": "string"
+                            },
+                            "executionMode": {
+                              "const": "simulated",
+                              "type": "string"
+                            },
+                            "feeConfirmed": {
+                              "const": false,
+                              "type": "boolean"
+                            },
+                            "ratio": {
+                              "enum": [
+                                "16:9",
+                                "4:3",
+                                "1:1",
+                                "3:4",
+                                "9:16",
+                                "21:9",
+                                "adaptive"
+                              ],
+                              "type": "string"
+                            },
+                            "resolution": {
+                              "const": "720p",
+                              "type": "string"
+                            },
+                            "generateAudio": {
+                              "type": "boolean"
+                            },
+                            "watermark": {
+                              "type": "boolean"
+                            },
+                            "outputFormat": {
+                              "const": "mp4",
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "maxLength": 2500,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "durationSeconds": {
+                              "maximum": 12,
+                              "minimum": 4,
+                              "type": "integer"
+                            },
+                            "references": {
+                              "items": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "canonVersionId": {
+                                    "maxLength": 128,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "strength": {
+                                    "anyOf": [
+                                      {
+                                        "maximum": 100,
+                                        "minimum": 1,
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "canonVersionId"
+                                ],
+                                "type": "object"
+                              },
+                              "maxItems": 20,
+                              "minItems": 1,
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "model",
+                            "ratio",
+                            "prompt",
+                            "durationSeconds",
+                            "references"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "scriptSceneId",
+                        "title",
+                        "action",
+                        "framing",
+                        "cameraMovement",
+                        "durationMs",
+                        "productionIntent"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 300,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "shots"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "stageKey",
+          "candidate",
+          "review"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "key": "output.video_episode_storyboard_review_stage.v2",
+      "version": 2,
+      "supported": true,
+      "purpose": "generation",
+      "sha256": "1da61785699a2cf07226c9bee851ca27469946483b6df8833fa3e1ad1fa05db0",
+      "jsonSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "stageKey": {
+            "const": "episode_storyboard_review",
+            "type": "string"
+          },
+          "candidate": {
+            "type": "null"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "pass",
+                      "revise"
+                    ],
+                    "type": "string"
+                  },
+                  "summary": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "requiredChanges": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 30,
+                    "type": "array"
+                  },
+                  "findings": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "script_coverage",
+                            "continuity",
+                            "shot_clarity",
+                            "feasibility",
+                            "reference",
+                            "duration"
+                          ],
+                          "type": "string"
+                        },
+                        "shotId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "scriptSceneId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "maxLength": 2000,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "shotId",
+                        "scriptSceneId",
+                        "message"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 200,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "decision",
+                  "summary",
+                  "requiredChanges",
+                  "findings"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "stageKey",
+          "candidate",
+          "review"
         ],
         "type": "object"
       }

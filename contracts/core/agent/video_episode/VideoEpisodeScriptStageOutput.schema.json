@@ -1,0 +1,523 @@
+{
+  "$defs": {
+    "VideoEpisodeDependencyInput": {
+      "additionalProperties": false,
+      "properties": {
+        "consumerLineId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Consumerlineid"
+        },
+        "consumerSceneId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Consumersceneid",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Narrativetime",
+          "type": "string"
+        },
+        "producerEpisodeId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Producerepisodeid",
+          "type": "string"
+        },
+        "producerScriptVersionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Producerscriptversionid",
+          "type": "string"
+        },
+        "producerStateKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Producerstatekey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "producerEpisodeId",
+        "producerScriptVersionId",
+        "producerStateKey",
+        "consumerSceneId",
+        "narrativeTime",
+        "description"
+      ],
+      "title": "VideoEpisodeDependencyInput",
+      "type": "object"
+    },
+    "VideoEpisodeEndingState": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "entityIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Entityids",
+          "type": "array"
+        },
+        "key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Key",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "default": "",
+          "maxLength": 400,
+          "title": "Narrativetime",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "description"
+      ],
+      "title": "VideoEpisodeEndingState",
+      "type": "object"
+    },
+    "VideoEpisodeScriptLine": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "kind": {
+          "enum": [
+            "action",
+            "dialogue",
+            "narration"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sourceRefs": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeSourceRef"
+          },
+          "maxItems": 40,
+          "title": "Sourcerefs",
+          "type": "array"
+        },
+        "speakerId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speakerid"
+        },
+        "tempKey": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tempkey"
+        },
+        "text": {
+          "maxLength": 8000,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "VideoEpisodeScriptLine",
+      "type": "object"
+    },
+    "VideoEpisodeScriptOverview": {
+      "additionalProperties": false,
+      "properties": {
+        "creativeIntent": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Creativeintent",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 4000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "targetDurationSeconds": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Targetdurationseconds"
+        }
+      },
+      "title": "VideoEpisodeScriptOverview",
+      "type": "object"
+    },
+    "VideoEpisodeScriptProposal": {
+      "additionalProperties": false,
+      "description": "局部修订仅返回选中场次；其他内容由 Core 按冻结工作稿合并。",
+      "properties": {
+        "dependencies": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/VideoEpisodeDependencyInput"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dependencies"
+        },
+        "endingStates": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/VideoEpisodeEndingState"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Endingstates"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VideoEpisodeScriptOverview"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scenes": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeScriptScene"
+          },
+          "maxItems": 60,
+          "minItems": 1,
+          "title": "Scenes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "overview",
+        "scenes",
+        "endingStates",
+        "dependencies"
+      ],
+      "title": "VideoEpisodeScriptProposal",
+      "type": "object"
+    },
+    "VideoEpisodeScriptReview": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "enum": [
+            "pass",
+            "revise"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeScriptReviewFinding"
+          },
+          "maxItems": 100,
+          "title": "Findings",
+          "type": "array"
+        },
+        "requiredChanges": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Requiredchanges",
+          "type": "array"
+        },
+        "summary": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "summary",
+        "requiredChanges",
+        "findings"
+      ],
+      "title": "VideoEpisodeScriptReview",
+      "type": "object"
+    },
+    "VideoEpisodeScriptReviewFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "source",
+            "continuity",
+            "dialogue",
+            "clarity"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "lineId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lineid"
+        },
+        "message": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "sceneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sceneid"
+        }
+      },
+      "required": [
+        "code",
+        "sceneId",
+        "lineId",
+        "message"
+      ],
+      "title": "VideoEpisodeScriptReviewFinding",
+      "type": "object"
+    },
+    "VideoEpisodeScriptScene": {
+      "additionalProperties": false,
+      "properties": {
+        "characterIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Characterids",
+          "type": "array"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/VideoEpisodeScriptLine"
+          },
+          "maxItems": 500,
+          "title": "Lines",
+          "type": "array"
+        },
+        "locationLabel": {
+          "maxLength": 240,
+          "title": "Locationlabel",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "maxLength": 400,
+          "title": "Narrativetime",
+          "type": "string"
+        },
+        "tempKey": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tempkey"
+        },
+        "timeLabel": {
+          "maxLength": 160,
+          "title": "Timelabel",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 160,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "locationLabel",
+        "timeLabel",
+        "narrativeTime"
+      ],
+      "title": "VideoEpisodeScriptScene",
+      "type": "object"
+    },
+    "VideoEpisodeSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "minimum": 1,
+          "title": "End",
+          "type": "integer"
+        },
+        "sourceSnapshotId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Sourcesnapshotid",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sourceSnapshotId",
+        "start",
+        "end"
+      ],
+      "title": "VideoEpisodeSourceRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeScriptStageOutput/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "candidate": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoEpisodeScriptProposal"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "review": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VideoEpisodeScriptReview"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stageKey": {
+      "enum": [
+        "episode_script",
+        "episode_script_review"
+      ],
+      "title": "Stagekey",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stageKey",
+    "candidate",
+    "review"
+  ],
+  "title": "VideoEpisodeScriptStageOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeScriptStageOutput"
+}

@@ -54,7 +54,7 @@ class VideoAdaptationServiceTest {
         VideoAdaptationService service =
                 new VideoAdaptationService(repository, decisions, tasks, true);
 
-        var response = service.create("user-1", "project-1", request);
+        var response = service.get("user-1", "adaptation-1");
 
         assertThat(response.getState().getValue()).isEqualTo("empty");
         assertThat(response.getHeadRevision()).isOne();
@@ -62,6 +62,23 @@ class VideoAdaptationServiceTest {
         assertThat(response.getPromptVersions()).isEmpty();
         assertThat(response.getPromptCandidates()).isEmpty();
         assertThat(response.getVisualReferenceSets()).isEmpty();
+    }
+
+    @Test
+    void 新章节根与两个旧模型起跑入口必须退出且不能创建任务() {
+        VideoAdaptationRepository repository = mock(VideoAdaptationRepository.class);
+        VideoAdaptationTaskStore tasks = mock(VideoAdaptationTaskStore.class);
+        var service = new VideoAdaptationService(repository, mock(VideoAdaptationDecisionStore.class), tasks, true);
+        for (Runnable command : List.<Runnable>of(
+                () -> service.create("user-1", "project-1", mock(CreateChapterAdaptationRequest.class)),
+                () -> service.startPlan("user-1", "adaptation-1", mock(cn.inkforge.contracts.api.StartShotPlanRunRequest.class)),
+                () -> service.startPrompts("user-1", "adaptation-1", mock(cn.inkforge.contracts.api.StartPromptRunRequest.class)))) {
+            assertThatThrownBy(command::run).isInstanceOfSatisfying(ApiException.class, error -> {
+                assertThat(error.statusCode()).isEqualTo(410);
+                assertThat(error.code()).isEqualTo("VIDEO_CHAPTER_CREATION_RETIRED");
+            });
+        }
+        org.mockito.Mockito.verifyNoInteractions(repository, tasks);
     }
 
     private static VideoAdaptationSnapshot snapshot() {

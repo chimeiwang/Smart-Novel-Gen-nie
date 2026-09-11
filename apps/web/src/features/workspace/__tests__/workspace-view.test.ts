@@ -3,11 +3,20 @@ import { describe, it } from "node:test";
 
 import {
   buildWorkspaceChapterHref,
+  buildWorkspaceEpisodeHref,
+  parseEpisodeRouteContext,
   parseWorkspaceView,
   resolveWorkspaceViewForProfile,
 } from "../workspace-view";
 
 describe("工作区视图", () => {
+  it("视频深链以稳定分集身份恢复，不夹带文字章节", () => {
+    const context = parseEpisodeRouteContext({ projectId: "project-1", episodeId: "episode-2", surface: "production" });
+    const href = buildWorkspaceEpisodeHref("novel-1", context);
+    assert.equal(href, "/workspace/novel-1?view=video&surface=production&projectId=project-1&episodeId=episode-2");
+    assert.equal(href.includes("chapterId"), false);
+    assert.deepEqual(parseEpisodeRouteContext({ projectId: ["bad"], episodeId: "", surface: "unknown" }), { projectId: null, episodeId: null, surface: "script" });
+  });
   it("只接受四个已声明工作区视图", () => {
     assert.equal(parseWorkspaceView("studio"), "studio");
     assert.equal(parseWorkspaceView("reading"), "reading");

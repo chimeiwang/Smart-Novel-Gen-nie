@@ -1,0 +1,31 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeSourceRef/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "end": {
+      "minimum": 1,
+      "title": "End",
+      "type": "integer"
+    },
+    "sourceSnapshotId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Sourcesnapshotid",
+      "type": "string"
+    },
+    "start": {
+      "minimum": 0,
+      "title": "Start",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sourceSnapshotId",
+    "start",
+    "end"
+  ],
+  "title": "VideoEpisodeSourceRef",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeSourceRef"
+}

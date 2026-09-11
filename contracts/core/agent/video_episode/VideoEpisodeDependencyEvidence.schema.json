@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "VideoEpisodeEndingState": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "entityIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Entityids",
+          "type": "array"
+        },
+        "key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Key",
+          "type": "string"
+        },
+        "narrativeTime": {
+          "default": "",
+          "maxLength": 400,
+          "title": "Narrativetime",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "description"
+      ],
+      "title": "VideoEpisodeEndingState",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeDependencyEvidence/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "contentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contenthash",
+      "type": "string"
+    },
+    "episodeId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Episodeid",
+      "type": "string"
+    },
+    "scriptVersionId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Scriptversionid",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/VideoEpisodeEndingState"
+    }
+  },
+  "required": [
+    "episodeId",
+    "scriptVersionId",
+    "state",
+    "contentHash"
+  ],
+  "title": "VideoEpisodeDependencyEvidence",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeDependencyEvidence"
+}

@@ -13,6 +13,7 @@ from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_contracts.video_render import (
     SeedanceRenderQueryRequest,
     SeedanceRenderSubmitRequest,
+    SeedanceRuntimeReference,
 )
 from inkforge_core.agent_client import (
     AgentClient,
@@ -480,25 +481,14 @@ async def test_seedance_short_calls_use_dedicated_scope_and_poll_identity() -> N
     )
     client = AgentClient(http, signer)
     submitted = await client.submit_seedance_render(
-        SeedanceRenderSubmitRequest(
-            taskId="render-1",
-            novelId="novel-1",
-            inputHash="a" * 64,
-            model="seedance-test",
-            promptText="完整提示词",
-            ratio="9:16",
-            durationSeconds=5,
-            resolution="720p",
-            generateAudio=True,
-            watermark=False,
-            references=[],
-        )
+        _seedance_submit_request()
     )
     queried = await client.query_seedance_render(
         SeedanceRenderQueryRequest(
             taskId="render-1",
             novelId="novel-1",
             providerTaskId=submitted.providerTaskId,
+            executionMode="live",
             pollCount=3,
         )
     )
@@ -520,6 +510,8 @@ def _seedance_submit_request() -> SeedanceRenderSubmitRequest:
         taskId="render-1",
         novelId="novel-1",
         inputHash="a" * 64,
+        generationMode="reference",
+        executionMode="live",
         model="seedance-test",
         promptText="完整提示词",
         ratio="9:16",
@@ -527,7 +519,14 @@ def _seedance_submit_request() -> SeedanceRenderSubmitRequest:
         resolution="720p",
         generateAudio=True,
         watermark=False,
-        references=[],
+        references=[
+            SeedanceRuntimeReference(
+                ordinal=1,
+                assetId="asset-1",
+                mimeType="image/png",
+                url="https://assets.example/reference.png",
+            )
+        ],
     )
 
 

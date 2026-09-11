@@ -49,6 +49,7 @@ public final class WorkflowOutputValidator {
 
     private WorkflowOutputValidator() {}
 
+    /** 按已解析的注册表 Schema 校验一次模型结构化输出。 */
     public static void validate(ExecutionRegistry.OutputSchema outputSchema, Object value) {
         Objects.requireNonNull(outputSchema, "输出 Schema 不能为空");
         if (!outputSchema.supported()) {
@@ -72,6 +73,7 @@ public final class WorkflowOutputValidator {
     }
 
     private static void validateSchemaDefinition(Map<String, Object> schema, String path) {
+        // 遇到未实现的关键字必须拒绝，不能把“未校验”误当成“校验通过”。
         Set<String> unknown = new HashSet<>(schema.keySet());
         unknown.removeAll(SUPPORTED_KEYWORDS);
         if (!unknown.isEmpty()) {
@@ -124,6 +126,7 @@ public final class WorkflowOutputValidator {
 
     private static void validateValue(
             Map<String, Object> schema, Object value, String path, List<String> violations) {
+        // anyOf 只要求至少一个分支匹配；错误详情由外层统一收敛为首个稳定路径。
         if (schema.containsKey("anyOf")) {
             int matches = 0;
             for (Object branch : list(schema.get("anyOf"), path + ".anyOf")) {

@@ -108,6 +108,8 @@ class VideoVisualCanonRepository:
                 include_json = _json_list(request.includeFeatures)
                 exclude_json = _json_list(request.excludeFeatures)
                 if canon is None:
+                    if request.expectedRevision != 0:
+                        raise _canon_revision_conflict(0)
                     canon = VideoVisualCanon(
                         id=generate_id(),
                         projectId=project.id,
@@ -137,6 +139,8 @@ class VideoVisualCanonRepository:
                         and canon.candidateDefaultStrength == request.defaultStrength
                     )
                     if not unchanged:
+                        if request.expectedRevision != canon.revision:
+                            raise _canon_revision_conflict(canon.revision)
                         canon.settingName = setting_name
                         canon.label = request.label
                         canon.candidateAssetId = asset.id

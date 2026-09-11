@@ -1,80 +1,42 @@
 # AI 写作与 Agent 需求
 
-## 长篇章节影视化任务
+## 长篇 Episode 视频 Agent 与生成任务
 
-旧 `VideoScene` 的选区创建、查询、重试、返工、批准和提示词预览公共接口已经退役。数据库表、内部回调、
-dispatcher 和 Agent handler 只为已存在历史任务保留终态收敛能力，不得再形成新任务入口。
+活动视频主链以独立 `VideoEpisode` 为身份，章节只作为一个或多个不可变来源快照。旧
+`VideoChapterAdaptation`、`VideoAdaptationTask`、`chapter_cinematic_adaptation_v2` 和
+`chapter_shot_prompt_v2` 已从公共／内部路由、活动 Catalog、dispatcher 与 Agent handler 退出，不能再创建或调度。
+服务器尚未执行物理退役迁移，因此旧表和类型只作为未装配结构投影暂留。
 
-长篇视频工作台的新入口使用独立 `VideoChapterAdaptation`，不再把完整章节或镜头方案写入旧
-`VideoScene.planJson`。`JobKind=video` 新增两个判别 workflow：
+当前 Durable Agent V2 Catalog 共 23 项，其中视频只包含 4 项：
 
-- `chapter_cinematic_adaptation_v2`：先识别真实 Scene、DramaticBeat 和观众覆盖目标，保存 Core 耐久 checkpoint，
-  再设计有剪辑动机的 Shot，并经过连续性 Reviewer；最多一次完整返工。
-- `chapter_shot_prompt_v2`：固定到一个已批准 `VideoShotPlanVersion`，只为请求镜头生成结构化即梦提示词规格。
+- `episode_script_generate`：依据精确 Episode、来源集合、创作意图和工作稿 revision 生成剧本候选；
+- `episode_script_revise`：只修改声明的稳定 sceneId／lineId 范围，由 Core 合并保留范围外内容；
+- `episode_storyboard_generate`：从确切正式剧本生成带稳定 shot 身份意图的分镜候选；
+- `episode_storyboard_revise`：只修改声明的稳定 shotId，复制、替换、拆分和合并由 Core 校验 lineage 并分配新身份。
 
-提示词任务还必须按目标镜头冻结当前 `VideoShotVisualReferenceSet` 中的精确视觉版本，而不是只保存可变 Head 或图片
-URL。每项包含 `canonVersionId/assetId/sha256/settingKind/settingId/duty/variantKey/strength`。Agent 不读取图片文件；
-有 `identity/costume/scene/prop` 正式参考时，相应图片负责静态身份与造型，文字投影只保留主体名称、本镜必要锚点、
-临时状态和可见变化。候选和正式 PromptVersion 都必须能重建自己采用的参考图集合。
+四项操作都只运行于 V2 单 Step 边界。Core 在受理时冻结完整来源、基础版本、revision、修改范围、视觉依据和内容哈希，
+以 Workflow Evidence 持久化；Agent 只读取该 Evidence，不能连接 PostgreSQL、重新读取可变小说资料或直接写正式视频事实。
+Run 完成只表示候选已持久化到 `ReviewArtifact`，不表示作者采用或正式版本已经切换。
 
-逐镜提示词首次响应不是合法 JSON 结构，或没有通过正式时长、景别、重复与确定性编译门禁时，同一任务允许一次带
-具体原因和 Schema 要求的纠正调用；第二次仍有 Schema、目标顺序、空字段、编译或预算硬错误时必须失败并返回可定位
-原因，只有动作密度、重复、邻镜语言、不可见解释或未确认状态变化等语义质量问题时返回带 `qualityWarnings` 的可编辑
-候选，不能从可见正文猜测结构、无限重试或保存部分提示词。调用纠正前允许执行有边界的确定性归一：移除编译器持有的画幅/时长、历史冗余字段、当前景别
-不可见的表情、与正式动作直接冲突的负面约束，并将唯一冲突的显式景别词替换为正式中文标签；正式标签与一个冲突
-标签并存且没有景别变化语义时可删除冲突词，主体与摄影机重复景别时只在摄影机保留。真正的运镜或景别变化不得
-自动改写，也不得截断文本、改写动作或补造事件。
-新候选按镜头内容选择性提交 `expressionAndGaze`：中景及更近可以写一个可见表情变化或明确视线目标，全景/大全景
-只能写头部朝向、步态和身体张力；无人、物件和只见手部的镜头必须为空。历史 `performance/continuity` 继续兼容
-读取，新模型不再请求；主体、动作、表情、摄影和声音不得重复堆叠同一信息。
+模型输出使用视频专属闭合 Schema。Core 校验稳定 ID、节点归属、来源范围、顺序和限定修改范围；模型声称“未修改其他
+内容”不能代替合并校验。作者采用候选只更新带 revision CAS 的工作稿；正式剧本和正式分镜分别通过独立人工确认创建
+不可变版本。取消、重启、重复回调和结果恢复沿用 Core 权威 V2 Run、Step、Evidence、Event 与 BillingReservation，
+不得复活 `VideoAdaptationTask` 作为第二份任务状态。
 
-提示词模型只读取目标镜头自己的正式 Scene、Beat、Shot、来源范围和本镜相关冻结设定，不接收完整章节正文或前后镜完整
-事件。冻结设定先满足来源合法，再按本镜必要裁剪；当前镜头事实覆盖具体设定，具体设定覆盖全局风格，道具动态状态
-只有本镜正式事实或来源明确发生时才能进入动作。批量任务必须按 `shotKey` 分别构建设定投影；人物外观按景别与本镜
-明确锚点裁剪，近景不得携带鞋、全套服装或背包等画外信息。负面约束不得禁止完成正式动作所需的手部或正式主体，
-但可明确排除其他人物或额外人物。500～2500ms、
-3000～5000ms、5500～15000ms 镜头的编译文本
-上限分别为 360、480、640 字；超限必须纠正或失败，不能静默截断。Agent 完成回调前必须按正式画幅和时长实际编译
-每个候选，保证 Core 一定可以展示同一候选。
+逐镜视频渲染不属于 Agent Catalog。Core 从确切 `VideoProductionBaselineShot` 创建耐久 Episode RenderTask，
+只把冻结的供应商中立请求交给短 submit／query 网关。当前输入为 `video-production-shot-input/1.2`：Canon 和关键帧
+同时冻结 `rightsStatus=confirmed`、规范 UTC `lockedAt`、素材身份、MIME 与哈希，执行前再次同数据库权威事实核对。
+`1.0`／`1.1` 只允许历史 simulated 读取，live 必须失败关闭并要求新建基线。
 
-`visibleAction` 可以写正式主动作及其直接结果，但不得在来源未确认时追加再次、继续、反向操作或失败重试。
-转动、旋转等物理变化必须来自本镜正式事实或来源，不能把道具静态设定改写成本镜动作。2500ms 及以下正式镜头若
-自身包含四个以上可读信息单元，Agent 只附加延长/拆镜质量提醒，不要求提示词模型越权改写已确认镜头。
-每个目标镜头上下文必须同时给出正式景别代码和产品中文标签；候选一旦显式写景别，必须与该标签一致，不能把
-`close=近景` 当作“特写”等其他景别。
+Seedance 2.5 真实 POST／GET 只位于 Provider 的 `_create_live_task()`／`_query_live_task()`。默认
+`SEEDANCE_EXECUTION_MODE=simulated` 不访问供应商，Core 生成并归档带 `simulated_placeholder` 标记的可播放 MP4。
+提交调用开始后的连接异常、空响应或缺少 provider task ID 一律进入 `submission_unknown`；普通重试和同镜新任务绕过
+被禁止。明确拒绝才进入可受控重试状态。供应商 URL 只用于当次受控归档，不持久化为播放事实；归档和 ffprobe 成功后
+才创建不可变 Take。
 
-`negativeConstraints` 只承担禁止或避免，不得用“只保留、仅保留、允许出现”等正向要求补造画面。火花、火焰、
-爆炸、闪电/电弧、粒子、光束/光柱、浓烟、雨雪和血迹等高成本视觉效果，必须能在当前正式 Scene/Beat/Shot、
-来源范围、本镜相关设定投影或视觉参考包含特征中找到依据。首次无依据时使用同一轮已有纠正机会；纠正后仍存在
-只形成非阻断 `qualityWarnings`，不得自动删除文字、补造来源或把语义问题升级为结构硬失败。
-
-来源句末编号只用于 Unicode code point 锚定。说话人改变、句子结束、段落或换行不得直接产生镜头；一个对白
-可跨多个画面，多句对白也可保留在一个主镜头或双人镜头。每个镜头必须提交目的、景别、机位、运镜、可见动作、
-本镜作用、观众获得、目标绑定、来源关系、对白位置、声音设计、成片时长和具体切镜理由。Agent 候选不得直接写
-正式关系表或 PromptHead。
-
-场景首镜、景别变化、平均镜头时长、慢镜比例和空镜数量是软评估，不得成为确定性拒绝或服务端改写镜头的理由。
-Reviewer 只有在核心情节目标缺失、与原文矛盾、时间线无法理解或单镜明显不可执行时要求完整返工一次；第二轮仍有
-问题时返回带非阻断 findings 的候选交给作者。已有正式方案时，Core 可冻结当前方案作为修订基线，确认后只新增
-`basedOnVersionId` 指向基线的正式版本。
-
-镜头设计输出使用闭合 `beatsByKey`。模型沿用旧方案 Beat Key 时，只能按第一阶段 checkpoint 的精确 U 集合归位；
-不得用自然语言关键词猜归属。大对象遗漏 Beat 时保留已完成槽位，并最多补全缺失槽，不要求整份重写。跨 Beat 的
-G 绑定剔除并进入 finding；跨 Beat U 不能进入候选，无法保留合法来源的直呈/推导草案降为视听补充并提示作者。
-
-场景/节拍 checkpoint 成功后，at-least-once 重试必须从该阶段继续，不能重复消费第一阶段模型调用。所有模型调用
-继续经过 `ModelRuntime` 的计费授权、全局并发门和结构化输出日志脱敏。
-
-逐镜真实视频生成不进入上述模型规划 workflow，也不复用旧 `VideoGenerationTask`。Core 使用
-`VideoShotRenderTask` 保存冻结 prompt/ref/output manifest 和供应商状态，并由 PostgreSQL due index 恢复短轮询；
-Agent 仅通过受签名内部接口执行一次 Seedance `submit/query`，不得重编译提示词、重排参考图或长期占用队列 worker。
-创建响应不确定时任务进入 `submission_unknown`，Core 禁止自动重提；每次用户显式重试都创建可能再次计费的新任务。
-供应商成功 URL 只用于当次受控归档，不持久化为播放事实；归档完成后才允许创建不可变 `VideoShotTake`。
-
-关键帧、粗剪、声音、字幕与整集导出继续由 Core 持有，不新增“AI 导演”或媒体 Agent。Core 在创建
-逐镜任务时把当前关键帧按首帧、过渡锚点、尾帧顺序冻结进 manifest，并生成不可变的供应商提示文本；
-Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模型运行时，也不允许 Agent 读取受控素材目录。
-未来图片生成或 TTS 只能作为新的素材生产器接入，不能绕过素材权利、锁定、版本和人工确认链。
+关键帧、Take 采用、粗剪、声音字幕与整集导出均由 Core 持有，不新增媒体 Agent。FFmpeg 不经过模型运行时，Agent
+不得读取受控素材目录。真实 Seedance、商业计费和生产视频开关继续关闭；未来图片生成或 TTS 只能作为受素材权利、
+锁定、版本和人工确认约束的新生产器接入。
 
 ## 长篇选区改写契约
 

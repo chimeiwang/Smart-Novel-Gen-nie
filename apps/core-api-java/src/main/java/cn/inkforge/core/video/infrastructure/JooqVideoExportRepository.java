@@ -259,6 +259,7 @@ final class JooqVideoExportRepository {
             List<VideoepisodeexporttaskRecord> tasks = transaction
                     .selectFrom(VIDEOEPISODEEXPORTTASK)
                     .where(
+                            VIDEOEPISODEEXPORTTASK.VIDEOEPISODEID.isNull(),
                             VIDEOEPISODEEXPORTTASK.STATUS.in(ACTIVE),
                             VIDEOEPISODEEXPORTTASK.NEXTATTEMPTAT.le(now))
                     .orderBy(

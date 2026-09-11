@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import cast
 
 from pydantic import JsonValue
 
@@ -83,6 +84,24 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
     properties = structured.jsonSchema.get("properties")
     if not isinstance(properties, dict):
         raise ValueError("模拟结构化输出 Schema 缺少 properties")
+    if structured.name == "episode_script":
+        return _fake_episode_script(_frozen_video_context(request))
+    if structured.name == "episode_script_review":
+        return {
+            "decision": "pass",
+            "summary": "模拟审阅未发现阻断作者采用的问题。",
+            "requiredChanges": [],
+            "findings": [],
+        }
+    if structured.name == "episode_storyboard":
+        return _fake_episode_storyboard(_frozen_video_context(request))
+    if structured.name == "episode_storyboard_review":
+        return {
+            "decision": "pass",
+            "summary": "模拟审片未发现阻断作者采用的问题。",
+            "requiredChanges": [],
+            "findings": [],
+        }
     if {"workflow", "operation", "confidence", "clarification"} <= set(properties):
         # 隔离 Fake 只识别明确测试标记；真实意图判断仍由严格模型 Step 执行。
         envelope = json.loads(request.messages[-1].content)
@@ -160,6 +179,193 @@ def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
     if {"contentVerdict", "findings"} <= set(properties):
         return {"contentVerdict": "pass", "findings": []}
     raise ValueError("模拟 Provider 不支持该结构化输出 Schema")
+
+
+def _frozen_video_context(request: ModelTurnRequest) -> dict[str, JsonValue]:
+    """只解析本地适配器写入的显式 JSON 边界，不读取或猜测作品身份。"""
+
+    content = request.messages[-1].content
+    marker = "冻结上下文："
+    stage_marker = "\n本次阶段："
+    if marker not in content or stage_marker not in content:
+        raise ValueError("模拟视频输出缺少冻结上下文边界")
+    raw = content.split(marker, 1)[1].split(stage_marker, 1)[0]
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("模拟视频冻结上下文必须是对象")
+    return value
+
+
+def _fake_episode_script(context: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    draft = context.get("draft")
+    if not isinstance(draft, dict):
+        raise ValueError("模拟剧本输出缺少冻结工作稿")
+    raw_scenes = draft.get("scenes")
+    scenes = list(raw_scenes) if isinstance(raw_scenes, list) else []
+    selected = context.get("selectedSceneIds")
+    selected_ids = set(selected) if isinstance(selected, list) else set()
+    if selected_ids:
+        chosen = [
+            scene
+            for scene in scenes
+            if isinstance(scene, dict) and scene.get("id") in selected_ids
+        ]
+        if len(chosen) != len(selected_ids):
+            raise ValueError("模拟剧本修订范围不属于冻结工作稿")
+        return cast(
+            dict[str, JsonValue],
+            {
+                "overview": None,
+                "scenes": chosen,
+                "endingStates": None,
+                "dependencies": None,
+            },
+        )
+    if not scenes:
+        sources = context.get("sources")
+        if not isinstance(sources, list) or not sources or not isinstance(sources[0], dict):
+            raise ValueError("模拟剧本起草缺少真实冻结来源")
+        source = sources[0]
+        ranges = source.get("selectedRanges")
+        if not isinstance(ranges, list) or not ranges or not isinstance(ranges[0], dict):
+            raise ValueError("模拟剧本起草缺少真实选区")
+        selected_range = ranges[0]
+        text = selected_range.get("text")
+        if not isinstance(text, str) or not text:
+            raise ValueError("模拟剧本起草选区正文无效")
+        snapshot_id = source.get("sourceSnapshotId")
+        scenes = [
+            {
+                "id": None,
+                "tempKey": "fake-scene-1",
+                "title": "隔离试制场次",
+                "locationLabel": "来源场景",
+                "timeLabel": "当前时段",
+                "narrativeTime": "本集",
+                "characterIds": [],
+                "lines": [
+                    {
+                        "id": None,
+                        "tempKey": "fake-line-1",
+                        "kind": "action",
+                        "speakerId": None,
+                        "text": f"人物依据来源行动：{text[:120]}",
+                        "sourceRefs": [
+                            {
+                                "sourceSnapshotId": snapshot_id,
+                                "start": selected_range.get("start"),
+                                "end": selected_range.get("end"),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    overview = draft.get("overview")
+    ending_states = draft.get("endingStates")
+    dependencies = draft.get("dependencies")
+    return {
+        "overview": overview if isinstance(overview, dict) else {},
+        "scenes": scenes,
+        "endingStates": ending_states if isinstance(ending_states, list) else [],
+        "dependencies": dependencies if isinstance(dependencies, list) else [],
+    }
+
+
+def _fake_episode_storyboard(context: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    draft = context.get("draft")
+    if not isinstance(draft, dict):
+        raise ValueError("模拟分镜输出缺少冻结工作稿")
+    raw_shots = draft.get("shots")
+    shots = list(raw_shots) if isinstance(raw_shots, list) else []
+    selected = context.get("selectedShotIds")
+    selected_ids = set(selected) if isinstance(selected, list) else set()
+    if selected_ids:
+        shots = [
+            shot
+            for shot in shots
+            if isinstance(shot, dict) and shot.get("id") in selected_ids
+        ]
+        if len(shots) != len(selected_ids):
+            raise ValueError("模拟分镜修订范围不属于冻结工作稿")
+    elif not shots:
+        script = context.get("script")
+        script_scenes = script.get("scenes") if isinstance(script, dict) else None
+        if (
+            not isinstance(script_scenes, list)
+            or not script_scenes
+            or not isinstance(script_scenes[0], dict)
+        ):
+            raise ValueError("模拟分镜起草缺少正式剧本场次")
+        scene = script_scenes[0]
+        lines = scene.get("lines")
+        first_line = lines[0] if isinstance(lines, list) and lines else None
+        references = context.get("availableReferences")
+        defaults = context.get("productionDefaults")
+        if (
+            not isinstance(references, list)
+            or not references
+            or not isinstance(references[0], dict)
+            or not isinstance(defaults, dict)
+        ):
+            raise ValueError("模拟分镜起草缺少已批准参考或制作默认值")
+        scene_id = scene.get("id")
+        line_id = first_line.get("id") if isinstance(first_line, dict) else None
+        action = first_line.get("text") if isinstance(first_line, dict) else scene.get("title")
+        shots = [
+            {
+                "id": None,
+                "tempKey": "fake-shot-1",
+                "lineage": [],
+                "scriptSceneId": scene_id,
+                "scriptLineIds": [line_id] if isinstance(line_id, str) else [],
+                "title": "隔离试制镜头",
+                "action": action if isinstance(action, str) and action else "人物完成本场行动。",
+                "framing": "medium",
+                "cameraMovement": "static",
+                "durationMs": 6000,
+                "productionIntent": {
+                    **defaults,
+                    "prompt": "人物在冻结场景中完成剧本明确动作，保持定妆和道具一致。",
+                    "durationSeconds": 6,
+                    "references": [
+                        {
+                            "canonVersionId": references[0].get("canonVersionId"),
+                            "strength": references[0].get("defaultStrength"),
+                        }
+                    ],
+                },
+            }
+        ]
+    return {"shots": [_storyboard_proposal_shot(shot) for shot in shots]}
+
+
+def _storyboard_proposal_shot(value: object) -> dict[str, JsonValue]:
+    if not isinstance(value, dict):
+        raise ValueError("模拟分镜镜头必须是对象")
+    shot = dict(value)
+    intent = shot.get("productionIntent")
+    if not isinstance(intent, dict):
+        raise ValueError("模拟分镜镜头缺少制作意图")
+    choices: list[dict[str, JsonValue]] = []
+    references = intent.get("references")
+    if not isinstance(references, list):
+        raise ValueError("模拟分镜镜头缺少参考版本")
+    for reference in references:
+        if not isinstance(reference, dict):
+            raise ValueError("模拟分镜参考必须是对象")
+        choices.append(
+            {
+                "canonVersionId": reference.get("canonVersionId"),
+                "strength": reference.get("strength"),
+            }
+        )
+    shot["productionIntent"] = {
+        key: item
+        for key, item in intent.items()
+        if key not in {"references"}
+    } | {"references": choices}
+    return shot
 
 
 def _intent_available_operations(envelope: object) -> list[tuple[str, str]]:

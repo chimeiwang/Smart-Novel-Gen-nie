@@ -8,9 +8,11 @@ import cn.inkforge.core.db.generated.Indexes;
 import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.Videoasset.VideoassetPath;
+import cn.inkforge.core.db.generated.tables.Videoepisode.VideoepisodePath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion.VideoepisodeeditversionPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeexporttask.VideoepisodeexporttaskPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodemixversion.VideoepisodemixversionPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
 import cn.inkforge.core.db.generated.tables.records.VideoepisodeexportRecord;
 
 import java.time.LocalDateTime;
@@ -86,7 +88,7 @@ public class Videoepisodeexport extends TableImpl<VideoepisodeexportRecord> {
     /**
      * The column <code>public.VideoEpisodeExport.adaptationId</code>.
      */
-    public final TableField<VideoepisodeexportRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeexportRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExport.projectId</code>.
@@ -96,12 +98,12 @@ public class Videoepisodeexport extends TableImpl<VideoepisodeexportRecord> {
     /**
      * The column <code>public.VideoEpisodeExport.episodePlanVersionId</code>.
      */
-    public final TableField<VideoepisodeexportRecord, String> EPISODEPLANVERSIONID = createField(DSL.name("episodePlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoepisodeexportRecord, String> EPISODEPLANVERSIONID = createField(DSL.name("episodePlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExport.episodeNo</code>.
      */
-    public final TableField<VideoepisodeexportRecord, Integer> EPISODENO = createField(DSL.name("episodeNo"), SQLDataType.INTEGER.nullable(false), this, "");
+    public final TableField<VideoepisodeexportRecord, Integer> EPISODENO = createField(DSL.name("episodeNo"), SQLDataType.INTEGER, this, "");
 
     /**
      * The column <code>public.VideoEpisodeExport.editVersionId</code>.
@@ -132,6 +134,16 @@ public class Videoepisodeexport extends TableImpl<VideoepisodeexportRecord> {
      * The column <code>public.VideoEpisodeExport.createdAt</code>.
      */
     public final TableField<VideoepisodeexportRecord, LocalDateTime> CREATEDAT = createField(DSL.name("createdAt"), SQLDataType.LOCALDATETIME(3).nullable(false).defaultValue(DSL.field(DSL.raw("CURRENT_TIMESTAMP"), SQLDataType.LOCALDATETIME)), this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeExport.videoEpisodeId</code>.
+     */
+    public final TableField<VideoepisodeexportRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoEpisodeExport.productionBaselineId</code>.
+     */
+    public final TableField<VideoepisodeexportRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
 
     private Videoepisodeexport(Name alias, Table<VideoepisodeexportRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -209,7 +221,7 @@ public class Videoepisodeexport extends TableImpl<VideoepisodeexportRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.VIDEOEPISODEEXPORT_ASSETID_KEY, Indexes.VIDEOEPISODEEXPORT_EPISODE_CREATED_IDX, Indexes.VIDEOEPISODEEXPORT_EPISODE_VERSION_KEY, Indexes.VIDEOEPISODEEXPORT_TASKID_KEY);
+        return Arrays.asList(Indexes.VIDEOEPISODEEXPORT_ASSETID_KEY, Indexes.VIDEOEPISODEEXPORT_EPISODE_CREATED_IDX, Indexes.VIDEOEPISODEEXPORT_EPISODE_VERSION_KEY, Indexes.VIDEOEPISODEEXPORT_NEW_EPISODE_VERSION_KEY, Indexes.VIDEOEPISODEEXPORT_TASKID_KEY);
     }
 
     @Override
@@ -218,8 +230,13 @@ public class Videoepisodeexport extends TableImpl<VideoepisodeexportRecord> {
     }
 
     @Override
+    public List<UniqueKey<VideoepisodeexportRecord>> getUniqueKeys() {
+        return Arrays.asList(Keys.VIDEOEPISODEEXPORT_ID_VIDEO_EPISODE_KEY);
+    }
+
+    @Override
     public List<ForeignKey<VideoepisodeexportRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_ASSET_PROJECT_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_EDIT_VERSION_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_MIX_VERSION_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_SCOPE_FKEY);
+        return Arrays.asList(Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_ASSET_PROJECT_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_BASELINE_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_EDIT_NEW_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_EDIT_VERSION_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_MIX_NEW_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_MIX_VERSION_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_NEW_SCOPE_FKEY, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_SCOPE_FKEY);
     }
 
     private transient VideoassetPath _videoasset;
@@ -234,50 +251,122 @@ public class Videoepisodeexport extends TableImpl<VideoepisodeexportRecord> {
         return _videoasset;
     }
 
-    private transient VideoepisodeeditversionPath _videoepisodeeditversion;
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoEpisodeEditVersion</code> table.
+     * <code>public.VideoProductionBaseline</code> table.
      */
-    public VideoepisodeeditversionPath videoepisodeeditversion() {
-        if (_videoepisodeeditversion == null)
-            _videoepisodeeditversion = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_EDIT_VERSION_FKEY, null);
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_BASELINE_SCOPE_FKEY, null);
 
-        return _videoepisodeeditversion;
+        return _videoproductionbaseline;
     }
 
-    private transient VideoepisodemixversionPath _videoepisodemixversion;
+    private transient VideoepisodeeditversionPath _videoepisodeexportEditNewScopeFkey;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoEpisodeMixVersion</code> table.
+     * <code>public.VideoEpisodeEditVersion</code> table, via the
+     * <code>VideoEpisodeExport_edit_new_scope_fkey</code> key.
      */
-    public VideoepisodemixversionPath videoepisodemixversion() {
-        if (_videoepisodemixversion == null)
-            _videoepisodemixversion = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_MIX_VERSION_FKEY, null);
+    public VideoepisodeeditversionPath videoepisodeexportEditNewScopeFkey() {
+        if (_videoepisodeexportEditNewScopeFkey == null)
+            _videoepisodeexportEditNewScopeFkey = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_EDIT_NEW_SCOPE_FKEY, null);
 
-        return _videoepisodemixversion;
+        return _videoepisodeexportEditNewScopeFkey;
     }
 
-    private transient VideoepisodeexporttaskPath _videoepisodeexporttask;
+    private transient VideoepisodeeditversionPath _videoepisodeexportEditVersionFkey;
 
     /**
      * Get the implicit join path to the
-     * <code>public.VideoEpisodeExportTask</code> table.
+     * <code>public.VideoEpisodeEditVersion</code> table, via the
+     * <code>VideoEpisodeExport_edit_version_fkey</code> key.
      */
-    public VideoepisodeexporttaskPath videoepisodeexporttask() {
-        if (_videoepisodeexporttask == null)
-            _videoepisodeexporttask = new VideoepisodeexporttaskPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_SCOPE_FKEY, null);
+    public VideoepisodeeditversionPath videoepisodeexportEditVersionFkey() {
+        if (_videoepisodeexportEditVersionFkey == null)
+            _videoepisodeexportEditVersionFkey = new VideoepisodeeditversionPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_EDIT_VERSION_FKEY, null);
 
-        return _videoepisodeexporttask;
+        return _videoepisodeexportEditVersionFkey;
+    }
+
+    private transient VideoepisodemixversionPath _videoepisodeexportMixNewScopeFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeMixVersion</code> table, via the
+     * <code>VideoEpisodeExport_mix_new_scope_fkey</code> key.
+     */
+    public VideoepisodemixversionPath videoepisodeexportMixNewScopeFkey() {
+        if (_videoepisodeexportMixNewScopeFkey == null)
+            _videoepisodeexportMixNewScopeFkey = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_MIX_NEW_SCOPE_FKEY, null);
+
+        return _videoepisodeexportMixNewScopeFkey;
+    }
+
+    private transient VideoepisodemixversionPath _videoepisodeexportMixVersionFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeMixVersion</code> table, via the
+     * <code>VideoEpisodeExport_mix_version_fkey</code> key.
+     */
+    public VideoepisodemixversionPath videoepisodeexportMixVersionFkey() {
+        if (_videoepisodeexportMixVersionFkey == null)
+            _videoepisodeexportMixVersionFkey = new VideoepisodemixversionPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_MIX_VERSION_FKEY, null);
+
+        return _videoepisodeexportMixVersionFkey;
+    }
+
+    private transient VideoepisodeexporttaskPath _videoepisodeexportTaskNewScopeFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeExportTask</code> table, via the
+     * <code>VideoEpisodeExport_task_new_scope_fkey</code> key.
+     */
+    public VideoepisodeexporttaskPath videoepisodeexportTaskNewScopeFkey() {
+        if (_videoepisodeexportTaskNewScopeFkey == null)
+            _videoepisodeexportTaskNewScopeFkey = new VideoepisodeexporttaskPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_NEW_SCOPE_FKEY, null);
+
+        return _videoepisodeexportTaskNewScopeFkey;
+    }
+
+    private transient VideoepisodeexporttaskPath _videoepisodeexportTaskScopeFkey;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoEpisodeExportTask</code> table, via the
+     * <code>VideoEpisodeExport_task_scope_fkey</code> key.
+     */
+    public VideoepisodeexporttaskPath videoepisodeexportTaskScopeFkey() {
+        if (_videoepisodeexportTaskScopeFkey == null)
+            _videoepisodeexportTaskScopeFkey = new VideoepisodeexporttaskPath(this, Keys.VIDEOEPISODEEXPORT__VIDEOEPISODEEXPORT_TASK_SCOPE_FKEY, null);
+
+        return _videoepisodeexportTaskScopeFkey;
+    }
+
+    private transient VideoepisodePath _videoepisode;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisode</code> table
+     */
+    public VideoepisodePath videoepisode() {
+        if (_videoepisode == null)
+            _videoepisode = new VideoepisodePath(this, null, Keys.VIDEOEPISODE__VIDEOEPISODE_LATEST_DELIVERY_FKEY.getInverseKey());
+
+        return _videoepisode;
     }
 
     @Override
     public List<Check<VideoepisodeexportRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("VideoEpisodeExport_hash_check"), "((\"inputHash\" ~ '^[0-9a-f]{64}$'::text))", true),
-            Internal.createCheck(this, DSL.name("VideoEpisodeExport_numbers_check"), "(((\"episodeNo\" > 0) AND (\"versionNo\" > 0)))", true)
+            Internal.createCheck(this, DSL.name("VideoEpisodeExport_numbers_check"), "(((\"episodeNo\" > 0) AND (\"versionNo\" > 0)))", true),
+            Internal.createCheck(this, DSL.name("VideoEpisodeExport_scope_branch_check"), "((((\"adaptationId\" IS NOT NULL) AND (\"episodePlanVersionId\" IS NOT NULL) AND (\"episodeNo\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"adaptationId\" IS NULL) AND (\"episodePlanVersionId\" IS NULL) AND (\"episodeNo\" IS NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true)
         );
     }
 

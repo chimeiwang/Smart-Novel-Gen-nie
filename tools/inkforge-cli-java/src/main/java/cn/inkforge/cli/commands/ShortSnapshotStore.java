@@ -33,6 +33,7 @@ final class ShortSnapshotStore {
         this.json = json;
     }
 
+    /** 加载并验证清单、作品绑定和两份工作稿描述。 */
     ObjectNode load(Path source, String novelId) {
         Path manifestPath = resolve(source);
         if (!manifestPath.getFileName().toString().equals("manifest.json")) {
@@ -60,6 +61,7 @@ final class ShortSnapshotStore {
         return manifest;
     }
 
+    /** 确认两份本地工作稿内容仍与清单哈希一致。 */
     ObjectNode ensureClean(Path source, String novelId) {
         Path manifestPath = resolve(source);
         ObjectNode manifest = load(manifestPath, novelId);
@@ -80,6 +82,7 @@ final class ShortSnapshotStore {
         return ensureClean(Path.of(raw.textValue()), novelId);
     }
 
+    /** 原子写出双文档快照和受保护清单，拒绝覆盖来源不明的既有文稿。 */
     ObjectNode export(
             Path directory,
             String novelId,
@@ -123,6 +126,7 @@ final class ShortSnapshotStore {
         return result;
     }
 
+    /** 在业务写入成功后推进单份文档哈希和对应服务端时间戳。 */
     String advance(
             Path manifestSource,
             ObjectNode manifest,

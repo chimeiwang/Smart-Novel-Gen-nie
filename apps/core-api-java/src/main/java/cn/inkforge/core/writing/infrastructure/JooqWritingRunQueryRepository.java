@@ -119,6 +119,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 artifacts(context, List.of(taskId))));
     }
 
+    /** 按持久化引擎版本读取 V1 或 V2 任务，并投影为公共状态。 */
     @Override
     public WritingRunStatusPublicResponse getPublic(String userId, String taskId) {
         if (!durableAgentSchemaReady) return get(userId, taskId);
@@ -142,6 +143,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
         });
     }
 
+    /** 批量扫描 V1/V2 候选，投影后应用结果过滤并生成统一游标页。 */
     @Override
     public WritingRunListResponse list(
             String userId,
@@ -162,6 +164,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
         WritingRunCursor.Position scan = initial;
         List<ProjectedItem> matched = new ArrayList<>();
         DSLContext context = database.dsl();
+        // operation/outcome 需要在完整状态投影后判断，因此按固定批次继续扫描直到填满一页。
         while (matched.size() < limit + 1) {
             List<RunCandidate> candidates = candidates(
                     context,
@@ -456,6 +459,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
                 value.get("errorCode", String.class));
     }
 
+    /** 批量读取 V2 Step、最新进度、Artifact 和中短篇清单，避免逐 Run 查询。 */
     private static V2Related v2Related(
             DSLContext context, List<String> runIds, boolean includeCompletedGenerations) {
         if (runIds.isEmpty()) return V2Related.empty();
@@ -586,6 +590,7 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
         return new V2Related(activeSteps, failedSteps, artifacts, completedGenerations, shortMediumManifests);
     }
 
+    /** 复验 V2 持久事实的一致性，并组装当前 Step、产物、错误和用量。 */
     private WritingRunV2Response v2Response(
             DSLContext transaction,
             V2Run run,

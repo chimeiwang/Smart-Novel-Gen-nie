@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -20,9 +21,7 @@ SCHEMA_PATH = CONTRACT_ROOT / "operation-catalog.schema.json"
 PROFILE_REGISTRY_PATH = CONTRACT_ROOT / "profile-registry.v1.json"
 PROFILE_REGISTRY_SCHEMA_PATH = CONTRACT_ROOT / "profile-registry.schema.json"
 DEPLOYMENT_PROFILE_REGISTRY_PATH = CONTRACT_ROOT / "deployment-profile-registry.v1.json"
-DEPLOYMENT_PROFILE_REGISTRY_SCHEMA_PATH = (
-    CONTRACT_ROOT / "deployment-profile-registry.schema.json"
-)
+DEPLOYMENT_PROFILE_REGISTRY_SCHEMA_PATH = CONTRACT_ROOT / "deployment-profile-registry.schema.json"
 PROMPT_PROFILE_REGISTRY_PATH = CONTRACT_ROOT / "prompt-profile-registry.v1.json"
 PROMPT_PROFILE_REGISTRY_SCHEMA_PATH = CONTRACT_ROOT / "prompt-profile-registry.schema.json"
 OUTPUT_SCHEMA_REGISTRY_PATH = CONTRACT_ROOT / "output-schema-registry.v1.json"
@@ -55,14 +54,18 @@ EXPECTED_OPERATION_KEYS = frozenset(
         "quality.consistency",
         "style.portrait",
         "rag.embedding",
-        "video.chapter_cinematic_adaptation_v2",
-        "video.chapter_shot_prompt_v2",
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
     }
 )
 DEVELOPMENT_ONLY_OPERATION_KEYS = frozenset(
     {
-        "video.chapter_cinematic_adaptation_v2",
-        "video.chapter_shot_prompt_v2",
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
     }
 )
 POSITIVE_BUDGET_LIMIT_FIELDS = frozenset(
@@ -121,9 +124,10 @@ EXPECTED_SYSTEM_PURPOSES = frozenset(
 )
 RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
     {
-        "video.chapter_adaptation.v2", "reviewer.cinematic.v2",
-    "style.portrait.v1",
-    "rag.embedding.v1",
+        "video.chapter_adaptation.v2",
+        "reviewer.cinematic.v2",
+        "style.portrait.v1",
+        "rag.embedding.v1",
         "quality.consistency.v1",
         "system.protocol_corrector.v1",
         "system.intent_resolver.v1",
@@ -146,13 +150,18 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
     {
-        "output.video_adaptation_plan.v2", "output.video_shot_prompt_batch.v2",
-    "output.style_portrait.v1",
-    "output.embedding_batch.v1",
-        "output.consistency_quality_report.v1", "output.protocol_correction.v1",
-        "output.agent_updates.v1", "output.agent_updates.v2",
-        "output.short_medium_outline.v1", "output.short_medium_segment_manifest.v1",
-        "output.short_medium_replacement.v1", "output.short_medium_check_report.v1",
+        "output.video_adaptation_plan.v2",
+        "output.video_shot_prompt_batch.v2",
+        "output.style_portrait.v1",
+        "output.embedding_batch.v1",
+        "output.consistency_quality_report.v1",
+        "output.protocol_correction.v1",
+        "output.agent_updates.v1",
+        "output.agent_updates.v2",
+        "output.short_medium_outline.v1",
+        "output.short_medium_segment_manifest.v1",
+        "output.short_medium_replacement.v1",
+        "output.short_medium_check_report.v1",
     }
 )
 AGENT_UPDATES_V2_ASSET_SHA256 = {
@@ -190,8 +199,10 @@ NO_THINKING_OPERATION_KEYS = frozenset(
         "quality.consistency",
         "style.portrait",
         "rag.embedding",
-        "video.chapter_cinematic_adaptation_v2",
-        "video.chapter_shot_prompt_v2",
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
     }
 )
 CHAPTER_DRAFT_OPERATION_KEYS = frozenset(
@@ -285,6 +296,18 @@ def test_all_execution_registries_conform_to_their_schemas() -> None:
         validator.validate(_read_json(registry_path))
 
 
+def test_retired_chapter_video_operations_are_absent() -> None:
+    keys = {operation["key"] for operation in _operations()}
+    assert "video.chapter_cinematic_adaptation_v2" not in keys
+    assert "video.chapter_shot_prompt_v2" not in keys
+    assert {
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
+    } <= keys
+
+
 def test_operation_catalog_has_complete_unique_keys() -> None:
     operations = _operations()
     keys = [operation["key"] for operation in operations]
@@ -299,7 +322,10 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
 
     enabled_keys = {operation["key"] for operation in operations if operation["v2Enabled"]}
     assert enabled_keys == {
-        "video.chapter_cinematic_adaptation_v2", "video.chapter_shot_prompt_v2",
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
         "long_serial.answer_question",
         "long_serial.create_lore",
         "long_serial.revise_lore",
@@ -321,9 +347,7 @@ def test_operation_catalog_has_complete_unique_keys() -> None:
         "rag.embedding",
     }
     answer = next(
-        operation
-        for operation in operations
-        if operation["key"] == "long_serial.answer_question"
+        operation for operation in operations if operation["key"] == "long_serial.answer_question"
     )
     assert answer["targetKinds"] == ["chapter"]
     assert answer["scopeKinds"] == ["chapter"]
@@ -360,13 +384,11 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         if "reviewerOutputSchema" in operation["reviewPolicy"]
     )
     referenced_profiles.update(
-        cast(str, system_purpose["modelProfile"])
-        for system_purpose in system_purposes.values()
+        cast(str, system_purpose["modelProfile"]) for system_purpose in system_purposes.values()
     )
     referenced_profiles.update(RETAINED_EXECUTION_PROFILE_KEYS)
     referenced_output_schemas.update(
-        cast(str, system_purpose["outputSchema"])
-        for system_purpose in system_purposes.values()
+        cast(str, system_purpose["outputSchema"]) for system_purpose in system_purposes.values()
     )
     referenced_output_schemas.update(RETAINED_OUTPUT_SCHEMA_KEYS)
     referenced_step_budgets = {
@@ -381,12 +403,8 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         generator_step_budget = operation.get("generatorStepBudgetProfile")
         if generator_step_budget is not None:
             referenced_step_budgets.add(cast(str, generator_step_budget))
-        reviewer_budget_profiles = operation["reviewPolicy"].get(
-            "reviewerStepBudgetProfiles", {}
-        )
-        referenced_step_budgets.update(
-            cast(dict[str, str], reviewer_budget_profiles).values()
-        )
+        reviewer_budget_profiles = operation["reviewPolicy"].get("reviewerStepBudgetProfiles", {})
+        referenced_step_budgets.update(cast(dict[str, str], reviewer_budget_profiles).values())
 
     assert set(profiles) == referenced_profiles
     assert set(output_schemas) == referenced_output_schemas
@@ -418,14 +436,12 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
         _assert_key_version(output_schema)
 
     assert set(prompts) == {profile["promptProfile"] for profile in profiles.values()}
-    assert set(deployments) == {
-        profile["deploymentProfileKey"] for profile in profiles.values()
-    }
+    assert set(deployments) == {profile["deploymentProfileKey"] for profile in profiles.values()}
     for prompt in prompts.values():
         _assert_key_version(prompt)
-        assert prompt["sha256"] == hashlib.sha256(
-            prompt["systemPrompt"].encode("utf-8")
-        ).hexdigest()
+        assert (
+            prompt["sha256"] == hashlib.sha256(prompt["systemPrompt"].encode("utf-8")).hexdigest()
+        )
         assert not ({"apiKey", "baseUrl", "model", "provider", "secret", "token"} & set(prompt))
 
     for step_budget in step_budgets.values():
@@ -443,7 +459,8 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
             assert deployment["configuredBinding"] == {
                 "key": "binding.rag-embedding-config.v1",
                 "allowedEnvironments": ["dev", "test", "production"],
-                "pricingVersion": "credit-pricing.v1", "billable": False,
+                "pricingVersion": "credit-pricing.v1",
+                "billable": False,
             }
         else:
             assert bool(allowed_models) is deployment["supported"]
@@ -542,9 +559,9 @@ def test_agent_updates_v2_schema_is_generated_without_changing_v1_placeholder() 
     assert set(schema["properties"]) == {"summary", "updates"}
     assert "updatesSha256" not in schema["properties"]
     assert schema["properties"]["updates"]["additionalProperties"] is False
-    character_actions = schema["properties"]["updates"]["properties"]["characters"][
-        "items"
-    ]["anyOf"]
+    character_actions = schema["properties"]["updates"]["properties"]["characters"]["items"][
+        "anyOf"
+    ]
     assert [branch["properties"]["action"]["const"] for branch in character_actions] == [
         "create",
         "update",
@@ -570,9 +587,7 @@ def test_agent_updates_v2_schema_is_generated_without_changing_v1_placeholder() 
 
 
 def test_agent_updates_step_schema_is_closed_and_requests_only_bounded_sources() -> None:
-    step = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")[
-        "output.agent_updates_step.v1"
-    ]
+    step = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")["output.agent_updates_step.v1"]
     assert step["version"] == 1
     assert step["supported"] is True
     assert step["purpose"] == "generation"
@@ -615,19 +630,13 @@ def test_agent_updates_step_schema_is_closed_and_requests_only_bounded_sources()
         {
             "if": {"properties": {"resourceType": {"const": "outline_tree"}}},
             "then": {"properties": {"purposeCode": {"const": "replace_tree"}}},
-            "else": {
-                "properties": {
-                    "purposeCode": {"enum": ["target", "delete_impact"]}
-                }
-            },
+            "else": {"properties": {"purposeCode": {"enum": ["target", "delete_impact"]}}},
         },
         {
             "if": {"properties": {"purposeCode": {"const": "delete_impact"}}},
             "then": {
                 "properties": {
-                    "resourceType": {
-                        "enum": ["character", "location", "faction", "outline_node"]
-                    }
+                    "resourceType": {"enum": ["character", "location", "faction", "outline_node"]}
                 }
             },
         },
@@ -662,7 +671,9 @@ def test_short_medium_v2_assets_are_enabled_and_keep_placeholders() -> None:
         assert operation["runBudgetProfile"]["maxProtocolCorrectionSteps"] == 0
         old_purpose = "evaluation" if name == "full_check" else "generation"
         assert profiles[profile + ".v1"] == {
-            "key": profile + ".v1", "version": 1, "supported": False,
+            "key": profile + ".v1",
+            "version": 1,
+            "supported": False,
             "reasoningMode": "disabled" if name == "full_check" else "bounded",
             "purpose": old_purpose,
             "promptProfile": f"prompt.unavailable.{old_purpose}.v1",
@@ -737,15 +748,15 @@ def test_structured_updates_business_enabled_assets_keep_complete_and_retained_c
         assert "两种互斥对象之一" in prompt["systemPrompt"]
         assert "不得同时返回 summary、updates 或半份候选" in prompt["systemPrompt"]
         assert "agent_updates_index 冻结名录中已有的真实 ID" in prompt["systemPrompt"]
-        assert "三种单例的 resourceId 只能是当前 evidenceBundle 绑定的 novelId" in prompt[
-            "systemPrompt"
-        ]
-        assert "resourceType=outline_tree、resourceId=该 novelId、purposeCode=replace_tree" in (
-            prompt["systemPrompt"]
+        assert (
+            "三种单例的 resourceId 只能是当前 evidenceBundle 绑定的 novelId"
+            in prompt["systemPrompt"]
         )
-        assert "purposeCode 仅可为 target、delete_impact、replace_tree" in prompt[
-            "systemPrompt"
-        ]
+        assert (
+            "resourceType=outline_tree、resourceId=该 novelId、purposeCode=replace_tree"
+            in (prompt["systemPrompt"])
+        )
+        assert "purposeCode 仅可为 target、delete_impact、replace_tree" in prompt["systemPrompt"]
         assert "不得请求 SQL、路径、正文范围、全 workspace" in prompt["systemPrompt"]
         deployment = deployments[generator["deploymentProfileKey"]]
         assert deployment == v2_deployment | {
@@ -759,25 +770,25 @@ def test_structured_updates_business_enabled_assets_keep_complete_and_retained_c
         assert review["onUnavailable"] == "awaiting_user"
         assert review["maxAutomaticRevisions"] == 1
         assert profiles[reviewer_key]["reasoningMode"] == "disabled"
-        assert "candidateRange 必须为 null" in prompts[
-            profiles[reviewer_key]["promptProfile"]
-        ]["systemPrompt"]
-        finding = outputs[review["reviewerOutputSchema"]]["jsonSchema"]["properties"][
-            "findings"
-        ]["items"]
+        assert (
+            "candidateRange 必须为 null"
+            in prompts[profiles[reviewer_key]["promptProfile"]]["systemPrompt"]
+        )
+        finding = outputs[review["reviewerOutputSchema"]]["jsonSchema"]["properties"]["findings"][
+            "items"
+        ]
         assert "candidatePatch" not in finding["properties"]
         generator_budget = budgets[operation["generatorStepBudgetProfile"]]["budget"]
-        reviewer_budget = budgets[review["reviewerStepBudgetProfiles"][reviewer_key]][
-            "budget"
-        ]
+        reviewer_budget = budgets[review["reviewerStepBudgetProfiles"][reviewer_key]]["budget"]
         assert generator_budget["maxModelCalls"] == reviewer_budget["maxModelCalls"] == 1
         assert reviewer_budget["maxReasoningTokens"] == 0
         for budget in (generator_budget, reviewer_budget):
             assert budget["maxInputTokens"] == budget["maxPromptCacheMissTokens"]
         for field in AGGREGATE_STEP_BUDGET_FIELDS:
-            assert 2 * (generator_budget[field] + reviewer_budget[field]) <= operation[
-                "runBudgetProfile"
-            ][field]
+            assert (
+                2 * (generator_budget[field] + reviewer_budget[field])
+                <= operation["runBudgetProfile"][field]
+            )
 
 
 def test_system_purposes_are_language_neutral_closed_and_honest() -> None:
@@ -798,9 +809,7 @@ def test_system_purposes_are_language_neutral_closed_and_honest() -> None:
         output_schema = output_schemas[definition["outputSchema"]]
         step_budget = step_budgets[definition["stepBudgetProfile"]]
         dependencies_supported = (
-            profile["supported"]
-            and output_schema["supported"]
-            and step_budget["supported"]
+            profile["supported"] and output_schema["supported"] and step_budget["supported"]
         )
         assert definition["supported"] is dependencies_supported
 
@@ -879,8 +888,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
         "quality.consistency",
         "style.portrait",
         "rag.embedding",
-        "video.chapter_cinematic_adaptation_v2",
-        "video.chapter_shot_prompt_v2",
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
     ]
     for operation in enabled:
         assert operation["developmentOnly"] is (operation["key"] in DEVELOPMENT_ONLY_OPERATION_KEYS)
@@ -899,8 +910,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 "quality.consistency",
                 "style.portrait",
                 "rag.embedding",
-                "video.chapter_cinematic_adaptation_v2",
-                "video.chapter_shot_prompt_v2",
+                "video.episode_script_generate",
+                "video.episode_script_revise",
+                "video.episode_storyboard_generate",
+                "video.episode_storyboard_revise",
             }
             else "bounded"
         )
@@ -940,9 +953,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert reviewer_output_schema["supported"] is True
             assert reviewer_output_schema["purpose"] == "evaluation"
             assert reviewer_output_schema["jsonSchema"]["properties"]
-            finding_schema = reviewer_output_schema["jsonSchema"]["properties"][
-                "findings"
-            ]["items"]
+            finding_schema = reviewer_output_schema["jsonSchema"]["properties"]["findings"]["items"]
             assert set(finding_schema["required"]) == {
                 "dimension",
                 "severity",
@@ -981,7 +992,10 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert operation["runBudgetProfile"]["maxInputTokens"] == 420000
         elif operation["key"] == "long_serial.plan_chapter":
             assert output_schema["jsonSchema"]["required"] == [
-                "title", "summary", "chapterGoal", "sceneBeats"
+                "title",
+                "summary",
+                "chapterGoal",
+                "sceneBeats",
             ]
             scene = output_schema["jsonSchema"]["properties"]["sceneBeats"]["items"]
             assert scene["additionalProperties"] is False
@@ -999,8 +1013,11 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert "candidatePatch" not in finding_schema["required"]
             assert finding_schema["properties"]["candidatePatch"]["additionalProperties"] is False
         elif operation["key"] in {
-            "long_serial.create_lore", "long_serial.revise_lore", "long_serial.create_outline",
-            "long_serial.revise_outline", "long_serial.manage_foreshadowing",
+            "long_serial.create_lore",
+            "long_serial.revise_lore",
+            "long_serial.create_outline",
+            "long_serial.revise_outline",
+            "long_serial.manage_foreshadowing",
         }:
             schema = output_schema["jsonSchema"]
             assert schema["required"] == []
@@ -1017,7 +1034,11 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             schema = output_schema["jsonSchema"]
             assert schema["required"] == ["scores", "qualityGate", "issues", "report"]
             assert set(schema["properties"]) == {
-                "scores", "qualityGate", "issues", "report", "rewriteBrief",
+                "scores",
+                "qualityGate",
+                "issues",
+                "report",
+                "rewriteBrief",
             }
             assert schema["properties"]["qualityGate"]["enum"] == ["pass", "revise"]
             assert schema["properties"]["issues"]["maxItems"] == 100
@@ -1036,13 +1057,37 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
             assert operation["runBudgetProfile"]["maxProtocolCorrectionSteps"] == 0
         elif operation["workflow"] == "video":
             assert operation["videoStagePolicy"] in {
-                "video.cinematic-stages.v1", "video.shot-prompt-stages.v1"}
+                "video.episode-script-stages.v1",
+                "video.episode-storyboard-stages.v1",
+            }
             assert operation["stageSteps"][0]["modelProfile"] == operation["generatorProfile"]
             assert "stageKey" in output_schema["jsonSchema"]["required"]
-            assert "outcome" in output_schema["jsonSchema"]["required"]
+            if operation["videoStagePolicy"] == "video.episode-script-stages.v1":
+                assert output_schema["jsonSchema"]["required"] == [
+                    "stageKey",
+                    "candidate",
+                    "review",
+                ]
+                assert operation["runBudgetProfile"]["maxModelCalls"] == 4
+                assert operation["applyHandler"] == "apply.video_episode_script_candidate.v1"
+            elif operation["videoStagePolicy"] == "video.episode-storyboard-stages.v1":
+                assert output_schema["jsonSchema"]["required"] == [
+                    "stageKey",
+                    "candidate",
+                    "review",
+                ]
+                assert operation["runBudgetProfile"]["maxModelCalls"] == 4
+                assert (
+                    operation["applyHandler"]
+                    == "apply.video_episode_storyboard_candidate.v1"
+                )
+            else:
+                assert "outcome" in output_schema["jsonSchema"]["required"]
             assert generator["reasoningMode"] == "disabled"
-            assert all("production" not in item["allowedEnvironments"]
-                       for item in generator_deployment["allowedModels"])
+            assert all(
+                "production" not in item["allowedEnvironments"]
+                for item in generator_deployment["allowedModels"]
+            )
         elif operation["workflow"] == "short_medium":
             expected_field = {
                 "generate_outline": "content",
@@ -1060,9 +1105,7 @@ def test_enabled_operation_has_complete_executable_profiles_and_output_schema() 
                 "answer"
                 if operation["key"] == "long_serial.answer_question"
                 else (
-                    "report"
-                    if operation["key"] == "long_serial.review_chapter"
-                    else "replacement"
+                    "report" if operation["key"] == "long_serial.review_chapter" else "replacement"
                 )
             )
             assert output_schema["jsonSchema"]["required"] == [expected_output_field]
@@ -1144,9 +1187,7 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
 
         reviewer_budgets = []
         for reviewer_profile_key in review_policy["reviewerProfiles"]:
-            reviewer_budget = step_budgets[
-                reviewer_budget_profiles[reviewer_profile_key]
-            ]
+            reviewer_budget = step_budgets[reviewer_budget_profiles[reviewer_profile_key]]
             assert reviewer_budget["supported"] is True
             if profiles[reviewer_profile_key]["reasoningMode"] == "disabled":
                 assert reviewer_budget["budget"]["maxReasoningTokens"] == 0
@@ -1160,8 +1201,11 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
             for reviewer_budget in reviewer_budgets
         )
         if operation.get("stageSteps"):
-            planned_budgets = [step_budgets[stage["stepBudgetProfile"]]["budget"]
-                for stage in operation["stageSteps"] for _ in range(stage["maxInvocations"])]
+            planned_budgets = [
+                step_budgets[stage["stepBudgetProfile"]]["budget"]
+                for stage in operation["stageSteps"]
+                for _ in range(stage["maxInvocations"])
+            ]
         run_budget = operation["runBudgetProfile"]
         for field in AGGREGATE_STEP_BUDGET_FIELDS:
             assert sum(budget[field] for budget in planned_budgets) <= run_budget[field], (
@@ -1188,9 +1232,7 @@ def test_system_step_budgets_fit_every_applicable_run_budget() -> None:
         if purpose == "resolve_intent":
             workflows = set(definition["workflows"])
             parent_keys = [
-                key
-                for key, operation in operations.items()
-                if operation["workflow"] in workflows
+                key for key, operation in operations.items() if operation["workflow"] in workflows
             ]
 
         for operation_key in parent_keys:
@@ -1199,10 +1241,7 @@ def test_system_step_budgets_fit_every_applicable_run_budget() -> None:
                 assert step_budget[field] <= run_budget[field], (
                     f"{purpose} 的 Step {field} 超过 {operation_key} Run 上限"
                 )
-            assert (
-                step_budget["maxProviderRetries"]
-                <= run_budget["maxProviderRetriesPerStep"]
-            )
+            assert step_budget["maxProviderRetries"] <= run_budget["maxProviderRetriesPerStep"]
             if purpose == "protocol_correction":
                 assert run_budget["maxProtocolCorrectionSteps"] == 1
 
@@ -1234,15 +1273,23 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
     assert rag_budget["maxVisibleOutputTokens"] == 0
     assert rag_budget["maxProtocolCorrectionSteps"] == 0
 
-    video_budget = operations["video.chapter_cinematic_adaptation_v2"]["runBudgetProfile"]
-    assert video_budget["maxModelCalls"] == 10
+    for key in {
+        "video.episode_script_generate",
+        "video.episode_script_revise",
+        "video.episode_storyboard_generate",
+        "video.episode_storyboard_revise",
+    }:
+        assert operations[key]["runBudgetProfile"]["maxModelCalls"] == 4
     assert operations["style.portrait"]["scopeKinds"] == ["user"]
 
 
 def test_video_migration_preserves_all_nineteen_existing_operation_values() -> None:
     """冻结 65ebacf 的非视频 19 项完整 JSON，不只检查数量或 enabled 标记。"""
-    retained = [operation for operation in _operations()
-                if operation["key"] not in DEVELOPMENT_ONLY_OPERATION_KEYS]
+    retained = [
+        operation
+        for operation in _operations()
+        if operation["key"] not in DEVELOPMENT_ONLY_OPERATION_KEYS
+    ]
     assert len(retained) == 19
     assert hashlib.sha256(canonical_execution_json_bytes(retained)).hexdigest() == (
         "96afc59ca82841eeebbef5e3152c49e14902cfe1ae641501a06933a393642b12"
@@ -1295,3 +1342,15 @@ def test_operation_catalog_manifest_hashes_are_stable() -> None:
         path = CONTRACT_ROOT / entry["path"]
         actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
         assert actual_sha256 == entry["sha256"], f"{entry_name} SHA-256 已漂移"
+
+
+def test_episode_script_stage_schemas_match_shared_contract_and_are_stage_bound() -> None:
+    generator = runpy.run_path(str(REPOSITORY_ROOT / "scripts/refresh_agent_execution_manifest.py"))
+    schemas = _keyed_items(OUTPUT_SCHEMA_REGISTRY_PATH, "schemas")
+    for stage in ("episode_script", "episode_script_review"):
+        expected = generator["episode_script_stage_schema"](stage)
+        assert schemas[f"output.video_{stage}_stage.v2"]["jsonSchema"] == expected
+        serialized = json.dumps(expected)
+        assert '"$defs"' not in serialized
+        assert '"$ref"' not in serialized
+        assert '"exclusiveMinimum"' not in serialized

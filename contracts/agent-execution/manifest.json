@@ -3,15 +3,15 @@
   "catalogVersion": "1",
   "catalog": {
     "path": "operation-catalog.v1.json",
-    "sha256": "2045c3548849dea008d126de4bd667ac200c7524552d8032b12a2526dcbac2cd"
+    "sha256": "3d79fe1d171873f112ebcdf6129e8b064f7631fddfa079bf9e2ccdd036831246"
   },
   "schema": {
     "path": "operation-catalog.schema.json",
-    "sha256": "bea6152b99889392feda1a8f3d0cfd025e9c48e814d172703f0aaf35ea9ced7e"
+    "sha256": "17037cbe74698a9a72c0546944c672aabee4bab00e4d3361fa4f7860b13cd54c"
   },
   "profileRegistry": {
     "path": "profile-registry.v1.json",
-    "sha256": "e87c98fe299dbb94c9e318a26cd38018f921e8f0da5544ed7dafdc135fa254db"
+    "sha256": "b3b32bf8a09780073b931d7e38f535628d05495b74abdb25d712e054135a4640"
   },
   "profileRegistrySchema": {
     "path": "profile-registry.schema.json",
@@ -19,7 +19,7 @@
   },
   "deploymentProfileRegistry": {
     "path": "deployment-profile-registry.v1.json",
-    "sha256": "4b9b31d26a36c1a57f9581c6eaf9d074d01562f0e31e657d54ebd8dd4195a612"
+    "sha256": "d34123f4c44afc250e4e5a67681cabcec50cf6036a14423ef931c042c73643ee"
   },
   "deploymentProfileRegistrySchema": {
     "path": "deployment-profile-registry.schema.json",
@@ -27,7 +27,7 @@
   },
   "promptProfileRegistry": {
     "path": "prompt-profile-registry.v1.json",
-    "sha256": "87a8b2188ab017993bb8bd3e4f1913042a15f4a5138576c3165422ae2c6d45b0"
+    "sha256": "983860212f69ec5a0119e2ea1cd03cf90258af797978a272fc81bc270a8edace"
   },
   "promptProfileRegistrySchema": {
     "path": "prompt-profile-registry.schema.json",
@@ -35,7 +35,7 @@
   },
   "outputSchemaRegistry": {
     "path": "output-schema-registry.v1.json",
-    "sha256": "976e05d41456c0c582b296e8937c7b257541a35593824d1b993b9954ffde6674"
+    "sha256": "db6be7287d89a68879a94d3dab9dcd64fdf4211734a3d670515e351d84c11254"
   },
   "outputSchemaRegistrySchema": {
     "path": "output-schema-registry.schema.json",
@@ -43,7 +43,7 @@
   },
   "stepBudgetRegistry": {
     "path": "step-budget-registry.v1.json",
-    "sha256": "e4b161bf0e009c10b1a71b3781bb31ba5af9e3735b85d8a1513a607950e75bdd"
+    "sha256": "9e08a5bafc4288105914c203de70de0f456d3278aca6375742633788f1662be9"
   },
   "stepBudgetRegistrySchema": {
     "path": "step-budget-registry.schema.json",
@@ -51,7 +51,7 @@
   },
   "systemPurposeRegistry": {
     "path": "system-purpose-registry.v1.json",
-    "sha256": "f381857df704eab025116b67eaa14dce0e3159e27c348a58525a9ec41386c136"
+    "sha256": "f6bb59fff572b49cc1972dd49c243c0d8ed0cc39fc2cafff15270c7a68c58177"
   },
   "systemPurposeRegistrySchema": {
     "path": "system-purpose-registry.schema.json",

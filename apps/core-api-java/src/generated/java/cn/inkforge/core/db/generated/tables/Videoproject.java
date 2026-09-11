@@ -12,6 +12,8 @@ import cn.inkforge.core.db.generated.tables.Videoadaptationdecisioncommand.Video
 import cn.inkforge.core.db.generated.tables.Videoadaptationtask.VideoadaptationtaskPath;
 import cn.inkforge.core.db.generated.tables.Videoasset.VideoassetPath;
 import cn.inkforge.core.db.generated.tables.Videochapteradaptation.VideochapteradaptationPath;
+import cn.inkforge.core.db.generated.tables.Videoepisode.VideoepisodePath;
+import cn.inkforge.core.db.generated.tables.Videoepisodecommand.VideoepisodecommandPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion.VideoepisodeeditversionPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodemixversion.VideoepisodemixversionPath;
 import cn.inkforge.core.db.generated.tables.Videogenerationtask.VideogenerationtaskPath;
@@ -299,6 +301,32 @@ public class Videoproject extends TableImpl<VideoprojectRecord> {
             _videochapteradaptation = new VideochapteradaptationPath(this, null, Keys.VIDEOCHAPTERADAPTATION__VIDEOCHAPTERADAPTATION_PROJECT_NOVEL_FKEY.getInverseKey());
 
         return _videochapteradaptation;
+    }
+
+    private transient VideoepisodePath _videoepisode;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisode</code> table
+     */
+    public VideoepisodePath videoepisode() {
+        if (_videoepisode == null)
+            _videoepisode = new VideoepisodePath(this, null, Keys.VIDEOEPISODE__VIDEOEPISODE_PROJECT_NOVEL_FKEY.getInverseKey());
+
+        return _videoepisode;
+    }
+
+    private transient VideoepisodecommandPath _videoepisodecommand;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoEpisodeCommand</code> table
+     */
+    public VideoepisodecommandPath videoepisodecommand() {
+        if (_videoepisodecommand == null)
+            _videoepisodecommand = new VideoepisodecommandPath(this, null, Keys.VIDEOEPISODECOMMAND__VIDEOEPISODECOMMAND_PROJECT_NOVEL_FKEY.getInverseKey());
+
+        return _videoepisodecommand;
     }
 
     private transient VideoepisodeeditversionPath _videoepisodeeditversion;

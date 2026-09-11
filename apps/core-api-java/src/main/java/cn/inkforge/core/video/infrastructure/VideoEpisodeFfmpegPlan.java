@@ -13,6 +13,7 @@ final class VideoEpisodeFfmpegPlan {
 
     private VideoEpisodeFfmpegPlan() {}
 
+    /** 将冻结剪辑、附加音轨和字幕编译成确定性的 FFmpeg filter graph。 */
     static String filterGraph(
             VideoEpisodeExportManifest manifest,
             List<Boolean> audioStreams,
@@ -80,10 +81,11 @@ final class VideoEpisodeFfmpegPlan {
                                 0))
                         + ":d=" + decimal(clip.transitionDurationMs() / 1_000d));
             }
-            if (audioStreams.get(index)) {
+            if (audioStreams.get(index) && "keep".equals(clip.sourceAudioMode())) {
                 filters.add("[" + index + ":a:0]" + String.join(",", audio)
                         + "[a" + index + "]");
             } else {
+                // 无音轨或明确静音都注入等长静音，避免附加声音意外叠加原声。
                 List<String> silent = new ArrayList<>(List.of(
                         "anullsrc=r=48000:cl=stereo",
                         "atrim=duration=" + decimal(durationSeconds),
@@ -158,6 +160,7 @@ final class VideoEpisodeFfmpegPlan {
         return String.join(";\n", filters);
     }
 
+    /** 将冻结字幕提示转换为 UTF-8 SRT 文本。 */
     static String subtitles(VideoEpisodeExportManifest manifest) {
         List<String> blocks = new ArrayList<>();
         for (int index = 0; index < manifest.subtitleCues().size(); index++) {
@@ -172,6 +175,7 @@ final class VideoEpisodeFfmpegPlan {
         return String.join("\n", blocks);
     }
 
+    /** 按目标画幅计算偶数像素尺寸，满足常用 H.264 编码要求。 */
     static Dimensions dimensions(String ratio, String resolution) {
         String[] values = ratio.split(":", -1);
         int left = Integer.parseInt(values[0]);

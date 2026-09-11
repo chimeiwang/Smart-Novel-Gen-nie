@@ -7,6 +7,7 @@ import static cn.inkforge.core.db.generated.Tables.CHARACTERSTATECHANGE;
 import static cn.inkforge.core.db.generated.Tables.FACTION;
 import static cn.inkforge.core.db.generated.Tables.ITEM;
 import static cn.inkforge.core.db.generated.Tables.LOCATION;
+import static cn.inkforge.core.db.generated.Tables.VIDEOVISUALCANON;
 import static cn.inkforge.core.db.generated.Tables._FACTIONTERRITORIES;
 
 import cn.inkforge.contracts.api.DeleteImpactResponse;
@@ -659,7 +660,7 @@ public final class JooqLoreRepository implements LoreRepository {
                 expectedUpdatedAt,
                 "LORE_ENTITY_VERSION_CONFLICT");
         Map<String, Integer> references = deleteReferences(
-                transaction, definition.kind(), entityId);
+                transaction, novelId, definition.kind(), entityId);
         if (!references.isEmpty()) {
             throw new ApiException(
                     409,
@@ -775,7 +776,7 @@ public final class JooqLoreRepository implements LoreRepository {
     }
 
     private static Map<String, Integer> deleteReferences(
-            DSLContext transaction, LoreEntityKind kind, String entityId) {
+            DSLContext transaction, String novelId, LoreEntityKind kind, String entityId) {
         Map<String, Integer> references = new LinkedHashMap<>();
         switch (kind) {
             case CHARACTERS -> {
@@ -811,6 +812,21 @@ public final class JooqLoreRepository implements LoreRepository {
             case ITEMS, GLOSSARY -> {
                 // 这两类实体没有现有数据库级反向引用。
             }
+        }
+        String settingKind = switch (kind) {
+            case CHARACTERS -> "character";
+            case LOCATIONS -> "location";
+            case ITEMS -> "item";
+            default -> null;
+        };
+        if (settingKind != null) {
+            // 调用方持有设定行锁；视觉候选创建也先锁同一行。先创建的引用会阻止删除，
+            // 先完成的删除会让候选创建读不到设定，不能留下没有来源的定妆槽。
+            putCount(references, "videoVisualCanons", transaction.fetchCount(
+                    VIDEOVISUALCANON,
+                    VIDEOVISUALCANON.NOVELID.eq(novelId)
+                            .and(VIDEOVISUALCANON.SETTINGKIND.eq(settingKind))
+                            .and(VIDEOVISUALCANON.SETTINGID.eq(entityId))));
         }
         return references;
     }

@@ -48,6 +48,7 @@ def set_canon_candidate(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         required={
             "projectId",
             "clientRequestId",
+            "expectedRevision",
             "settingKind",
             "settingId",
             "duty",
@@ -75,6 +76,7 @@ def set_canon_candidate(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     project_id = encode_id(require_string(payload, "projectId"))
     body: JsonObject = {
         "clientRequestId": require_client_request_id(payload),
+        "expectedRevision": require_int(payload, "expectedRevision", minimum=0),
         "settingKind": setting_kind,
         "settingId": require_string(payload, "settingId"),
         "duty": duty,
@@ -222,15 +224,5 @@ VIDEO_VISUAL_COMMAND_SPECS: tuple[CommandSpec, ...] = (
         mutation=True,
         requiresIdentity=True,
         requiresClientRequestId=True,
-    ),
-    CommandSpec(
-        name="long.video.reference.save",
-        handler=save_references,
-        inputMode="json",
-        outputMode="json",
-        fileOutput=_NO_FILE,
-        mutation=True,
-        requiresIdentity=True,
-        requiresClientRequestId=False,
     ),
 )

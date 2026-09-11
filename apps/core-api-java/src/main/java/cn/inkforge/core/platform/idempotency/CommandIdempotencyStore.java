@@ -48,6 +48,7 @@ public final class CommandIdempotencyStore {
         this.durableAgentSchemaReady = durableAgentSchemaReady;
     }
 
+    /** 在 V1 命令、旧 Workflow 信封、V2 Run 和作者决定中解析唯一幂等记录。 */
     public Resolution resolve(
             DSLContext transaction,
             String userId,

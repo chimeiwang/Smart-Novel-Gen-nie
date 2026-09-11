@@ -53,11 +53,7 @@ final class VideoWatchCommands {
     private VideoWatchCommands() {}
 
     static void register(Map<String, CommandHandler> handlers) {
-        handlers.put("long.video.adaptation.watch", VideoWatchCommands::adaptation);
-        handlers.put("long.video.render.watch", (context, payload) ->
-                task(context, payload, "render", RENDER));
-        handlers.put("long.video.export.watch", (context, payload) ->
-                task(context, payload, "export", EXPORT));
+        // 旧章节改编命令已从唯一新语义的普通 CLI 退场。
     }
 
     private static CommandResult adaptation(CommandContext context, ObjectNode payload) {

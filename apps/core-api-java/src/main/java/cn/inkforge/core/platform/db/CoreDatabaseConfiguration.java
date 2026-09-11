@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** 按运行能力投影冻结 schema，并装配唯一数据库连接与只读结构门禁。 */
 @Configuration(proxyBeanMethods = false)
 class CoreDatabaseConfiguration {
 
@@ -30,6 +31,7 @@ class CoreDatabaseConfiguration {
     }
 
     private static SchemaProfile schemaProfile(CoreSettings settings) {
+        // 结构投影反映已启用能力，避免要求生产为关闭的视频能力自动补表。
         return SchemaProfile.forCapabilities(
                 settings.videoPreviewEnabled(),
                 settings.phoneAuthEnabled() && settings.phoneAuthSendEnabled());

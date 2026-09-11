@@ -9,6 +9,7 @@ import picocli.CommandLine.Option;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 实现唯一交互式登录及本地凭据与配置的一致更新。 */
 final class AuthCommands {
 
     private AuthCommands() {}
@@ -49,6 +50,7 @@ final class AuthCommands {
                     .configStore()
                     .save(options.profile, new ProfileConfig(origin, options.username));
         } catch (RuntimeException exception) {
+            // 配置写入失败时撤销刚保存的令牌，避免留下无法定位来源的孤立凭据。
             context.dependencies().credentialStore().delete(options.profile, origin);
             throw exception;
         }
@@ -60,6 +62,7 @@ final class AuthCommands {
             return CommandResult.json(
                     context.requireApi().request("POST", "/api/v1/auth/logout"));
         } finally {
+            // 服务端退出失败也清理本机令牌，保证用户要求的本地登出一定生效。
             context.dependencies()
                     .credentialStore()
                     .delete(context.profile(), context.origin());

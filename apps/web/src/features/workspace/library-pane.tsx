@@ -32,6 +32,7 @@ import {
   resolveSingletonEditValue,
 } from "./singleton-edit-baseline";
 import { subscribeWorkspaceInvalidation } from "./workspace-invalidation";
+import { confirmVisualEditorLeave } from "@/features/video/adaptation/visual-editor-leave-guard";
 
 type LoreItem = "characters" | "locations" | "factions" | "items" | "glossaries";
 export type LibraryItem = LoreItem
@@ -47,6 +48,8 @@ type PlanningData = components["schemas"]["WorkspacePlanningResponse"];
 
 type LibraryPaneProps = {
   novelId: string;
+  novelName?: string;
+  allowVisuals?: boolean;
   appliedStyleId: string | null;
   active: boolean;
   activeItem?: LibraryItem;
@@ -350,6 +353,8 @@ function WritingBibleEditor({
 
 export function LibraryPane({
   novelId,
+  novelName,
+  allowVisuals = false,
   appliedStyleId,
   active,
   activeItem: controlledActiveItem,
@@ -360,6 +365,7 @@ export function LibraryPane({
   const [internalActiveItem, setInternalActiveItem] = useState<LibraryItem>("characters");
   const activeItem = controlledActiveItem ?? internalActiveItem;
   const setActiveItem = (item: LibraryItem) => {
+    if (!confirmVisualEditorLeave(novelId)) return;
     setInternalActiveItem(item);
     onActiveItemChange?.(item);
   };
@@ -437,6 +443,8 @@ export function LibraryPane({
       return (
         <LorePanel
           novelId={novelId}
+          novelName={novelName}
+          allowVisuals={allowVisuals}
           characters={lore.characters}
           items={lore.items}
           locations={lore.locations}

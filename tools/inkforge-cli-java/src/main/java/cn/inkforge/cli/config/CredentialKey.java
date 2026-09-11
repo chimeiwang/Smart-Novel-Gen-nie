@@ -6,6 +6,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
+/** 以规范化 origin 的摘要隔离不同服务地址下的同名 profile 凭据。 */
 record CredentialKey(String service, String account) {
 
     static CredentialKey of(String profile, String origin) {

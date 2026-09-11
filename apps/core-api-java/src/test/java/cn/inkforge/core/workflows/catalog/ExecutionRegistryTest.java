@@ -125,9 +125,14 @@ class ExecutionRegistryTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");
         assertThatThrownBy(() -> registry.resolve(
-                        "video.chapter_cinematic_adaptation_v2", false))
+                        "video.chapter_cinematic_adaptation_v2", true))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("开发专用");
+                .hasMessageContaining("未知 Operation");
+        assertThatThrownBy(() -> registry.resolve("video.chapter_shot_prompt_v2", true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("未知 Operation");
+        assertThat(registry.resolve("video.episode_script_generate", true).operation().key())
+                .isEqualTo("video.episode_script_generate");
         assertThatThrownBy(() -> registry.resolveSystemPurpose("summarize_evidence"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未启用");

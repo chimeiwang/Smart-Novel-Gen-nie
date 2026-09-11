@@ -8,6 +8,7 @@ import java.util.Set;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册人物关系命令，并把 CLI 输入转换为冻结的 Core 公共请求。 */
 final class LongRelationshipCommands {
 
     private static final Set<String> RELATION_CREATE_FIELDS = Set.of(

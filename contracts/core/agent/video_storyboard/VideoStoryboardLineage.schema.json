@@ -1,0 +1,30 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardLineage/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "relation": {
+      "enum": [
+        "replacement",
+        "copy",
+        "split",
+        "merge"
+      ],
+      "title": "Relation",
+      "type": "string"
+    },
+    "sourceShotId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Sourceshotid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sourceShotId",
+    "relation"
+  ],
+  "title": "VideoStoryboardLineage",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardLineage"
+}

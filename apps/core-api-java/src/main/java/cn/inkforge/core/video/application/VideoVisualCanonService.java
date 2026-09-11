@@ -42,6 +42,9 @@ public final class VideoVisualCanonService {
             String projectId,
             CreateVisualCanonCandidateRequest request) {
         requireEnabled();
+        if (request.getExpectedRevision() == null || request.getExpectedRevision() < 0) {
+            throw new ApiException(422, "VALIDATION_ERROR", "请提供视觉候选的基线版本");
+        }
         String duty = request.getDuty().getValue();
         String settingKind = request.getSettingKind().getValue();
         if (!settingKind.equals(SETTING_KIND_BY_DUTY.get(duty))) {
@@ -68,7 +71,7 @@ public final class VideoVisualCanonService {
                         request.getCandidateAssetId(),
                         include,
                         exclude,
-                        request.getDefaultStrength()));
+                        request.getDefaultStrength(), request.getExpectedRevision()));
     }
 
     public VisualCanonResponse approve(

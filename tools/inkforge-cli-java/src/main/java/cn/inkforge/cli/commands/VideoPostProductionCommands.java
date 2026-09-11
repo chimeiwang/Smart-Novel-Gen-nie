@@ -19,18 +19,7 @@ final class VideoPostProductionCommands {
     private VideoPostProductionCommands() {}
 
     static void register(Map<String, CommandHandler> handlers) {
-        handlers.put("long.video.post.show", VideoPostProductionCommands::show);
-        handlers.put("long.video.keyframe.set", VideoPostProductionCommands::setKeyframe);
-        handlers.put("long.video.keyframe.clear", VideoPostProductionCommands::clearKeyframe);
-        handlers.put("long.video.keyframe.extract", VideoPostProductionCommands::extractKeyframe);
-        handlers.put("long.video.edit.save", VideoPostProductionCommands::saveEdit);
-        handlers.put("long.video.edit.get", VideoPostProductionCommands::getEdit);
-        handlers.put("long.video.mix.save", VideoPostProductionCommands::saveMix);
-        handlers.put("long.video.mix.get", VideoPostProductionCommands::getMix);
-        handlers.put("long.video.export.start", VideoPostProductionCommands::startExport);
-        handlers.put("long.video.export.get", VideoPostProductionCommands::getExport);
-        handlers.put("long.video.export.retry", VideoPostProductionCommands::retryExport);
-        handlers.put("long.video.export.download", VideoPostProductionCommands::downloadExport);
+        // 旧章节改编命令已从唯一新语义的普通 CLI 退场。
     }
 
     private static CommandResult show(CommandContext context, ObjectNode payload) {

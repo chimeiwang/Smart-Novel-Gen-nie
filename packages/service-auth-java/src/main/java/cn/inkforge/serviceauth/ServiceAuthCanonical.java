@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.regex.Pattern;
 
+/** 统一签名端与验证端的 HTTP 规范化和常量时间摘要比较。 */
 final class ServiceAuthCanonical {
 
     private static final Pattern METHOD = Pattern.compile("[A-Z]{3,16}");

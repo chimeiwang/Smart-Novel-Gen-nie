@@ -8,6 +8,7 @@ import java.util.Set;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册长篇规划、故事进展和文本大纲命令。 */
 final class LongPlanningCommands {
 
     private static final Set<String> WRITING_BIBLE_FIELDS = Set.of(

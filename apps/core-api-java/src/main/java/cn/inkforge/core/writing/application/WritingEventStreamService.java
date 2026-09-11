@@ -114,6 +114,7 @@ public final class WritingEventStreamService implements AutoCloseable {
         this.heartbeatInterval = heartbeatInterval;
     }
 
+    /** 为任务创建受管理的 SSE 会话；V2 直接转交耐久工作流事件服务。 */
     public ManagedSseEmitter stream(
             String userId, String taskId, String lastEventId) {
         return open(prepare(userId, taskId, lastEventId));
@@ -143,6 +144,7 @@ public final class WritingEventStreamService implements AutoCloseable {
         String fingerprint = fingerprint(outcome);
         sender.send(formatOutcome(outcome));
         if (Boolean.TRUE.equals(outcome.getStreamShouldClose())) {
+            // 已终态也先回放游标后的可见事件，避免断线客户端遗漏终态前最后一批业务帧。
             VisibleReplay replay = replay(taskId, cursor);
             for (WritingEvent event : replay.events()) sender.send(formatEvent(event));
             if (!replay.events().isEmpty()) sender.send(formatOutcome(outcome));
@@ -186,6 +188,7 @@ public final class WritingEventStreamService implements AutoCloseable {
         String next = cursor;
         for (WritingEvent event : replayed) {
             String disposition = dispositions.getOrDefault(event.id(), "wait");
+            // 一旦遇到未决前序事件就停止推进游标，保持同任务事件的严格可见顺序。
             if ("wait".equals(disposition)) break;
             next = event.id();
             if ("emit".equals(disposition)) visible.add(event);
@@ -212,6 +215,7 @@ public final class WritingEventStreamService implements AutoCloseable {
     private String fingerprint(WritingRunOutcome outcome) {
         Map<String, Object> value = json.convertValue(
                 outcome, new TypeReference<Map<String, Object>>() {});
+        // observedAt 每次查询都会变化，不应因此持续向客户端发送内容相同的 outcome。
         value.remove("observedAt");
         return CommandIdempotency.sha256(
                 CommandIdempotency.canonicalJsonBytes(value, json));
@@ -250,6 +254,7 @@ public final class WritingEventStreamService implements AutoCloseable {
 
     @Override
     public void close() {
+        // 先关闭所有会话，再终止执行器并等待 worker 计数归零，避免停机后仍持有响应流。
         closing.set(true);
         List.copyOf(sessions).forEach(EmitterSession::shutdown);
         workers.shutdownNow();

@@ -12,6 +12,7 @@ public final class OutlineNodeValidator {
 
     private OutlineNodeValidator() {}
 
+    /** 校验候选节点及修改后整棵局部树的层级与章节区间不变量。 */
     public static void validate(
             OutlineNodeSnapshot candidate,
             List<OutlineNodeSnapshot> existing,
@@ -61,6 +62,7 @@ public final class OutlineNodeValidator {
                 .map(Map.Entry::getKey)
                 .findFirst()
                 .orElse(null);
+        // 修改父节点时同时验证既有子节点，不能只证明候选自身合法。
         List<OutlineNodeSnapshot> children = existing.stream()
                 .filter(value -> candidate.id().equals(value.parentId()))
                 .toList();

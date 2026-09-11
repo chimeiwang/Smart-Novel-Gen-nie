@@ -46,7 +46,11 @@ public enum Reviewartifactkind implements EnumType {
 
     video_scene_plan("video_scene_plan"),
 
-    video_adaptation_plan("video_adaptation_plan");
+    video_adaptation_plan("video_adaptation_plan"),
+
+    video_episode_script("video_episode_script"),
+
+    video_episode_storyboard("video_episode_storyboard");
 
     private final String literal;
 

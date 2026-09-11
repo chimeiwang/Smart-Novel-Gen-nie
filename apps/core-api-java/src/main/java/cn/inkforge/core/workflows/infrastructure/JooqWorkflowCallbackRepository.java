@@ -23,7 +23,10 @@ import cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion;
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
-import cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion;
+import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeScriptCompletion;
+import cn.inkforge.core.workflows.domain.VideoEpisodeScriptTransitions;
+import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeStoryboardCompletion;
+import cn.inkforge.core.workflows.domain.VideoEpisodeStoryboardTransitions;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
@@ -46,7 +49,6 @@ import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.protocol.WorkflowOutputValidator;
 import cn.inkforge.core.workflows.domain.WorkflowMessageMetadata;
 import cn.inkforge.core.workflows.domain.ShortMediumSegments;
-import cn.inkforge.core.workflows.domain.VideoStageTransitions;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -91,7 +93,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
     private final java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion;
     private final java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion;
     private final java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion;
-    private final java.util.function.Supplier<WorkflowVideoAdaptationCompletion> videoCompletion;
+    private final java.util.function.Supplier<WorkflowVideoEpisodeScriptCompletion> episodeScriptCompletion;
+    private final java.util.function.Supplier<WorkflowVideoEpisodeStoryboardCompletion> episodeStoryboardCompletion;
 
     JooqWorkflowCallbackRepository(
             CoreDatabase database,
@@ -174,7 +177,22 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
             java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion,
             java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion,
-            java.util.function.Supplier<WorkflowVideoAdaptationCompletion> videoCompletion) {
+            java.util.function.Supplier<WorkflowVideoEpisodeScriptCompletion> episodeScriptCompletion) {
+        this(database, ids, clock, json, registry, leaseDuration, contexts, businessPreparation, structuredCandidates,
+                shortMediumCompletion, qualityCompletion, styleCompletion, ragCompletion, episodeScriptCompletion, () -> null);
+    }
+
+    JooqWorkflowCallbackRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
+            ObjectMapper json, ExecutionRegistry registry, Duration leaseDuration,
+            WorkflowExecutionContextReader contexts,
+            java.util.function.Supplier<WorkflowIntentBusinessPreparation> businessPreparation,
+            java.util.function.Supplier<WorkflowStructuredCandidatePreparation> structuredCandidates,
+            java.util.function.Supplier<WorkflowShortMediumCompletion> shortMediumCompletion,
+            java.util.function.Supplier<WorkflowQualityCompletion> qualityCompletion,
+            java.util.function.Supplier<WorkflowStylePortraitCompletion> styleCompletion,
+            java.util.function.Supplier<WorkflowRagIndexCompletion> ragCompletion,
+            java.util.function.Supplier<WorkflowVideoEpisodeScriptCompletion> episodeScriptCompletion,
+            java.util.function.Supplier<WorkflowVideoEpisodeStoryboardCompletion> episodeStoryboardCompletion) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
@@ -202,7 +220,8 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         this.qualityCompletion = Objects.requireNonNull(qualityCompletion);
         this.styleCompletion = Objects.requireNonNull(styleCompletion);
         this.ragCompletion = Objects.requireNonNull(ragCompletion);
-        this.videoCompletion = Objects.requireNonNull(videoCompletion);
+        this.episodeScriptCompletion = Objects.requireNonNull(episodeScriptCompletion);
+        this.episodeStoryboardCompletion = Objects.requireNonNull(episodeStoryboardCompletion);
     }
 
     @Override
@@ -361,9 +380,16 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
                 // preparing 是唯一昂贵调用授权门：部署、Run 累计预算和 User 可用余额必须在
                 // 当前 Run→Step 锁事务内同时冻结，Agent 收到 accepted 后才可进入 provider journal。
                 billing.reserve(transaction, body.getRunId(), body.getStepId(), resolved, now);
-                if (isVideoRun(locked.run())) {
-                    requireVideoCurrentInput(transaction, locked);
-                    videoCompletion().markProcessing(transaction, body.getRunId());
+                if (isEpisodeScriptRun(locked.run())) {
+                    requireEpisodeScriptCurrentInput(transaction, locked);
+                    if (!episodeScriptCompletion().targetExists(transaction, body.getRunId())) {
+                        throw new IllegalArgumentException("剧集来源已经不存在");
+                    }
+                } else if (isEpisodeStoryboardRun(locked.run())) {
+                    requireEpisodeStoryboardCurrentInput(transaction, locked);
+                    if (!episodeStoryboardCompletion().targetExists(transaction, body.getRunId())) {
+                        throw new IllegalArgumentException("分镜剧集来源已经不存在");
+                    }
                 }
             } else if (body.getPhase()
                     == ExecutionStepProgress.PhaseEnum.WAITING_PROVIDER) {
@@ -590,9 +616,6 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         if (tryQualityProtocolCorrection(transaction, locked, body, usage, sequence, now)) {
             return receipt(body, ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
         }
-        if (tryVideoProtocolCorrection(transaction, locked, body, usage, sequence, now)) {
-            return receipt(body, ExecutionCallbackReceipt.StatusEnum.ACCEPTED);
-        }
         if (GENERATION.equals(purpose) || RESOLVE_INTENT.equals(purpose)
                 || PROTOCOL_CORRECTION.equals(purpose) && isQualityRun(locked.run())) {
             String terminalCode = isQualityRun(locked.run()) && QUALITY_CORRECTION_REQUIRED.equals(body.getErrorCode())
@@ -801,7 +824,9 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             throw invalid(exception.getMessage());
         }
         switch (materializer) {
-            case VIDEO_STAGES -> completeVideoStage(transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case VIDEO_EPISODE_SCRIPT -> completeEpisodeScriptStage(transaction, locked, executionPlan, frozenStep, body, usage, output, now);
+            case VIDEO_EPISODE_STORYBOARD -> completeEpisodeStoryboardStage(
+                    transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case RAG_INDEX -> completeRagIndex(
                     transaction, locked, executionPlan, frozenStep, body, usage, output, now);
             case STYLE_PORTRAIT -> completeStylePortrait(
@@ -827,173 +852,242 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         }
     }
 
-    private void completeVideoStage(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+    private void completeEpisodeScriptStage(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
             ExecutionPlanSnapshot.Step stage, ExecutionStepResult body, WorkflowStepUsage usage,
             Map<String, Object> output, LocalDateTime now) {
-        requireVideoCurrentInput(tx, locked);
+        requireEpisodeScriptCurrentInput(tx, locked);
         WorkflowOutputValidator.validate(stage.outputSchema().jsonSchema(), output);
         completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
         long sequence = appendStepFinished(tx, locked, "completed", null,
                 locked.run().get("lastEventSequence", Long.class), now);
-        if ("dramatic_structure".equals(output.get("stageKey")) && "ready".equals(output.get("outcome"))) {
-            videoCompletion().saveDramaticCheckpoint(tx, body.getRunId(), object(output.get("checkpoint"), "checkpoint"));
-        }
-        convergeVideo(tx, locked, plan, sequence, now);
-    }
-
-    private boolean tryVideoProtocolCorrection(DSLContext tx, Locked locked, ExecutionStepFailure body,
-            WorkflowStepUsage usage, long sequence, LocalDateTime now) {
-        if (!isVideoRun(locked.run()) || !VideoStageTransitions.CORRECTION_REQUIRED.equals(body.getErrorCode())
-                || body.getErrorCategory() != ExecutionStepFailure.ErrorCategoryEnum.PROTOCOL
-                || !Boolean.FALSE.equals(body.getRetryable()) || !Boolean.FALSE.equals(body.getOutcomeUnknown())
-                || !videoCorrectionAllowed(tx, body.getRunId(), body.getStepId(), WorkflowCallbackValues.usageMap(usage))) return false;
-        convergeVideo(tx, locked, executionPlan(locked.run()), sequence, now);
-        return true;
-    }
-
-    private void convergeVideo(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan, long sequence, LocalDateTime now) {
-        String runId = locked.run().get("id", String.class);
-        var decision = videoDecision(tx, locked);
-        if (decision.errorCode() != null) {
-            failRun(tx, locked, decision.errorCode(), false, sequence, now);
+        VideoEpisodeScriptTransitions.Decision decision;
+        try {
+            decision = episodeScriptDecision(tx, locked);
+        } catch (IllegalArgumentException error) {
+            failRun(tx, locked, "VIDEO_EPISODE_SCRIPT_OUTPUT_INVALID", false, sequence, now);
             return;
         }
         if (decision.nextInput() != null) {
             ExecutionPlanSnapshot.Step next = plan.requireVideoStage(string(decision.nextInput(), "stageKey")).step();
             appendGenerationStep(tx, locked, next, decision.nextInput(),
                     locked.step().get("evidenceBundleId", String.class), null, now);
-            updateRun(tx, runId, "running", sequence, null, null, now);
+            updateRun(tx, body.getRunId(), "running", sequence, null, null, now);
             return;
         }
-        if (decision.candidate() != null) {
-            Map<String, Object> properties = object(plan.requireVideoStage("shot_design").step().outputSchema()
-                    .jsonSchema().get("properties"), "视频候选属性");
-            try {
-                // 中间审镜合并可以大于最终候选包络；只有最终交作者时按原 Candidate Schema 复验。
-                WorkflowOutputValidator.validate(object(properties.get("candidate"), "最终视频候选 Schema"), decision.candidate());
-            } catch (IllegalArgumentException error) {
-                failRun(tx, locked, "VIDEO_ADAPTATION_OUTPUT_INVALID", false, sequence, now);
-                return;
-            }
-        }
-        WorkflowVideoAdaptationCompletion.Completion completion;
+        String artifactId;
         try {
-            completion = tx.transactionResult(configuration -> decision.candidate() != null
-                    ? videoCompletion().completePlan(DSL.using(configuration), runId, decision.candidate())
-                    : videoCompletion().completePrompts(DSL.using(configuration), runId, decision.promptBatch()));
+            artifactId = tx.transactionResult(configuration -> episodeScriptCompletion().completeCandidate(
+                    DSL.using(configuration), body.getRunId(), decision.document(), decision.review()));
         } catch (ApiException error) {
             if (error.statusCode() >= 500 || error.statusCode() == 408 || error.statusCode() == 429) throw error;
             failRun(tx, locked, error.code(), false, sequence, now);
             return;
         }
-        if ("cancelled".equals(completion.terminal())) {
-            cancelUnavailableVideo(tx, locked, sequence, now);
-            return;
-        }
-        if (!"completed".equals(completion.terminal())) throw invalid("视频领域物化返回非法完成状态");
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("taskId", completion.taskId()); result.put("artifactId", completion.artifactId());
-        tx.execute("UPDATE public.\"WorkflowRun\" SET output = ? WHERE id = ?", canonicalJson(result), runId);
-        sequence = appendEvent(tx, runId, sequence, "completed", Map.of("outcomeType", "video_task",
-                "resultId", completion.taskId()), "run:completed", now);
-        updateRun(tx, runId, "completed", sequence, null, now, now);
+        tx.execute("UPDATE public.\"WorkflowRun\" SET output = ? WHERE id = ?",
+                canonicalJson(Map.of("episodeId", locked.run().get("targetId", String.class), "artifactId", artifactId)), body.getRunId());
+        sequence = appendEvent(tx, body.getRunId(), sequence, "candidate_ready",
+                Map.of("stepId", body.getStepId(), "artifactId", artifactId, "artifactRevision", 1), "candidate:" + artifactId + ":1", now);
+        sequence = appendEvent(tx, body.getRunId(), sequence, "completed",
+                Map.of("outcomeType", "video_episode_script_candidate", "resultId", artifactId), "run:completed", now);
+        updateRun(tx, body.getRunId(), "completed", sequence, null, now, now);
     }
 
-    private void requireVideoCurrentInput(DSLContext tx, Locked locked) {
-        var decision = videoDecision(tx, locked);
+    private void requireEpisodeScriptCurrentInput(DSLContext tx, Locked locked) {
+        var decision = episodeScriptDecision(tx, locked);
         Map<String, Object> input = readObject(locked.step().get("input", String.class));
-        if (decision.nextInput() == null || !ExecutionCanonicalJson.sha256(decision.nextInput()).equals(ExecutionCanonicalJson.sha256(input))) {
-            throw invalid("当前视频 Step 不匹配 Core 的冻结阶段接续");
-        }
-        ExecutionPlanSnapshot plan = executionPlan(locked.run());
-        if (!plan.requireVideoStage(string(input, "stageKey")).step().equals(frozenStep(locked, plan))) {
-            throw invalid("当前视频阶段与模型快照不一致");
+        if (decision.nextInput() == null || !ExecutionCanonicalJson.sha256(decision.nextInput()).equals(ExecutionCanonicalJson.sha256(input))
+                || !executionPlan(locked.run()).requireVideoStage(string(input, "stageKey")).step().equals(frozenStep(locked, executionPlan(locked.run())))) {
+            throw invalid("当前剧本阶段不匹配 Core 的冻结接续");
         }
     }
 
-    private VideoStageTransitions.Decision videoDecision(DSLContext tx, Locked locked) {
+    private VideoEpisodeScriptTransitions.Decision episodeScriptDecision(DSLContext tx, Locked locked) {
         String runId = locked.run().get("id", String.class);
+        String episodeId = locked.run().get("targetId", String.class);
         String bundleId = locked.step().get("evidenceBundleId", String.class);
         var plan = executionPlan(locked.run());
-        if (!isVideoRun(locked.run()) || locked.run().get("novelId") == null
+        if (!isEpisodeScriptRun(locked.run()) || locked.run().get("novelId") == null
                 || locked.run().get("chapterId") != null || locked.run().get("writingSessionId") != null
+                || !"video_episode_script".equals(locked.run().get("sourceType", String.class))
+                || !"video_episode_script".equals(locked.run().get("targetType", String.class))
+                || !Objects.equals(episodeId, locked.run().get("sourceId", String.class))
                 || locked.step().get("artifactId") != null || !GENERATION.equals(locked.step().get("purpose", String.class))
                 || !Objects.equals(bundleId, locked.run().get("currentEvidenceBundleId", String.class))) {
-            throw invalid("视频阶段只能使用小说级原冻结来源且不得绑定通用 Artifact");
+            throw invalid("独立剧本必须绑定小说级剧集来源，不绑定旧章节任务或候选");
         }
-        List<Record> evidence = tx.fetch("""
-                SELECT item."resourceType", item."resourceId", item."contentJson", item."contentSha256",
-                       run."sourceType", run."sourceId"
-                FROM public."WorkflowEvidenceItem" item
-                JOIN public."WorkflowEvidenceBundle" bundle ON bundle.id = item."bundleId"
-                JOIN public."WorkflowRun" run ON run.id = bundle."runId"
-                WHERE bundle.id = ? AND bundle."runId" = ? AND item.exists AND item."contentType" = 'json'
+        var rows = tx.fetch("""
+                SELECT item."resourceType", item."resourceId", item.exists, item."contentType", item."contentJson",
+                    item."contentSha256", item."byteCount", item."rangeJson", bundle."policyVersion"
+                FROM public."WorkflowEvidenceItem" item JOIN public."WorkflowEvidenceBundle" bundle ON bundle.id = item."bundleId"
+                WHERE bundle.id = ? AND bundle."runId" = ? ORDER BY item.ordinal
                 """, bundleId, runId);
-        if (evidence.size() != 1) throw invalid("视频必须冻结唯一完整任务来源");
-        Record item = evidence.getFirst();
+        if (rows.size() != 1) throw invalid("剧本必须冻结唯一完整上下文");
+        Record item = rows.getFirst();
         Map<String, Object> context = readObject(item.get("contentJson", String.class));
-        if (!"video_task_context".equals(item.get("resourceType", String.class))
-                || !"video_adaptation_task_v2".equals(item.get("sourceType", String.class))
-                || !Objects.equals(item.get("sourceId"), item.get("resourceId"))
-                || !Objects.equals(context.get("taskId"), item.get("sourceId"))
-                || !ExecutionCanonicalJson.sha256(context).equals(item.get("contentSha256", String.class))
-                || !context.keySet().equals(Set.of("taskId", "payload", "inheritedCheckpoint"))
-                || !readObject(locked.run().get("input", String.class)).equals(Map.of("taskId", context.get("taskId")))) {
-            throw invalid("视频任务来源绑定或内容 hash 无效");
+        Map<String, Object> runInput = readObject(locked.run().get("input", String.class));
+        if (!"video_episode_script_context".equals(item.get("resourceType")) || !episodeId.equals(item.get("resourceId"))
+                || !Boolean.TRUE.equals(item.get("exists")) || !"json".equals(item.get("contentType")) || item.get("rangeJson") != null
+                || !"evidence.video.episode_script.v1".equals(item.get("policyVersion"))
+                || !episodeId.equals(context.get("episodeId")) || !episodeId.equals(runInput.get("episodeId"))
+                || !locked.run().get("novelId").equals(context.get("novelId"))
+                || !locked.run().get("operation").equals(context.get("operation"))
+                || !"video-episode-script-context/1.0".equals(context.get("schemaVersion"))
+                || !ExecutionCanonicalJson.sha256(context).equals(item.get("contentSha256"))
+                || ExecutionCanonicalJson.bytes(context).length != item.get("byteCount", Long.class)) {
+            throw invalid("分镜 Evidence 身份或哈希无效");
         }
-        List<Record> steps = tx.fetch("""
-                SELECT id, ordinal, purpose, lane, input, "inputHash", output, "resultHash", "errorCode", "usageJson",
-                       "evidenceBundleId", "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson"
-                FROM public."WorkflowStep" WHERE "runId" = ? AND status IN ('completed', 'failed') ORDER BY ordinal LIMIT 11
+        var steps = tx.fetch("""
+                SELECT id, input, "inputHash", output, "resultHash", "evidenceBundleId", purpose, lane,
+                    "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson"
+                FROM public."WorkflowStep" WHERE "runId" = ? AND status = 'completed' ORDER BY ordinal LIMIT 5
                 """, runId);
-        if (steps.size() > plan.runBudget().maxModelCalls()) throw invalid("视频历史阶段超过调用上限");
-        List<VideoStageTransitions.Completed> history = new ArrayList<>();
+        if (steps.size() > 4) throw invalid("剧本历史阶段超过固定上限");
+        List<VideoEpisodeScriptTransitions.Completed> history = new ArrayList<>();
         for (Record step : steps) {
             Map<String, Object> input = readObject(step.get("input", String.class));
             var frozen = plan.requireStep(step.get("purpose", String.class), step.get("lane", String.class),
                     step.get("modelProfile", String.class), Integer.parseInt(step.get("modelProfileVersion", String.class)),
                     step.get("outputSchema", String.class), Integer.parseInt(step.get("outputSchemaVersion", String.class)),
                     readObject(step.get("budgetJson", String.class)));
-            if (!bundleId.equals(step.get("evidenceBundleId", String.class))
-                    || !ExecutionCanonicalJson.sha256(input).equals(step.get("inputHash", String.class))
+            if (!bundleId.equals(step.get("evidenceBundleId")) || !ExecutionCanonicalJson.sha256(input).equals(step.get("inputHash"))
                     || !frozen.equals(plan.requireVideoStage(string(input, "stageKey")).step())) {
-                throw invalid("视频前序阶段来源、输入或模型身份无效");
+                throw invalid("剧本前序模型、来源或输入身份无效");
             }
-            Map<String, Object> output = step.get("output", String.class) == null ? null : readObject(step.get("output", String.class));
-            if (output != null) WorkflowOutputValidator.validate(frozen.outputSchema().jsonSchema(), output);
-            history.add(new VideoStageTransitions.Completed(step.get("id", String.class), step.get("resultHash", String.class),
-                    input, output, step.get("errorCode", String.class), videoCorrectionAllowed(tx, runId, step.get("id", String.class),
-                            readObject(step.get("usageJson", String.class)))));
+            Map<String, Object> output = readObject(step.get("output", String.class));
+            WorkflowOutputValidator.validate(frozen.outputSchema().jsonSchema(), output);
+            history.add(new VideoEpisodeScriptTransitions.Completed(step.get("id", String.class), step.get("resultHash", String.class), input, output));
         }
-        return VideoStageTransitions.replay(plan, context, history);
+        return VideoEpisodeScriptTransitions.replay(plan, context, history);
     }
 
-    private static boolean videoCorrectionAllowed(DSLContext tx, String runId, String stepId, Map<String, Object> usage) {
-        if (!(usage.get("providerAttempts") instanceof Number attempts) || attempts.intValue() != 1
-                || "unknown".equals(usage.get("usageStatus"))
-                || List.of("inputTokens", "cachedTokens", "promptCacheMissTokens", "completionTokens", "reasoningTokens", "visibleOutputTokens")
-                        .stream().anyMatch(key -> usage.get(key) == null)) return false;
-        Record reservation = tx.fetchOne("SELECT status FROM public.\"WorkflowBillingReservation\" WHERE \"runId\" = ? AND \"stepId\" = ?", runId, stepId);
-        return reservation != null && "settled".equals(reservation.get("status", String.class));
+    private static boolean isEpisodeScriptRun(Record run) {
+        return "video".equals(run.get("workflow", String.class))
+                && Set.of("episode_script_generate", "episode_script_revise").contains(run.get("operation", String.class));
     }
 
-    private static boolean isVideoRun(Record run) {
-        return "video".equals(run.get("workflow", String.class)) && Set.of("chapter_cinematic_adaptation_v2", "chapter_shot_prompt_v2")
-                .contains(run.get("operation", String.class));
-    }
-
-    private WorkflowVideoAdaptationCompletion videoCompletion() {
-        WorkflowVideoAdaptationCompletion completion = videoCompletion.get();
-        if (completion == null) throw new IllegalStateException("视频耐久任务投影端口未装配");
+    private WorkflowVideoEpisodeScriptCompletion episodeScriptCompletion() {
+        var completion = episodeScriptCompletion.get();
+        if (completion == null) throw new IllegalStateException("独立剧本候选物化端口未装配");
         return completion;
     }
 
-    private void cancelUnavailableVideo(DSLContext tx, Locked locked, long sequence, LocalDateTime now) {
+    private void completeEpisodeStoryboardStage(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
+            ExecutionPlanSnapshot.Step stage, ExecutionStepResult body, WorkflowStepUsage usage,
+            Map<String, Object> output, LocalDateTime now) {
+        requireEpisodeStoryboardCurrentInput(tx, locked);
+        WorkflowOutputValidator.validate(stage.outputSchema().jsonSchema(), output);
+        completeStep(tx, locked, body.getResultHash(), usage, canonicalJson(output), null, null, now);
+        long sequence = appendStepFinished(tx, locked, "completed", null,
+                locked.run().get("lastEventSequence", Long.class), now);
+        VideoEpisodeStoryboardTransitions.Decision decision;
+        try {
+            decision = episodeStoryboardDecision(tx, locked);
+        } catch (IllegalArgumentException error) {
+            failRun(tx, locked, "VIDEO_EPISODE_STORYBOARD_OUTPUT_INVALID", false, sequence, now);
+            return;
+        }
+        if (decision.nextInput() != null) {
+            ExecutionPlanSnapshot.Step next = plan.requireVideoStage(string(decision.nextInput(), "stageKey")).step();
+            appendGenerationStep(tx, locked, next, decision.nextInput(),
+                    locked.step().get("evidenceBundleId", String.class), null, now);
+            updateRun(tx, body.getRunId(), "running", sequence, null, null, now);
+            return;
+        }
+        String artifactId;
+        try {
+            artifactId = tx.transactionResult(configuration -> episodeStoryboardCompletion().completeCandidate(
+                    DSL.using(configuration), body.getRunId(), decision.document(), decision.review()));
+        } catch (ApiException error) {
+            if (error.statusCode() >= 500 || error.statusCode() == 408 || error.statusCode() == 429) throw error;
+            failRun(tx, locked, error.code(), false, sequence, now);
+            return;
+        }
+        tx.execute("UPDATE public.\"WorkflowRun\" SET output = ? WHERE id = ?",
+                canonicalJson(Map.of("episodeId", locked.run().get("targetId", String.class), "artifactId", artifactId)), body.getRunId());
+        sequence = appendEvent(tx, body.getRunId(), sequence, "candidate_ready",
+                Map.of("stepId", body.getStepId(), "artifactId", artifactId, "artifactRevision", 1), "candidate:" + artifactId + ":1", now);
+        sequence = appendEvent(tx, body.getRunId(), sequence, "completed",
+                Map.of("outcomeType", "video_episode_storyboard_candidate", "resultId", artifactId), "run:completed", now);
+        updateRun(tx, body.getRunId(), "completed", sequence, null, now, now);
+    }
+
+    private void requireEpisodeStoryboardCurrentInput(DSLContext tx, Locked locked) {
+        var decision = episodeStoryboardDecision(tx, locked);
+        Map<String, Object> input = readObject(locked.step().get("input", String.class));
+        if (decision.nextInput() == null || !ExecutionCanonicalJson.sha256(decision.nextInput()).equals(ExecutionCanonicalJson.sha256(input))
+                || !executionPlan(locked.run()).requireVideoStage(string(input, "stageKey")).step().equals(frozenStep(locked, executionPlan(locked.run())))) {
+            throw invalid("当前分镜阶段不匹配 Core 的冻结接续");
+        }
+    }
+
+    private VideoEpisodeStoryboardTransitions.Decision episodeStoryboardDecision(DSLContext tx, Locked locked) {
         String runId = locked.run().get("id", String.class);
-        String requestId = "video-unavailable." + runId;
-        tx.execute("UPDATE public.\"WorkflowRun\" SET \"cancelRequestId\"=?, \"cancelRequestedAt\"=? WHERE id=?", requestId, now, runId);
-        sequence = appendEvent(tx, runId, sequence, "cancelled", Map.of("cancelRequestId", requestId), "run:cancelled", now);
-        updateRun(tx, runId, "cancelled", sequence, "RUN_CANCELLED", now, now);
+        String episodeId = locked.run().get("targetId", String.class);
+        String bundleId = locked.step().get("evidenceBundleId", String.class);
+        var plan = executionPlan(locked.run());
+        if (!isEpisodeStoryboardRun(locked.run()) || locked.run().get("novelId") == null
+                || locked.run().get("chapterId") != null || locked.run().get("writingSessionId") != null
+                || !"video_episode_storyboard".equals(locked.run().get("sourceType", String.class))
+                || !"video_episode_storyboard".equals(locked.run().get("targetType", String.class))
+                || !Objects.equals(episodeId, locked.run().get("sourceId", String.class))
+                || locked.step().get("artifactId") != null || !GENERATION.equals(locked.step().get("purpose", String.class))
+                || !Objects.equals(bundleId, locked.run().get("currentEvidenceBundleId", String.class))) {
+            throw invalid("独立分镜必须绑定小说级剧集来源，不绑定旧章节任务或候选");
+        }
+        var rows = tx.fetch("""
+                SELECT item."resourceType", item."resourceId", item.exists, item."contentType", item."contentJson",
+                    item."contentSha256", item."byteCount", item."rangeJson", bundle."policyVersion"
+                FROM public."WorkflowEvidenceItem" item JOIN public."WorkflowEvidenceBundle" bundle ON bundle.id = item."bundleId"
+                WHERE bundle.id = ? AND bundle."runId" = ? ORDER BY item.ordinal
+                """, bundleId, runId);
+        if (rows.size() != 1) throw invalid("分镜必须冻结唯一完整上下文");
+        Record item = rows.getFirst();
+        Map<String, Object> context = readObject(item.get("contentJson", String.class));
+        Map<String, Object> runInput = readObject(locked.run().get("input", String.class));
+        if (!"video_episode_storyboard_context".equals(item.get("resourceType")) || !episodeId.equals(item.get("resourceId"))
+                || !Boolean.TRUE.equals(item.get("exists")) || !"json".equals(item.get("contentType")) || item.get("rangeJson") != null
+                || !"evidence.video.episode_storyboard.v1".equals(item.get("policyVersion"))
+                || !episodeId.equals(context.get("episodeId")) || !episodeId.equals(runInput.get("episodeId"))
+                || !locked.run().get("novelId").equals(context.get("novelId"))
+                || !locked.run().get("operation").equals(context.get("operation"))
+                || !"video-episode-storyboard-context/1.0".equals(context.get("schemaVersion"))
+                || !ExecutionCanonicalJson.sha256(context).equals(item.get("contentSha256"))
+                || ExecutionCanonicalJson.bytes(context).length != item.get("byteCount", Long.class)) {
+            throw invalid("剧本 Evidence 身份或哈希无效");
+        }
+        var steps = tx.fetch("""
+                SELECT id, input, "inputHash", output, "resultHash", "evidenceBundleId", purpose, lane,
+                    "modelProfile", "modelProfileVersion", "outputSchema", "outputSchemaVersion", "budgetJson"
+                FROM public."WorkflowStep" WHERE "runId" = ? AND status = 'completed' ORDER BY ordinal LIMIT 5
+                """, runId);
+        if (steps.size() > 4) throw invalid("分镜历史阶段超过固定上限");
+        List<VideoEpisodeStoryboardTransitions.Completed> history = new ArrayList<>();
+        for (Record step : steps) {
+            Map<String, Object> input = readObject(step.get("input", String.class));
+            var frozen = plan.requireStep(step.get("purpose", String.class), step.get("lane", String.class),
+                    step.get("modelProfile", String.class), Integer.parseInt(step.get("modelProfileVersion", String.class)),
+                    step.get("outputSchema", String.class), Integer.parseInt(step.get("outputSchemaVersion", String.class)),
+                    readObject(step.get("budgetJson", String.class)));
+            if (!bundleId.equals(step.get("evidenceBundleId")) || !ExecutionCanonicalJson.sha256(input).equals(step.get("inputHash"))
+                    || !frozen.equals(plan.requireVideoStage(string(input, "stageKey")).step())) {
+                throw invalid("分镜前序模型、来源或输入身份无效");
+            }
+            Map<String, Object> output = readObject(step.get("output", String.class));
+            WorkflowOutputValidator.validate(frozen.outputSchema().jsonSchema(), output);
+            history.add(new VideoEpisodeStoryboardTransitions.Completed(step.get("id", String.class), step.get("resultHash", String.class), input, output));
+        }
+        return VideoEpisodeStoryboardTransitions.replay(plan, context, history);
+    }
+
+    private static boolean isEpisodeStoryboardRun(Record run) {
+        return "video".equals(run.get("workflow", String.class))
+                && Set.of("episode_storyboard_generate", "episode_storyboard_revise").contains(run.get("operation", String.class));
+    }
+
+    private WorkflowVideoEpisodeStoryboardCompletion episodeStoryboardCompletion() {
+        var completion = episodeStoryboardCompletion.get();
+        if (completion == null) throw new IllegalStateException("独立分镜候选物化端口未装配");
+        return completion;
     }
 
     private void completeRagIndex(DSLContext tx, Locked locked, ExecutionPlanSnapshot plan,
@@ -2794,15 +2888,6 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
             Boolean outcomeUnknown,
             long previousSequence,
             LocalDateTime now) {
-        if (isVideoRun(locked.run())) {
-            String terminal = videoCompletion().finish(transaction, locked.run().get("id", String.class),
-                    "failed", errorCode, "视频生成失败，请按任务状态检查后重试");
-            if ("cancelled".equals(terminal)) {
-                cancelUnavailableVideo(transaction, locked, previousSequence, now);
-                return;
-            }
-            if (!"failed".equals(terminal)) throw invalid("视频物化端口返回非法失败状态");
-        }
         if (isRagRun(locked.run())) {
             String terminal = ragCompletion().finish(transaction, locked.run().get("id", String.class), "failed");
             if ("cancelled".equals(terminal)) {
@@ -2911,9 +2996,6 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         if (isRagRun(locked.run())) {
             ragCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled");
         }
-        if (isVideoRun(locked.run())) {
-            videoCompletion().finish(transaction, locked.run().get("id", String.class), "cancelled", "RUN_CANCELLED", "运行已取消");
-        }
         sequence = appendEvent(
                 transaction,
                 locked.run().get("id", String.class),
@@ -2938,7 +3020,7 @@ final class JooqWorkflowCallbackRepository implements WorkflowCallbackRepository
         Record run = transaction.fetchOne(
                 """
                 SELECT id, "userId", "novelId", "chapterId", "writingSessionId", input, workflow, operation,
-                       "targetType", "targetId", "currentEvidenceBundleId",
+                       "sourceType", "sourceId", "targetType", "targetId", "currentEvidenceBundleId",
                        "operationCatalogVersion", "modelPolicyJson",
                        status::text AS status, "cancelRequestId", "cancelRequestedAt",
                        "lastEventSequence", revision

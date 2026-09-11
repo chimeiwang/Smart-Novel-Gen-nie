@@ -10,17 +10,12 @@ import tools.jackson.databind.node.ObjectNode;
 /** 逐镜 Seedance 耐久任务、候选 Take 与选片确认命令。 */
 final class VideoRenderCommands {
 
-    private static final Set<String> RESOLUTIONS = Set.of("480p", "720p", "1080p");
+    private static final Set<String> RESOLUTIONS = Set.of("720p");
 
     private VideoRenderCommands() {}
 
     static void register(Map<String, CommandHandler> handlers) {
-        handlers.put("long.video.render.list", VideoRenderCommands::list);
-        handlers.put("long.video.render.start", VideoRenderCommands::start);
-        handlers.put("long.video.render.get", VideoRenderCommands::get);
-        handlers.put("long.video.render.retry", VideoRenderCommands::retry);
-        handlers.put("long.video.take.confirm", VideoRenderCommands::confirmTake);
-        handlers.put("long.video.take.download", VideoRenderCommands::downloadTake);
+        // 旧章节改编命令已从唯一新语义的普通 CLI 退场。
     }
 
     private static CommandResult list(CommandContext context, ObjectNode payload) {
@@ -40,17 +35,20 @@ final class VideoRenderCommands {
                         "shotId",
                         "clientRequestId",
                         "expectedPromptRevision",
+                        "generationMode",
                         "durationSeconds"),
-                Set.of("resolution", "generateAudio", "watermark"),
+                Set.of("resolution", "generateAudio", "watermark", "feeConfirmed"),
                 false);
         ObjectNode body = context.dependencies().json().createObjectNode();
         body.put("clientRequestId", VideoPayloads.clientRequestId(payload));
         body.put(
                 "expectedPromptRevision",
                 VideoPayloads.integer(payload, "expectedPromptRevision", 1, null));
+        body.put("generationMode", VideoPayloads.enumeration(payload, "generationMode", Set.of("reference"), null));
+        body.put("feeConfirmed", VideoPayloads.optionalBoolean(payload, "feeConfirmed", false));
         body.put(
                 "durationSeconds",
-                VideoPayloads.integer(payload, "durationSeconds", 2, 12));
+                VideoPayloads.integer(payload, "durationSeconds", 4, 12));
         body.put(
                 "resolution",
                 VideoPayloads.enumeration(payload, "resolution", RESOLUTIONS, "720p"));
@@ -77,9 +75,10 @@ final class VideoRenderCommands {
     }
 
     private static CommandResult retry(CommandContext context, ObjectNode payload) {
-        VideoPayloads.fields(payload, Set.of("taskId", "clientRequestId"));
+        VideoPayloads.fields(payload, Set.of("taskId", "clientRequestId"), Set.of("feeConfirmed"), false);
         ObjectNode body = context.dependencies().json().createObjectNode();
         body.put("clientRequestId", VideoPayloads.clientRequestId(payload));
+        body.put("feeConfirmed", VideoPayloads.optionalBoolean(payload, "feeConfirmed", false));
         return VideoPayloads.request(
                 context,
                 "POST",

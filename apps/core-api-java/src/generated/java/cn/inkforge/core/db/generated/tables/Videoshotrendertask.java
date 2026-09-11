@@ -7,7 +7,12 @@ package cn.inkforge.core.db.generated.tables;
 import cn.inkforge.core.db.generated.Indexes;
 import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaselineshot.VideoproductionbaselineshotPath;
 import cn.inkforge.core.db.generated.tables.Videoproject.VideoprojectPath;
+import cn.inkforge.core.db.generated.tables.Videoshotpromptversion.VideoshotpromptversionPath;
+import cn.inkforge.core.db.generated.tables.Videoshottake.VideoshottakePath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
 import cn.inkforge.core.db.generated.tables.records.VideoshotrendertaskRecord;
 
 import java.time.LocalDateTime;
@@ -78,7 +83,7 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
     /**
      * The column <code>public.VideoShotRenderTask.adaptationId</code>.
      */
-    public final TableField<VideoshotrendertaskRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotrendertaskRecord, String> ADAPTATIONID = createField(DSL.name("adaptationId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotRenderTask.projectId</code>.
@@ -93,17 +98,17 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
     /**
      * The column <code>public.VideoShotRenderTask.shotId</code>.
      */
-    public final TableField<VideoshotrendertaskRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotrendertaskRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotRenderTask.shotPlanVersionId</code>.
      */
-    public final TableField<VideoshotrendertaskRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotrendertaskRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotRenderTask.promptVersionId</code>.
      */
-    public final TableField<VideoshotrendertaskRecord, String> PROMPTVERSIONID = createField(DSL.name("promptVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotrendertaskRecord, String> PROMPTVERSIONID = createField(DSL.name("promptVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotRenderTask.retryOfTaskId</code>.
@@ -190,6 +195,26 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
      */
     public final TableField<VideoshotrendertaskRecord, LocalDateTime> COMPLETEDAT = createField(DSL.name("completedAt"), SQLDataType.LOCALDATETIME(3), this, "");
 
+    /**
+     * The column <code>public.VideoShotRenderTask.videoEpisodeId</code>.
+     */
+    public final TableField<VideoshotrendertaskRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotRenderTask.episodeShotId</code>.
+     */
+    public final TableField<VideoshotrendertaskRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotRenderTask.episodeShotVersionId</code>.
+     */
+    public final TableField<VideoshotrendertaskRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotRenderTask.productionBaselineId</code>.
+     */
+    public final TableField<VideoshotrendertaskRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
+
     private Videoshotrendertask(Name alias, Table<VideoshotrendertaskRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -266,7 +291,7 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.VIDEOSHOTRENDERTASK_ACTIVE_SHOT_KEY, Indexes.VIDEOSHOTRENDERTASK_DUE_IDX, Indexes.VIDEOSHOTRENDERTASK_ID_SCOPE_KEY, Indexes.VIDEOSHOTRENDERTASK_PROVIDER_TASK_KEY, Indexes.VIDEOSHOTRENDERTASK_SHOT_CLIENT_REQUEST_KEY, Indexes.VIDEOSHOTRENDERTASK_SHOT_CREATED_IDX);
+        return Arrays.asList(Indexes.VIDEOSHOTRENDERTASK_ACTIVE_SHOT_KEY, Indexes.VIDEOSHOTRENDERTASK_DUE_IDX, Indexes.VIDEOSHOTRENDERTASK_EPISODE_BASELINE_IDX, Indexes.VIDEOSHOTRENDERTASK_ID_SCOPE_KEY, Indexes.VIDEOSHOTRENDERTASK_NEW_ACTIVE_SHOT_KEY, Indexes.VIDEOSHOTRENDERTASK_NEW_SHOT_CLIENT_REQUEST_KEY, Indexes.VIDEOSHOTRENDERTASK_PROVIDER_TASK_KEY, Indexes.VIDEOSHOTRENDERTASK_SHOT_CLIENT_REQUEST_KEY, Indexes.VIDEOSHOTRENDERTASK_SHOT_CREATED_IDX);
     }
 
     @Override
@@ -276,12 +301,51 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
 
     @Override
     public List<UniqueKey<VideoshotrendertaskRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.VIDEOSHOTRENDERTASK_ID_SHOT_KEY);
+        return Arrays.asList(Keys.VIDEOSHOTRENDERTASK_ID_EPISODE_SCOPE_KEY, Keys.VIDEOSHOTRENDERTASK_ID_EPISODE_SHOT_KEY, Keys.VIDEOSHOTRENDERTASK_ID_SHOT_KEY);
     }
 
     @Override
     public List<ForeignKey<VideoshotrendertaskRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_PROJECT_NOVEL_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_RETRY_SHOT_FKEY);
+        return Arrays.asList(Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_BASELINE_INPUT_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_BASELINE_SCOPE_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_EPISODE_SCOPE_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_PROJECT_NOVEL_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_PROMPT_NEW_SCOPE_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_RETRY_EPISODE_FKEY, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_RETRY_SHOT_FKEY);
+    }
+
+    private transient VideoproductionbaselineshotPath _videoproductionbaselineshot;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaselineShot</code> table.
+     */
+    public VideoproductionbaselineshotPath videoproductionbaselineshot() {
+        if (_videoproductionbaselineshot == null)
+            _videoproductionbaselineshot = new VideoproductionbaselineshotPath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_BASELINE_INPUT_FKEY, null);
+
+        return _videoproductionbaselineshot;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
     }
 
     private transient VideoprojectPath _videoproject;
@@ -296,17 +360,56 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
         return _videoproject;
     }
 
-    private transient VideoshotrendertaskPath _videoshotrendertask;
+    private transient VideoshotpromptversionPath _videoshotpromptversion;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoShotPromptVersion</code> table.
+     */
+    public VideoshotpromptversionPath videoshotpromptversion() {
+        if (_videoshotpromptversion == null)
+            _videoshotpromptversion = new VideoshotpromptversionPath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_PROMPT_NEW_SCOPE_FKEY, null);
+
+        return _videoshotpromptversion;
+    }
+
+    private transient VideoshotrendertaskPath _videoshotrendertaskRetryEpisodeFkey;
 
     /**
      * Get the implicit join path to the <code>public.VideoShotRenderTask</code>
-     * table.
+     * table, via the <code>VideoShotRenderTask_retry_episode_fkey</code> key.
      */
-    public VideoshotrendertaskPath videoshotrendertask() {
-        if (_videoshotrendertask == null)
-            _videoshotrendertask = new VideoshotrendertaskPath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_RETRY_SHOT_FKEY, null);
+    public VideoshotrendertaskPath videoshotrendertaskRetryEpisodeFkey() {
+        if (_videoshotrendertaskRetryEpisodeFkey == null)
+            _videoshotrendertaskRetryEpisodeFkey = new VideoshotrendertaskPath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_RETRY_EPISODE_FKEY, null);
 
-        return _videoshotrendertask;
+        return _videoshotrendertaskRetryEpisodeFkey;
+    }
+
+    private transient VideoshotrendertaskPath _videoshotrendertaskRetryShotFkey;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotRenderTask</code>
+     * table, via the <code>VideoShotRenderTask_retry_shot_fkey</code> key.
+     */
+    public VideoshotrendertaskPath videoshotrendertaskRetryShotFkey() {
+        if (_videoshotrendertaskRetryShotFkey == null)
+            _videoshotrendertaskRetryShotFkey = new VideoshotrendertaskPath(this, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_RETRY_SHOT_FKEY, null);
+
+        return _videoshotrendertaskRetryShotFkey;
+    }
+
+    private transient VideoshottakePath _videoshottake;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoShotTake</code> table
+     */
+    public VideoshottakePath videoshottake() {
+        if (_videoshottake == null)
+            _videoshottake = new VideoshottakePath(this, null, Keys.VIDEOSHOTTAKE__VIDEOSHOTTAKE_TASK_EPISODE_SCOPE_FKEY.getInverseKey());
+
+        return _videoshottake;
     }
 
     @Override
@@ -317,6 +420,7 @@ public class Videoshotrendertask extends TableImpl<VideoshotrendertaskRecord> {
             Internal.createCheck(this, DSL.name("VideoShotRenderTask_manifest_check"), "(COALESCE((jsonb_typeof((\"requestManifestJson\")::jsonb) = 'object'::text), false))", true),
             Internal.createCheck(this, DSL.name("VideoShotRenderTask_provider_check"), "((provider = 'seedance'::text))", true),
             Internal.createCheck(this, DSL.name("VideoShotRenderTask_provider_task_check"), "((((status = ANY (ARRAY['queued'::text, 'running'::text, 'archiving'::text, 'succeeded'::text])) AND (\"providerTaskId\" IS NOT NULL)) OR (status <> ALL (ARRAY['queued'::text, 'running'::text, 'archiving'::text, 'succeeded'::text]))))", true),
+            Internal.createCheck(this, DSL.name("VideoShotRenderTask_scope_branch_check"), "((((\"adaptationId\" IS NOT NULL) AND (\"shotId\" IS NOT NULL) AND (\"shotPlanVersionId\" IS NOT NULL) AND (\"promptVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"adaptationId\" IS NULL) AND (\"shotId\" IS NULL) AND (\"shotPlanVersionId\" IS NULL) AND (\"promptVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true),
             Internal.createCheck(this, DSL.name("VideoShotRenderTask_status_check"), "((status = ANY (ARRAY['pending'::text, 'submitting'::text, 'submission_unknown'::text, 'queued'::text, 'running'::text, 'archiving'::text, 'succeeded'::text, 'failed'::text, 'expired'::text, 'cancelled'::text])))", true),
             Internal.createCheck(this, DSL.name("VideoShotRenderTask_text_check"), "(((btrim(model) <> ''::text) AND (btrim(\"clientRequestId\") <> ''::text)))", true)
         );

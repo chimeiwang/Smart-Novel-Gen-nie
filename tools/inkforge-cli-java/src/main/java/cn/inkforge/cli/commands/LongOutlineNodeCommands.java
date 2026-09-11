@@ -9,6 +9,7 @@ import java.util.TreeSet;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
+/** 注册结构化大纲节点的查询与变更命令。 */
 final class LongOutlineNodeCommands {
 
     private static final Set<String> BUSINESS_FIELDS = Set.of(

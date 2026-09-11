@@ -10,7 +10,7 @@ import java.util.Set;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** 按基线顺序加载并严格校验 126 个 CLI 命令。 */
+/** 按基线顺序加载并严格校验共享 CLI 命令。 */
 public final class CommandCatalog {
 
     private static final Set<String> ROOT_FIELDS =

@@ -7,7 +7,16 @@ public record CompletedVideoTake(
         String assetId,
         StoredVideoAsset stored,
         Map<String, Object> providerMetadata,
-        Integer durationMs) {
+        Integer durationMs,
+        ArchivedVideoFrame lastFrame) {
+
+    public CompletedVideoTake(
+            String assetId,
+            StoredVideoAsset stored,
+            Map<String, Object> providerMetadata,
+            Integer durationMs) {
+        this(assetId, stored, providerMetadata, durationMs, null);
+    }
 
     public CompletedVideoTake {
         providerMetadata = java.util.Collections.unmodifiableMap(

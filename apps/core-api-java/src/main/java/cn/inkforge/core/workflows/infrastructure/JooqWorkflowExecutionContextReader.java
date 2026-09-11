@@ -32,6 +32,7 @@ public final class JooqWorkflowExecutionContextReader implements WorkflowExecuti
         this.json = Objects.requireNonNull(json);
     }
 
+    /** 从首轮输入和唯一 intent_selection 控制事实重建当前执行上下文。 */
     @Override
     public WorkflowExecutionContext load(DSLContext transaction, WorkflowExecutionContext.RunIdentity identity,
             Map<String, Object> initialMap) {
@@ -155,6 +156,7 @@ public final class JooqWorkflowExecutionContextReader implements WorkflowExecuti
         }
     }
 
+    /** 配对澄清问题与回答，只返回同 Run 唯一尚未回答的问题。 */
     @Override
     public WorkflowClarificationSnapshot pendingClarification(DSLContext transaction, String runId, String status) {
         if (!"waiting_user".equals(status)) return null;
@@ -176,6 +178,7 @@ public final class JooqWorkflowExecutionContextReader implements WorkflowExecuti
         }
         List<Record> answers = controlFacts(transaction, runId, "intent_clarification_answer");
         if (answers.size() > 2) throw invalid("同一 Run 的澄清回答超过冻结上限");
+        // 回答必须消费已知问题并指向随后创建的解析 Step，孤立回执不能推进 Run。
         for (Record value : answers) {
             requireCompletedControl(value, "user_confirmation", "intent_clarification_answer");
             if (!Long.valueOf(1).equals(value.get("fencingToken", Long.class))) throw invalid("澄清回答控制事实必须冻结 fence=1");

@@ -29,6 +29,7 @@ public final class CommandIdempotency {
 
     private CommandIdempotency() {}
 
+    /** 对命令类型、资源身份和正文生成跨语言稳定请求指纹。 */
     public static String requestFingerprint(
             String commandKind,
             Map<String, Object> resourceIdentity,
@@ -41,11 +42,13 @@ public final class CommandIdempotency {
         return sha256(canonicalJsonBytes(value, json));
     }
 
+    /** 规范化时间、对象键和数值后输出确定性 JSON 字节。 */
     public static byte[] canonicalJsonBytes(Object value, ObjectMapper json) {
         Objects.requireNonNull(json);
         return json.writeValueAsBytes(normalize(value));
     }
 
+    /** 将用户级幂等身份映射为 PostgreSQL 事务咨询锁键。 */
     public static long advisoryLockKey(String userId, String clientRequestId) {
         byte[] digest = digest(requireIdentity(userId, clientRequestId));
         return ByteBuffer.wrap(digest, 0, Long.BYTES).getLong();

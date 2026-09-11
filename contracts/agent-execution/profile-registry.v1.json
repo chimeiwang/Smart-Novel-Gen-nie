@@ -2,45 +2,13 @@
   "registryVersion": "1",
   "profiles": [
     {
-      "key": "video.cinematic_review.v2",
+      "key": "rag.embedding.v2",
       "version": 2,
       "supported": true,
       "reasoningMode": "disabled",
-      "purpose": "generation",
-      "promptProfile": "prompt.video.cinematic_review.v2",
-      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
-    },
-    {
-      "key": "video.missing_beat_shots.v2",
-      "version": 2,
-      "supported": true,
-      "reasoningMode": "disabled",
-      "purpose": "generation",
-      "promptProfile": "prompt.video.missing_beat_shots.v2",
-      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
-    },
-    {
-      "key": "video.shot_design.v2",
-      "version": 2,
-      "supported": true,
-      "reasoningMode": "disabled",
-      "purpose": "generation",
-      "promptProfile": "prompt.video.shot_design.v2",
-      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
-    },
-    {
-      "key": "video.dramatic_structure.v2",
-      "version": 2,
-      "supported": true,
-      "reasoningMode": "disabled",
-      "purpose": "generation",
-      "promptProfile": "prompt.video.dramatic_structure.v2",
-      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
-    },
-    {
-      "key": "rag.embedding.v2", "version": 2, "supported": true,
-      "reasoningMode": "disabled", "purpose": "embedding",
-      "promptProfile": "prompt.rag.embedding.v2", "deploymentProfileKey": "deployment.rag.embedding.v2"
+      "purpose": "embedding",
+      "promptProfile": "prompt.rag.embedding.v2",
+      "deploymentProfileKey": "deployment.rag.embedding.v2"
     },
     {
       "key": "style.portrait.v2",
@@ -286,15 +254,6 @@
       "deploymentProfileKey": "deployment.unavailable.media.v1"
     },
     {
-      "key": "video.shot_prompt.v2",
-      "version": 2,
-      "supported": true,
-      "reasoningMode": "disabled",
-      "purpose": "generation",
-      "promptProfile": "prompt.video.shot_prompt.v2",
-      "deploymentProfileKey": "deployment.video.shot_prompt.v2"
-    },
-    {
       "key": "writer.chapter_draft.v1",
       "version": 1,
       "supported": true,
@@ -509,6 +468,42 @@
       "purpose": "generation",
       "promptProfile": "prompt.quality.short_medium_full_check.v2",
       "deploymentProfileKey": "deployment.quality.short_medium_full_check.v2"
+    },
+    {
+      "key": "video.episode_script.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.episode_script.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
+      "key": "video.episode_script_review.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.episode_script_review.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
+      "key": "video.episode_storyboard.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.episode_storyboard.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
+    },
+    {
+      "key": "video.episode_storyboard_review.v2",
+      "version": 2,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.video.episode_storyboard_review.v2",
+      "deploymentProfileKey": "deployment.video.chapter_adaptation.v2"
     }
   ]
 }

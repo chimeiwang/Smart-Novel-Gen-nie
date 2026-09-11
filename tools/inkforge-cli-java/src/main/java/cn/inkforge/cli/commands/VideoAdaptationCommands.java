@@ -20,15 +20,7 @@ final class VideoAdaptationCommands {
     private VideoAdaptationCommands() {}
 
     static void register(Map<String, CommandHandler> handlers) {
-        handlers.put("long.video.adaptation.list", VideoAdaptationCommands::list);
-        handlers.put("long.video.adaptation.get", VideoAdaptationCommands::get);
-        handlers.put("long.video.adaptation.create", VideoAdaptationCommands::create);
-        handlers.put("long.video.plan.start", VideoAdaptationCommands::startPlan);
-        handlers.put("long.video.plan.confirm", VideoAdaptationCommands::confirmPlan);
-        handlers.put("long.video.plan.discard", VideoAdaptationCommands::discardPlan);
-        handlers.put("long.video.episode.save", VideoAdaptationCommands::saveEpisode);
-        handlers.put("long.video.prompt.start", VideoAdaptationCommands::startPrompts);
-        handlers.put("long.video.prompt.save", VideoAdaptationCommands::savePrompt);
+        // 旧章节改编命令已从唯一新语义的普通 CLI 退场。
     }
 
     private static CommandResult list(CommandContext context, ObjectNode payload) {

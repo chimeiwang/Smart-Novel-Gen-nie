@@ -100,6 +100,7 @@ public final class JooqChapterRepository implements ChapterRepository {
         return mapper.load(context, List.of(chapter)).getFirst();
     }
 
+    /** 以更新时间 CAS 保存草稿；正文变化会在同一事务内使旧质量结果失效。 */
     @Override
     public OffsetDateTime updateDraft(
             String chapterId,
@@ -141,6 +142,7 @@ public final class JooqChapterRepository implements ChapterRepository {
         });
     }
 
+    /** 以独立 CAS 新建或更新故事进展，不与章节正文混写。 */
     @Override
     public OffsetDateTime upsertProgress(
             String chapterId,
@@ -181,6 +183,7 @@ public final class JooqChapterRepository implements ChapterRepository {
         });
     }
 
+    /** 校验允许的状态迁移，并在完成前强制检查一致性终检门禁。 */
     @Override
     public ChapterRecord transitionStatus(
             String chapterId,
@@ -244,6 +247,7 @@ public final class JooqChapterRepository implements ChapterRepository {
             ChapterqualitycheckRecord check,
             LocalDateTime now) {
         if (check == null) {
+            // 首次进入复审时建立唯一检查项；后续只修复状态和固定展示元数据。
             transaction.insertInto(CHAPTERQUALITYCHECK)
                     .set(CHAPTERQUALITYCHECK.ID, ids.next())
                     .set(CHAPTERQUALITYCHECK.CHAPTERID, chapter.getId())
@@ -274,6 +278,7 @@ public final class JooqChapterRepository implements ChapterRepository {
 
     private static void invalidateQuality(
             DSLContext transaction, ChapterqualitycheckRecord check, LocalDateTime now) {
+        // 来源变化后旧分数、报告和活动运行必须一起失效，不能留下可误认的半旧结果。
         transaction.update(CHAPTERQUALITYCHECK)
                 .set(CHAPTERQUALITYCHECK.STATUS, Qualitycheckstatus.pending)
                 .setNull(CHAPTERQUALITYCHECK.RESULT)

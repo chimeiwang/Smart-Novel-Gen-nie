@@ -112,6 +112,7 @@ class VideoRuntimeIntegrationTest {
     @Autowired
     private CoreDatabase database;
 
+
     @Autowired
     private ObjectMapper json;
 
@@ -130,22 +131,21 @@ class VideoRuntimeIntegrationTest {
     }
 
     @Test
-    void 四十八个视频映射与项目素材章节改编内部进度必须在真实运行时闭环() throws Exception {
+    void 十一个共享视频映射与旧域退场必须在真实运行时闭环() throws Exception {
         var videoHandlers = mappings.getHandlerMethods().entrySet().stream()
                 .filter(entry -> entry.getValue().getBeanType() == VideoController.class)
                 .toList();
         Set<String> videoMappings = videoHandlers.stream()
                 .flatMap(entry -> entry.getKey().getPatternValues().stream())
                 .collect(Collectors.toSet());
-        assertThat(videoHandlers).hasSize(48);
-        // 项目、章节改编和视觉设定各有一组 GET/POST 共用路径，因此 48 个操作对应 45 条路径。
-        assertThat(videoMappings).hasSize(45);
+        assertThat(videoHandlers).hasSize(11);
+        // 项目和视觉设定各有一组 GET/POST 共用路径，因此 11 个操作对应 9 条路径。
+        assertThat(videoMappings).hasSize(9);
         assertThat(videoMappings)
                 .contains(
                         "/api/v1/video/novels/{novel_id}/projects",
-                        "/api/v1/video/chapter-adaptations/{adaptation_id}/post-production",
-                        "/internal/v1/video/adaptations/{adaptation_id}/progress",
-                        "/internal/v1/video/scenes/{scene_id}/progress");
+                        "/api/v1/video/projects/{project_id}/visual-canons",
+                        "/api/v1/video/provider-assets/{token}");
 
         String username = "video_"
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -235,82 +235,41 @@ class VideoRuntimeIntegrationTest {
                         "/api/v1/video/assets/" + assetId + "/preview", cookie)
                 .body()).isEqualTo(png);
 
-        HttpResponse<String> adaptation = jsonRequest(
-                "POST",
-                "/api/v1/video/projects/" + projectId + "/chapter-adaptations",
-                json.writeValueAsString(java.util.Map.of(
-                        "chapterId", chapterId,
-                        "clientRequestId", "runtime-video-adaptation-0001",
-                        "expectedChapterUpdatedAt", chapterUpdatedAt)),
-                cookie,
-                false);
-        assertThat(adaptation.statusCode()).as(adaptation.body()).isEqualTo(201);
-        String adaptationId = json.readTree(adaptation.body()).get("id").asString();
+        assertThat(jsonRequest(
+                        "POST",
+                        "/api/v1/video/projects/" + projectId + "/chapter-adaptations",
+                        "{}",
+                        cookie,
+                        false)
+                .statusCode()).isEqualTo(404);
         assertThat(jsonRequest(
                         "GET",
                         "/api/v1/video/projects/" + projectId + "/chapter-adaptations",
                         null,
                         cookie,
                         false)
-                .body()).contains(adaptationId);
+                .statusCode()).isEqualTo(404);
         assertThat(jsonRequest(
                         "GET",
-                        "/api/v1/video/chapter-adaptations/" + adaptationId,
+                        "/api/v1/video/chapter-adaptations/retired/renders",
                         null,
                         cookie,
                         false)
-                .statusCode()).isEqualTo(200);
+                .statusCode()).isEqualTo(404);
         assertThat(jsonRequest(
                         "GET",
-                        "/api/v1/video/projects/" + projectId + "/visual-canons",
+                        "/api/v1/video/chapter-adaptations/retired/post-production",
                         null,
                         cookie,
                         false)
-                .statusCode()).isEqualTo(200);
+                .statusCode()).isEqualTo(404);
         assertThat(jsonRequest(
-                        "GET",
-                        "/api/v1/video/chapter-adaptations/" + adaptationId + "/renders",
+                        "POST",
+                        "/internal/v1/video/adaptations/retired/progress",
+                        "{}",
                         null,
-                        cookie,
-                        false)
-                .statusCode()).isEqualTo(200);
-        HttpResponse<String> postProduction = jsonRequest(
-                "GET",
-                "/api/v1/video/chapter-adaptations/" + adaptationId + "/post-production",
-                null,
-                cookie,
-                false);
-        assertThat(postProduction.statusCode()).isEqualTo(409);
-        assertThat(json.readTree(postProduction.body()).get("code").asString())
-                .isEqualTo("VIDEO_POST_PRODUCTION_FORMAL_PLAN_REQUIRED");
-
-        HttpResponse<String> started = jsonRequest(
-                "POST",
-                "/api/v1/video/chapter-adaptations/" + adaptationId + "/shot-plan-runs",
-                "{\"clientRequestId\":\"runtime-video-plan-0001\"}",
-                cookie,
-                false);
-        assertThat(started.statusCode()).as(started.body()).isEqualTo(202);
-        JsonNode task = json.readTree(started.body()).get("task");
-        String taskId = task.get("id").asString();
-        String jobId = task.get("jobId").asString();
-        String progressBody = json.writeValueAsString(java.util.Map.of(
-                "protocolVersion", "1.0",
-                "jobId", jobId,
-                "runId", taskId,
-                "taskId", taskId,
-                "novelId", novelId,
-                "projectId", projectId,
-                "adaptationId", adaptationId,
-                "workflow", "chapter_cinematic_adaptation_v2"));
-        HttpResponse<String> progress = jsonRequest(
-                "POST",
-                "/internal/v1/video/adaptations/" + adaptationId + "/progress",
-                progressBody,
-                null,
-                true);
-        assertThat(progress.statusCode()).as(progress.body()).isEqualTo(200);
-        assertThat(json.readTree(progress.body()).get("status").asString()).isEqualTo("active");
+                        true)
+                .statusCode()).isEqualTo(404);
     }
 
     private HttpResponse<String> jsonRequest(

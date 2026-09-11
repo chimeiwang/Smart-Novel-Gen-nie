@@ -1,0 +1,69 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeDependencyInput/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "consumerLineId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Consumerlineid"
+    },
+    "consumerSceneId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Consumersceneid",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "narrativeTime": {
+      "maxLength": 400,
+      "minLength": 1,
+      "title": "Narrativetime",
+      "type": "string"
+    },
+    "producerEpisodeId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Producerepisodeid",
+      "type": "string"
+    },
+    "producerScriptVersionId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Producerscriptversionid",
+      "type": "string"
+    },
+    "producerStateKey": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "title": "Producerstatekey",
+      "type": "string"
+    }
+  },
+  "required": [
+    "producerEpisodeId",
+    "producerScriptVersionId",
+    "producerStateKey",
+    "consumerSceneId",
+    "narrativeTime",
+    "description"
+  ],
+  "title": "VideoEpisodeDependencyInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeDependencyInput"
+}

@@ -48,6 +48,7 @@ public final class JooqAgentUpdatesApplier {
         this.writer = Objects.requireNonNull(writer);
     }
 
+    /** 核验所选来源后，在同一事务内应用草案中被作者选中的更新。 */
     public int apply(String novelId, String userId, String artifactId, int revision,
             Map<String, Object> materializedUpdates, List<ArtifactSelectionRef> selectedRefs,
             AgentUpdatesFrozenSources sources) {

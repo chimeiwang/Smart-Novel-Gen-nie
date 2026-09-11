@@ -22,7 +22,8 @@ import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePrepara
 import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
 import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
-import cn.inkforge.core.workflows.application.WorkflowVideoAdaptationCompletion;
+import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeScriptCompletion;
+import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeStoryboardCompletion;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
 import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import cn.inkforge.core.workflows.application.WorkflowStartRepository;
@@ -73,8 +74,7 @@ class WorkflowConfiguration {
             WorkflowExecutionContextReader contexts,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
             ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
-            ObjectProvider<WorkflowVideoAdaptationCompletion> videoCompletion) {
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
         return new JooqWorkflowDispatchRepository(
                 database,
                 ids,
@@ -83,7 +83,7 @@ class WorkflowConfiguration {
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30),
                 settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable,
-                ragCompletion::getIfAvailable, videoCompletion::getIfAvailable,
+                ragCompletion::getIfAvailable,
                 settings.videoPreviewEnabled() && settings.videoDispatchEnabled(), settings.videoDispatchNamespace());
     }
 
@@ -101,7 +101,8 @@ class WorkflowConfiguration {
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
             ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
             ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
-            ObjectProvider<WorkflowVideoAdaptationCompletion> videoCompletion) {
+            ObjectProvider<WorkflowVideoEpisodeScriptCompletion> episodeScriptCompletion,
+            ObjectProvider<WorkflowVideoEpisodeStoryboardCompletion> episodeStoryboardCompletion) {
         return new JooqWorkflowCallbackRepository(
                 database,
                 ids,
@@ -110,7 +111,9 @@ class WorkflowConfiguration {
                 workflowExecutionRegistry,
                 Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
                 shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable,
-                ragCompletion::getIfAvailable, videoCompletion::getIfAvailable);
+                ragCompletion::getIfAvailable,
+                episodeScriptCompletion::getIfAvailable,
+                episodeStoryboardCompletion::getIfAvailable);
     }
 
     @Bean
@@ -139,11 +142,10 @@ class WorkflowConfiguration {
             ExecutionRegistry workflowExecutionRegistry,
             ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
             ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
-            ObjectProvider<WorkflowVideoAdaptationCompletion> videoCompletion) {
+            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
         return new JooqWorkflowRunCancellationRepository(
                 database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable,
-                styleCompletion::getIfAvailable, ragCompletion::getIfAvailable, videoCompletion::getIfAvailable);
+                styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
     }
 
     @Bean

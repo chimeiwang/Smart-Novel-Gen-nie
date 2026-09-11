@@ -140,6 +140,22 @@ class JooqWorkflowDispatchRepositoryTest {
     }
 
     @Test
+    void 旧视频任务表退役后普通V2仍可领取且不查询已删表() {
+        Fixture fixture = fixture("dispatch-post-video-retirement");
+        starts.start(plan(fixture, "dispatch-post-video-retirement-request"));
+        database.dsl().execute(
+                "ALTER TABLE public.\"VideoAdaptationTask\" RENAME TO \"RetiredVideoAdaptationTaskForTest\"");
+        try {
+            ExecutionStepRequest request = dispatches.claimNext().orElseThrow();
+            assertThat(request.getWorkflow()).isEqualTo("long_serial");
+            assertThat(request.getOperation()).isEqualTo("rewrite_chapter_selection");
+        } finally {
+            database.dsl().execute(
+                    "ALTER TABLE public.\"RetiredVideoAdaptationTaskForTest\" RENAME TO \"VideoAdaptationTask\"");
+        }
+    }
+
+    @Test
     void 自然SSE快照恢复未解析模型和完整待澄清问题() {
         String prefix = "intent-sse-question";
         IntentFixture fixture = intentFixture(prefix, null, "valid");

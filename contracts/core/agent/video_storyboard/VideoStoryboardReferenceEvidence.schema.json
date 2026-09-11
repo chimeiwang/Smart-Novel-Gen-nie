@@ -1,0 +1,97 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardReferenceEvidence/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Core 冻结的已批准视觉版本与已核验图片事实。",
+  "properties": {
+    "assetId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Assetid",
+      "type": "string"
+    },
+    "canonContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Canoncontenthash",
+      "type": "string"
+    },
+    "canonVersionId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Canonversionid",
+      "type": "string"
+    },
+    "defaultStrength": {
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Defaultstrength",
+      "type": "integer"
+    },
+    "duty": {
+      "enum": [
+        "identity",
+        "costume",
+        "scene",
+        "prop"
+      ],
+      "title": "Duty",
+      "type": "string"
+    },
+    "excludeFeatures": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Excludefeatures",
+      "type": "array"
+    },
+    "includeFeatures": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Includefeatures",
+      "type": "array"
+    },
+    "label": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+    },
+    "mimeType": {
+      "enum": [
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+      ],
+      "title": "Mimetype",
+      "type": "string"
+    },
+    "settingName": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Settingname",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "canonVersionId",
+    "canonContentHash",
+    "assetId",
+    "sha256",
+    "mimeType",
+    "duty",
+    "defaultStrength",
+    "settingName",
+    "label"
+  ],
+  "title": "VideoStoryboardReferenceEvidence",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardReferenceEvidence"
+}

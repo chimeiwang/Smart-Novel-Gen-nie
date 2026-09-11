@@ -326,25 +326,21 @@ class DevBusinessAcceptanceTest {
                                 "targetLanguage", "zh-CN")),
                         cookie));
         String projectId = project.get("id").asString();
-        JsonNode adaptation = expectJson(
-                201,
-                send(
-                        "POST",
-                        "/api/v1/video/projects/" + projectId + "/chapter-adaptations",
-                        json.writeValueAsString(Map.of(
-                                "chapterId", chapterId,
-                                "clientRequestId", "jacc-video-adaptation-" + runId,
-                                "expectedChapterUpdatedAt",
-                                updatedChapter.get("updatedAt").asString())),
-                        cookie));
-        assertThat(adaptation.get("novelId").asString()).isEqualTo(longNovelId);
-        expectJson(
-                200,
-                send(
+        HttpResponse<String> retiredAdaptationWrite = send(
+                "POST",
+                "/api/v1/video/projects/" + projectId + "/chapter-adaptations",
+                json.writeValueAsString(Map.of(
+                        "chapterId", chapterId,
+                        "clientRequestId", "jacc-video-adaptation-" + runId,
+                        "expectedChapterUpdatedAt", updatedChapter.get("updatedAt").asString())),
+                cookie);
+        assertThat(retiredAdaptationWrite.statusCode()).isEqualTo(404);
+        assertThat(send(
                         "GET",
                         "/api/v1/video/projects/" + projectId + "/chapter-adaptations",
                         null,
-                        cookie));
+                        cookie)
+                .statusCode()).isEqualTo(404);
     }
 
     private String trackedNovel(JsonNode created) {

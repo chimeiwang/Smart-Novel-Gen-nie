@@ -10,15 +10,15 @@ import tools.jackson.databind.json.JsonMapper;
 class CommandCatalogTest {
 
     @Test
-    void Java命令目录必须逐项匹配当前126个Python命令() throws Exception {
+    void Java命令目录必须逐项匹配当前Python命令() throws Exception {
         try (InputStream source = getClass()
                 .getResourceAsStream("/cli-contracts/command-registry.json")) {
             assertThat(source).isNotNull();
             CommandCatalog catalog = CommandCatalog.load(
                     source, JsonMapper.builder().build());
 
-            assertThat(catalog.specs()).hasSize(126);
-            assertThat(catalog.specs().keySet()).hasSize(126);
+            assertThat(catalog.specs()).hasSize(152);
+            assertThat(catalog.specs().keySet()).hasSize(152);
             assertThat(catalog.require("long.session.create").inputMode())
                     .isEqualTo(CommandSpec.InputMode.JSON);
             assertThat(catalog.require("long.session.create").outputMode())
@@ -32,13 +32,16 @@ class CommandCatalogTest {
                     .isEqualTo(CommandSpec.OutputMode.JSONL);
             assertThat(catalog.require("long.chapter.get").fileOutput().kind())
                     .isEqualTo(CommandSpec.FileOutputKind.PRIMARY_TEXT);
-            assertThat(catalog.require("long.video.export.download").requiresIdentity())
+            assertThat(catalog.require("long.video.episode.delivery.download").requiresIdentity())
                     .isTrue();
             assertThat(catalog.specs().values())
                     .filteredOn(CommandSpec::requiresClientRequestId)
                     .allMatch(CommandSpec::mutation);
             assertThat(catalog.specs().keySet()).doesNotContainAnyElementsOf(Set.of(
                     "long.video.scene.create",
+                    "long.video.adaptation.create",
+                    "long.video.plan.start",
+                    "long.video.prompt.start",
                     "long.foreshadowing.create",
                     "long.style.create"));
         }

@@ -19,6 +19,7 @@ public record DurableIntentDecision(
         confidence = confidence(confidence);
     }
 
+    /** 将模型意图结果收敛为唯一获准操作，置信度不足时生成有界澄清问题。 */
     public static DurableIntentDecision resolve(Map<String, Object> proposed, String workflow,
             Set<String> allowedOperationKeys, int answeredClarifications, int maxClarifications) {
         protocolCode(workflow);

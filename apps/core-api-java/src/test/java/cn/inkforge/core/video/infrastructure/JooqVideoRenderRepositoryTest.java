@@ -1,6 +1,7 @@
 package cn.inkforge.core.video.infrastructure;
 
 import static cn.inkforge.core.db.generated.Tables.NOVEL;
+import static cn.inkforge.core.db.generated.Tables.CHARACTER;
 import static cn.inkforge.core.db.generated.Tables.USER;
 import static cn.inkforge.core.db.generated.Tables.VIDEOASSET;
 import static cn.inkforge.core.db.generated.Tables.VIDEOCHAPTERADAPTATION;
@@ -44,6 +45,10 @@ import cn.inkforge.core.video.application.CompletedVideoTake;
 import cn.inkforge.core.video.application.CompletedTakeFrameExtraction;
 import cn.inkforge.core.video.application.CompletedEpisodeExport;
 import cn.inkforge.core.video.application.StoredVideoAsset;
+import cn.inkforge.core.video.application.VisualCanonCandidateCommand;
+import cn.inkforge.core.video.application.VisualCanonApproval;
+import cn.inkforge.core.video.application.ShotVisualReferenceSelection;
+import cn.inkforge.core.video.application.ShotVisualReferencesCommand;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -128,7 +133,7 @@ class JooqVideoRenderRepositoryTest {
     @Test
     void 渲染任务必须冻结正式输入归档不可变Take并以命令确认Head() {
         FormalShot formal = formalShot();
-        var request = new StartShotRenderRequest("render-request-0001", 5, 2);
+        var request = new StartShotRenderRequest("render-request-0001", 5, 2, "reference").feeConfirmed(true);
 
         var created = renders.createTask(
                 OWNER,
@@ -136,18 +141,18 @@ class JooqVideoRenderRepositoryTest {
                 formal.shotId(),
                 request,
                 "doubao-seedance-2-5-test",
-                false);
+                true);
         var replay = renders.createTask(
                 OWNER,
                 ADAPTATION_ID,
                 formal.shotId(),
                 request,
                 "doubao-seedance-2-5-test",
-                false);
+                true);
 
         assertThat(replay.getId()).isEqualTo(created.getId());
         assertThat(created.getManifest().getPromptText()).isEqualTo("作者确认的正式即梦提示词");
-        assertThat(created.getManifest().getReferences()).isEmpty();
+        assertThat(created.getManifest().getReferences()).hasSize(1);
         assertThat(created.getManifest().getKeyframes()).isEmpty();
         assertThat(created.getInputHash()).hasSize(64);
 
@@ -187,7 +192,7 @@ class JooqVideoRenderRepositoryTest {
         var workspace = renders.getWorkspace(
                 OWNER,
                 ADAPTATION_ID,
-                new VideoRenderReadinessResponse(true, true, "model", false));
+                new VideoRenderReadinessResponse(true, true, VideoRenderReadinessResponse.ExecutionModeEnum.LIVE, "model", false));
         assertThat(workspace.getTakes()).singleElement().satisfies(take -> {
             assertThat(take.getTakeNo()).isOne();
             assertThat(take.getAsset().getDuty().getValue()).isEqualTo("motion");
@@ -217,8 +222,8 @@ class JooqVideoRenderRepositoryTest {
         var retry = renders.retryTask(
                 OWNER,
                 created.getId(),
-                new RetryShotRenderRequest("render-retry-00001"),
-                false);
+                new RetryShotRenderRequest("render-retry-00001").feeConfirmed(true),
+                true);
         assertThat(retry.getRetryOfTaskId()).isEqualTo(created.getId());
         assertThat(retry.getInputHash()).isEqualTo(created.getInputHash());
         assertThat(retry.getManifest()).isEqualTo(created.getManifest());
@@ -231,9 +236,9 @@ class JooqVideoRenderRepositoryTest {
                 OWNER,
                 ADAPTATION_ID,
                 formal.shotId(),
-                new StartShotRenderRequest("render-request-0002", 5, 2),
+                new StartShotRenderRequest("render-request-0002", 5, 2, "reference").feeConfirmed(true),
                 "doubao-seedance-2-5-test",
-                false);
+                true);
         assertThat(renders.claimDue(1)).hasSize(1);
         database.dsl().update(VIDEOSHOTRENDERTASK)
                 .set(VIDEOSHOTRENDERTASK.NEXTATTEMPTAT, INITIAL)
@@ -245,6 +250,71 @@ class JooqVideoRenderRepositoryTest {
                 .isEqualTo("submission_unknown");
         assertThat(renders.getTask(OWNER, task.getId()).getLastErrorCode())
                 .isEqualTo("SEEDANCE_SUBMISSION_RECOVERY_UNKNOWN");
+        assertCode(() -> renders.retryTask(OWNER, task.getId(),
+                        new RetryShotRenderRequest("unknown-retry-00001").feeConfirmed(true), true),
+                "VIDEO_RENDER_SUBMISSION_UNRESOLVED");
+        assertCode(() -> renders.createTask(OWNER, ADAPTATION_ID, formal.shotId(),
+                        new StartShotRenderRequest("unknown-new-000001", 5, 2, "reference").feeConfirmed(true),
+                        "doubao-seedance-2-5-test", true),
+                "VIDEO_RENDER_SUBMISSION_UNRESOLVED");
+        assertThat(database.dsl().fetchCount(VIDEOSHOTRENDERTASK)).isEqualTo(1);
+    }
+
+    @Test
+    void 归档失败和服务重建只恢复原供应商任务并保留唯一Take() {
+        FormalShot formal = formalShot();
+        var task = renders.createTask(OWNER, ADAPTATION_ID, formal.shotId(),
+                new StartShotRenderRequest("archive-recovery-001", 5, 2, "reference"),
+                "doubao-seedance-2-5-test", true, "simulated");
+        assertThat(task.getManifest().getExecutionMode().getValue()).isEqualTo("simulated");
+        assertThat(task.getManifest().getFeeConfirmed()).isFalse();
+        renders.claimDue(1);
+        renders.markSubmitted(task.getId(), "simulated-" + task.getId());
+        assertThat(renders.beginArchiving(task.getId())).isTrue();
+        assertThat(renders.retryArchiving(task.getId(), "临时文件下载失败")).isTrue();
+        var recovering = renders.getTask(OWNER, task.getId());
+        assertThat(recovering.getStatus().getValue()).isEqualTo("archiving");
+        assertThat(recovering.getCompletedAt()).isNull();
+        assertThat(recovering.getLastErrorCode()).isEqualTo("SEEDANCE_RESULT_ARCHIVE_RETRY");
+        assertCode(() -> renders.retryTask(OWNER, task.getId(), new RetryShotRenderRequest("archive-retry-001"), true, "simulated"),
+                "VIDEO_RENDER_TASK_STILL_ACTIVE");
+        var restarted = new JooqVideoRenderRepository(database, new CuidV1Generator(CLOCK), CLOCK,
+                JsonMapper.builder().findAndAddModules().build());
+        database.dsl().update(VIDEOSHOTRENDERTASK).set(VIDEOSHOTRENDERTASK.NEXTATTEMPTAT, INITIAL)
+                .where(VIDEOSHOTRENDERTASK.ID.eq(task.getId())).execute();
+        var claim = restarted.claimDue(1).getFirst();
+        assertThat(claim.submission()).isFalse();
+        assertThat(claim.providerTaskId()).isEqualTo("simulated-" + task.getId());
+        assertThat(claim.inputHash()).isEqualTo(task.getInputHash());
+        assertThat(restarted.beginArchiving(task.getId())).isTrue();
+        var completed = new CompletedVideoTake(task.getId(), new StoredVideoAsset(
+                PROJECT_ID + "/" + task.getId() + ".mp4", Path.of("/tmp/result.mp4"), "video/mp4", 128,
+                "d".repeat(64)), Map.of("executionMode", "simulated", "usage", Map.of()), 4_875);
+        restarted.completeTake(task.getId(), completed);
+        restarted.completeTake(task.getId(), completed);
+        assertThat(restarted.retryArchiving(task.getId(), "迟到的失败")).isFalse();
+        assertThat(restarted.getTask(OWNER, task.getId()).getStatus().getValue()).isEqualTo("succeeded");
+        assertThat(restarted.getWorkspace(OWNER, ADAPTATION_ID, new VideoRenderReadinessResponse()
+                .configured(true).enabled(true).executionMode(VideoRenderReadinessResponse.ExecutionModeEnum.SIMULATED)
+                .model("model").referenceTransportConfigured(true)).getTakes()).hasSize(1);
+    }
+
+    @Test
+    void 新建受控请求拒绝旧时长高清档未确认真实费用和无参考图() {
+        FormalShot formal = formalShot();
+        assertCode(() -> renders.createTask(OWNER, ADAPTATION_ID, formal.shotId(),
+                        new StartShotRenderRequest("bad-duration-0001", 3, 2, "reference").feeConfirmed(true), "model", true),
+                "VIDEO_RENDER_DURATION_INVALID");
+        assertCode(() -> renders.createTask(OWNER, ADAPTATION_ID, formal.shotId(),
+                        new StartShotRenderRequest("bad-resolution-001", 5, 2, "reference").resolution("1080p").feeConfirmed(true), "model", true),
+                "VIDEO_RENDER_RESOLUTION_INVALID");
+        assertCode(() -> renders.createTask(OWNER, ADAPTATION_ID, formal.shotId(),
+                        new StartShotRenderRequest("missing-fee-00001", 5, 2, "reference"), "model", true),
+                "VIDEO_RENDER_FEE_CONFIRMATION_REQUIRED");
+        database.dsl().deleteFrom(cn.inkforge.core.db.generated.Tables.VIDEOSHOTPROMPTVISUALREFERENCE).execute();
+        assertCode(() -> renders.createTask(OWNER, ADAPTATION_ID, formal.shotId(),
+                        new StartShotRenderRequest("missing-images-001", 5, 2, "reference"), "model", true, "simulated"),
+                "VIDEO_RENDER_REFERENCE_COUNT_INVALID");
     }
 
     @Test
@@ -574,6 +644,24 @@ class JooqVideoRenderRepositoryTest {
         String planId = approved.getCurrentPlan().getPlanVersionId();
         String shotId = approved.getCurrentPlan().getScenes().getFirst().getBeats().getFirst()
                 .getShots().getFirst().getId();
+        var visual = new JooqVideoVisualCanonRepository(database, new CuidV1Generator(CLOCK), CLOCK, new ObjectMapper());
+        database.dsl().insertInto(CHARACTER).set(CHARACTER.ID, "render-character")
+                .set(CHARACTER.NOVELID, NOVEL_ID).set(CHARACTER.NAME, "林岚")
+                .set(CHARACTER.CREATEDAT, INITIAL).set(CHARACTER.UPDATEDAT, INITIAL).execute();
+        database.dsl().insertInto(VIDEOASSET).set(VIDEOASSET.ID, "render-reference")
+                .set(VIDEOASSET.PROJECTID, PROJECT_ID).set(VIDEOASSET.NAME, "已确认定妆")
+                .set(VIDEOASSET.MODALITY, "image").set(VIDEOASSET.DUTY, "identity")
+                .set(VIDEOASSET.STORAGEKEY, PROJECT_ID + "/render-reference.png")
+                .set(VIDEOASSET.MIMETYPE, "image/png").set(VIDEOASSET.BYTESIZE, 128L)
+                .set(VIDEOASSET.SHA256, "a".repeat(64)).set(VIDEOASSET.SOURCEKIND, "user_upload")
+                .set(VIDEOASSET.RIGHTSSTATUS, "confirmed").set(VIDEOASSET.LOCKEDAT, INITIAL)
+                .set(VIDEOASSET.CREATEDAT, INITIAL).set(VIDEOASSET.UPDATEDAT, INITIAL).execute();
+        var canon = visual.setCandidate(OWNER, PROJECT_ID, new VisualCanonCandidateCommand(
+                "character", "render-character", "identity", "default", "定妆", "render-reference",
+                List.of(), List.of(), 70, 0));
+        canon = visual.approve(OWNER, canon.getId(), new VisualCanonApproval(canon.getRevision(), "render-reference"));
+        visual.saveShotReferences(OWNER, ADAPTATION_ID, shotId, new ShotVisualReferencesCommand(0,
+                List.of(new ShotVisualReferenceSelection(canon.getCurrentVersionId(), 70))));
         var promptTask = adaptationTasks.createPromptTask(
                 OWNER,
                 ADAPTATION_ID,
@@ -609,9 +697,9 @@ class JooqVideoRenderRepositoryTest {
                 OWNER,
                 ADAPTATION_ID,
                 formal.shotId(),
-                new StartShotRenderRequest(clientRequestId, 5, 2),
+                new StartShotRenderRequest(clientRequestId, 5, 2, "reference").feeConfirmed(true),
                 "doubao-seedance-2-5-test",
-                false);
+                true);
         renders.claimDue(1);
         renders.markSubmitted(task.getId(), "provider-" + clientRequestId);
         assertThat(renders.beginArchiving(task.getId())).isTrue();
@@ -630,7 +718,7 @@ class JooqVideoRenderRepositoryTest {
         return renders.getWorkspace(
                         OWNER,
                         ADAPTATION_ID,
-                        new VideoRenderReadinessResponse(true, true, "model", false))
+                        new VideoRenderReadinessResponse(true, true, VideoRenderReadinessResponse.ExecutionModeEnum.LIVE, "model", false))
                 .getTakes()
                 .getFirst()
                 .getId();

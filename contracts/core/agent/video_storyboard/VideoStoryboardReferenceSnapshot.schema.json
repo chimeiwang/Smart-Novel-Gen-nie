@@ -1,0 +1,73 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardReferenceSnapshot/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assetId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Assetid",
+      "type": "string"
+    },
+    "canonContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Canoncontenthash",
+      "type": "string"
+    },
+    "canonVersionId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Canonversionid",
+      "type": "string"
+    },
+    "duty": {
+      "enum": [
+        "identity",
+        "costume",
+        "scene",
+        "prop"
+      ],
+      "title": "Duty",
+      "type": "string"
+    },
+    "mimeType": {
+      "enum": [
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+      ],
+      "title": "Mimetype",
+      "type": "string"
+    },
+    "ordinal": {
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "strength": {
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Strength",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ordinal",
+    "canonVersionId",
+    "canonContentHash",
+    "assetId",
+    "sha256",
+    "mimeType",
+    "duty",
+    "strength"
+  ],
+  "title": "VideoStoryboardReferenceSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardReferenceSnapshot"
+}

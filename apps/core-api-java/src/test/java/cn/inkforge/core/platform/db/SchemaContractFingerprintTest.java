@@ -13,9 +13,9 @@ import tools.jackson.databind.node.ObjectNode;
 class SchemaContractFingerprintTest {
 
     private static final String EXPECTED_PRE_MIGRATION_FINGERPRINT =
-            "4f8cbf58820c7e601026012249f1896e4f8ad0231cfa6b9bd2fdad1c83c3d195";
+            "0b8da839b6a759aaa1063c0cb8395e98feff184a4b7e94ee0bf3aae4f252a7ce";
     private static final String EXPECTED_POST_MIGRATION_FINGERPRINT =
-            "15d50f0b8572d6b7fffbeecc2b9f762ff16500efa94cd93729e4a84c393fa798";
+            "3a51237c2d642c3b08247adbb6468615ab9b7f651216c74b877d7ca38d8d5e32";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -26,8 +26,18 @@ class SchemaContractFingerprintTest {
         SchemaContract loaded = SchemaContract.load(document);
 
         assertThat(loaded.fingerprint()).isEqualTo(EXPECTED_PRE_MIGRATION_FINGERPRINT);
-        assertThat(document.path("tables").size()).isEqualTo(86);
+        assertThat(document.path("tables").size()).isEqualTo(104);
         assertThat(document.path("enums").size()).isEqualTo(22);
+        assertThat(document.path("tables").toString())
+                .contains(
+                        "VideoEpisode",
+                        "VideoEpisodeSourceSetVersion",
+                        "VideoEpisodeScriptDraft",
+                        "VideoEpisodeScriptVersion",
+                        "VideoEpisodeCommand",
+                        "VideoStoryboardVersion",
+                        "VideoProductionBaseline",
+                        "VideoTakeAdoption");
     }
 
     @Test
@@ -51,7 +61,7 @@ class SchemaContractFingerprintTest {
         assertThat(post.fingerprint()).isNotEqualTo(pre.fingerprint());
         assertThat(post.document().path("source").path("serverVersionNum").asInt())
                 .isBetween(140000, 149999);
-        assertThat(post.document().path("tables")).hasSize(91);
+        assertThat(post.document().path("tables")).hasSize(109);
         assertThat(post.document().path("enums")).hasSize(22);
         assertThat(post.document().path("tables").toString())
                 .contains(
@@ -94,6 +104,22 @@ class SchemaContractFingerprintTest {
         assertThat(projected.document().path("tables")).hasSize(44);
         assertThat(projected.document().path("tables").toString())
                 .doesNotContain("VideoShotRenderTask", "UserPhoneIdentity");
+    }
+
+    @Test
+    void 耐久迁移后的生产投影不因新增剧集开发表漂移() {
+        SchemaContract projected = SchemaContractProjector.project(
+                SchemaContracts.loadPostDurableAgentV2(),
+                SchemaProfile.WITHOUT_VIDEO_PREVIEW);
+
+        assertThat(projected.fingerprint())
+                .isEqualTo("ea1df9ad015cd8d811d6ab250a7098870aa2befcf0afa3273b845255a0ac11b2");
+        assertThat(projected.document().path("tables")).hasSize(50);
+        assertThat(projected.document().path("tables").toString())
+                .contains("WorkflowEvidenceBundle", "UserPhoneIdentity")
+                .doesNotContain("VideoEpisode", "videoEpisodeId");
+        assertThat(projected.document().path("enums").toString())
+                .doesNotContain("video_episode_script");
     }
 
     private JsonNode readContract() throws IOException {

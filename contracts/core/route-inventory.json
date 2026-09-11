@@ -2444,215 +2444,112 @@
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "get_adaptation",
-      "endpointModule": "inkforge_core.video.adaptation.router",
+      "endpointFunction": "get_video_episode",
+      "endpointModule": "inkforge_core.video.episodes.router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "GET",
       "mutation": false,
-      "operationId": "get_adaptation_api_v1_video_chapter_adaptations__adaptation_id__get",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}",
+      "operationId": "get_video_episode_api_v1_video_episodes__episode_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
       ],
       "responseKind": "json",
       "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 118,
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 79,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_video_episode",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_video_episode_api_v1_video_episodes__episode_id__patch",
+      "path": "/api/v1/video/episodes/{episode_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 87,
+      "statusCode": 200,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_command",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_command_api_v1_video_episodes__episode_id__commands__client_request_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/commands/{client_request_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 264,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_impact_reviews",
+      "endpointModule": "inkforge_core.video.episodes.impact_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_impact_reviews_api_v1_video_episodes__episode_id__impact_reviews_get",
+      "path": "/api/v1/video/episodes/{episode_id}/impact-reviews",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/impact_router.py",
+      "sourceLine": 30,
       "statusCode": null,
       "transaction": "read_only"
     },
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "discard_candidate",
-      "endpointModule": "inkforge_core.video.adaptation.router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "discard_candidate_api_v1_video_chapter_adaptations__adaptation_id__candidate_discard_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/candidate/discard",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 157,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "save_episode_plan",
-      "endpointModule": "inkforge_core.video.adaptation.router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "PUT",
-      "mutation": true,
-      "operationId": "save_episode_plan_api_v1_video_chapter_adaptations__adaptation_id__episode_plan_put",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episode-plan",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 170,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "save_episode_edit_version",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "save_episode_edit_version_api_v1_video_chapter_adaptations__adaptation_id__episodes__episode_no__edit_versions_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/edit-versions",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 93,
-      "statusCode": 201,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "create_episode_export_task",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "create_episode_export_task_api_v1_video_chapter_adaptations__adaptation_id__episodes__episode_no__export_tasks_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/export-tasks",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 147,
-      "statusCode": 202,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "save_episode_mix_version",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "save_episode_mix_version_api_v1_video_chapter_adaptations__adaptation_id__episodes__episode_no__mix_versions_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/mix-versions",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 120,
-      "statusCode": 201,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "get_post_production_workspace",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "endpointFunction": "get_video_impact_review",
+      "endpointModule": "inkforge_core.video.episodes.impact_router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "GET",
       "mutation": false,
-      "operationId": "get_post_production_workspace_api_v1_video_chapter_adaptations__adaptation_id__post_production_get",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/post-production",
+      "operationId": "get_video_impact_review_api_v1_video_episodes__episode_id__impact_reviews__review_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/impact-reviews/{review_id}",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
       ],
       "responseKind": "json",
       "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 52,
-      "statusCode": null,
-      "transaction": "read_only"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "start_prompt_run",
-      "endpointModule": "inkforge_core.video.adaptation.router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "start_prompt_run_api_v1_video_chapter_adaptations__adaptation_id__prompt_runs_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/prompt-runs",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 183,
-      "statusCode": 202,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "get_render_workspace",
-      "endpointModule": "inkforge_core.video.adaptation.render_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "GET",
-      "mutation": false,
-      "operationId": "get_render_workspace_api_v1_video_chapter_adaptations__adaptation_id__renders_get",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/renders",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/impact_router.py",
       "sourceLine": 44,
       "statusCode": null,
       "transaction": "read_only"
@@ -2660,14 +2557,14 @@
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "start_shot_plan",
-      "endpointModule": "inkforge_core.video.adaptation.router",
+      "endpointFunction": "decide_video_impact_review",
+      "endpointModule": "inkforge_core.video.episodes.impact_router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "POST",
       "mutation": true,
-      "operationId": "start_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_runs_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan-runs",
+      "operationId": "decide_video_impact_review_api_v1_video_episodes__episode_id__impact_reviews__review_id__decisions_post",
+      "path": "/api/v1/video/episodes/{episode_id}/impact-reviews/{review_id}/decisions",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
@@ -2677,202 +2574,239 @@
         "background_dispatch_or_reconciliation",
         "postgresql_transaction"
       ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 130,
-      "statusCode": 202,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "confirm_shot_plan",
-      "endpointModule": "inkforge_core.video.adaptation.router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "confirm_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_confirm_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan/confirm",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 144,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "save_shot_keyframe_version",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "save_shot_keyframe_version_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__keyframe_versions_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/keyframe-versions",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 64,
-      "statusCode": 201,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "save_shot_prompt",
-      "endpointModule": "inkforge_core.video.adaptation.router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "PUT",
-      "mutation": true,
-      "operationId": "save_shot_prompt_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__prompt_put",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/prompt",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 197,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "create_render_task",
-      "endpointModule": "inkforge_core.video.adaptation.render_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "create_render_task_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__render_tasks_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/render-tasks",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/impact_router.py",
       "sourceLine": 56,
-      "statusCode": 202,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "confirm_shot_take",
-      "endpointModule": "inkforge_core.video.adaptation.render_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "confirm_shot_take_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__takes__take_id__confirm_post",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/takes/{take_id}/confirm",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
-      "sourceLine": 97,
       "statusCode": null,
       "transaction": "write"
     },
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "save_shot_visual_references",
-      "endpointModule": "inkforge_core.video.adaptation.router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "PUT",
-      "mutation": true,
-      "operationId": "save_shot_visual_references_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__visual_references_put",
-      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/visual-references",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "controlled_file_storage",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 211,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "get_episode_edit_version",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "endpointFunction": "list_video_production_baselines",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "GET",
       "mutation": false,
-      "operationId": "get_episode_edit_version_api_v1_video_edit_versions__version_id__get",
-      "path": "/api/v1/video/edit-versions/{version_id}",
+      "operationId": "list_video_production_baselines_api_v1_video_episodes__episode_id__production_baselines_get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
       ],
       "responseKind": "json",
       "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 108,
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 230,
       "statusCode": null,
       "transaction": "read_only"
     },
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "get_episode_export_task",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "endpointFunction": "create_video_production_baseline",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_video_production_baseline_api_v1_video_episodes__episode_id__production_baselines_post",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 219,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_production_baseline",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "GET",
       "mutation": false,
-      "operationId": "get_episode_export_task_api_v1_video_export_tasks__task_id__get",
-      "path": "/api/v1/video/export-tasks/{task_id}",
+      "operationId": "get_video_production_baseline_api_v1_video_episodes__episode_id__production_baselines__baseline_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
       ],
       "responseKind": "json",
       "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 243,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_episode_edit_versions",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_episode_edit_versions_api_v1_video_episodes__episode_id__production_baselines__baseline_id__edit_versions_get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/edit-versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 52,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_video_episode_edit_version",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_video_episode_edit_version_api_v1_video_episodes__episode_id__production_baselines__baseline_id__edit_versions_post",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/edit-versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 38,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_edit_version",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_edit_version_api_v1_video_episodes__episode_id__production_baselines__baseline_id__edit_versions__version_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/edit-versions/{version_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 66,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_video_episode_export",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_video_episode_export_api_v1_video_episodes__episode_id__production_baselines__baseline_id__export_tasks_post",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/export-tasks",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 120,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_export_task",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_export_task_api_v1_video_episodes__episode_id__production_baselines__baseline_id__export_tasks__task_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/export-tasks/{task_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 134,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "retry_video_episode_export",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "retry_video_episode_export_api_v1_video_episodes__episode_id__production_baselines__baseline_id__export_tasks__task_id__retry_post",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/export-tasks/{task_id}/retry",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 147,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_delivery",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_delivery_api_v1_video_episodes__episode_id__production_baselines__baseline_id__exports__export_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/exports/{export_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
       "sourceLine": 162,
       "statusCode": null,
       "transaction": "read_only"
@@ -2880,14 +2814,58 @@
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "retry_episode_export_task",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "endpointFunction": "get_video_episode_delivery_content",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_delivery_content_api_v1_video_episodes__episode_id__production_baselines__baseline_id__exports__export_id__content_get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/exports/{export_id}/content",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 175,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_episode_mix_versions",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_episode_mix_versions_api_v1_video_episodes__episode_id__production_baselines__baseline_id__mix_versions_get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/mix-versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 93,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_video_episode_mix_version",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "POST",
       "mutation": true,
-      "operationId": "retry_episode_export_task_api_v1_video_export_tasks__task_id__retry_post",
-      "path": "/api/v1/video/export-tasks/{task_id}/retry",
+      "operationId": "create_video_episode_mix_version_api_v1_video_episodes__episode_id__production_baselines__baseline_id__mix_versions_post",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/mix-versions",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
@@ -2897,52 +2875,776 @@
         "background_dispatch_or_reconciliation",
         "postgresql_transaction"
       ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 174,
-      "statusCode": 202,
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 79,
+      "statusCode": 201,
       "transaction": "write"
     },
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "get_episode_export_content",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "endpointFunction": "get_video_episode_mix_version",
+      "endpointModule": "inkforge_core.video.episodes.post_production_router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "GET",
       "mutation": false,
-      "operationId": "get_episode_export_content_api_v1_video_exports__export_id__content_get",
-      "path": "/api/v1/video/exports/{export_id}/content",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "file",
-      "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 188,
-      "statusCode": null,
-      "transaction": "read_only"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "get_episode_mix_version",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "GET",
-      "mutation": false,
-      "operationId": "get_episode_mix_version_api_v1_video_mix_versions__version_id__get",
-      "path": "/api/v1/video/mix-versions/{version_id}",
+      "operationId": "get_video_episode_mix_version_api_v1_video_episodes__episode_id__production_baselines__baseline_id__mix_versions__version_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/mix-versions/{version_id}",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
       ],
       "responseKind": "json",
       "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 135,
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+      "sourceLine": 107,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_video_episode_shot_render",
+      "endpointModule": "inkforge_core.video.episodes.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_video_episode_shot_render_api_v1_video_episodes__episode_id__production_baselines__baseline_id__shots__shot_id__render_tasks_post",
+      "path": "/api/v1/video/episodes/{episode_id}/production-baselines/{baseline_id}/shots/{shot_id}/render-tasks",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/render_router.py",
+      "sourceLine": 31,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_render_task",
+      "endpointModule": "inkforge_core.video.episodes.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_render_task_api_v1_video_episodes__episode_id__render_tasks__task_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/render-tasks/{task_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/render_router.py",
+      "sourceLine": 46,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "retry_video_episode_render_task",
+      "endpointModule": "inkforge_core.video.episodes.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "retry_video_episode_render_task_api_v1_video_episodes__episode_id__render_tasks__task_id__retry_post",
+      "path": "/api/v1/video/episodes/{episode_id}/render-tasks/{task_id}/retry",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/render_router.py",
+      "sourceLine": 58,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "adopt_video_episode_script_candidate",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "adopt_video_episode_script_candidate_api_v1_video_episodes__episode_id__script_candidates__artifact_id__adopt_post",
+      "path": "/api/v1/video/episodes/{episode_id}/script/candidates/{artifact_id}/adopt",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 185,
+      "statusCode": 200,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "prepare_video_episode_script_confirmation",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "prepare_video_episode_script_confirmation_api_v1_video_episodes__episode_id__script_confirmations_post",
+      "path": "/api/v1/video/episodes/{episode_id}/script/confirmations",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 199,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_script_confirmation",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_script_confirmation_api_v1_video_episodes__episode_id__script_confirmations__artifact_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/script/confirmations/{artifact_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 212,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "approve_video_episode_script_confirmation",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "approve_video_episode_script_confirmation_api_v1_video_episodes__episode_id__script_confirmations__artifact_id__approve_post",
+      "path": "/api/v1/video/episodes/{episode_id}/script/confirmations/{artifact_id}/approve",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 225,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_script_draft",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_script_draft_api_v1_video_episodes__episode_id__script_draft_get",
+      "path": "/api/v1/video/episodes/{episode_id}/script/draft",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 134,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_video_episode_script_draft",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_video_episode_script_draft_api_v1_video_episodes__episode_id__script_draft_put",
+      "path": "/api/v1/video/episodes/{episode_id}/script/draft",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 146,
+      "statusCode": 200,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_video_episode_script_run",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_video_episode_script_run_api_v1_video_episodes__episode_id__script_runs_post",
+      "path": "/api/v1/video/episodes/{episode_id}/script/runs",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 159,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_script_run",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_script_run_api_v1_video_episodes__episode_id__script_runs__run_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/script/runs/{run_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 172,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_episode_script_versions",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_episode_script_versions_api_v1_video_episodes__episode_id__script_versions_get",
+      "path": "/api/v1/video/episodes/{episode_id}/script/versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 239,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_script_version",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_script_version_api_v1_video_episodes__episode_id__script_versions__version_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/script/versions/{version_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 251,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_episode_source_sets",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_episode_source_sets_api_v1_video_episodes__episode_id__source_sets_get",
+      "path": "/api/v1/video/episodes/{episode_id}/source-sets",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 109,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_video_episode_source_set",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_video_episode_source_set_api_v1_video_episodes__episode_id__source_sets_post",
+      "path": "/api/v1/video/episodes/{episode_id}/source-sets",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 96,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_source_set",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_source_set_api_v1_video_episodes__episode_id__source_sets__version_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/source-sets/{version_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 121,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_storyboard_candidate",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_storyboard_candidate_api_v1_video_episodes__episode_id__storyboard_candidates__artifact_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/candidates/{artifact_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 103,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "adopt_video_storyboard_candidate",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "adopt_video_storyboard_candidate_api_v1_video_episodes__episode_id__storyboard_candidates__artifact_id__adopt_post",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/candidates/{artifact_id}/adopt",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 113,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "prepare_video_storyboard_confirmation",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "prepare_video_storyboard_confirmation_api_v1_video_episodes__episode_id__storyboard_confirmations_post",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/confirmations",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 126,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_storyboard_confirmation",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_storyboard_confirmation_api_v1_video_episodes__episode_id__storyboard_confirmations__artifact_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/confirmations/{artifact_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 137,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "approve_video_storyboard_confirmation",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "approve_video_storyboard_confirmation_api_v1_video_episodes__episode_id__storyboard_confirmations__artifact_id__approve_post",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/confirmations/{artifact_id}/approve",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 147,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_storyboard_draft",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_storyboard_draft_api_v1_video_episodes__episode_id__storyboard_draft_get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/draft",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 49,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_video_storyboard_draft",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_video_storyboard_draft_api_v1_video_episodes__episode_id__storyboard_draft_put",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/draft",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 59,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_storyboard_runs",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_storyboard_runs_api_v1_video_episodes__episode_id__storyboard_runs_get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/runs",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 80,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_video_storyboard_run",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_video_storyboard_run_api_v1_video_episodes__episode_id__storyboard_runs_post",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/runs",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 69,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_storyboard_run",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_storyboard_run_api_v1_video_episodes__episode_id__storyboard_runs__run_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/runs/{run_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 93,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_storyboard_versions",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_storyboard_versions_api_v1_video_episodes__episode_id__storyboard_versions_get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 161,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_storyboard_version",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_storyboard_version_api_v1_video_episodes__episode_id__storyboard_versions__version_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/storyboard/versions/{version_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 174,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_video_take_adoption",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_video_take_adoption_api_v1_video_episodes__episode_id__take_adoptions_post",
+      "path": "/api/v1/video/episodes/{episode_id}/take-adoptions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 184,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_take_adoption",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_take_adoption_api_v1_video_episodes__episode_id__take_adoptions__adoption_id__get",
+      "path": "/api/v1/video/episodes/{episode_id}/take-adoptions/{adoption_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 209,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_video_take_candidates",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_take_candidates_api_v1_video_episodes__episode_id__takes_get",
+      "path": "/api/v1/video/episodes/{episode_id}/takes",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 195,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_video_episode_take_content",
+      "endpointModule": "inkforge_core.video.episodes.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_episode_take_content_api_v1_video_episodes__episode_id__takes__take_id__content_get",
+      "path": "/api/v1/video/episodes/{episode_id}/takes/{take_id}/content",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/render_router.py",
+      "sourceLine": 72,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -2996,6 +3698,28 @@
     {
       "authentication": "browser_cookie",
       "deprecated": false,
+      "endpointFunction": "get_video_production_capabilities",
+      "endpointModule": "inkforge_core.video.episodes.production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_video_production_capabilities_api_v1_video_production_capabilities_get",
+      "path": "/api/v1/video/production-capabilities",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
+      "sourceLine": 44,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
       "endpointFunction": "get_project",
       "endpointModule": "inkforge_core.video.router",
       "exposure": "public",
@@ -3044,36 +3768,58 @@
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "list_adaptations",
-      "endpointModule": "inkforge_core.video.adaptation.router",
+      "endpointFunction": "get_video_project_episode_command",
+      "endpointModule": "inkforge_core.video.episodes.router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "GET",
       "mutation": false,
-      "operationId": "list_adaptations_api_v1_video_projects__project_id__chapter_adaptations_get",
-      "path": "/api/v1/video/projects/{project_id}/chapter-adaptations",
+      "operationId": "get_video_project_episode_command_api_v1_video_projects__project_id__episode_commands__client_request_id__get",
+      "path": "/api/v1/video/projects/{project_id}/episode-commands/{client_request_id}",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
       ],
       "responseKind": "json",
       "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 67,
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 277,
       "statusCode": null,
       "transaction": "read_only"
     },
     {
       "authentication": "browser_cookie",
       "deprecated": false,
-      "endpointFunction": "create_adaptation",
-      "endpointModule": "inkforge_core.video.adaptation.router",
+      "endpointFunction": "list_video_episodes",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_video_episodes_api_v1_video_projects__project_id__episodes_get",
+      "path": "/api/v1/video/projects/{project_id}/episodes",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 56,
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_video_episode",
+      "endpointModule": "inkforge_core.video.episodes.router",
       "exposure": "public",
       "includeInOpenApi": true,
       "method": "POST",
       "mutation": true,
-      "operationId": "create_adaptation_api_v1_video_projects__project_id__chapter_adaptations_post",
-      "path": "/api/v1/video/projects/{project_id}/chapter-adaptations",
+      "operationId": "create_video_episode_api_v1_video_projects__project_id__episodes_post",
+      "path": "/api/v1/video/projects/{project_id}/episodes",
       "productModule": "video",
       "pythonTests": [
         "apps/core-api/tests/video/**/test_*.py"
@@ -3083,9 +3829,34 @@
         "background_dispatch_or_reconciliation",
         "postgresql_transaction"
       ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 53,
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 45,
       "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "reorder_video_episodes",
+      "endpointModule": "inkforge_core.video.episodes.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "reorder_video_episodes_api_v1_video_projects__project_id__episodes_reorder_post",
+      "path": "/api/v1/video/projects/{project_id}/episodes/reorder",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/episodes/router.py",
+      "sourceLine": 66,
+      "statusCode": 200,
       "transaction": "write"
     },
     {
@@ -3106,7 +3877,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 79,
+      "sourceLine": 41,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3131,7 +3902,7 @@
         "postgresql_transaction"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 91,
+      "sourceLine": 53,
       "statusCode": 201,
       "transaction": "write"
     },
@@ -3153,104 +3924,9 @@
       "responseKind": "file",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
-      "sourceLine": 133,
+      "sourceLine": 33,
       "statusCode": null,
       "transaction": "read_only"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "get_render_task",
-      "endpointModule": "inkforge_core.video.adaptation.render_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "GET",
-      "mutation": false,
-      "operationId": "get_render_task_api_v1_video_render_tasks__task_id__get",
-      "path": "/api/v1/video/render-tasks/{task_id}",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
-      "sourceLine": 71,
-      "statusCode": null,
-      "transaction": "read_only"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "retry_render_task",
-      "endpointModule": "inkforge_core.video.adaptation.render_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "retry_render_task_api_v1_video_render_tasks__task_id__retry_post",
-      "path": "/api/v1/video/render-tasks/{task_id}/retry",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
-      "sourceLine": 83,
-      "statusCode": 202,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "get_take_content",
-      "endpointModule": "inkforge_core.video.adaptation.render_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "GET",
-      "mutation": false,
-      "operationId": "get_take_content_api_v1_video_takes__take_id__content_get",
-      "path": "/api/v1/video/takes/{take_id}/content",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "file",
-      "sideEffects": [],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
-      "sourceLine": 118,
-      "statusCode": null,
-      "transaction": "read_only"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "endpointFunction": "extract_take_frame",
-      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
-      "exposure": "public",
-      "includeInOpenApi": true,
-      "method": "POST",
-      "mutation": true,
-      "operationId": "extract_take_frame_api_v1_video_takes__take_id__frames_post",
-      "path": "/api/v1/video/takes/{take_id}/frames",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "controlled_file_storage",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-      "sourceLine": 79,
-      "statusCode": 201,
-      "transaction": "write"
     },
     {
       "authentication": "browser_cookie",
@@ -3273,7 +3949,7 @@
         "postgresql_transaction"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-      "sourceLine": 105,
+      "sourceLine": 67,
       "statusCode": null,
       "transaction": "write"
     },
@@ -4021,256 +4697,6 @@
       "sourceFile": "apps/core-api/src/inkforge_core/writing/tool_gateway.py",
       "sourceLine": 148,
       "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "save_checkpoint",
-      "endpointModule": "inkforge_core.video.adaptation.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/adaptations/{adaptation_id}/checkpoint",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
-      "sourceLine": 95,
-      "statusCode": 204,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "fail_task",
-      "endpointModule": "inkforge_core.video.adaptation.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/adaptations/{adaptation_id}/fail",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
-      "sourceLine": 164,
-      "statusCode": 204,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "complete_plan",
-      "endpointModule": "inkforge_core.video.adaptation.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/adaptations/{adaptation_id}/plan/complete",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
-      "sourceLine": 118,
-      "statusCode": 204,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "get_progress",
-      "endpointModule": "inkforge_core.video.adaptation.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/adaptations/{adaptation_id}/progress",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
-      "sourceLine": 73,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "complete_prompts",
-      "endpointModule": "inkforge_core.video.adaptation.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/adaptations/{adaptation_id}/prompts/complete",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
-      "sourceLine": 141,
-      "statusCode": 204,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "reserve_plan_call",
-      "endpointModule": "inkforge_core.video.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/scenes/{scene_id}/call-reservations",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
-      "sourceLine": 165,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "complete_plan",
-      "endpointModule": "inkforge_core.video.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/scenes/{scene_id}/complete",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
-      "sourceLine": 78,
-      "statusCode": 204,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "fail_plan",
-      "endpointModule": "inkforge_core.video.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/scenes/{scene_id}/fail",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
-      "sourceLine": 100,
-      "statusCode": 204,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "get_plan_progress",
-      "endpointModule": "inkforge_core.video.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/scenes/{scene_id}/progress",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
-      "sourceLine": 122,
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "endpointFunction": "save_story_plan_checkpoint",
-      "endpointModule": "inkforge_core.video.internal_router",
-      "exposure": "internal",
-      "includeInOpenApi": false,
-      "method": "POST",
-      "mutation": true,
-      "operationId": null,
-      "path": "/internal/v1/video/scenes/{scene_id}/story-checkpoint",
-      "productModule": "video",
-      "pythonTests": [
-        "apps/core-api/tests/video/**/test_*.py"
-      ],
-      "responseKind": "empty",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction"
-      ],
-      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
-      "sourceLine": 143,
-      "statusCode": 204,
       "transaction": "write"
     },
     {

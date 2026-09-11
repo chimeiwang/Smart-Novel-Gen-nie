@@ -52,6 +52,7 @@ final class ShortAgentCommands {
         return CommandResult.jsonl(emitter -> watch(context, taskId, initialCursor, emitter));
     }
 
+    /** 观察 SSE 并以 PostgreSQL 状态回读确认终态，最多执行三次有界重连。 */
     private static int watch(
             CommandContext context,
             String taskId,
@@ -83,6 +84,7 @@ final class ShortAgentCommands {
                 disconnected = true;
             }
 
+            // SSE 终态只是提示；断流或终态后必须回读同一任务的权威状态。
             JsonNode state = null;
             if (!disconnected || Integer.valueOf(2).equals(observedEngine) || reconnects >= 3) {
                 state = context.requireApi().request(
@@ -118,6 +120,7 @@ final class ShortAgentCommands {
         }
     }
 
+    /** 校验 V1/V2 状态契约，返回终态退出码；非终态返回 null。 */
     private static Integer terminalExit(JsonNode state, String taskId) {
         if (!(state instanceof ObjectNode object)) return null;
         if (engineVersion(state) == 2) {
@@ -182,6 +185,7 @@ final class ShortAgentCommands {
     }
 
     private static void requireSameEngine(Integer observed, int current) {
+        // 同一 taskId 不能在观察期间从 V1 变为 V2，否则游标和终态语义将不可判定。
         if (observed != null && observed != current) {
             throw new CoreResponseContractException("同一任务的 engineVersion 在观察期间发生变化");
         }

@@ -3,6 +3,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "executionMode": {
+      "enum": [
+        "simulated",
+        "live"
+      ],
+      "title": "Executionmode",
+      "type": "string"
+    },
     "novelId": {
       "minLength": 1,
       "title": "Novelid",
@@ -28,6 +36,7 @@
     "taskId",
     "novelId",
     "providerTaskId",
+    "executionMode",
     "pollCount"
   ],
   "title": "SeedanceRenderQueryRequest",

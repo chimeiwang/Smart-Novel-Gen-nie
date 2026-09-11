@@ -58,6 +58,7 @@ public final class WritingOutboxPublisher {
         this.cleanupInterval = cleanupInterval;
     }
 
+    /** 领取一批到期 Outbox，并按租约所有权发布或登记失败退避。 */
     public int runOnce() {
         LocalDateTime now = DatabaseTimestamp.now(clock);
         List<WritingOutboxRecord> records = repository.claimDue(
@@ -70,6 +71,7 @@ public final class WritingOutboxPublisher {
                 repository.markBlocked(record.id(), record.leaseToken(), contractError);
                 continue;
             }
+            // 等待采用事件可能已被新决定取代，发布前再次由 PostgreSQL 判断是否仍可见。
             if ("artifact_awaiting_user_approval".equals(record.eventType())
                     && repository.supersedeWaitingIfStale(
                             record.id(), record.leaseToken(), now)) {

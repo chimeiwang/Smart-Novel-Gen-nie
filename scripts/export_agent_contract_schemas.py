@@ -33,6 +33,8 @@ CONTRACT_MODULES = (
     "video",
     "video_adaptation",
     "video_execution",
+    "video_episode",
+    "video_storyboard",
     "video_render",
     "workflow_events",
 )
@@ -48,6 +50,10 @@ ABSTRACT_MODELS = {
     "VideoContractModel",
     "VideoAdaptationContractModel",
     "VideoRenderContractModel",
+    "VideoEpisodeContractModel",
+    "VideoEpisodeScriptNode",
+    "VideoStoryboardContractModel",
+    "_StoryboardShotIdentity",
     "_VideoInput",
     "_VideoOutput",
 }
@@ -59,6 +65,7 @@ MODULE_SCHEMA_VERSIONS = {
     "style_execution": "2.0",
     "rag_execution": "2.0",
     "video_execution": "2.0",
+    "video_storyboard": "2.0",
 }
 
 

@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** 仅注册已装配的外部依赖探针，允许未配置外部依赖的最小健康上下文正常启动。 */
 @Configuration(proxyBeanMethods = false)
 class ReadinessConfiguration {
 

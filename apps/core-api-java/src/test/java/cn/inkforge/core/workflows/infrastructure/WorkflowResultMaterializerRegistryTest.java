@@ -15,15 +15,24 @@ class WorkflowResultMaterializerRegistryTest {
     }
 
     @Test
-    void 支持集合允许保留旧Operation但拒绝启用Operation漏接物化器() {
+    void 支持集合仅保留当前Operation并拒绝旧章节视频与未知物化器() {
         Set<String> supported = WorkflowResultMaterializerRegistry.supportedOperationKeys();
 
         assertThat(supported)
                 .contains(
                         "long_serial.answer_question",
-                        "long_serial.rewrite_chapter_selection");
+                        "long_serial.rewrite_chapter_selection",
+                        "video.episode_script_generate",
+                        "video.episode_storyboard_revise")
+                .doesNotContain(
+                        "video.chapter_cinematic_adaptation_v2",
+                        "video.chapter_shot_prompt_v2");
         WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
                 Set.of("long_serial.answer_question"));
+        assertThatThrownBy(() -> WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
+                        Set.of("video.chapter_cinematic_adaptation_v2")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("video.chapter_cinematic_adaptation_v2");
         assertThatThrownBy(() -> WorkflowResultMaterializerRegistry.requireEnabledOperationKeys(
                         Set.of("long_serial.answer_question", "long_serial.future_operation")))
                 .isInstanceOf(IllegalStateException.class)

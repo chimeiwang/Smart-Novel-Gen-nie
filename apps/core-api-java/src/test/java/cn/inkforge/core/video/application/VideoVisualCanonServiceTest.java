@@ -115,6 +115,7 @@ class VideoVisualCanonServiceTest {
                 "asset-1",
                 "request-12345678",
                 CreateVisualCanonCandidateRequest.DutyEnum.IDENTITY,
+                0,
                 "默认形象",
                 "character-1",
                 CreateVisualCanonCandidateRequest.SettingKindEnum.CHARACTER,

@@ -10,7 +10,6 @@ import cn.inkforge.contracts.api.ShotRenderKeyframeManifest;
 import cn.inkforge.contracts.api.ShotRenderReferenceManifest;
 import cn.inkforge.contracts.api.VideoShotRenderManifest;
 import cn.inkforge.core.platform.failure.TransientInfrastructureErrors;
-import java.math.RoundingMode;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -23,6 +22,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,8 +32,9 @@ public final class VideoRenderReconciler implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(VideoRenderReconciler.class);
 
     private final VideoRenderRepository repository;
-    private final VideoRenderGateway gateway;
+    private final Supplier<VideoRenderGateway> gateways;
     private final VideoRenderResultArchiver archiver;
+    private final VideoRenderSimulator simulator;
     private final VideoAssetStore storage;
     private final URI providerMediaBaseUrl;
     private final ProviderAssetTokenCodec providerAssetTokens;
@@ -46,14 +47,24 @@ public final class VideoRenderReconciler implements AutoCloseable {
             VideoRenderRepository repository,
             VideoRenderGateway gateway,
             VideoRenderResultArchiver archiver,
+            VideoRenderSimulator simulator,
             VideoAssetStore storage,
             URI providerMediaBaseUrl,
             ProviderAssetTokenCodec providerAssetTokens,
             int batchSize,
             Duration interval) {
+        this(repository, () -> gateway, archiver, simulator, storage, providerMediaBaseUrl,
+                providerAssetTokens, batchSize, interval);
+    }
+
+    public VideoRenderReconciler(
+            VideoRenderRepository repository, Supplier<VideoRenderGateway> gateways,
+            VideoRenderResultArchiver archiver, VideoRenderSimulator simulator, VideoAssetStore storage,
+            URI providerMediaBaseUrl, ProviderAssetTokenCodec providerAssetTokens, int batchSize, Duration interval) {
         this.repository = Objects.requireNonNull(repository);
-        this.gateway = Objects.requireNonNull(gateway);
+        this.gateways = Objects.requireNonNull(gateways);
         this.archiver = Objects.requireNonNull(archiver);
+        this.simulator = Objects.requireNonNull(simulator);
         this.storage = Objects.requireNonNull(storage);
         this.providerMediaBaseUrl = providerMediaBaseUrl;
         this.providerAssetTokens = providerAssetTokens;
@@ -67,10 +78,13 @@ public final class VideoRenderReconciler implements AutoCloseable {
                 Thread.ofPlatform().daemon(true).name("video-render-worker-", 0).factory());
     }
 
+    /** 领取一批到期任务并并行推进一次提交、查询或归档。 */
     public int runOnce() {
+        VideoRenderGateway gateway = gateways.get();
+        if (gateway == null) return 0;
         List<VideoRenderClaim> claims = repository.claimDue(batchSize);
         List<CompletableFuture<Void>> operations = claims.stream()
-                .map(claim -> CompletableFuture.runAsync(() -> process(claim), workers))
+                .map(claim -> CompletableFuture.runAsync(() -> process(claim, gateway), workers))
                 .toList();
         try {
             CompletableFuture.allOf(operations.toArray(CompletableFuture[]::new)).join();
@@ -111,34 +125,43 @@ public final class VideoRenderReconciler implements AutoCloseable {
         requestStop();
     }
 
-    private void process(VideoRenderClaim claim) {
+    private void process(VideoRenderClaim claim, VideoRenderGateway gateway) {
+        try {
+            executionMode(claim);
+        } catch (IllegalArgumentException exception) {
+            // 旧任务未冻结执行模式时失败关闭，绝不能默认成可能计费的 live 调用。
+            if (claim.submission()) {
+                repository.markSubmissionRejected(claim.taskId(), "VIDEO_RENDER_PROFILE_UNSUPPORTED",
+                        "旧任务未冻结执行模式，不能推断为模拟或真实调用");
+            } else {
+                repository.markProviderTerminal(claim.taskId(), "failed", "VIDEO_RENDER_PROFILE_UNSUPPORTED",
+                        "旧任务未冻结执行模式，请核查原任务");
+            }
+            return;
+        }
         if (claim.submission()) {
-            submit(claim);
+            submit(claim, gateway);
         } else {
-            query(claim);
+            query(claim, gateway);
         }
     }
 
-    private void submit(VideoRenderClaim claim) {
+    /** 提交一次冻结请求，并区分明确拒绝与结果未知，防止未知提交被自动重试。 */
+    private void submit(VideoRenderClaim claim, VideoRenderGateway gateway) {
         String providerTaskId;
         try {
             VideoShotRenderManifest manifest = claim.manifest();
             String prompt = manifest.getProviderPromptText() == null
                     ? manifest.getPromptText()
                     : manifest.getProviderPromptText();
-            SeedanceRenderSubmitRequest request = new SeedanceRenderSubmitRequest(
-                    manifest.getDurationSeconds(),
-                    manifest.getGenerateAudio(),
-                    claim.inputHash(),
-                    manifest.getModel(),
-                    claim.novelId(),
-                    prompt,
-                    SeedanceRenderSubmitRequest.RatioEnum.fromValue(
-                            manifest.getRatio().getValue()),
-                    SeedanceRenderSubmitRequest.ResolutionEnum.fromValue(
-                            manifest.getResolution().getValue()),
-                    claim.taskId(),
-                    manifest.getWatermark());
+            SeedanceRenderSubmitRequest request = new SeedanceRenderSubmitRequest()
+                    .durationSeconds(manifest.getDurationSeconds()).generateAudio(manifest.getGenerateAudio())
+                    .inputHash(claim.inputHash()).model(manifest.getModel()).novelId(claim.novelId())
+                    .promptText(prompt).taskId(claim.taskId()).watermark(manifest.getWatermark())
+                    .ratio(SeedanceRenderSubmitRequest.RatioEnum.fromValue(manifest.getRatio().getValue()))
+                    .resolution(manifest.getResolution().getValue())
+                    .generationMode("reference")
+                    .executionMode(SeedanceRenderSubmitRequest.ExecutionModeEnum.fromValue(executionMode(claim)));
             request.setReferences(runtimeReferences(claim));
             providerTaskId = gateway.submit(request).getProviderTaskId();
         } catch (VideoRenderSubmissionUnknownException exception) {
@@ -162,7 +185,8 @@ public final class VideoRenderReconciler implements AutoCloseable {
         repository.markSubmitted(claim.taskId(), providerTaskId);
     }
 
-    private void query(VideoRenderClaim claim) {
+    /** 查询同一供应商任务；成功后取得归档租约并落为不可变 Take。 */
+    private void query(VideoRenderClaim claim, VideoRenderGateway gateway) {
         if (claim.providerTaskId() == null) {
             repository.markProviderTerminal(
                     claim.taskId(),
@@ -173,11 +197,10 @@ public final class VideoRenderReconciler implements AutoCloseable {
         }
         SeedanceRenderQueryResponse response;
         try {
-            response = gateway.query(new SeedanceRenderQueryRequest(
-                    claim.novelId(),
-                    Math.max(claim.pollCount(), 1),
-                    claim.providerTaskId(),
-                    claim.taskId()));
+            response = gateway.query(new SeedanceRenderQueryRequest()
+                    .novelId(claim.novelId()).pollCount(Math.max(claim.pollCount(), 1))
+                    .providerTaskId(claim.providerTaskId()).taskId(claim.taskId())
+                    .executionMode(SeedanceRenderQueryRequest.ExecutionModeEnum.fromValue(executionMode(claim))));
         } catch (VideoRenderQueryException exception) {
             repository.markQueryError(
                     claim.taskId(), "Seedance 状态查询暂时失败，稍后继续查询同一任务");
@@ -202,37 +225,73 @@ public final class VideoRenderReconciler implements AutoCloseable {
             return;
         }
         SeedanceRenderOutput output = response.getOutput();
-        if (output == null) {
-            repository.markQueryError(claim.taskId(), "Seedance 成功响应缺少视频结果");
+        if (output == null || output.getMediaKind() == null) {
+            repository.markQueryError(claim.taskId(), "Seedance 成功响应缺少完整媒体来源事实");
             return;
         }
+        // 只有归档租约持有者可以下载和登记 Take，避免多 worker 重复保存同一结果。
         if (!repository.beginArchiving(claim.taskId())) return;
         String assetId = claim.taskId();
+        String frameAssetId = claim.taskId() + "-last-frame";
         String staleStorageKey = claim.projectId() + "/" + assetId + ".mp4";
-        storage.delete(staleStorageKey);
+        ArchivedVideoFrame frame = null;
         try {
-            ArchivedVideoRender archived =
-                    archiver.archive(claim.projectId(), assetId, output.getVideoUrl());
+            if (!storage.delete(staleStorageKey)) {
+                throw new IllegalStateException("VIDEO_RENDER_STALE_FILE_CLEANUP_FAILED");
+            }
+            ArchivedVideoRender archived;
+            String mediaKind = output.getMediaKind().getValue();
+            if ("simulated".equals(executionMode(claim))) {
+                if (!"simulated_placeholder".equals(mediaKind)
+                        || (output.getUsage() != null && !output.getUsage().isEmpty())
+                        || output.getLastFrameUrl() != null
+                        || !("simulated-" + claim.taskId()).equals(claim.providerTaskId())
+                        || !("inkforge-simulated://" + claim.taskId()).equals(output.getVideoUrl())) {
+                    throw new IllegalArgumentException("模拟供应商结果与冻结任务不匹配");
+                }
+                archived = simulator.render(claim);
+            } else {
+                if (!"provider_media".equals(mediaKind)) {
+                    throw new IllegalArgumentException("真实任务未返回 provider_media");
+                }
+                archived = archiver.archive(claim.projectId(), assetId, output.getVideoUrl());
+                if (output.getLastFrameUrl() != null) {
+                    frame = archiver.archiveImage(
+                            claim.projectId(), frameAssetId, output.getLastFrameUrl());
+                }
+            }
+            Map<String, Object> metadata = providerMetadata(output, mediaKind, frame);
+            metadata.put("executionMode", executionMode(claim));
+            metadata.put("simulated", "simulated".equals(executionMode(claim)));
             repository.completeTake(
                     claim.taskId(),
                     new CompletedVideoTake(
                             archived.assetId(),
                             archived.stored(),
-                            providerMetadata(output),
-                            durationMs(output, claim.manifest())));
+                            metadata,
+                            archived.durationMs(),
+                            frame));
         } catch (RuntimeException exception) {
-            boolean failed = repository.failArchiving(
+            boolean recovering = repository.retryArchiving(
                     claim.taskId(),
                     "Seedance 结果归档失败：" + exception.getClass().getSimpleName());
-            if (failed) storage.delete(staleStorageKey);
+            if (recovering) {
+                storage.delete(staleStorageKey);
+                if (frame != null) storage.delete(frame.stored().storageKey());
+                storage.delete(claim.projectId() + "/" + frameAssetId + ".jpg");
+                storage.delete(claim.projectId() + "/" + frameAssetId + ".png");
+                storage.delete(claim.projectId() + "/" + frameAssetId + ".webp");
+            }
         }
     }
 
+    /** 按首帧、设定参考、过渡帧、尾帧的固定顺序生成供应商图片输入。 */
     private List<SeedanceRuntimeReference> runtimeReferences(VideoRenderClaim claim) {
         List<ShotRenderReferenceManifest> references = list(claim.manifest().getReferences());
         List<ShotRenderKeyframeManifest> keyframes = list(claim.manifest().getKeyframes());
         if (references.isEmpty() && keyframes.isEmpty()) return List.of();
-        if (providerMediaBaseUrl == null || providerAssetTokens == null) {
+        boolean simulated = "simulated".equals(executionMode(claim));
+        if (!simulated && (providerMediaBaseUrl == null || providerAssetTokens == null)) {
             throw new IllegalArgumentException("VIDEO_RENDER_REFERENCE_TRANSPORT_NOT_CONFIGURED");
         }
         Map<ShotRenderKeyframeManifest.RoleEnum, ShotRenderKeyframeManifest> byRole =
@@ -259,15 +318,22 @@ public final class VideoRenderReconciler implements AutoCloseable {
         List<SeedanceRuntimeReference> result = new ArrayList<>(ordered.size());
         for (int index = 0; index < ordered.size(); index++) {
             RuntimeReferenceSource source = ordered.get(index);
-            String url = providerMediaBaseUrl
-                    + "/api/v1/video/provider-assets/"
-                    + providerAssetTokens.encode(source.assetId(), source.sha256());
+            String url = simulated ? "urn:inkforge:simulated-asset:" + source.assetId()
+                    : providerMediaBaseUrl + "/api/v1/video/provider-assets/"
+                            + providerAssetTokens.encode(source.assetId(), source.sha256());
             result.add(new SeedanceRuntimeReference(
                             source.assetId(), source.mimeType(), index + 1, url)
                     .usageRole(SeedanceRuntimeReference.UsageRoleEnum.fromValue(
                             source.usageRole())));
         }
         return List.copyOf(result);
+    }
+
+    private static String executionMode(VideoRenderClaim claim) {
+        if (claim.manifest().getExecutionMode() == null) {
+            throw new IllegalArgumentException("视频任务缺少冻结执行模式，不能推断为真实调用");
+        }
+        return claim.manifest().getExecutionMode().getValue();
     }
 
     private static void addKeyframe(
@@ -279,26 +345,26 @@ public final class VideoRenderReconciler implements AutoCloseable {
                 frame.getAssetId(), frame.getSha256(), frame.getMimeType(), role));
     }
 
-    private static Map<String, Object> providerMetadata(SeedanceRenderOutput output) {
+    private static Map<String, Object> providerMetadata(
+            SeedanceRenderOutput output, String mediaKind, ArchivedVideoFrame frame) {
         Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("mediaKind", mediaKind);
         metadata.put("durationSeconds", output.getDurationSeconds());
         metadata.put("framesPerSecond", output.getFramesPerSecond());
         metadata.put("generateAudio", output.getGenerateAudio());
         metadata.put("ratio", output.getRatio());
         metadata.put("resolution", output.getResolution());
         metadata.put("usage", output.getUsage());
+        metadata.put(
+                "lastFrame",
+                frame == null
+                        ? null
+                        : Map.of(
+                                "assetId", frame.assetId(),
+                                "sha256", frame.stored().sha256(),
+                                "mimeType", frame.stored().mimeType(),
+                                "byteSize", frame.stored().byteSize()));
         return metadata;
-    }
-
-    private static int durationMs(
-            SeedanceRenderOutput output, VideoShotRenderManifest manifest) {
-        if (output.getDurationSeconds() == null) {
-            return Math.multiplyExact(manifest.getDurationSeconds(), 1_000);
-        }
-        return output.getDurationSeconds()
-                .movePointRight(3)
-                .setScale(0, RoundingMode.HALF_EVEN)
-                .intValueExact();
     }
 
     private static String message(RuntimeException exception) {

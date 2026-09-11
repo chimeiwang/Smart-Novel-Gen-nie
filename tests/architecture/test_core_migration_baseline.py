@@ -40,8 +40,8 @@ def test_public_openapi_baseline_is_complete_and_current() -> None:
     baseline = _json(PUBLIC_OPENAPI)
     runtime = create_app(testing=True).openapi()
 
-    assert len(baseline["paths"]) == 119
-    assert _operation_count(baseline) == 152
+    assert len(baseline["paths"]) == 141
+    assert _operation_count(baseline) == 182
     assert baseline == runtime
 
 
@@ -49,9 +49,9 @@ def test_full_openapi_baseline_covers_every_java_route() -> None:
     full = _json(FULL_OPENAPI)
     java = _json(JAVA_OPENAPI)
 
-    assert len(full["paths"]) == 154
-    assert _operation_count(full) == 187
-    assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 34
+    assert len(full["paths"]) == 166
+    assert _operation_count(full) == 207
+    assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 24
     assert {
         "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
         "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result",
@@ -116,6 +116,11 @@ def test_full_openapi_baseline_covers_every_java_route() -> None:
         "shortmedium",
         "styles",
         "video",
+        "videoepisodeimpacts",
+        "videoepisodepostproduction",
+        "videoepisoderenders",
+        "videoepisodes",
+        "videoproduction",
         "workflows",
         "writing",
     }
@@ -141,8 +146,8 @@ def test_public_java_openapi_is_safe_for_cli_generation() -> None:
     assert public["x-inkforge-source-contract"] == (
         "public-openapi-python-baseline.json"
     )
-    assert len(public["paths"]) == 119
-    assert _operation_count(public) == 152
+    assert len(public["paths"]) == 141
+    assert _operation_count(public) == 182
     assert all(not path.startswith("/internal/") for path in public["paths"])
     assert "/api/v1/video/provider-assets/{token}" not in public["paths"]
 
@@ -189,15 +194,15 @@ def test_hidden_and_public_route_inventory_is_complete() -> None:
     inventory = _json(ROUTE_INVENTORY)
 
     assert internal["schemaVersion"] == "core-internal-endpoints/1.0"
-    assert len(internal["endpoints"]) == 34
+    assert len(internal["endpoints"]) == 24
     assert all(item["path"].startswith("/internal/v1/") for item in internal["endpoints"])
 
     assert inventory["schemaVersion"] == "core-route-inventory/1.0"
-    assert len(inventory["routes"]) == 187
-    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 152
-    assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 34
+    assert len(inventory["routes"]) == 207
+    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 182
+    assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 24
     assert sum(item["exposure"] == "provider_media" for item in inventory["routes"]) == 1
-    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 187
+    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 207
     assert all(item["productModule"] and item["pythonTests"] for item in inventory["routes"])
 
 

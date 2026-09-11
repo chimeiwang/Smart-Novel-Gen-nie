@@ -185,6 +185,66 @@ public class VideotakeframeextractionRecord extends UpdatableRecordImpl<Videotak
         return (LocalDateTime) get(10);
     }
 
+    /**
+     * Setter for <code>public.VideoTakeFrameExtraction.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(11, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoTakeFrameExtraction.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(11);
+    }
+
+    /**
+     * Setter for <code>public.VideoTakeFrameExtraction.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(12, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoTakeFrameExtraction.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(12);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoTakeFrameExtraction.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoTakeFrameExtraction.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(13);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoTakeFrameExtraction.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(14, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoTakeFrameExtraction.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(14);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -208,7 +268,7 @@ public class VideotakeframeextractionRecord extends UpdatableRecordImpl<Videotak
     /**
      * Create a detached, initialised VideotakeframeextractionRecord
      */
-    public VideotakeframeextractionRecord(String assetid, String takeid, String shotid, String adaptationid, String projectid, String novelid, Integer timestampms, String clientrequestid, String requesthash, String requestedbyuserid, LocalDateTime createdat) {
+    public VideotakeframeextractionRecord(String assetid, String takeid, String shotid, String adaptationid, String projectid, String novelid, Integer timestampms, String clientrequestid, String requesthash, String requestedbyuserid, LocalDateTime createdat, String videoepisodeid, String episodeshotid, String episodeshotversionid, String productionbaselineid) {
         super(Videotakeframeextraction.VIDEOTAKEFRAMEEXTRACTION);
 
         setAssetid(assetid);
@@ -222,6 +282,10 @@ public class VideotakeframeextractionRecord extends UpdatableRecordImpl<Videotak
         setRequesthash(requesthash);
         setRequestedbyuserid(requestedbyuserid);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setProductionbaselineid(productionbaselineid);
         resetTouchedOnNotNull();
     }
 }

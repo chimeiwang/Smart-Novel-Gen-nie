@@ -1,0 +1,43 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_episode/VideoEpisodeSelectedSourceEvidence/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "只把明确选中的片段交给模型；偏移仍引用完整不可变章节快照。",
+  "properties": {
+    "end": {
+      "minimum": 1,
+      "title": "End",
+      "type": "integer"
+    },
+    "sourceSnapshotId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Sourcesnapshotid",
+      "type": "string"
+    },
+    "start": {
+      "minimum": 0,
+      "title": "Start",
+      "type": "integer"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "textHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Texthash",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sourceSnapshotId",
+    "start",
+    "end",
+    "text",
+    "textHash"
+  ],
+  "title": "VideoEpisodeSelectedSourceEvidence",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_episode.VideoEpisodeSelectedSourceEvidence"
+}

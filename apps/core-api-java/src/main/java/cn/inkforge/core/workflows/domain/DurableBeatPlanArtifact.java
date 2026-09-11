@@ -38,6 +38,7 @@ public final class DurableBeatPlanArtifact {
     }
 
     /** Agent 可派生顺序和摘要哈希，但 Core 必须独立重算并拒绝任何差异。 */
+    /** 校验模型章节计划的严格字段、顺序和数量边界并返回冻结副本。 */
     public static Map<String, Object> validateOutput(Map<String, Object> output) {
         Map<String, Object> plan = new LinkedHashMap<>(output);
         String expected = hash(plan.remove("contentSha256"));
@@ -75,6 +76,7 @@ public final class DurableBeatPlanArtifact {
         return Collections.unmodifiableMap(output);
     }
 
+    /** 从冻结章节来源重新生成可采用计划及其审核差异。 */
     public static Materialized reconstruct(Map<String, Object> stored, Map<String, Object> storedDiff,
             String bundleId, String manifestHash, String chapterId) {
         try {

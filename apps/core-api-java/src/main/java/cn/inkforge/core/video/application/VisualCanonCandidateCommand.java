@@ -12,10 +12,12 @@ public record VisualCanonCandidateCommand(
         String candidateAssetId,
         List<String> includeFeatures,
         List<String> excludeFeatures,
-        int defaultStrength) {
+        int defaultStrength,
+        int expectedRevision) {
 
     public VisualCanonCandidateCommand {
         includeFeatures = List.copyOf(includeFeatures);
         excludeFeatures = List.copyOf(excludeFeatures);
+        if (expectedRevision < 0) throw new IllegalArgumentException("候选基线版本不能为负数");
     }
 }

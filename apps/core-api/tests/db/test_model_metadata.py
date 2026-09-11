@@ -116,6 +116,24 @@ EXPECTED_MODEL_TABLES = {
     "VideoEpisodeMixHead",
     "VideoEpisodeExportTask",
     "VideoEpisodeExport",
+    "VideoEpisode",
+    "VideoEpisodeSourceSetVersion",
+    "VideoEpisodeSourceSnapshot",
+    "VideoEpisodeScriptDraft",
+    "VideoEpisodeScriptVersion",
+    "VideoEpisodeDependency",
+    "VideoImpactReview",
+    "VideoEpisodeCommand",
+    "VideoEpisodeShot",
+    "VideoShotLineage",
+    "VideoStoryboardDraft",
+    "VideoStoryboardVersion",
+    "VideoShotVersion",
+    "VideoProductionBaseline",
+    "VideoTakeAdoption",
+    "VideoProductionBaselineShot",
+    "VideoProductionEditHead",
+    "VideoProductionMixHead",
 }
 EXPECTED_TABLES = EXPECTED_MODEL_TABLES | {"_FactionTerritories"}
 
@@ -247,7 +265,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 142
+    assert len(timestamp_columns) == 160
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -409,11 +427,54 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                                 "pending",
                                 "rendering",
                             ),
-                            "VideoEpisodeExportTask_due_idx": (
-                                '"status"',
-                                "pending",
-                                "rendering",
-                            ),
+                        "VideoEpisodeExportTask_due_idx": (
+                            '"status"',
+                            "pending",
+                            "rendering",
+                        ),
+                        "VideoEpisodeEditVersion_new_episode_version_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
+                        "VideoEpisodeExport_new_episode_version_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
+                        "VideoEpisodeExportTask_new_active_episode_key": (
+                            '"videoEpisodeId"',
+                            "status",
+                            "pending",
+                            "rendering",
+                        ),
+                        "VideoEpisodeMixVersion_new_episode_version_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
+                        "VideoShotKeyframeVersion_new_shot_role_version_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
+                        "VideoShotPromptVersion_new_shot_version_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
+                        "VideoShotRenderTask_new_active_shot_key": (
+                            '"videoEpisodeId"',
+                            "status",
+                            "pending",
+                            "submitting",
+                            "queued",
+                            "running",
+                            "archiving",
+                        ),
+                        "VideoShotRenderTask_new_shot_client_request_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
+                        "VideoShotTake_new_shot_take_no_key": (
+                            '"videoEpisodeId"',
+                            "IS NOT NULL",
+                        ),
                 }
                 assert name in expected_predicate_tokens
                 assert all(token in predicate for token in expected_predicate_tokens[name])
@@ -584,6 +645,12 @@ def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds
             assert table.c.id.default.arg.__wrapped__ is generate_id
         else:
             assert table_name in {
+                "VideoEpisodeScriptDraft",
+                "VideoStoryboardDraft",
+                "VideoShotLineage",
+                "VideoProductionBaselineShot",
+                "VideoProductionEditHead",
+                "VideoProductionMixHead",
                 "VideoChapterAdaptationHead",
                 "VideoDramaticBeatSourceAnchor",
                 "VideoShotSourceAnchor",
@@ -755,7 +822,7 @@ def test_configured_database_registers_connection_and_schema_readiness(
 
     assert app.state.database_engine is engine
     assert getattr(app.state, "video_service", None) is None
-    assert app.state.video_dispatcher is None
+    assert getattr(app.state, "video_provider_asset_service", None) is None
     assert set(app.state.readiness_checks) == {
         "configuration",
         "database",
@@ -987,6 +1054,7 @@ def test_parent_relationship_delete_policy_matches_every_real_foreign_key() -> N
                 foreign_key.ondelete
                 for column in relation._calculated_foreign_keys
                 for foreign_key in column.foreign_keys
+                if foreign_key.column.table is relation.parent.local_table
             }
             assert len(on_delete) == 1, (model_name, relation.key)
             assert relation.passive_deletes is True, (model_name, relation.key)

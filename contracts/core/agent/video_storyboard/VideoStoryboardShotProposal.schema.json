@@ -1,0 +1,281 @@
+{
+  "$defs": {
+    "VideoStoryboardLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "relation": {
+          "enum": [
+            "replacement",
+            "copy",
+            "split",
+            "merge"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "sourceShotId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Sourceshotid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceShotId",
+        "relation"
+      ],
+      "title": "VideoStoryboardLineage",
+      "type": "object"
+    },
+    "VideoStoryboardProductionIntentProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "durationSeconds": {
+          "maximum": 12,
+          "minimum": 4,
+          "title": "Durationseconds",
+          "type": "integer"
+        },
+        "executionMode": {
+          "const": "simulated",
+          "default": "simulated",
+          "title": "Executionmode",
+          "type": "string"
+        },
+        "feeConfirmed": {
+          "const": false,
+          "default": false,
+          "title": "Feeconfirmed",
+          "type": "boolean"
+        },
+        "generateAudio": {
+          "default": true,
+          "title": "Generateaudio",
+          "type": "boolean"
+        },
+        "generationMode": {
+          "const": "reference",
+          "default": "reference",
+          "title": "Generationmode",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "outputFormat": {
+          "const": "mp4",
+          "default": "mp4",
+          "title": "Outputformat",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 2500,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "provider": {
+          "const": "seedance",
+          "default": "seedance",
+          "title": "Provider",
+          "type": "string"
+        },
+        "ratio": {
+          "enum": [
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9",
+            "adaptive"
+          ],
+          "title": "Ratio",
+          "type": "string"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/VideoStoryboardReferenceChoice"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "References",
+          "type": "array"
+        },
+        "resolution": {
+          "const": "720p",
+          "default": "720p",
+          "title": "Resolution",
+          "type": "string"
+        },
+        "watermark": {
+          "default": false,
+          "title": "Watermark",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "ratio",
+        "prompt",
+        "durationSeconds",
+        "references"
+      ],
+      "title": "VideoStoryboardProductionIntentProposal",
+      "type": "object"
+    },
+    "VideoStoryboardReferenceChoice": {
+      "additionalProperties": false,
+      "description": "模型只选择已冻结版本及强度，其余不可变事实由 Core 回填。",
+      "properties": {
+        "canonVersionId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Canonversionid",
+          "type": "string"
+        },
+        "strength": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strength"
+        }
+      },
+      "required": [
+        "canonVersionId"
+      ],
+      "title": "VideoStoryboardReferenceChoice",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_storyboard/VideoStoryboardShotProposal/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Action",
+      "type": "string"
+    },
+    "cameraMovement": {
+      "enum": [
+        "static",
+        "pan",
+        "tilt",
+        "dolly",
+        "truck",
+        "crane",
+        "handheld",
+        "orbit",
+        "zoom"
+      ],
+      "title": "Cameramovement",
+      "type": "string"
+    },
+    "durationMs": {
+      "maximum": 12000,
+      "minimum": 4000,
+      "title": "Durationms",
+      "type": "integer"
+    },
+    "framing": {
+      "enum": [
+        "extreme_wide",
+        "wide",
+        "medium",
+        "close_up",
+        "detail",
+        "over_shoulder",
+        "pov"
+      ],
+      "title": "Framing",
+      "type": "string"
+    },
+    "id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Id"
+    },
+    "lineage": {
+      "items": {
+        "$ref": "#/$defs/VideoStoryboardLineage"
+      },
+      "maxItems": 20,
+      "title": "Lineage",
+      "type": "array"
+    },
+    "productionIntent": {
+      "$ref": "#/$defs/VideoStoryboardProductionIntentProposal"
+    },
+    "scriptLineIds": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 100,
+      "title": "Scriptlineids",
+      "type": "array"
+    },
+    "scriptSceneId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Scriptsceneid",
+      "type": "string"
+    },
+    "tempKey": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tempkey"
+    },
+    "title": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "scriptSceneId",
+    "title",
+    "action",
+    "framing",
+    "cameraMovement",
+    "durationMs",
+    "productionIntent"
+  ],
+  "title": "VideoStoryboardShotProposal",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_storyboard.VideoStoryboardShotProposal"
+}

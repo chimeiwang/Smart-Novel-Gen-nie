@@ -31,6 +31,7 @@ public final class WritingGraphSnapshot {
 
     private WritingGraphSnapshot() {}
 
+    /** 解析持久 Graph 快照并复验任务、用户、小说和章节归属。 */
     public static Parsed parse(
             String serialized,
             ObjectMapper json,
@@ -93,6 +94,7 @@ public final class WritingGraphSnapshot {
             artifactId = (String) candidate;
         }
         if (artifactId == null) {
+            // 兼容旧快照的顶层字段；新结构的 artifactReview 始终优先。
             Object legacy = values.get("activeArtifactId");
             if (legacy != null && !(legacy instanceof String)) {
                 throw invalid("写作任务快照的兼容草案标识无效");
@@ -110,6 +112,7 @@ public final class WritingGraphSnapshot {
                 artifactId);
     }
 
+    /** 从快照读取非负事件序号；旧快照缺失时按零开始。 */
     public static int eventSequence(String serialized, ObjectMapper json) {
         Map<String, Object> values = object(serialized, json);
         Object value = values.getOrDefault("eventSequence", 0);

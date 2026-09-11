@@ -27,13 +27,8 @@ from inkforge_contracts.short_medium_execution import (
     ShortMediumReplacementOutput,
 )
 from inkforge_contracts.style_execution import StylePortraitSectionOutput
-from inkforge_contracts.video_execution import (
-    VideoCinematicReviewOutput,
-    VideoDramaticStructureOutput,
-    VideoMissingBeatShotsOutput,
-    VideoShotDesignOutput,
-    VideoShotPromptOutput,
-)
+from inkforge_contracts.video_episode import VideoEpisodeScriptStageOutput
+from inkforge_contracts.video_storyboard import VideoStoryboardStageOutput
 from pydantic import BaseModel
 
 
@@ -70,6 +65,30 @@ def model_output_schema(model: type[BaseModel]) -> dict[str, Any]:
         return result
 
     return {"$schema": "https://json-schema.org/draft/2020-12/schema"} | simplify(source)
+
+
+def episode_script_stage_schema(stage: str) -> dict[str, Any]:
+    """剧本/审阅阶段各自只允许一种结果，使用 Core 已实现的内联子集。"""
+
+    if stage not in {"episode_script", "episode_script_review"}:
+        raise ValueError("未知单集剧本阶段")
+    schema = model_output_schema(VideoEpisodeScriptStageOutput)
+    schema["properties"]["stageKey"] = {"const": stage, "type": "string"}
+    schema["properties"]["review" if stage == "episode_script" else "candidate"] = {"type": "null"}
+    return schema
+
+
+def episode_storyboard_stage_schema(stage: str) -> dict[str, Any]:
+    """分镜/审阅阶段各自只允许一种结果，禁止模型混写候选和结论。"""
+
+    if stage not in {"episode_storyboard", "episode_storyboard_review"}:
+        raise ValueError("未知单集分镜阶段")
+    schema = model_output_schema(VideoStoryboardStageOutput)
+    schema["properties"]["stageKey"] = {"const": stage, "type": "string"}
+    schema["properties"]["review" if stage == "episode_storyboard" else "candidate"] = {
+        "type": "null"
+    }
+    return schema
 
 
 def chapter_plan_schema() -> dict[str, Any]:
@@ -137,15 +156,24 @@ def refresh(root: Path, *, check: bool) -> list[str]:
         if schema["key"] == "output.chapter_review_report.v1"
     )
     for output in outputs["schemas"]:
-        video_models = {
-            "output.video_dramatic_structure_stage.v2": VideoDramaticStructureOutput,
-            "output.video_shot_design_stage.v2": VideoShotDesignOutput,
-            "output.video_missing_beat_shots_stage.v2": VideoMissingBeatShotsOutput,
-            "output.video_cinematic_review_stage.v2": VideoCinematicReviewOutput,
-            "output.video_shot_prompt_stage.v2": VideoShotPromptOutput,
-        }
-        if output["key"] in video_models:
-            output["jsonSchema"] = model_output_schema(video_models[output["key"]])
+        if output["key"] in {
+            "output.video_episode_script_stage.v2",
+            "output.video_episode_script_review_stage.v2",
+        }:
+            stage = (
+                "episode_script_review" if "script_review" in output["key"] else "episode_script"
+            )
+            output["jsonSchema"] = episode_script_stage_schema(stage)
+        if output["key"] in {
+            "output.video_episode_storyboard_stage.v2",
+            "output.video_episode_storyboard_review_stage.v2",
+        }:
+            stage = (
+                "episode_storyboard_review"
+                if "storyboard_review" in output["key"]
+                else "episode_storyboard"
+            )
+            output["jsonSchema"] = episode_storyboard_stage_schema(stage)
         if output["key"] == "output.embedding_batch.v2":
             output["jsonSchema"] = model_output_schema(RagEmbeddingBatchOutput)
         if output["key"] == "output.style_portrait_section.v2":

@@ -55,6 +55,7 @@ public final class AliyunPhoneSmsProvider implements PhoneSmsProvider {
         this.schemeName = optionalText(schemeName, "阿里云短信方案名称", 20);
     }
 
+    /** 请求供应商生成并发送验证码，且拒绝任何返回验证码明文的响应。 */
     @Override
     public void sendVerificationCode(String nationalPhone, String challengeId) {
         requirePhone(nationalPhone);
@@ -97,6 +98,7 @@ public final class AliyunPhoneSmsProvider implements PhoneSmsProvider {
         }
     }
 
+    /** 让供应商核验验证码；格式错误返回 false，通信或响应异常失败关闭。 */
     @Override
     public boolean verifyCode(String nationalPhone, String challengeId, String code) {
         requirePhone(nationalPhone);

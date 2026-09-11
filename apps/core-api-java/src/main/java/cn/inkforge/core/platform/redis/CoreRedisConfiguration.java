@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** 复用同一 Redis 客户端提供运行态检查和服务请求重放保护。 */
 @Configuration(proxyBeanMethods = false)
 class CoreRedisConfiguration {
 

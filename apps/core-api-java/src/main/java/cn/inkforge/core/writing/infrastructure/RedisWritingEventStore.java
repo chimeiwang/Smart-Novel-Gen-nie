@@ -83,6 +83,7 @@ final class RedisWritingEventStore implements WritingEventStore {
         return false;
     }
 
+    /** 在写入前检查来源幂等和严格序号，允许按 PostgreSQL 基线受控重建短期序列。 */
     @Override
     public boolean validate(
             String taskId,
@@ -108,6 +109,7 @@ final class RedisWritingEventStore implements WritingEventStore {
         return true;
     }
 
+    /** 以 Lua 原子追加 Agent 事件、来源映射和最新序号。 */
     @Override
     public WritingEvent appendAgent(
             String taskId,
@@ -155,6 +157,7 @@ final class RedisWritingEventStore implements WritingEventStore {
                 sequence);
     }
 
+    /** 从指定游标后完整分页读取事件，不因单批上限静默截断。 */
     @Override
     public List<WritingEvent> replay(String taskId, String lastEventId) {
         List<WritingEvent> result = new ArrayList<>();

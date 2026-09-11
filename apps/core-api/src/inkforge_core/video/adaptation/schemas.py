@@ -15,7 +15,7 @@ from inkforge_contracts.video_adaptation import (
     VisualSettingKind,
 )
 from inkforge_contracts.video_render import (
-    RenderResolution,
+    VideoRenderExecutionMode,
     VideoShotRenderManifest,
 )
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -113,6 +113,7 @@ class CreateVisualCanonCandidateRequest(VideoAdaptationApiModel):
     """把已上传且已确认权利的图片放入一个视觉设定槽的候选位置。"""
 
     clientRequestId: ClientRequestId
+    expectedRevision: int = Field(ge=0)
     settingKind: VisualSettingKind
     settingId: str = Field(min_length=1)
     duty: VisualCanonDuty
@@ -178,8 +179,10 @@ class StartShotRenderRequest(VideoAdaptationApiModel):
 
     clientRequestId: ClientRequestId
     expectedPromptRevision: int = Field(ge=1)
-    durationSeconds: int = Field(ge=2, le=12)
-    resolution: RenderResolution = "720p"
+    generationMode: Literal["reference"]
+    feeConfirmed: bool = Field(default=False, strict=True)
+    durationSeconds: int = Field(ge=4, le=12)
+    resolution: Literal["720p"] = "720p"
     generateAudio: bool = True
     watermark: bool = False
 
@@ -188,6 +191,7 @@ class RetryShotRenderRequest(VideoAdaptationApiModel):
     """精确复制旧任务 manifest；不会自动采用后来修改的提示词或参考图。"""
 
     clientRequestId: ClientRequestId
+    feeConfirmed: bool = Field(default=False, strict=True)
 
 
 class ConfirmShotTakeRequest(VideoAdaptationApiModel):
@@ -294,6 +298,7 @@ class ShotPromptCandidateResponse(VideoAdaptationApiModel):
 
 
 class VideoRenderReadinessResponse(VideoAdaptationApiModel):
+    executionMode: VideoRenderExecutionMode
     configured: bool
     enabled: bool
     referenceTransportConfigured: bool

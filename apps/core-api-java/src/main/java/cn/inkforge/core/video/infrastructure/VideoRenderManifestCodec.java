@@ -19,11 +19,13 @@ final class VideoRenderManifestCodec {
         this.json = Objects.requireNonNull(json);
     }
 
+    /** 按显式字段顺序序列化渲染清单，保持跨语言 hash 稳定。 */
     String serialize(VideoShotRenderManifest manifest) {
         validate(manifest);
         return json.writeValueAsString(map(manifest));
     }
 
+    /** 解析持久清单并复验其规范化内容哈希。 */
     VideoShotRenderManifest parse(String serialized, String expectedHash) {
         try {
             VideoShotRenderManifest manifest =
@@ -49,6 +51,12 @@ final class VideoRenderManifestCodec {
     Map<String, Object> map(VideoShotRenderManifest manifest) {
         LinkedHashMap<String, Object> value = new LinkedHashMap<>();
         value.put("schemaVersion", manifest.getSchemaVersion().getValue());
+        if (manifest.getSchemaVersion()
+                == VideoShotRenderManifest.SchemaVersionEnum.VIDEO_SHOT_RENDER_MANIFEST_1_2) {
+            value.put("generationMode", manifest.getGenerationMode());
+            value.put("executionMode", manifest.getExecutionMode().getValue());
+            value.put("feeConfirmed", manifest.getFeeConfirmed());
+        }
         value.put("adaptationId", manifest.getAdaptationId());
         value.put("projectId", manifest.getProjectId());
         value.put("novelId", manifest.getNovelId());
@@ -86,6 +94,7 @@ final class VideoRenderManifestCodec {
         List<ShotRenderKeyframeManifest> keyframes = list(manifest.getKeyframes());
         if (manifest.getSchemaVersion()
                 == VideoShotRenderManifest.SchemaVersionEnum.VIDEO_SHOT_RENDER_MANIFEST_1_0) {
+            // 旧版本只接受当时存在的字段，避免新代码把历史任务解释成带关键帧任务。
             if (manifest.getProviderPromptText() != null || !keyframes.isEmpty()) {
                 throw new IllegalArgumentException("1.0 清单不能携带 P1 关键帧字段");
             }
@@ -100,6 +109,20 @@ final class VideoRenderManifestCodec {
         }
         if (list(manifest.getReferences()).size() + keyframes.size() > 20) {
             throw new IllegalArgumentException("Seedance 单次渲染最多使用 20 份图片输入");
+        }
+        if (manifest.getSchemaVersion()
+                == VideoShotRenderManifest.SchemaVersionEnum.VIDEO_SHOT_RENDER_MANIFEST_1_2) {
+            if (!"reference".equals(manifest.getGenerationMode())
+                    || manifest.getExecutionMode() == null
+                    || manifest.getDurationSeconds() == null
+                    || manifest.getDurationSeconds() < 4 || manifest.getDurationSeconds() > 12
+                    || manifest.getResolution() == null
+                    || !"720p".equals(manifest.getResolution().getValue())
+                    || list(manifest.getReferences()).size() + keyframes.size() < 1
+                    || !Objects.equals(manifest.getFeeConfirmed(),
+                            manifest.getExecutionMode() == VideoShotRenderManifest.ExecutionModeEnum.LIVE)) {
+                throw new IllegalArgumentException("1.2 清单必须冻结受控图片参考参数、执行模式与费用确认");
+            }
         }
     }
 

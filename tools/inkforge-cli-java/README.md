@@ -1,7 +1,7 @@
 # InkForge Java CLI
 
 独立的 Java 21 命令行客户端，只访问 Core `/api/v1/**`；不直接调用 Agent、不连接数据库，不依赖 Spring Core。
-注册表为126个命令，含2026-09-07补齐的 `long.session.create`；完整字段与 JSON/JSONL 规则见 `../inkforge-cli/README.md`。
+注册表为143个命令，含2026-09-10新增的20个独立分集／剧本命令，并已关闭3个旧章节改编启动命令；完整字段与 JSON/JSONL 规则见 `../inkforge-cli/README.md`。
 
 ## 构建与直接运行
 
@@ -17,11 +17,16 @@ printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.w
 ```
 
 `auth.login` 只在真实 TTY 隐藏读取密码。macOS 使用 Keychain，Windows 使用 Credential Manager，无明文回退。
-上述直接入口提供126命令；使用 Operator Skill 时必须走下面的受限入口，不能用裸 CLI 扩大其授权范围。
+上述直接入口提供143命令；使用 Operator Skill 时必须走下面的受限入口，不能用裸 CLI 扩大其授权范围。
 
 `long.session.create` 接收 `novelId/chapterId`、可选 `title/profile`，只映射现有 Core会话创建接口。
 它补齐新小说问答所需的首个会话，不修改 Agent、正文或数据库结构；完整示例与不确定结果对账见共享README。
 该命令不加入日常 Operator白名单；本文后续历次迁移中的125命令保留为当时历史计数。
+
+独立分集主链使用 `long.video.episode.*`，覆盖分集、来源集、剧本工作稿、V2 Run、候选采用、正式确认、
+版本和命令回执。网络响应不确定时，创建分集通过 `episode.project-command.get` 回读，其他领域写命令通过
+`episode.command.get` 回读，不换 `clientRequestId` 重写。剧本 Run 取消继续复用 `long.task.cancel`。
+这20个命令只进入普通CLI注册表，不加入两份Operator Skill的45命令白名单；仓内实现也不表示生产视频已开放。
 
 ## macOS Skill 实际入口
 
@@ -111,7 +116,7 @@ printf '{}\n' | "$HOME/.codex/skills/inkforge-production-short-story-operator/sc
 ## 验证范围与兼容保留
 
 CLI 模块验证使用 `./mvnw -pl tools/inkforge-cli-java verify`，提交前还运行根目录完整 `./mvnw verify`。
-现有共享 fixture 直接比较 Python/Java 的126命令最小输入、错误信封、代表成功请求、文件字节及全部 watcher；
+现有共享 fixture 直接比较 Python/Java 的143命令最小输入、错误信封、代表成功请求、文件字节及全部 watcher；
 Operator 的 JUnit 注入模拟 Core 与凭据，验证双环境绑定、配置升级、账号预检、允许集合、TTY、凭据和传输错误。
 另用真实 JAR/shell 进程验证隔离安装、无 Python/uv 启动、无 profile、未授权命令、origin 拒绝和包校验：
 

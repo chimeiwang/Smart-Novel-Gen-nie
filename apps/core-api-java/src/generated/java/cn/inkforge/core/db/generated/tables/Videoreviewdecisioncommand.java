@@ -374,7 +374,7 @@ public class Videoreviewdecisioncommand extends TableImpl<Videoreviewdecisioncom
     @Override
     public List<Check<VideoreviewdecisioncommandRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("VideoReviewDecisionCommand_client_request_check"), "((((char_length(\"clientRequestId\") >= 16) AND (char_length(\"clientRequestId\") <= 128)) AND (btrim(\"clientRequestId\") = \"clientRequestId\")))", true),
+            Internal.createCheck(this, DSL.name("VideoReviewDecisionCommand_client_request_check"), "(((char_length(\"clientRequestId\") >= 16) AND (char_length(\"clientRequestId\") <= 128) AND (btrim(\"clientRequestId\") = \"clientRequestId\")))", true),
             Internal.createCheck(this, DSL.name("VideoReviewDecisionCommand_decision_check"), "((decision = 'approve'::text))", true),
             Internal.createCheck(this, DSL.name("VideoReviewDecisionCommand_request_hash_check"), "((\"requestHash\" ~ '^[0-9a-f]{64}$'::text))", true),
             Internal.createCheck(this, DSL.name("VideoReviewDecisionCommand_result_json_check"), "(COALESCE((jsonb_typeof((\"resultJson\")::jsonb) = 'object'::text), false))", true),

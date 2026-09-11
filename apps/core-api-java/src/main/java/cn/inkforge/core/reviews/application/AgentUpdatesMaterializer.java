@@ -115,6 +115,7 @@ public final class AgentUpdatesMaterializer {
 
     private AgentUpdatesMaterializer() {}
 
+    /** 将模型候选绑定到冻结来源，生成可执行载荷和作者可读的逐项差异。 */
     public static Materialized materialize(
             String userId,
             String novelId,
@@ -135,6 +136,7 @@ public final class AgentUpdatesMaterializer {
         State state = new State(novelId, sources);
         List<Map<String, Object>> diff = new ArrayList<>();
 
+        // 各分区共享同一内存状态，后续更新可以安全引用本候选前面新建的资源。
         for (EntitySection section : ENTITY_SECTIONS) {
             materializeEntities(userId, novelId, artifactId, revision, updates, section, state, diff);
         }
@@ -299,6 +301,7 @@ public final class AgentUpdatesMaterializer {
         if (items == null) return;
         boolean replace = "replace".equals(updates.get("outlineTreeMode"));
         if (replace) {
+            // replace 先把冻结旧树投影为删除，再按候选顺序建立全新树，不能混用当前数据库 Head。
             for (Map<String, Object> before : state.outlineReplacementBefore()) {
                 diff.add(diffItem("大纲节点", "delete", display(null, before, "title", (String) before.get("id")),
                         deletedFields(before, OUTLINE_FIELDS)));
@@ -359,6 +362,7 @@ public final class AgentUpdatesMaterializer {
         }
         String parentKey = text(item.get("parentKey"));
         if (parentKey != null) {
+            // parentKey 只允许引用同一候选中已经出现的 create，避免前向引用造成顺序不确定。
             String parentId = clientIds.get(parentKey);
             if (parentId == null) throw unresolved("大纲 parentKey 无法解析到前序 create");
             state.resolveById(ResourceKind.OUTLINE_NODE, parentId);

@@ -253,6 +253,76 @@ public class VideoshottakeRecord extends UpdatableRecordImpl<VideoshottakeRecord
         return (LocalDateTime) get(15);
     }
 
+    /**
+     * Setter for <code>public.VideoShotTake.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(16, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotTake.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(16);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotTake.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(17, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotTake.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(17);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotTake.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(18, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotTake.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(18);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotTake.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(19, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotTake.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(19);
+    }
+
+    /**
+     * Setter for <code>public.VideoShotTake.lastFrameAssetId</code>.
+     */
+    public void setLastframeassetid(String value) {
+        set(20, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoShotTake.lastFrameAssetId</code>.
+     */
+    public String getLastframeassetid() {
+        return (String) get(20);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -276,7 +346,7 @@ public class VideoshottakeRecord extends UpdatableRecordImpl<VideoshottakeRecord
     /**
      * Create a detached, initialised VideoshottakeRecord
      */
-    public VideoshottakeRecord(String id, String taskid, String adaptationid, String projectid, String novelid, String shotid, String shotplanversionid, String promptversionid, String assetid, Integer takeno, String provider, String model, String providertaskid, String inputhash, String providermetadatajson, LocalDateTime createdat) {
+    public VideoshottakeRecord(String id, String taskid, String adaptationid, String projectid, String novelid, String shotid, String shotplanversionid, String promptversionid, String assetid, Integer takeno, String provider, String model, String providertaskid, String inputhash, String providermetadatajson, LocalDateTime createdat, String videoepisodeid, String episodeshotid, String episodeshotversionid, String productionbaselineid, String lastframeassetid) {
         super(Videoshottake.VIDEOSHOTTAKE);
 
         setId(id);
@@ -295,6 +365,11 @@ public class VideoshottakeRecord extends UpdatableRecordImpl<VideoshottakeRecord
         setInputhash(inputhash);
         setProvidermetadatajson(providermetadatajson);
         setCreatedat(createdat);
+        setVideoepisodeid(videoepisodeid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
+        setProductionbaselineid(productionbaselineid);
+        setLastframeassetid(lastframeassetid);
         resetTouchedOnNotNull();
     }
 }

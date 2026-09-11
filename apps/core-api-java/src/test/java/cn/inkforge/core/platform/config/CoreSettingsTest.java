@@ -10,6 +10,25 @@ import org.junit.jupiter.api.Test;
 class CoreSettingsTest {
 
     @Test
+    void 视频默认模拟且真实执行模式必须显式配置() {
+        assertThat(CoreSettings.from(Map.of()).seedanceExecutionMode()).isEqualTo("simulated");
+        assertThat(CoreSettings.from(Map.of("SEEDANCE_ENABLED", "true"))
+                        .seedanceExecutionMode())
+                .isEqualTo("simulated");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "SEEDANCE_EXECUTION_MODE", "automatic")))
+                .hasMessageContaining("simulated 或 live");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "SEEDANCE_EXECUTION_MODE", "live", "SEEDANCE_ENABLED", "true")))
+                .hasMessageContaining("供应商已配置");
+        assertThat(CoreSettings.from(Map.of(
+                        "SEEDANCE_EXECUTION_MODE", "live",
+                        "SEEDANCE_ENABLED", "true", "SEEDANCE_CONFIGURED", "true"))
+                        .seedanceExecutionMode())
+                .isEqualTo("live");
+    }
+
+    @Test
     void 开发默认值与CIDR必须规范化() {
         CoreSettings settings = CoreSettings.from(Map.of(
                 "TRUSTED_PROXY_CIDRS", "10.0.0.7/24,2001:db8::1/64",

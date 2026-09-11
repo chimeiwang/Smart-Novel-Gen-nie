@@ -209,6 +209,66 @@ public class VideoepisodeaudioclipRecord extends UpdatableRecordImpl<Videoepisod
         return (Integer) get(12);
     }
 
+    /**
+     * Setter for <code>public.VideoEpisodeAudioClip.videoEpisodeId</code>.
+     */
+    public void setVideoepisodeid(String value) {
+        set(13, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeAudioClip.videoEpisodeId</code>.
+     */
+    public String getVideoepisodeid() {
+        return (String) get(13);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeAudioClip.productionBaselineId</code>.
+     */
+    public void setProductionbaselineid(String value) {
+        set(14, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeAudioClip.productionBaselineId</code>.
+     */
+    public String getProductionbaselineid() {
+        return (String) get(14);
+    }
+
+    /**
+     * Setter for <code>public.VideoEpisodeAudioClip.episodeShotId</code>.
+     */
+    public void setEpisodeshotid(String value) {
+        set(15, value);
+    }
+
+    /**
+     * Getter for <code>public.VideoEpisodeAudioClip.episodeShotId</code>.
+     */
+    public String getEpisodeshotid() {
+        return (String) get(15);
+    }
+
+    /**
+     * Setter for
+     * <code>public.VideoEpisodeAudioClip.episodeShotVersionId</code>.
+     */
+    public void setEpisodeshotversionid(String value) {
+        set(16, value);
+    }
+
+    /**
+     * Getter for
+     * <code>public.VideoEpisodeAudioClip.episodeShotVersionId</code>.
+     */
+    public String getEpisodeshotversionid() {
+        return (String) get(16);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -232,7 +292,7 @@ public class VideoepisodeaudioclipRecord extends UpdatableRecordImpl<Videoepisod
     /**
      * Create a detached, initialised VideoepisodeaudioclipRecord
      */
-    public VideoepisodeaudioclipRecord(String mixversionid, String projectid, String shotplanversionid, Integer ordinal, String trackkind, String assetid, String shotid, Integer timelinestartms, Integer sourceinms, Integer sourceoutms, Integer gainmillibels, Integer fadeinms, Integer fadeoutms) {
+    public VideoepisodeaudioclipRecord(String mixversionid, String projectid, String shotplanversionid, Integer ordinal, String trackkind, String assetid, String shotid, Integer timelinestartms, Integer sourceinms, Integer sourceoutms, Integer gainmillibels, Integer fadeinms, Integer fadeoutms, String videoepisodeid, String productionbaselineid, String episodeshotid, String episodeshotversionid) {
         super(Videoepisodeaudioclip.VIDEOEPISODEAUDIOCLIP);
 
         setMixversionid(mixversionid);
@@ -248,6 +308,10 @@ public class VideoepisodeaudioclipRecord extends UpdatableRecordImpl<Videoepisod
         setGainmillibels(gainmillibels);
         setFadeinms(fadeinms);
         setFadeoutms(fadeoutms);
+        setVideoepisodeid(videoepisodeid);
+        setProductionbaselineid(productionbaselineid);
+        setEpisodeshotid(episodeshotid);
+        setEpisodeshotversionid(episodeshotversionid);
         resetTouchedOnNotNull();
     }
 }

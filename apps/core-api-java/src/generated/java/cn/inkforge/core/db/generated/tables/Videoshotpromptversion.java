@@ -9,6 +9,10 @@ import cn.inkforge.core.db.generated.Keys;
 import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.User.UserPath;
 import cn.inkforge.core.db.generated.tables.Videoadaptationtask.VideoadaptationtaskPath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaseline.VideoproductionbaselinePath;
+import cn.inkforge.core.db.generated.tables.Videoproductionbaselineshot.VideoproductionbaselineshotPath;
+import cn.inkforge.core.db.generated.tables.Videoshotrendertask.VideoshotrendertaskPath;
+import cn.inkforge.core.db.generated.tables.Videoshotversion.VideoshotversionPath;
 import cn.inkforge.core.db.generated.tables.records.VideoshotpromptversionRecord;
 
 import java.time.LocalDateTime;
@@ -79,12 +83,12 @@ public class Videoshotpromptversion extends TableImpl<VideoshotpromptversionReco
     /**
      * The column <code>public.VideoShotPromptVersion.shotId</code>.
      */
-    public final TableField<VideoshotpromptversionRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotpromptversionRecord, String> SHOTID = createField(DSL.name("shotId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotPromptVersion.shotPlanVersionId</code>.
      */
-    public final TableField<VideoshotpromptversionRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB.nullable(false), this, "");
+    public final TableField<VideoshotpromptversionRecord, String> SHOTPLANVERSIONID = createField(DSL.name("shotPlanVersionId"), SQLDataType.CLOB, this, "");
 
     /**
      * The column <code>public.VideoShotPromptVersion.versionNo</code>.
@@ -125,6 +129,28 @@ public class Videoshotpromptversion extends TableImpl<VideoshotpromptversionReco
      * The column <code>public.VideoShotPromptVersion.createdAt</code>.
      */
     public final TableField<VideoshotpromptversionRecord, LocalDateTime> CREATEDAT = createField(DSL.name("createdAt"), SQLDataType.LOCALDATETIME(3).nullable(false).defaultValue(DSL.field(DSL.raw("CURRENT_TIMESTAMP"), SQLDataType.LOCALDATETIME)), this, "");
+
+    /**
+     * The column <code>public.VideoShotPromptVersion.videoEpisodeId</code>.
+     */
+    public final TableField<VideoshotpromptversionRecord, String> VIDEOEPISODEID = createField(DSL.name("videoEpisodeId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column <code>public.VideoShotPromptVersion.episodeShotId</code>.
+     */
+    public final TableField<VideoshotpromptversionRecord, String> EPISODESHOTID = createField(DSL.name("episodeShotId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoShotPromptVersion.episodeShotVersionId</code>.
+     */
+    public final TableField<VideoshotpromptversionRecord, String> EPISODESHOTVERSIONID = createField(DSL.name("episodeShotVersionId"), SQLDataType.CLOB, this, "");
+
+    /**
+     * The column
+     * <code>public.VideoShotPromptVersion.productionBaselineId</code>.
+     */
+    public final TableField<VideoshotpromptversionRecord, String> PRODUCTIONBASELINEID = createField(DSL.name("productionBaselineId"), SQLDataType.CLOB, this, "");
 
     private Videoshotpromptversion(Name alias, Table<VideoshotpromptversionRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
@@ -204,7 +230,7 @@ public class Videoshotpromptversion extends TableImpl<VideoshotpromptversionReco
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.VIDEOSHOTPROMPTVERSION_ID_SHOT_PLAN_KEY, Indexes.VIDEOSHOTPROMPTVERSION_ID_SHOTID_KEY);
+        return Arrays.asList(Indexes.VIDEOSHOTPROMPTVERSION_EPISODE_VERSION_IDX, Indexes.VIDEOSHOTPROMPTVERSION_ID_SHOT_PLAN_KEY, Indexes.VIDEOSHOTPROMPTVERSION_ID_SHOTID_KEY, Indexes.VIDEOSHOTPROMPTVERSION_NEW_SHOT_VERSION_KEY);
     }
 
     @Override
@@ -214,12 +240,51 @@ public class Videoshotpromptversion extends TableImpl<VideoshotpromptversionReco
 
     @Override
     public List<UniqueKey<VideoshotpromptversionRecord>> getUniqueKeys() {
-        return Arrays.asList(Keys.VIDEOSHOTPROMPTVERSION_SHOT_VERSION_KEY);
+        return Arrays.asList(Keys.VIDEOSHOTPROMPTVERSION_ID_EPISODE_SHOT_KEY, Keys.VIDEOSHOTPROMPTVERSION_ID_NEW_SCOPE_KEY, Keys.VIDEOSHOTPROMPTVERSION_SHOT_VERSION_KEY);
     }
 
     @Override
     public List<ForeignKey<VideoshotpromptversionRecord, ?>> getReferences() {
-        return Arrays.asList(Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_CREATEDBYUSERID_FKEY, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_SOURCETASKID_FKEY);
+        return Arrays.asList(Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_BASED_ON_EPISODE_FKEY, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_BASELINE_INPUT_FKEY, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_BASELINE_SCOPE_FKEY, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_CREATEDBYUSERID_FKEY, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_EPISODE_SCOPE_FKEY, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_SOURCETASKID_FKEY);
+    }
+
+    private transient VideoshotpromptversionPath _videoshotpromptversion;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoShotPromptVersion</code> table.
+     */
+    public VideoshotpromptversionPath videoshotpromptversion() {
+        if (_videoshotpromptversion == null)
+            _videoshotpromptversion = new VideoshotpromptversionPath(this, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_BASED_ON_EPISODE_FKEY, null);
+
+        return _videoshotpromptversion;
+    }
+
+    private transient VideoproductionbaselineshotPath _videoproductionbaselineshot;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaselineShot</code> table.
+     */
+    public VideoproductionbaselineshotPath videoproductionbaselineshot() {
+        if (_videoproductionbaselineshot == null)
+            _videoproductionbaselineshot = new VideoproductionbaselineshotPath(this, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_BASELINE_INPUT_FKEY, null);
+
+        return _videoproductionbaselineshot;
+    }
+
+    private transient VideoproductionbaselinePath _videoproductionbaseline;
+
+    /**
+     * Get the implicit join path to the
+     * <code>public.VideoProductionBaseline</code> table.
+     */
+    public VideoproductionbaselinePath videoproductionbaseline() {
+        if (_videoproductionbaseline == null)
+            _videoproductionbaseline = new VideoproductionbaselinePath(this, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_BASELINE_SCOPE_FKEY, null);
+
+        return _videoproductionbaseline;
     }
 
     private transient UserPath _user;
@@ -232,6 +297,19 @@ public class Videoshotpromptversion extends TableImpl<VideoshotpromptversionReco
             _user = new UserPath(this, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_CREATEDBYUSERID_FKEY, null);
 
         return _user;
+    }
+
+    private transient VideoshotversionPath _videoshotversion;
+
+    /**
+     * Get the implicit join path to the <code>public.VideoShotVersion</code>
+     * table.
+     */
+    public VideoshotversionPath videoshotversion() {
+        if (_videoshotversion == null)
+            _videoshotversion = new VideoshotversionPath(this, Keys.VIDEOSHOTPROMPTVERSION__VIDEOSHOTPROMPTVERSION_EPISODE_SCOPE_FKEY, null);
+
+        return _videoshotversion;
     }
 
     private transient VideoadaptationtaskPath _videoadaptationtask;
@@ -247,11 +325,25 @@ public class Videoshotpromptversion extends TableImpl<VideoshotpromptversionReco
         return _videoadaptationtask;
     }
 
+    private transient VideoshotrendertaskPath _videoshotrendertask;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.VideoShotRenderTask</code> table
+     */
+    public VideoshotrendertaskPath videoshotrendertask() {
+        if (_videoshotrendertask == null)
+            _videoshotrendertask = new VideoshotrendertaskPath(this, null, Keys.VIDEOSHOTRENDERTASK__VIDEOSHOTRENDERTASK_PROMPT_NEW_SCOPE_FKEY.getInverseKey());
+
+        return _videoshotrendertask;
+    }
+
     @Override
     public List<Check<VideoshotpromptversionRecord>> getChecks() {
         return Arrays.asList(
             Internal.createCheck(this, DSL.name("VideoShotPromptVersion_content_hash_check"), "((\"contentHash\" ~ '^[0-9a-f]{64}$'::text))", true),
-            Internal.createCheck(this, DSL.name("VideoShotPromptVersion_text_check"), "((((char_length(\"currentText\") >= 1) AND (char_length(\"currentText\") <= 2000)) AND ((\"generatedText\" IS NULL) OR ((char_length(\"generatedText\") >= 1) AND (char_length(\"generatedText\") <= 2000)))))", true),
+            Internal.createCheck(this, DSL.name("VideoShotPromptVersion_scope_branch_check"), "((((\"shotId\" IS NOT NULL) AND (\"shotPlanVersionId\" IS NOT NULL) AND (\"videoEpisodeId\" IS NULL) AND (\"episodeShotId\" IS NULL) AND (\"episodeShotVersionId\" IS NULL) AND (\"productionBaselineId\" IS NULL)) OR ((\"shotId\" IS NULL) AND (\"shotPlanVersionId\" IS NULL) AND (\"sourceTaskId\" IS NULL) AND (\"videoEpisodeId\" IS NOT NULL) AND (\"episodeShotId\" IS NOT NULL) AND (\"episodeShotVersionId\" IS NOT NULL) AND (\"productionBaselineId\" IS NOT NULL))))", true),
+            Internal.createCheck(this, DSL.name("VideoShotPromptVersion_text_check"), "(((char_length(\"currentText\") >= 1) AND (char_length(\"currentText\") <= 2000) AND ((\"generatedText\" IS NULL) OR ((char_length(\"generatedText\") >= 1) AND (char_length(\"generatedText\") <= 2000)))))", true),
             Internal.createCheck(this, DSL.name("VideoShotPromptVersion_version_check"), "((\"versionNo\" > 0))", true)
         );
     }

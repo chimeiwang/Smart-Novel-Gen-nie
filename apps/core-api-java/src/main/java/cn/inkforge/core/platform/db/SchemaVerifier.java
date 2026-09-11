@@ -52,6 +52,7 @@ public final class SchemaVerifier {
         this.profile = profile;
     }
 
+    /** 读取实时结构并与每个获准完整契约比较，任一完全匹配即通过。 */
     public SchemaVerificationResult verify(Connection connection, String schema) throws SQLException {
         SchemaContract actual = SchemaContractProjector.project(inspector.inspect(connection, schema), profile);
         List<SchemaDiff> nearestDiffs = null;
@@ -111,6 +112,7 @@ public final class SchemaVerifier {
 
     private static void compareArrays(
             List<SchemaDiff> diffs, ArrayNode expected, ArrayNode actual, String path) {
+        // 有稳定身份字段时按名称比较；否则保留数组顺序，不能任意排序掩盖语义差异。
         String identityField = identityField(expected, actual);
         if (identityField != null) {
             Map<String, JsonNode> expectedItems = indexed(expected, identityField);
