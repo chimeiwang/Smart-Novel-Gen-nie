@@ -157,11 +157,63 @@ RETIRED_JAVA_METHODS = {
 }
 
 RETIRED_JAVA_SOURCES = (
+    "video/application/VideoAdaptationDecisionStore.java",
+    "video/application/VideoAdaptationRepository.java",
     "video/application/VideoAdaptationService.java",
+    "video/application/VideoAdaptationTaskStore.java",
+    "video/application/VideoAdaptationTaskSubmitter.java",
+    "video/application/VideoAdaptationTaskDispatcher.java",
+    "video/application/LegacyVideoPlanProgress.java",
     "video/application/LegacyVideoPlanService.java",
-    "video/application/VideoRenderService.java",
-    "video/application/VideoPostProductionService.java",
+    "video/application/LegacyVideoPlanStore.java",
+    "video/application/LegacyVideoPlanDispatcher.java",
+    "video/application/LegacyVideoPlanDispatchStore.java",
+    "video/domain/VideoAdaptationPlans.java",
+    "video/domain/SeedancePromptCompiler.java",
+    "video/infrastructure/JooqVideoAdaptationDecisionStore.java",
+    "video/infrastructure/JooqVideoAdaptationReadModel.java",
+    "video/infrastructure/JooqVideoAdaptationRepository.java",
+    "video/infrastructure/JooqVideoAdaptationTaskStore.java",
+    "video/infrastructure/JooqVideoPlanMaterializer.java",
+    "video/infrastructure/JooqLegacyVideoPlanStore.java",
+    "video/infrastructure/JooqLegacyVideoPlanDispatchStore.java",
+    "video/infrastructure/LegacyVideoPlanProgressCodec.java",
+    "video/infrastructure/VideoAdaptationTaskPayload.java",
+    "video/infrastructure/ProviderVideoAdaptationTaskSubmitter.java",
+    "video/infrastructure/DurableVideoAdaptationRun.java",
     "agentgateway/VideoAdaptationAgentSubmitter.java",
+    "video/application/VideoRenderClaim.java",
+    "video/application/VideoRenderReconciler.java",
+    "video/application/VideoRenderRepository.java",
+    "video/application/VideoRenderService.java",
+    "video/infrastructure/JooqVideoRenderRepository.java",
+    "video/infrastructure/VideoRenderManifestCodec.java",
+    "video/application/VideoPostProductionReconciler.java",
+    "video/application/VideoPostProductionRepository.java",
+    "video/application/VideoPostProductionService.java",
+    "video/infrastructure/JooqVideoPostProductionRepository.java",
+    "video/infrastructure/JooqVideoPostProductionReadModel.java",
+    "video/infrastructure/JooqVideoTimelineRepository.java",
+    "video/infrastructure/JooqVideoExportRepository.java",
+    "video/infrastructure/VideoPostProductionCommands.java",
+    "video/infrastructure/VideoPostProductionContext.java",
+    "video/infrastructure/VideoPostProductionDatabaseAccess.java",
+)
+
+# 这些共享实现仍由 Episode 视频链使用，故明确不纳入物理退役清单。
+ACTIVE_SHARED_VIDEO_JAVA_SOURCES = (
+    "video/application/VideoRenderSimulator.java",
+    "video/infrastructure/FfmpegVideoRenderSimulator.java",
+    "video/application/VideoVisualCanonService.java",
+    "video/application/VideoVisualCanonRepository.java",
+    "video/infrastructure/JooqVideoVisualCanonRepository.java",
+)
+
+REQUIRED_EPISODE_JAVA_SOURCES = (
+    "video/application/VideoEpisodeRenderService.java",
+    "video/application/VideoEpisodePostProductionService.java",
+    "video/application/VideoEpisodeRenderRepository.java",
+    "video/application/VideoEpisodeRenderReconciler.java",
 )
 
 
@@ -269,6 +321,15 @@ def test_retired_java_video_sources_are_physically_removed() -> None:
         path for path in RETIRED_JAVA_SOURCES if (java_root / path).exists()
     ]
     assert leftovers == []
+
+
+def test_active_episode_java_video_sources_are_preserved() -> None:
+    java_root = ROOT / "apps/core-api-java/src/main/java/cn/inkforge/core"
+    missing = [
+        path for path in REQUIRED_EPISODE_JAVA_SOURCES if not (java_root / path).exists()
+    ]
+    assert missing == []
+    assert set(RETIRED_JAVA_SOURCES).isdisjoint(ACTIVE_SHARED_VIDEO_JAVA_SOURCES)
 
 
 def test_retirement_migration_preserves_shared_media_and_guards_old_branches() -> None:
