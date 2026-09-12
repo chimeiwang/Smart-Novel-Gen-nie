@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -94,32 +95,6 @@ def test_agent_log_volume_initializer_is_not_a_compose_runtime_service() -> None
     assert "agent-logs-init:" not in source
     assert 'user: "10001:10001"' in agent
     assert "agent_logs:/data/agent-logs" in agent
-
-
-def test_cancel_uses_postgres_outcome_instead_of_outbox_boundary() -> None:
-    cancellation = (
-        ROOT
-        / "apps"
-        / "core-api"
-        / "src"
-        / "inkforge_core"
-        / "writing"
-        / "cancellation.py"
-    ).read_text(encoding="utf-8")
-    sse = (
-        ROOT
-        / "apps"
-        / "core-api"
-        / "src"
-        / "inkforge_core"
-        / "writing"
-        / "sse.py"
-    ).read_text(encoding="utf-8")
-
-    assert "WritingEventOutbox" not in cancellation
-    assert "supersede_waiting_for_new_command" not in cancellation
-    assert "outcome_provider" in sse
-    assert "format_run_outcome" in sse
 
 
 def test_only_nginx_publishes_ports_and_internal_routes_are_blocked() -> None:
@@ -263,15 +238,8 @@ def test_java_core_compose_has_bounded_jvm_and_python_free_healthcheck() -> None
     assert "mem_limit: 448m" in core
 
 
-def test_python_core_rollback_override_is_explicit_and_only_changes_healthcheck() -> None:
-    document = yaml.safe_load(PYTHON_ROLLBACK_COMPOSE.read_text(encoding="utf-8"))
-
-    assert set(document) == {"services"}
-    assert set(document["services"]) == {"core-api"}
-    core = document["services"]["core-api"]
-    assert set(core) == {"healthcheck"}
-    assert "python" in " ".join(core["healthcheck"]["test"])
-    assert "inkforge_core" not in " ".join(core["healthcheck"]["test"])
+def test_core_rollback_has_no_retired_runtime_overlay() -> None:
+    assert not PYTHON_ROLLBACK_COMPOSE.exists()
 
 
 def test_redis_is_bounded() -> None:
@@ -310,7 +278,8 @@ def test_redis_is_bounded() -> None:
     assert execution_redis["networks"] == ["execution_net"]
     assert "execution_net" in agent["networks"]
     assert "EXECUTION_REDIS_URL" in agent["environment"]
-    assert execution_config_path.stat().st_mode & 0o777 == 0o644
+    if os.name != "nt":
+        assert execution_config_path.stat().st_mode & 0o777 == 0o644
     execution_memory_mib = int(execution_redis["mem_limit"].removesuffix("m"))
     # AOF rewrite 最坏按 live dataset 全量 CoW 预留，另留 64 MiB 给 Redis/AOF 缓冲。
     assert execution_memory_mib >= 2 * 32 + 64
@@ -414,7 +383,6 @@ def test_durable_agent_schema_and_route_gates_default_closed() -> None:
 def test_python_redis_pools_allow_bounded_agent_parallelism() -> None:
     for path in (
         ROOT / "apps" / "agent-service" / "src" / "inkforge_agents" / "app.py",
-        ROOT / "apps" / "core-api" / "src" / "inkforge_core" / "app.py",
     ):
         source = path.read_text(encoding="utf-8")
         assert re.search(r"max_connections\s*=\s*8", source)

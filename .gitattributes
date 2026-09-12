@@ -1,7 +1,13 @@
 *.sh text eol=lf
+mvnw text eol=lf
+infra/docker/inkforge-* text eol=lf
 scripts/migrations/*.sql text eol=lf
 # 执行资产按文件字节校验哈希，Windows 检出也必须保留 LF。
 contracts/agent-execution/*.json text eol=lf
+# 生成器与迁移守卫按原始字节核对契约，所有平台必须使用同一换行。
+contracts/**/*.json text eol=lf
+apps/core-api-java/src/main/resources/db/**/*.json text eol=lf
+apps/core-api-java/src/test/resources/**/*.json text eol=lf
 mvnw.cmd text eol=crlf whitespace=cr-at-eol
 # SSE 事件以空行结束；这是协议帧边界，不是多余尾空行。
 contracts/core/sse-fixtures/*.txt text eol=lf whitespace=-blank-at-eof

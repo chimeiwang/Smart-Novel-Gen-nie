@@ -12,7 +12,6 @@ class GeneratedContractCoverageTest {
         assertThat(RegisterRequest.class).isNotNull();
         assertThat(NovelResponse.class).isNotNull();
         assertThat(RunCompletionCallback.class).isNotNull();
-        assertThat(VideoAdaptationPlanCompletionCallback.class).isNotNull();
         assertThat(RunSnapshot.class).isNotNull();
         assertThat(WorkflowEventEnvelope.class).isNotNull();
         assertThat(StepProgressEventPayload.class).isNotNull();

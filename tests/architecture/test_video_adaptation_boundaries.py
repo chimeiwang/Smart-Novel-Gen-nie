@@ -9,10 +9,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_episode_video_production_has_independent_service_modules() -> None:
     expected = (
-        "apps/core-api/src/inkforge_core/video/episodes/router.py",
-        "apps/core-api/src/inkforge_core/video/episodes/production_router.py",
-        "apps/core-api/src/inkforge_core/video/episodes/render_router.py",
-        "apps/core-api/src/inkforge_core/video/episodes/post_production_router.py",
+        "apps/core-api-java/src/main/java/cn/inkforge/core/video/api/VideoEpisodeController.java",
+        "apps/core-api-java/src/main/java/cn/inkforge/core/video/api/VideoProductionController.java",
+        "apps/core-api-java/src/main/java/cn/inkforge/core/video/api/VideoEpisodeRenderController.java",
+        "apps/core-api-java/src/main/java/cn/inkforge/core/video/api/VideoEpisodePostProductionController.java",
         "apps/agent-service/src/inkforge_agents/execution/video_episode.py",
         "apps/agent-service/src/inkforge_agents/execution/video_storyboard.py",
         "apps/agent-service/src/inkforge_agents/providers/video_generation.py",
@@ -24,14 +24,14 @@ def test_episode_video_production_has_independent_service_modules() -> None:
     assert all((ROOT / relative).is_file() for relative in expected)
 
 
-def test_new_adaptation_domain_does_not_extend_legacy_repository() -> None:
-    legacy_repository = (
-        ROOT / "apps/core-api/src/inkforge_core/video/repository.py"
-    ).read_text(encoding="utf-8")
-
-    assert "VideoChapterAdaptation" not in legacy_repository
-    assert "chapter-adaptations" not in legacy_repository
-    assert "ChapterAdaptationPlanCandidate" not in legacy_repository
+def test_episode_domain_does_not_extend_legacy_repository() -> None:
+    java_root = ROOT / "apps/core-api-java/src/main/java/cn/inkforge/core/video"
+    sources = list(java_root.glob("**/*VideoEpisode*.java"))
+    assert sources
+    for path in sources:
+        source = path.read_text(encoding="utf-8")
+        assert "extends JooqVideoAdaptationRepository" not in source
+        assert "ChapterAdaptationPlanCandidate" not in source
 
 
 def test_episode_workspace_replaces_legacy_chapter_workspace() -> None:

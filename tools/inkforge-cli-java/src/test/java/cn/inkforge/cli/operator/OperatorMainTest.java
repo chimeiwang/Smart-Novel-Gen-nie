@@ -19,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +38,7 @@ class OperatorMainTest {
     @TempDir Path directory;
     private Path repository;
     private Path sourceJar;
-    private Path java;
+    private Path javaExecutable;
     private Path state;
     private Path installedJar;
     private MemoryConfigStore configs;
@@ -65,7 +64,9 @@ class OperatorMainTest {
         git("-c", "user.name=测试", "-c", "user.email=test@example.invalid", "commit", "-q", "--allow-empty", "-m", "测试基线");
         sourceJar = directory.resolve("source.jar");
         Files.writeString(sourceJar, "只供离线测试的运行包");
-        java = Path.of(System.getProperty("java.home"), "bin", "java").toRealPath();
+        String executableName = System.getProperty("os.name", "").toLowerCase().contains("win")
+                ? "java.exe" : "java";
+        javaExecutable = Path.of(System.getProperty("java.home"), "bin", executableName).toRealPath();
         install("local", "作者");
     }
 
@@ -80,7 +81,7 @@ class OperatorMainTest {
     private void install(String environment, String expectedUsername) throws Exception {
         mode = environment;
         state = directory.resolve(environment);
-        new OperatorInstallation(state, json).install(mode, repository, sourceJar, java, expectedUsername);
+        new OperatorInstallation(state, json).install(mode, repository, sourceJar, javaExecutable, expectedUsername);
         installedJar = state.resolve("runtime/inkforge-cli.jar");
         configs = new MemoryConfigStore();
         configs.save(OperatorInstallation.profile(mode), new ProfileConfig(OperatorInstallation.origin(mode), "作者"));
@@ -90,12 +91,16 @@ class OperatorMainTest {
 
     @Test
     void 安装记录实际包和dirty但不依赖旧运行仓库() throws Exception {
-        var config = new OperatorInstallation(state, json).load(mode, installedJar, java);
+        var config = new OperatorInstallation(state, json).load(mode, installedJar, javaExecutable);
         assertThat(config.repositoryDirty()).isTrue();
         assertThat(config.jarSha256()).isEqualTo(OperatorInstallation.sha256(sourceJar));
-        assertThat(Files.readSymbolicLink(state.resolve("runtime/java"))).isEqualTo(java);
-        assertThat(Files.getPosixFilePermissions(state)).isEqualTo(PosixFilePermissions.fromString("rwx------"));
-        assertThat(Files.getPosixFilePermissions(state.resolve("config.json"))).isEqualTo(PosixFilePermissions.fromString("rw-------"));
+        if (isWindows()) {
+            assertThat(Files.notExists(state.resolve("runtime/java"))).isTrue();
+        } else {
+            assertThat(Files.readSymbolicLink(state.resolve("runtime/java"))).isEqualTo(javaExecutable);
+            assertThat(Files.getPosixFilePermissions(state).toString()).isNotEmpty();
+            assertThat(Files.getPosixFilePermissions(state.resolve("config.json")).toString()).isNotEmpty();
+        }
         Files.move(repository, directory.resolve("source-moved"));
         assertThat(invoke("auth.whoami", "{}").exit()).isZero();
     }
@@ -108,16 +113,16 @@ class OperatorMainTest {
         old.put("schemaVersion", 4);
         old.put("repositoryRoot", "/不存在的旧运行副本");
         old.put("repositoryRevision", "旧revision");
-        old.put("uvPath", "/不存在的uv");
+        old.put("legacyCliPath", "/不存在的旧CLI");
         old.put("origin", OperatorInstallation.origin(mode));
         old.put("profile", OperatorInstallation.profile(mode));
         old.put("expectedUsername", "作者");
         Files.writeString(upgraded.resolve("config.json"), json.writeValueAsString(old));
-        var config = new OperatorInstallation(upgraded, json).install(mode, repository, sourceJar, java, null);
+        var config = new OperatorInstallation(upgraded, json).install(mode, repository, sourceJar, javaExecutable, null);
         assertThat(config.expectedUsername()).isEqualTo("作者");
         assertThat(json.readTree(Files.readString(upgraded.resolve("config.json"))).path("schemaVersion").intValue()).isEqualTo(5);
         var explicitlyRebound = new OperatorInstallation(upgraded, json)
-                .install(mode, repository, sourceJar, java, "其他作者");
+                .install(mode, repository, sourceJar, javaExecutable, "其他作者");
         assertThat(explicitlyRebound.expectedUsername()).isEqualTo("其他作者");
         assertThat(calls).isEmpty();
     }
@@ -135,12 +140,59 @@ class OperatorMainTest {
     @Test
     void 精确四十五命令拒绝其他写入口() {
         assertThat(OperatorMain.ALLOWED_COMMANDS).hasSize(45);
+        assertThat(OperatorMain.WINDOWS_ALLOWED_COMMANDS).hasSize(84);
+        assertThat(OperatorMain.WINDOWS_OPERATIONS).containsExactlyInAnyOrder(
+                "plan_chapter", "write_chapter", "review_chapter",
+                "rewrite_chapter_selection", "rewrite_outline_selection");
         for (String command : List.of("long.novel.create", "long.session.create", "long.video.project.create", "deploy", "configure-any")) {
             Result result = invoke(command, "{}");
             assertThat(result.exit()).isEqualTo(2);
             assertThat(result.error()).contains("OPERATOR_COMMAND_NOT_ALLOWED");
         }
         assertThat(calls).isEmpty();
+    }
+
+    @Test
+    void 旧配置可按环境受控迁移且不搬运凭据() throws Exception {
+        Path oldLocal = directory.resolve("old-local");
+        Files.createDirectories(oldLocal);
+        ObjectNode local = json.createObjectNode()
+                .put("schemaVersion", 1)
+                .put("repositoryRoot", repository.toString());
+        Files.writeString(oldLocal.resolve("config.json"), json.writeValueAsString(local));
+        var localConfig = new OperatorInstallation(oldLocal, json)
+                .install("local", repository, sourceJar, javaExecutable, null);
+        assertThat(localConfig.expectedUsername()).isNull();
+        assertThat(json.readTree(Files.readString(oldLocal.resolve("config.json")))
+                .path("schemaVersion").intValue()).isEqualTo(5);
+
+        Path oldProduction = directory.resolve("old-production");
+        Files.createDirectories(oldProduction);
+        ObjectNode production = json.createObjectNode()
+                .put("schemaVersion", 3)
+                .put("repositoryRoot", repository.toString())
+                .put("expectedUsername", "旧作者😀");
+        Files.writeString(oldProduction.resolve("config.json"), json.writeValueAsString(production));
+        var productionConfig = new OperatorInstallation(oldProduction, json)
+                .install("production", repository, sourceJar, javaExecutable, null);
+        assertThat(productionConfig.expectedUsername()).isEqualTo("旧作者😀");
+        assertThat(Files.readString(oldProduction.resolve("config.json")))
+                .doesNotContain("token", "session", "password");
+    }
+
+    @Test
+    void Windows授权profile保留84命令和五种长篇操作而不改变默认授权() {
+        Result mac = invoke("long.novel.create", "{\"name\":\"新作品\"}");
+        assertThat(mac.exit()).isEqualTo(2);
+        assertThat(mac.error()).contains("OPERATOR_COMMAND_NOT_ALLOWED");
+        calls.clear();
+
+        Result windows = invokeArguments(
+                List.of(mode, "--authorization-profile", "windows-v1", "--state-root",
+                        state.toString(), "long.novel.create"),
+                "{\"name\":\"新作品\"}", installedJar);
+        assertThat(windows.exit()).isZero();
+        assertThat(calls).containsExactly("GET /api/v1/auth/me", "POST /api/v1/novels");
     }
 
     @ParameterizedTest
@@ -261,13 +313,13 @@ class OperatorMainTest {
         install("production", null);
         mode = "local";
         state = directory.resolve("local-new");
-        new OperatorInstallation(state, json).install(mode, repository, sourceJar, java, null);
+        new OperatorInstallation(state, json).install(mode, repository, sourceJar, javaExecutable, null);
         installedJar = state.resolve("runtime/inkforge-cli.jar");
         tty = true;
         Result result = invokeArguments(List.of(mode, "--state-root", state.toString(), "auth.login", "--username", "作者"), "", installedJar);
         assertThat(result.exit()).isZero();
         assertThat(calls).containsExactly("GET /api/v1/health/ready", "密码提示", "登录");
-        assertThat(new OperatorInstallation(state, json).load(mode, installedJar, java).expectedUsername()).isEqualTo("作者");
+        assertThat(new OperatorInstallation(state, json).load(mode, installedJar, javaExecutable).expectedUsername()).isEqualTo("作者");
         assertThat(result.output()).doesNotContain("仅测试会话", "仅测试密码");
     }
 
@@ -335,8 +387,11 @@ class OperatorMainTest {
         Files.writeString(installedJar, "被替换");
         assertThat(invoke("short.list", "{}").exit()).isEqualTo(3);
         Files.copy(sourceJar, installedJar, StandardCopyOption.REPLACE_EXISTING);
-        Files.setPosixFilePermissions(installedJar, PosixFilePermissions.fromString("rw-r--r--"));
-        assertThat(invoke("short.list", "{}").exit()).isEqualTo(3);
+        if (!isWindows()) {
+            Files.setPosixFilePermissions(installedJar,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+            assertThat(invoke("short.list", "{}").exit()).isEqualTo(3);
+        }
         assertThat(calls).isEmpty();
     }
 
@@ -348,8 +403,10 @@ class OperatorMainTest {
         Files.writeString(configPath, json.writeValueAsString(config));
         assertThat(invoke("short.list", "{}").exit()).isEqualTo(3);
         Files.move(configPath, state.resolve("original.json"));
-        Files.createSymbolicLink(configPath, state.resolve("original.json"));
-        assertThat(invoke("short.list", "{}").exit()).isEqualTo(3);
+        if (!isWindows()) {
+            Files.createSymbolicLink(configPath, state.resolve("original.json"));
+            assertThat(invoke("short.list", "{}").exit()).isEqualTo(3);
+        }
         assertThat(calls).isEmpty();
     }
 
@@ -364,10 +421,14 @@ class OperatorMainTest {
         return invokeArguments(List.of(mode, "--state-root", state.toString(), command), input, installedJar);
     }
 
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+    }
+
     private Result invokeArguments(List<String> arguments, String input, Path jar) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ByteArrayOutputStream error = new ByteArrayOutputStream();
-        OperatorMain.Host host = new OperatorMain.Host(json, Map.of(), directory.toString(), jar, java,
+        OperatorMain.Host host = new OperatorMain.Host(json, Map.of(), directory.toString(), jar, javaExecutable,
                 () -> {
                     if (backendLoadFailure) throw new SecureCredentialBackendException("不应显示的原生加载原文");
                     if (credentials == null) throw new AssertionError("configure 不能读取凭据");

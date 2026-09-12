@@ -1,68 +1,74 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
+import { buildCoreContract } from "./build_core_openapi.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const publicOpenApiPath = path.join(root, "contracts", "core", "public-openapi.json");
 const target = path.join(root, "packages", "api-client", "src", "generated", "schema.d.ts");
-const temporary = mkdtempSync(path.join(tmpdir(), "inkforge-openapi-"));
-const openapiPath = path.join(temporary, "openapi.json");
-const localPython = path.join(root, ".venv", "bin", "python");
-// Codex 桌面环境可能没有 uv 命令，但项目已存在受控 .venv；生成结果仍走同一导出脚本。
-const useLocalPython = process.platform !== "win32" && existsSync(localPython);
-const uvCommand = useLocalPython ? localPython : process.platform === "win32" ? "py" : "uv";
-const uvArgs = useLocalPython
-  ? ["scripts/export_openapi.py", "--output", openapiPath]
-  : process.platform === "win32"
-    ? ["-m", "uv", "run", "python", "scripts/export_openapi.py", "--output", openapiPath]
-    : ["run", "python", "scripts/export_openapi.py", "--output", openapiPath];
 
 function normalizeLineEndings(value) {
   return value.replace(/\r\n?/g, "\n");
 }
 
-function omitNumericDiscriminators(value) {
-  if (Array.isArray(value)) {
-    value.forEach(omitNumericDiscriminators);
-    return;
-  }
-  if (value === null || typeof value !== "object") {
-    return;
-  }
+/**
+ * 将 Java 3.0.3 归一化扩展还原为 TypeScript 需要的 const/null 语义。
+ * 仅修改内存副本，canonical 和 public 投影始终保留 Java 生成所需扩展。
+ */
+export function normalizeForTypeScript(value) {
+  if (Array.isArray(value)) return value.map(normalizeForTypeScript);
+  if (value === null || typeof value !== "object") return value;
 
-  const mapping = value.discriminator?.mapping;
-  if (
-    mapping !== null &&
-    typeof mapping === "object" &&
-    !Array.isArray(mapping) &&
-    Object.keys(mapping).length > 0 &&
-    Object.keys(mapping).every((key) => /^\d+$/.test(key))
-  ) {
-    // OpenAPI 的 discriminator mapping key 按规范只能是字符串；openapi-typescript
-    // 会据此把真实的整数 const 1/2 错投影为字符串字面量。TS 联合仍由分支中的
-    // 数字 const 完整判别，因此只在生成器输入副本中移除这层元数据。
-    delete value.discriminator;
+  const nullable = value.nullable === true || value["x-inkforge-source-nullable"] === true;
+  const fixedNull = value["x-inkforge-fixed-null"] === true;
+  const constant = value["x-inkforge-const"];
+  const normalized = Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "nullable" && !key.startsWith("x-inkforge-"))
+      .map(([key, child]) => [key, normalizeForTypeScript(child)]),
+  );
+
+  if (constant !== undefined) normalized.const = constant;
+  if (fixedNull) {
+    // Java 的生成器无法表达 OpenAPI 3.1 enum:[null]，但 TS 需要保留“固定为 null”。
+    normalized.enum = [null];
+    return normalized;
   }
-  Object.values(value).forEach(omitNumericDiscriminators);
+  if (nullable) return { anyOf: [normalized, { type: "null" }] };
+  return normalized;
 }
 
-try {
-  execFileSync(uvCommand, uvArgs, {
-    cwd: root,
-    stdio: "inherit",
-  });
-  const openapi = JSON.parse(readFileSync(openapiPath, "utf8"));
+async function generate() {
+  if (!existsSync(publicOpenApiPath)) {
+    throw new Error("缺少 contracts/core/public-openapi.json，请先运行 npm run core:contract");
+  }
+  const openapi = normalizeForTypeScript(JSON.parse(readFileSync(publicOpenApiPath, "utf8")));
+  // discriminator mapping key 按 OpenAPI 3.0 必须是字符串，但旧生成器会把纯数字映射
+  // 误判为 TS 字符串判别器；分支中的数字 const 才是实际判别依据。
+  function omitNumericDiscriminators(value) {
+    if (Array.isArray(value)) return value.forEach(omitNumericDiscriminators);
+    if (value === null || typeof value !== "object") return;
+    const mapping = value.discriminator?.mapping;
+    if (mapping && typeof mapping === "object" && !Array.isArray(mapping) &&
+        Object.keys(mapping).length > 0 && Object.keys(mapping).every((key) => /^\d+$/.test(key))) {
+      delete value.discriminator;
+    }
+    Object.values(value).forEach(omitNumericDiscriminators);
+  }
   omitNumericDiscriminators(openapi);
-  const ast = await openapiTS(openapi);
-  const generated = astToString(ast);
-  if (process.argv.includes("--check")) {
+  return astToString(await openapiTS(openapi));
+}
+
+async function main() {
+  const check = process.argv.includes("--check");
+  // 同一入口核对 canonical 到公共投影再到 TS，不能只比较两份过期生成物。
+  buildCoreContract({ check });
+  const generated = await generate();
+  if (check) {
     let current = "";
-    try {
-      current = readFileSync(target, "utf8");
-    } catch {
+    try { current = readFileSync(target, "utf8"); } catch {
       throw new Error("生成的 API 客户端不存在，请先运行 npm run api:generate");
     }
     if (normalizeLineEndings(current) !== normalizeLineEndings(generated)) {
@@ -72,6 +78,6 @@ try {
     mkdirSync(path.dirname(target), { recursive: true });
     writeFileSync(target, generated, "utf8");
   }
-} finally {
-  rmSync(temporary, { recursive: true, force: true });
 }
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

@@ -29,16 +29,17 @@
 
 - `apps/web` 只负责 Next.js 页面、SSR/SEO、浏览器交互和生成客户端；不得包含业务 API、Server Actions、数据库客户端或模型运行时。
 - `apps/core-api-java` 独占 PostgreSQL、浏览器认证、归属校验、业务规则、ReviewArtifact、计费和 SSE。
-  `apps/core-api` 保留历史镜像与公共契约来源；生产只运行一个 Core，不双 Core、不双写。
+  Core 与 CLI 只保留 Java 实现；生产只运行一个 Core，不双 Core、不双写。
 - `apps/agent-service` 负责 LangGraph、模型、工具循环和运行队列；只能通过 Core 内部工具网关读写业务数据，
   禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。V2 单 Step 使用独立持久 execution Redis，普通队列／认证 Redis 可重建。
 - Core 与 Agent 使用 `packages/service-contracts` 的版本化 Pydantic 契约及 `packages/service-auth` 的 Ed25519 服务身份。
   `/internal/v1/**` 同时校验直接对端网段和服务令牌，不得信任转发头决定内部身份。
 - 浏览器和 CLI 只访问 Core 公共 `/api/v1/**`，不得访问内部接口；Nginx 是唯一公网入口。
   CLI 凭据使用 macOS Keychain 或 Windows Credential Manager，不允许明文回退。
-- 公共接口先改 FastAPI/Pydantic 契约，再运行 `npm run api:generate`；`packages/api-client` 由 OpenAPI 生成，
-  禁止手写重复 TypeScript DTO。Java 必须通过版本化 Python OpenAPI 基线的契约差异测试，不依赖注解默认输出；
-  不得因 Java 已切换而删除仍在使用的 Python 契约或基线测试。
+- Core 接口先改 `contracts/core/openapi.json`，通过 Java API／DTO 生成与路由覆盖验证，再运行
+  `npm run api:generate` 与 `npm run api:check`。公共投影由 exposure 分类生成，内部与 provider media
+  不进入前端客户端；禁止手写重复 TypeScript DTO 或从 Spring 注解反向生成唯一契约。
+  Agent 的 Python 共享协议、鉴权和语言中立 golden fixtures 继续保留。
 - Java 业务模块拥有自身 Agent 出站应用端口，`agentgateway` 只能单向依赖并实现这些端口；业务模块不得反向
   导入 `AgentServiceClient` 或网关异常。`operations` 只托管后台生命周期；受配置门禁的数据库、Redis 或供应商
   协作者缺失时，不得让最小健康上下文装配失败。
@@ -63,7 +64,8 @@
 - 结构变更必须有用户明确授权、具名 spec 和迁移脚本；执行前按[授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)
   核对目标数据库、允许范围和门禁。已有授权按原范围沿用，不能因文档整理扩大或重新授予权限。
 - 迁移前备份并在隔离 PostgreSQL 验证，完成后从真实目标库重新导出
-  `apps/core-api/src/inkforge_core/db/schema-contract.json` 并复验精确一致；未获批变更只能只读核对契约。
+  Java Core 的 `src/main/resources/db/` 中对应 pre／post Durable V2 结构契约并复验精确一致；
+  使用 Java `inkforge-schema-export` 导出，未获批变更只能只读核对契约。
 - 当前正式库已有 V2 Run，永久禁止 DDL rollback；应用回滚必须保留 V2 查询与收敛能力，
   不得使用 V1-only Python Core 或不兼容的旧 Agent 镜像。不得物理删除会断开小说成果来源的 Task／Command 或候选。
 - 生产必须保持 `VIDEO_PREVIEW_ENABLED=false`，拒绝视频调度和真实 Seedance；开发结构授权不等于生产迁移或功能开放。
@@ -103,5 +105,5 @@ Python 依赖使用 `uv sync --frozen --all-packages --group dev`。
 共享协议、鉴权或工作流的 Mypy 命令：
 
 ```bash
-uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src packages/service-auth/src
+uv run mypy apps/agent-service/src packages/service-contracts/src packages/service-auth/src
 ```

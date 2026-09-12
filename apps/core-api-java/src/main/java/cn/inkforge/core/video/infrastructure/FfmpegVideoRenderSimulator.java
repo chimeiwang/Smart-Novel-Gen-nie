@@ -4,7 +4,6 @@ import cn.inkforge.core.video.application.ArchivedVideoRender;
 import cn.inkforge.core.video.application.VideoAssetStore;
 import cn.inkforge.core.video.application.VideoMediaProbe;
 import cn.inkforge.core.video.application.VideoEpisodeRenderClaim;
-import cn.inkforge.core.video.application.VideoRenderClaim;
 import cn.inkforge.core.video.application.VideoRenderSimulator;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,20 +41,6 @@ final class FfmpegVideoRenderSimulator implements VideoRenderSimulator {
     @Override
     public boolean available() {
         return ffmpeg != null && Files.isExecutable(ffmpeg) && probe.available();
-    }
-
-    @Override
-    public ArchivedVideoRender render(VideoRenderClaim claim) {
-        String executionMode = claim.manifest().getExecutionMode() == null
-                ? null
-                : claim.manifest().getExecutionMode().getValue();
-        return render(new SimulationInput(
-                claim.taskId(),
-                claim.projectId(),
-                executionMode,
-                claim.manifest().getRatio().getValue(),
-                claim.manifest().getDurationSeconds(),
-                Boolean.TRUE.equals(claim.manifest().getGenerateAudio())));
     }
 
     @Override

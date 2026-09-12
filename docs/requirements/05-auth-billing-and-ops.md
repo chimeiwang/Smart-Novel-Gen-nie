@@ -11,7 +11,8 @@
 `docs/architecture-decisions/001-core-java-stack.md` 到 `003-core-java-single-cutover.md`。
 
 Java Core 已于 2026-08-26 替换同名生产容器，生产始终只允许一个 `core-api`，不双 Core、不双写。
-现正式库已有 V2 Run，Python Core 仅保留历史镜像与公共契约来源，不再具有该库的回滚资格；禁止 DDL rollback，
+现正式库已有 V2 Run，Core 接口由 `contracts/core/openapi.json` 维护，Python Core／CLI 源码退出当前工程。
+Python Core 历史镜像不具有该库的回滚资格；禁止 DDL rollback，
 应用回滚必须保留 V2 查询和收敛能力，具体适用条件见 [V2 运维手册](../DURABLE_AGENT_V2_ROLLOUT.md)。
 
 Java 等价迁移本身没有增加手机号、短信、邮箱、支付、订单、订阅或新表。手机号认证于 2026-08-27 另立
@@ -19,6 +20,10 @@ Java 等价迁移本身没有增加手机号、短信、邮箱、支付、订单
 完整授权、迁移记录、生产启用和浏览器待验收范围见[手机号认证规格](../specs/2026-08-27-aliyun-phone-auth.md)，
 不由本段代替当前环境检查。Java 应用不得使用 JPA、Flyway、Liquibase 或启动 SQL 自动修改结构；
 schema guard 继续只读，并在手机号双开关关闭时只精确投影掉手机号身份表。
+
+本地开发、镜像和部署统一使用 Java Core；结构导出通过 `inkforge-schema-export`，结构验证通过
+`inkforge-schema-guard`。恢复演练入口使用现有 V2 隔离 Compose 测试，覆盖 Agent／Core 重启和 execution Redis AOF；
+它自行创建测试 Run，不接受生产 `TASK_ID`。具体变更见 [清理规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
 
 ## 浏览器认证
 

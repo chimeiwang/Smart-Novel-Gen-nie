@@ -10,7 +10,7 @@ import tools.jackson.databind.json.JsonMapper;
 class CommandCatalogTest {
 
     @Test
-    void Java命令目录必须逐项匹配当前Python命令() throws Exception {
+    void Java命令目录必须包含全部152项并与处理器注册双向一致() throws Exception {
         try (InputStream source = getClass()
                 .getResourceAsStream("/cli-contracts/command-registry.json")) {
             assertThat(source).isNotNull();

@@ -692,35 +692,35 @@ jobs:
             exit 1
           }
           [ "$running_state" = "true" ] || { echo "Core 容器未运行" >&2; exit 1; }
-          if ! timeout 180 docker exec -i "$core_container" python3 -c \
-            'from inkforge_core.db.schema_guard import export_schema_contract' </dev/null >/dev/null 2>&1; then
-            echo "当前 Core 容器不支持 schema_guard 只读导出" >&2
-            exit 1
-          fi
-          container_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
-          if ! timeout 180 docker exec -i "$core_container" sh -eu -c \
-            'test -w /tmp && rm -f "$1" && : > "$1" && rm -f "$1"' sh "$container_contract" \
-            </dev/null >/dev/null 2>&1; then
-            echo "Core 容器 /tmp 不可写" >&2
-            exit 1
-          fi
+          # 导出器使用运行镜像的独立资源上限，不能与 448 MiB 生产 JVM 共享 cgroup。
+          core_image="$(timeout 180 docker inspect --format '{{.Image}}' "$core_container")"
+          [[ "$core_image" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Core 镜像身份无效" >&2; exit 1; }
+          probe_cid="/tmp/inkforge-token-schema-$run_id-$run_attempt.cid"
+          [ ! -e "$probe_cid" ] || { echo "本次结构探针身份文件已存在" >&2; exit 1; }
           cleanup_container_contract() {
             set +e
-            timeout 180 docker exec -i "$core_container" rm -f "$container_contract" </dev/null >/dev/null 2>&1
+            if [ -f "$probe_cid" ]; then
+              probe_id="$(cat "$probe_cid")"
+              if [[ "$probe_id" =~ ^[0-9a-f]{64}$ ]]; then
+                timeout 30 docker rm -f "$probe_id" >/dev/null 2>&1
+              fi
+              rm -f -- "$probe_cid"
+            fi
             rm -f -- "$pgpass_file" "$database_url_file"
           }
           trap cleanup_container_contract EXIT
-          if ! timeout 180 docker exec -i "$core_container" python3 -c \
-            'import asyncio, sys; from inkforge_core.db.schema_guard import export_schema_contract; database_url = sys.stdin.read(); contract = asyncio.run(export_schema_contract(database_url, sys.argv[1])); print("schema-contract:" + str(contract["fingerprint"]))' \
-            "$container_contract" < "$database_url_file"; then
-            echo "schema_guard 只读 contract 导出失败" >&2
-            exit 1
-          fi
-          : > "$contract_temp"
-          if ! timeout 180 docker exec -i "$core_container" python3 -c \
-            'import sys; from pathlib import Path; sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes())' \
-            "$container_contract" </dev/null >"$contract_temp" 2>/dev/null; then
-            echo "无法传输 schema contract" >&2
+          # 具名验证库固定在本机；不继承业务容器环境，也不在其内启动 JVM。
+          if ! timeout 180 docker run --rm -i --cidfile "$probe_cid" \
+            --network host --add-host host.docker.internal:127.0.0.1 \
+            --memory 192m --memory-swap 192m --cpus 0.25 --pids-limit 64 \
+            --user 10001:10001 --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+            --tmpfs /tmp:size=16m,mode=1777 \
+            --env JAVA_TOOL_OPTIONS= --env JDK_JAVA_OPTIONS= --env _JAVA_OPTIONS= \
+            --entrypoint /bin/sh "$core_image" -ec \
+            'export JAVA_TOOL_OPTIONS="-Xms16m -Xmx64m -XX:MaxMetaspaceSize=48m -XX:ReservedCodeCacheSize=16m -XX:MaxDirectMemorySize=8m -Xss512k -XX:+UseSerialGC";
+             /usr/local/bin/inkforge-schema-export --database-url-stdin --output /tmp/schema.json >/dev/null;
+             cat /tmp/schema.json' < "$database_url_file" > "$contract_temp"; then
+            echo "独立 Java 探针只读 contract 导出失败" >&2
             exit 1
           fi
           [ -s "$contract_temp" ] || { echo "schema contract 为空" >&2; exit 1; }

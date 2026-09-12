@@ -2,9 +2,6 @@ package cn.inkforge.core.video.application;
 
 import cn.inkforge.contracts.api.ApproveVisualCanonRequest;
 import cn.inkforge.contracts.api.CreateVisualCanonCandidateRequest;
-import cn.inkforge.contracts.api.SaveShotVisualReferencesRequest;
-import cn.inkforge.contracts.api.ShotVisualReferenceSelectionRequest;
-import cn.inkforge.contracts.api.ShotVisualReferenceSetResponse;
 import cn.inkforge.contracts.api.VisualCanonLibraryResponse;
 import cn.inkforge.contracts.api.VisualCanonResponse;
 import cn.inkforge.core.platform.http.ApiException;
@@ -82,34 +79,6 @@ public final class VideoVisualCanonService {
                 canonId,
                 new VisualCanonApproval(
                         request.getExpectedRevision(), request.getCandidateAssetId()));
-    }
-
-    public ShotVisualReferenceSetResponse saveShotReferences(
-            String userId,
-            String adaptationId,
-            String shotId,
-            SaveShotVisualReferencesRequest request) {
-        requireEnabled();
-        List<ShotVisualReferenceSelectionRequest> values =
-                request.getReferences() == null ? List.of() : request.getReferences();
-        List<ShotVisualReferenceSelection> references = values.stream()
-                .map(value -> new ShotVisualReferenceSelection(
-                        value.getCanonVersionId(), value.getStrength()))
-                .toList();
-        Set<String> unique = references.stream()
-                .map(ShotVisualReferenceSelection::canonVersionId)
-                .collect(java.util.stream.Collectors.toSet());
-        if (unique.size() != references.size()) {
-            throw new ApiException(
-                    422,
-                    "VALIDATION_ERROR",
-                    "同一镜头不能重复绑定同一视觉设定版本");
-        }
-        return repository.saveShotReferences(
-                userId,
-                adaptationId,
-                shotId,
-                new ShotVisualReferencesCommand(request.getExpectedRevision(), references));
     }
 
     private static List<String> normalizedFeatures(List<String> values, String label) {

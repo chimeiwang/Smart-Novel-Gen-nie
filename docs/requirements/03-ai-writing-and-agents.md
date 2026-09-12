@@ -1,5 +1,12 @@
 # AI 写作与 Agent 需求
 
+## Java Core 与独立 Python Agent
+
+Core 与 CLI 已收敛到 Java 工程；Agent 保留 Python、LangGraph 和内部 FastAPI HTTP 入口。
+Agent 不导入 Java 实现、不访问 PostgreSQL；只通过版本化服务契约、Ed25519 身份和 Core 工具网关读写业务事实。
+Core HTTP 契约由 `contracts/core/openapi.json` 维护，Agent 仍使用自身 Pydantic 协议与共享鉴权库。
+删除历史 Python Core 不改变候选、审核、用户确认、正式应用和耐久恢复边界。
+
 ## 长篇 Episode 视频 Agent 与生成任务
 
 活动视频主链以独立 `VideoEpisode` 为身份，章节只作为一个或多个不可变来源快照。旧

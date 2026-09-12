@@ -86,36 +86,6 @@ SHARED_MEDIA_TABLES = {
     "VideoEpisodeExport",
 }
 
-RETIRED_PYTHON_HANDLERS = {
-    "create_adaptation",
-    "start_shot_plan",
-    "confirm_shot_plan",
-    "discard_candidate",
-    "save_episode_plan",
-    "start_prompt_run",
-    "save_shot_prompt",
-    "save_shot_visual_references",
-    "create_render_task",
-    "retry_render_task",
-    "confirm_shot_take",
-    "save_shot_keyframe_version",
-    "extract_take_frame",
-    "save_episode_edit_version",
-    "save_episode_mix_version",
-    "create_episode_export_task",
-    "retry_episode_export_task",
-    "list_adaptations",
-    "get_adaptation",
-    "get_render_workspace",
-    "get_render_task",
-    "get_take_content",
-    "get_post_production_workspace",
-    "get_episode_edit_version",
-    "get_episode_mix_version",
-    "get_episode_export_task",
-    "get_episode_export_content",
-}
-
 RETIRED_JAVA_METHODS = {
     "confirmShotPlanApiV1VideoChapterAdaptationsAdaptationIdShotPlanConfirmPost",
     "confirmShotTakeApiV1VideoChapterAdaptationsAdaptationIdShotsShotIdTakesTakeIdConfirmPost",
@@ -160,6 +130,11 @@ RETIRED_JAVA_SOURCES = (
     "video/application/VideoAdaptationDecisionStore.java",
     "video/application/VideoAdaptationRepository.java",
     "video/application/VideoAdaptationService.java",
+    "video/application/VideoAdaptationAgentStatus.java",
+    "video/application/VideoAdaptationSnapshot.java",
+    "video/application/VideoAdaptationSubmissionException.java",
+    "video/application/VideoAdaptationTaskAcceptance.java",
+    "video/application/VideoAdaptationTaskDispatch.java",
     "video/application/VideoAdaptationTaskStore.java",
     "video/application/VideoAdaptationTaskSubmitter.java",
     "video/application/VideoAdaptationTaskDispatcher.java",
@@ -181,6 +156,7 @@ RETIRED_JAVA_SOURCES = (
     "video/infrastructure/VideoAdaptationTaskPayload.java",
     "video/infrastructure/ProviderVideoAdaptationTaskSubmitter.java",
     "video/infrastructure/DurableVideoAdaptationRun.java",
+    "video/infrastructure/JooqVideoModelRunStarter.java",
     "agentgateway/VideoAdaptationAgentSubmitter.java",
     "video/application/VideoRenderClaim.java",
     "video/application/VideoRenderReconciler.java",
@@ -198,6 +174,8 @@ RETIRED_JAVA_SOURCES = (
     "video/infrastructure/VideoPostProductionCommands.java",
     "video/infrastructure/VideoPostProductionContext.java",
     "video/infrastructure/VideoPostProductionDatabaseAccess.java",
+    "video/application/ShotVisualReferenceSelection.java",
+    "video/application/ShotVisualReferencesCommand.java",
 )
 
 # 这些共享实现仍由 Episode 视频链使用，故明确不纳入物理退役清单。
@@ -222,14 +200,6 @@ def _source(path: str) -> str:
 
 
 def test_all_legacy_public_writes_and_background_starts_are_closed() -> None:
-    legacy_route_paths = (
-        "apps/core-api/src/inkforge_core/video/adaptation/router.py",
-        "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
-        "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
-    )
-    python_routes = "\n".join(
-        _source(path) for path in legacy_route_paths if (ROOT / path).is_file()
-    )
     java_controller = _source(
         "apps/core-api-java/src/main/java/cn/inkforge/core/video/api/VideoController.java"
     )
@@ -237,28 +207,10 @@ def test_all_legacy_public_writes_and_background_starts_are_closed() -> None:
         "apps/core-api-java/src/main/java/cn/inkforge/core/video/infrastructure/"
         "VideoConfiguration.java"
     )
-    python_app = _source("apps/core-api/src/inkforge_core/app.py")
 
-    for handler in RETIRED_PYTHON_HANDLERS:
-        assert f"async def {handler}(" not in python_routes
     for method in RETIRED_JAVA_METHODS:
         assert method not in java_controller
 
-    for constructor in (
-        "VideoTaskDispatcher(",
-        "VideoAdaptationTaskDispatcher(",
-        "VideoShotRenderReconciler(",
-        "VideoPostProductionReconciler(",
-        "VideoAdaptationRepository(",
-        "VideoAdaptationService(",
-        "VideoShotRenderRepository(",
-        "VideoShotRenderService(",
-        "VideoPostProductionRepository(",
-        "VideoPostProductionService(",
-        "video_internal_router",
-        "video_adaptation_internal_router",
-    ):
-        assert constructor not in python_app
     for bean in (
         "videoAdaptationTaskDispatcher(",
         "legacyVideoPlanDispatcher(",
@@ -285,31 +237,17 @@ def test_all_legacy_public_writes_and_background_starts_are_closed() -> None:
     ):
         assert not (operations / filename).exists()
 
-    # 用户确认没有历史数据后，旧公共读写与旧内部回调一并退出；新 Episode worker 独立运行。
-    assert "async def list_adaptations(" not in python_routes
-    assert "async def get_render_task(" not in python_routes
-    assert "async def get_episode_export_task(" not in python_routes
+    # Java Core 已接管唯一公共运行时，旧入口必须彻底缺席，新 Episode worker 继续装配。
     assert "completePlanInternalV1VideoAdaptations" not in java_controller
     assert "videoEpisodePostProductionReconciler(" in java_configuration
-    assert "async def list_visual_canons(" in python_routes
-    assert "async def get_provider_asset(" in python_routes
     assert "VideoEpisodeRenderService" in java_controller
-    assert not (
-        ROOT
-        / "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py"
-    ).exists()
 
 
 def test_retired_cli_and_web_entry_points_remain_absent() -> None:
-    cli = _source(
-        "tools/inkforge-cli-java/src/main/java/cn/inkforge/cli/commands/"
-        "VideoAdaptationCommands.java"
-    )
     workspace = _source("apps/web/src/features/video/video-workspace.tsx")
     registry = json.loads(_source("contracts/cli/command-registry.json"))
     command_names = {item["name"] for item in registry["commands"]}
 
-    assert not any(f'handlers.put("{name}"' in cli for name in RETIRED_CLI_COMMANDS)
     assert RETIRED_CLI_COMMANDS.isdisjoint(command_names)
     assert 'from "./production/episode-workspace"' in workspace
     assert "ChapterAdaptationWorkspace" not in workspace

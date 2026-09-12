@@ -4,6 +4,9 @@
 
 状态：已接受
 
+当前适用性：本文保留首次切换历史决策。Python Core 回滚目标已由
+[ADR-004](004-java-only-core-contract.md) 取代；当前只允许兼容 V2 的 Java 组合回滚，仍禁止双 Core 和自动 DDL。
+
 ## 背景
 
 用户明确不接受双 Core。Core 独占 PostgreSQL 正式写入，并包含计费、ReviewArtifact、SSE、Outbox 和

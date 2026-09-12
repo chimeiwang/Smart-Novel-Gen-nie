@@ -16,8 +16,6 @@ COPY contracts contracts
 COPY packages/service-auth-java packages/service-auth-java
 COPY packages/service-contracts-java packages/service-contracts-java
 COPY apps/core-api-java apps/core-api-java
-COPY apps/core-api/src/inkforge_core/db/schema-contract.json \
-     apps/core-api/src/inkforge_core/db/schema-contract.json
 RUN --mount=type=cache,target=/root/.m2 \
     chmod 0555 mvnw \
     && ./mvnw --batch-mode --no-transfer-progress \
@@ -40,7 +38,9 @@ COPY --from=builder --chown=10001:10001 \
      /app/inkforge-core-api.jar
 COPY --chown=10001:10001 infra/docker/inkforge-schema-guard \
      /usr/local/bin/inkforge-schema-guard
-RUN chmod 0555 /usr/local/bin/inkforge-schema-guard
+COPY --chown=10001:10001 infra/docker/inkforge-schema-export \
+     /usr/local/bin/inkforge-schema-export
+RUN chmod 0555 /usr/local/bin/inkforge-schema-guard /usr/local/bin/inkforge-schema-export
 
 LABEL cn.inkforge.core.runtime="java"
 # 与 CoreSettings 的 all 配置回归一同维护，部署用它拒绝不支持全量配置的回滚镜像。

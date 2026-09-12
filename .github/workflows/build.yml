@@ -119,7 +119,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Mypy
-        run: uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src packages/service-auth/src
+        run: uv run mypy apps/agent-service/src packages/service-contracts/src packages/service-auth/src
 
       - name: Typecheck
         run: npm run typecheck

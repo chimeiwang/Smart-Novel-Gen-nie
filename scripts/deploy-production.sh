@@ -8,7 +8,6 @@ DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"
 DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:-}"
 INKFORGE_IMAGE_TAG="${INKFORGE_IMAGE_TAG:?必须设置镜像标签}"
 compose_file="infra/compose.yaml"
-python_rollback_file="infra/compose.python-core-rollback.yaml"
 durable_migration_helper="scripts/durable-agent-execution-migration.sh"
 durable_image_verifier="scripts/verify-durable-agent-v2-image.sh"
 execution_manifest_path="contracts/agent-execution/manifest.json"
@@ -48,14 +47,9 @@ if [ -n "$DEPLOY_BUNDLE_PATH" ]; then
   }
 fi
 
-# Java 与历史 Python Core 使用不同的回滚覆盖层；运行时分类必须来自镜像标签，不能靠版本号猜测。
+# Core 运行时必须来自镜像标签；现有 V2 数据只允许兼容的 Java 镜像组合。
 compose() {
   docker compose --env-file .env -f "$compose_file" "$@"
-}
-
-compose_python_rollback() {
-  docker compose --env-file .env \
-    -f "$compose_file" -f "$python_rollback_file" "$@"
 }
 
 initialize_persistent_volume() {
@@ -164,13 +158,6 @@ verify_java_stack() {
   COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
 }
 
-verify_python_rollback_stack() {
-  compose_python_rollback ps &&
-  compose_python_rollback exec -T core-api python -c \
-    'import asyncio, os; from inkforge_core.config import Settings; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH, schema_profile_for_settings; settings = Settings(); result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH, profile=schema_profile_for_settings(settings))); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)' &&
-  COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE="$python_rollback_file" sh scripts/compose_smoke.sh
-}
-
 core_image_runtime_label() {
   docker image inspect \
     --format '{{ index .Config.Labels "cn.inkforge.core.runtime" }}' "$1"
@@ -179,7 +166,6 @@ core_image_runtime_label() {
 classify_core_runtime() {
   case "$1" in
     java) printf '%s\n' java ;;
-    ""|"<no value>") printf '%s\n' python ;;
     *) printf '%s\n' unknown ;;
   esac
 }
@@ -675,22 +661,14 @@ rollback() {
 
   INKFORGE_IMAGE_TAG="$previous_tag"
   export INKFORGE_IMAGE_TAG
-  if [ "$previous_core_runtime" = "python" ]; then
-    compose_python_rollback up --no-build -d --wait
-  else
-    compose up --no-build -d --wait
-  fi
+  compose up --no-build -d --wait
   rollback_status="$?"
   if [ "$rollback_status" -eq 0 ]; then
     refresh_nginx
     rollback_status="$?"
   fi
   if [ "$rollback_status" -eq 0 ]; then
-    if [ "$previous_core_runtime" = "python" ]; then
-      verify_python_rollback_stack
-    else
-      verify_java_stack
-    fi
+    verify_java_stack
     rollback_status="$?"
   fi
 

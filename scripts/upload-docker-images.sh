@@ -173,10 +173,11 @@ build_inputs_unchanged() {
         contracts/core
         contracts/agent-service
         contracts/agent-execution
-        apps/core-api/src/inkforge_core/db/schema-contract.json
+        apps/core-api-java/src/main/resources/db
         tools/inkforge-cli-java/pom.xml
         infra/docker/core-api.Dockerfile
         infra/docker/inkforge-schema-guard
+        infra/docker/inkforge-schema-export
       )
       ;;
     agent-service)

@@ -5,7 +5,7 @@
 ## 当前技术栈
 
 - Next.js 16、React 19、TypeScript：页面、SSR/SEO 和浏览器交互。
-- FastAPI、Pydantic、SQLAlchemy 异步接口：核心业务 API。
+- Java 21、Spring Boot、Spring MVC、jOOQ/JDBC：唯一核心业务 API。
 - LangGraph Python、LangChain Core：Agent 编排和模型运行时。
 - PostgreSQL、pgvector：现有主数据库，结构禁止在本重构中修改。
 - Redis：运行队列、SSE 短期重放、限流和服务令牌重放保护。
@@ -15,11 +15,15 @@
 
 ```text
 apps/web                 Next.js 前端
-apps/core-api            Python 核心接口服务
+apps/core-api-java       Java 核心接口服务
 apps/agent-service       Python 智能体服务
 packages/api-client      OpenAPI 生成的前端客户端
 packages/service-auth    服务身份共享库
 packages/service-contracts 服务间 Pydantic 契约
+packages/service-contracts-java Java 服务契约与生成 DTO
+packages/service-auth-java Java 服务身份实现
+tools/inkforge-cli-java   Java CLI 与受限 Operator
+contracts/core/openapi.json Core 唯一接口契约
 infra                    生产镜像、Nginx 和 Compose
 ```
 
@@ -35,7 +39,7 @@ npm install
 npm run dev
 ```
 
-Windows PowerShell 使用 `Copy-Item .env.local.example .env.local`。填写 `.env.local` 中的现有 PostgreSQL 地址后，`npm run dev` 会同时启动 Next.js `43119`、Core API `8000` 和 Agent Service `8001`。本地默认使用 fake 模型，不调用外部模型，也不产生计费。
+Windows PowerShell 使用 `Copy-Item .env.local.example .env.local`。需预装 Java 21；`npm run dev` 先通过 Maven Wrapper 构建 Java Core，再启动 Next.js `43119`、Core `8000` 和 Python Agent `8001`。本地默认使用 fake 模型，不调用外部模型，也不产生计费。
 
 本地启动不会创建数据库、执行迁移或修改 schema；PostgreSQL 必须已经具备项目当前结构。
 
@@ -47,6 +51,8 @@ npm run typecheck
 npm run lint
 npm run test:web
 npm run build
+npm run api:check
+./mvnw verify
 
 uv sync --frozen --all-packages --group dev
 uv run pytest

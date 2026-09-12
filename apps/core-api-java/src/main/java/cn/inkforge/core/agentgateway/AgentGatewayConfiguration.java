@@ -2,7 +2,6 @@ package cn.inkforge.core.agentgateway;
 
 import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.quality.application.QualityRunSubmitter;
-import cn.inkforge.core.video.application.VideoAdaptationTaskSubmitter;
 import cn.inkforge.core.video.application.VideoRenderGateway;
 import cn.inkforge.core.writing.application.WritingCommandSubmitter;
 import cn.inkforge.core.workflows.application.WorkflowExecutionCanceller;
@@ -128,13 +127,6 @@ class AgentGatewayConfiguration {
     WorkflowExecutionCanceller workflowExecutionCanceller(
             AgentServiceClient agentServiceClient) {
         return new WorkflowAgentExecutionCanceller(agentServiceClient);
-    }
-
-    @Bean
-    @ConditionalOnBean(AgentServiceClient.class)
-    VideoAdaptationTaskSubmitter videoAdaptationTaskSubmitter(
-            AgentServiceClient agentServiceClient) {
-        return new VideoAdaptationAgentSubmitter(agentServiceClient);
     }
 
     @Bean

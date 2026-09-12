@@ -115,7 +115,7 @@ def test_other_layers_sql_covers_real_independent_tables_and_hashes_changed_rows
     contract = json.loads(
         (
             Path(__file__).resolve().parents[2]
-            / "apps/core-api/src/inkforge_core/db/schema-contract.json"
+            / "apps/core-api-java/src/main/resources/db/pre-durable-agent-v2/schema-contract.json"
         ).read_text(encoding="utf-8")
     )
     tables = {

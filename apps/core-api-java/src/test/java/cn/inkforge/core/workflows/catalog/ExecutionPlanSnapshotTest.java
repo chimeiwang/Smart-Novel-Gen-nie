@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,7 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 class ExecutionPlanSnapshotTest {
 
     private static final String MANIFEST_FINGERPRINT =
-            "deca55c153c26ba9072f66b0a838f394c1c57f3453889708f2ff7cf4f98114f7";
+            "aa9d1838a436ea5588ae034e4097fde419ca9e8300324443fb55a1f90c1d1fec";
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
@@ -27,6 +29,7 @@ class ExecutionPlanSnapshotTest {
         ExecutionPlanSnapshot snapshot = registry.freezePlan(
                 "long_serial.rewrite_chapter_selection", false);
 
+        assertThat(checkedInManifestFingerprint()).isEqualTo(MANIFEST_FINGERPRINT);
         assertThat(registry.manifestFingerprint()).isEqualTo(MANIFEST_FINGERPRINT);
         assertThat(snapshot.executionManifestFingerprint()).isEqualTo(MANIFEST_FINGERPRINT);
         assertThat(snapshot.operationCatalogVersion()).isEqualTo(registry.catalogVersion());
@@ -261,6 +264,17 @@ class ExecutionPlanSnapshotTest {
 
     private Map<String, Object> read(String value) {
         return json.readValue(value, new TypeReference<>() {});
+    }
+
+    private String checkedInManifestFingerprint() {
+        try (InputStream input = ExecutionPlanSnapshotTest.class
+                .getResourceAsStream("/agent-execution/manifest.json")) {
+            if (input == null) throw new IllegalStateException("缺少当前 execution manifest 资源");
+            Map<String, Object> manifest = json.readValue(input, new TypeReference<>() {});
+            return ExecutionCanonicalJson.sha256(manifest);
+        } catch (IOException exception) {
+            throw new IllegalStateException("读取当前 execution manifest 失败", exception);
+        }
     }
 
     @SuppressWarnings("unchecked")

@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import base64
-import importlib
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +19,18 @@ def test_cli_command_registry_baseline_is_complete() -> None:
     commands = document["commands"]
     names = [command["name"] for command in commands]
 
-    assert document["schemaVersion"] == "inkforge-cli-command-registry/1.0"
+    assert document["schemaVersion"] == "inkforge-cli-command-registry/2.0"
+    assert document["source"] == "tools/inkforge-cli-java"
+    assert all(set(command) == {
+        "name",
+        "inputMode",
+        "outputMode",
+        "fileOutput",
+        "mutation",
+        "requiresIdentity",
+        "requiresClientRequestId",
+    } for command in commands)
+    assert all("pythonHandler" not in command for command in commands)
     assert len(commands) == 152
     assert len(names) == len(set(names))
     assert names[0] == "auth.login"
@@ -40,21 +48,6 @@ def test_cli_command_registry_baseline_is_complete() -> None:
     assert session_create["requiresIdentity"] is True
     assert session_create["requiresClientRequestId"] is False
     assert all("/internal/" not in command["name"] for command in commands)
-
-
-def test_cli_command_registry_export_has_no_drift() -> None:
-    result = subprocess.run(  # noqa: S603 -- 只执行当前解释器与仓库内固定脚本
-        [
-            sys.executable,
-            str(ROOT / "scripts" / "export_cli_migration_baseline.py"),
-            "--check",
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_cli_success_parity_fixture_is_language_neutral_and_registered() -> None:
@@ -211,11 +204,7 @@ def test_cli_v2_contract_error_fixture_closes_cross_language_gaps() -> None:
     assert not by_id["answer-instruction-unicode-blank"]["payload"][
         "userInstruction"
     ].strip()
-    assert (
-        by_id["answer-operation-unsupported"]["payload"]["operation"]
-        # 直接核对真实 CLI 允许集合，不能让旧副本把已接入操作误当负例。
-        not in importlib.import_module("inkforge_cli.commands.long.task_mutations")._OPERATIONS
-    )
+    assert by_id["answer-operation-unsupported"]["payload"]["operation"] == "unsupported_operation"
     assert set(by_id["answer-top-level-unexpected-field"]["payload"]) - {
         "clientRequestId",
         "novelId",

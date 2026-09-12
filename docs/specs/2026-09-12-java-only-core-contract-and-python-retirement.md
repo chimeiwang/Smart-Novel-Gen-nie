@@ -4,6 +4,9 @@
 
 状态：已批准，实施中
 
+实施记录：代码迁移与本地回归见 [清理审计](../audits/2026-09-12-java-only-core-retirement.md)；
+Compose 恢复演练因 Docker Hub 网络中断尚未通过，不据此宣称生产或全部环境验收完成。
+
 ## 背景
 
 Java Core 已原位接管生产，但仓库仍把 Python FastAPI Core 当作公共接口和迁移基线来源：
@@ -150,6 +153,9 @@ Agent 语言中立 schema。本次只清理源码，不执行 P4 物理数据库
 数据库结构契约改由 Java Core 自有资源维护。既有 pre／post Durable V2 profile 和只读 schema guard 继续
 生效；本次不得改变任何表、枚举、约束或指纹。
 
+旧 recovery drill 替换为已有的隔离 V2 Compose 最小恢复测试入口，复用 Java Core 与 Python Agent 的真实
+重启、回调丢失、取消和 Redis AOF 场景，不新增维护服务或生产写入口。该测试工具使用 Python 不表示保留 Python Core。
+
 ### 6. Python CLI 与 Operator 退役
 
 删除 `tools/inkforge-cli`、Python CLI workspace member、Python CLI 测试和 Python handler 元数据。
@@ -162,7 +168,7 @@ Java CLI 必须保持全部 152 个普通命令一一注册，且 handler 集合
 本机两份 Operator Skill 改为 PowerShell 直接启动固定 Java JAR：
 
 - 本地开发 Skill 只允许回环 Core；
-- 生产 Skill 继续执行受限端点、45 命令和既有操作白名单；
+- 本机 Windows 两份 Skill 继续执行受限端点、84 命令与五操作白名单；macOS 历史投影仍为 45 命令／三操作；
 - 不因 Java CLI 支持更多命令而扩大 Skill 授权；
 - Windows 凭据继续使用 Credential Manager，不允许明文回退；
 - 更新前备份活动 Skill，更新后验证 `configure`、`run`、端点拒绝和白名单拒绝。
@@ -268,7 +274,7 @@ docker compose --env-file .env.example -f infra/compose.yaml build web core-api 
 
 - Java JAR 的 SHA-256 与安装记录一致；
 - 本地与生产 PowerShell wrapper 均不调用 `python`、`uv` 或 `inkforge_cli`；
-- 生产端点限制、45 命令白名单和三种既有长篇操作保持；
+- Windows 端点限制、84 命令白名单和五种既有长篇操作保持；不改动 macOS 的独立授权投影；
 - `long.artifact.get` 的正整数 `revision` 能透传，非法值在联网前拒绝；
 - Credential Manager 读写成功且没有明文 token 文件。
 

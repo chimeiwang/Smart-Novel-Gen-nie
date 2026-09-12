@@ -21,6 +21,8 @@ import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
+import cn.inkforge.core.workflows.domain.WorkflowRunBudget;
+import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowExecutionContextReader;
@@ -292,6 +294,9 @@ class JooqDurableReviewDecisionStoreTest {
     void 整章作者返工在整轮任何剩余预算不足时提前原子拒绝() {
         for (String dimension : List.of("input", "completion", "reasoning", "visible", "cost", "wall", "wall_long")) {
             Fixture fixture = waitingArtifact("draft-budget-" + dimension, true, false, true, true);
+            ExecutionRegistry.ResolvedOperation planOperation = registry.resolve("long_serial.write_chapter", false);
+            WorkflowRunBudget runBudget = planOperation.operation().runBudget().toDomain();
+            long overflowValue = overRoundValue(planOperation, runBudget, dimension);
             var steps = database.dsl().fetch("SELECT id, ordinal FROM public.\"WorkflowStep\" WHERE \"runId\" = ? ORDER BY ordinal", fixture.runId());
             for (Record step : steps) {
                 boolean generator = step.get("ordinal", Integer.class) == 1;
@@ -300,14 +305,29 @@ class JooqDurableReviewDecisionStoreTest {
                         "reasoningTokens", generator ? 8_000 : 0, "visibleOutputTokens", generator ? 8_000 : 2_000,
                         "costMicros", generator ? 600_000 : 200_000, "providerAttempts", 1, "protocolCorrections", 0));
                 usage.put("wallTimeMillis", generator ? 300_000 : 75_000);
-                if (step.get("ordinal", Integer.class) == 2) {
+                if (generator) {
                     switch (dimension) {
-                        case "input" -> { usage.put("inputTokens", 40_000); usage.put("promptCacheMissTokens", 40_000); }
-                        case "completion", "visible" -> { usage.put("completionTokens", 2_001); usage.put("visibleOutputTokens", 2_001); }
-                        case "reasoning" -> { usage.put("completionTokens", 2_001); usage.put("reasoningTokens", 1); }
-                        case "cost" -> usage.put("costMicros", 200_001);
-                        case "wall" -> usage.put("wallTimeMillis", 75_001);
-                        case "wall_long" -> usage.put("wallTimeMillis", 3_000_000_000L);
+                        case "input" -> {
+                            usage.put("inputTokens", overflowValue);
+                            usage.put("promptCacheMissTokens", overflowValue);
+                        }
+                        case "completion" -> {
+                            usage.put("completionTokens", overflowValue);
+                            usage.put("reasoningTokens", 0L);
+                            usage.put("visibleOutputTokens", overflowValue);
+                        }
+                        case "reasoning" -> {
+                            usage.put("completionTokens", overflowValue);
+                            usage.put("reasoningTokens", overflowValue);
+                            usage.put("visibleOutputTokens", 0L);
+                        }
+                        case "visible" -> {
+                            usage.put("completionTokens", overflowValue);
+                            usage.put("reasoningTokens", 0L);
+                            usage.put("visibleOutputTokens", overflowValue);
+                        }
+                        case "cost" -> usage.put("costMicros", overflowValue);
+                        case "wall", "wall_long" -> usage.put("wallTimeMillis", overflowValue);
                         default -> throw new AssertionError(dimension);
                     }
                 } else if ("cost".equals(dimension)) {
@@ -325,6 +345,38 @@ class JooqDurableReviewDecisionStoreTest {
             assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE id = ? AND status = 'awaiting_user' AND revision = 1", fixture.artifactId())).isEqualTo(1);
             assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
         }
+    }
+
+    private static long overRoundValue(
+            ExecutionRegistry.ResolvedOperation operation,
+            WorkflowRunBudget runBudget,
+            String dimension) {
+        WorkflowRunBudgetCharge round = WorkflowRunBudgetCharge.active(operation.generatorStepBudget().budget());
+        for (var reviewer : operation.reviewers()) {
+            round = round.plus(WorkflowRunBudgetCharge.active(reviewer.stepBudget().budget()));
+        }
+        long limit = switch (dimension) {
+            case "input" -> runBudget.maxInputTokens();
+            case "completion" -> runBudget.maxCompletionTokens();
+            case "reasoning" -> runBudget.maxReasoningTokens();
+            case "visible" -> runBudget.maxVisibleOutputTokens();
+            case "cost" -> runBudget.maxCostMicros();
+            case "wall", "wall_long" -> Math.multiplyExact(runBudget.maxWallClockSeconds(), 1_000L);
+            default -> throw new AssertionError(dimension);
+        };
+        long reserved = switch (dimension) {
+            case "input" -> round.inputTokens();
+            case "completion" -> round.completionTokens();
+            case "reasoning" -> round.reasoningTokens();
+            case "visible" -> round.visibleOutputTokens();
+            case "cost" -> round.costMicros();
+            case "wall", "wall_long" -> round.wallTimeMillis();
+            default -> throw new AssertionError(dimension);
+        };
+        long overflow = Math.subtractExact(limit, reserved) + 1;
+        return "wall_long".equals(dimension)
+                ? Math.max(overflow, (long) Integer.MAX_VALUE + 1)
+                : overflow;
     }
 
     @Test

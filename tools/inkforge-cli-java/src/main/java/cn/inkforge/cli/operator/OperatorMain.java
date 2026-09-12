@@ -47,7 +47,38 @@ public final class OperatorMain {
             "long.chapter.save", "long.chapter.status", "long.chapter.progress.save", "long.agent.start",
             "long.task.resume", "long.task.cancel", "long.artifact.approve", "long.artifact.revise",
             "long.artifact.discard", "long.quality.run", "long.quality.skip", "long.quality.reset");
-    private static final Set<String> OPERATIONS = Set.of("plan_chapter", "write_chapter", "review_chapter");
+    /** Windows 已安装 Skill 的独立授权投影；默认 macOS 45 项集合保持不变。 */
+    static final Set<String> WINDOWS_ALLOWED_COMMANDS = Set.of(
+            "auth.login", "auth.whoami", "auth.logout", "short.list", "short.create",
+            "short.pull", "short.draft.save", "short.version.preview", "short.version.submit",
+            "short.version.list", "short.version.get", "short.version.diff", "short.version.adopt",
+            "short.version.restore", "short.agent.start", "short.agent.watch", "long.novel.list",
+            "long.novel.get", "long.novel.create", "long.novel.summary.save", "long.chapter.list",
+            "long.chapter.get", "long.chapter.create", "long.session.list", "long.session.get",
+            "long.planning.get", "long.lore.get", "long.resources.get", "long.outline-node.list",
+            "long.foreshadowing.list", "long.task.list", "long.task.get", "long.task.watch",
+            "long.artifact.list", "long.artifact.get", "long.quality.get", "long.chapter.save",
+            "long.chapter.status", "long.chapter.progress.save", "long.agent.start", "long.task.resume",
+            "long.task.cancel", "long.artifact.approve", "long.artifact.revise", "long.artifact.discard",
+            "long.quality.run", "long.quality.skip", "long.quality.reset", "long.outline.save",
+            "long.outline-node.create", "long.outline-node.update", "long.outline-node.delete",
+            "long.lore.story-background.save", "long.lore.world-setting.save",
+            "long.lore.writing-bible.save", "long.lore.story-progress.save", "long.plot-progress.save",
+            "long.lore.character.create", "long.lore.character.update", "long.lore.character.delete",
+            "long.lore.location.create", "long.lore.location.update", "long.lore.location.delete",
+            "long.lore.faction.create", "long.lore.faction.update", "long.lore.faction.delete",
+            "long.lore.item.create", "long.lore.item.update", "long.lore.item.delete",
+            "long.lore.glossary.create", "long.lore.glossary.update", "long.lore.glossary.delete",
+            "long.lore.relation.create", "long.lore.relation.update", "long.lore.relation.delete",
+            "long.lore.experience.create", "long.lore.experience.update", "long.lore.experience.delete",
+            "long.reference.create", "long.reference.update", "long.reference.delete",
+            "long.reference.reindex", "long.style.apply", "long.style.clear");
+    static final Set<String> OPERATIONS = Set.of("plan_chapter", "write_chapter", "review_chapter");
+    static final Set<String> WINDOWS_OPERATIONS = Set.of(
+            "plan_chapter", "write_chapter", "review_chapter", "rewrite_chapter_selection",
+            "rewrite_outline_selection");
+    private static final String DEFAULT_AUTHORIZATION_PROFILE = "mac-v1";
+    private static final String WINDOWS_AUTHORIZATION_PROFILE = "windows-v1";
 
     private OperatorMain() {}
 
@@ -60,7 +91,7 @@ public final class OperatorMain {
             var console = System.console();
             Host host = new Host(json, environment, userHome,
                     Path.of(OperatorMain.class.getProtectionDomain().getCodeSource().getLocation().toURI()),
-                    Path.of(System.getProperty("java.home"), "bin", "java"),
+                    currentJavaExecutable(),
                     () -> PlatformCredentialStores.create(System.getProperty("os.name")),
                     new JsonConfigStore(JsonConfigStore.defaultPath(environment, userHome), json),
                     (mode, origin, token) -> OperatorApiFactory.create(mode, environment, json, origin, token),
@@ -82,6 +113,16 @@ public final class OperatorMain {
             String mode = arguments.getFirst();
             OperatorInstallation.origin(mode);
             List<String> args = new ArrayList<>(arguments.subList(1, arguments.size()));
+            String authorizationProfile = DEFAULT_AUTHORIZATION_PROFILE;
+            if (!args.isEmpty() && args.getFirst().equals("--authorization-profile")) {
+                if (args.size() < 2 || args.get(1).isBlank()) {
+                    throw input("INVALID_ARGUMENTS", "--authorization-profile 必须提供有效值");
+                }
+                authorizationProfile = args.get(1);
+                args = new ArrayList<>(args.subList(2, args.size()));
+            }
+            Set<String> allowedCommands = allowedCommands(authorizationProfile);
+            Set<String> allowedOperations = allowedOperations(authorizationProfile);
             Path state = OperatorInstallation.defaultState(mode, host.userHome());
             String override = host.environment().get("INKFORGE_OPERATOR_STATE_ROOT");
             if (override != null && !override.isBlank()) state = Path.of(override);
@@ -111,7 +152,7 @@ public final class OperatorMain {
                         .getBytes(StandardCharsets.UTF_8));
                 return 0;
             }
-            if (args.isEmpty() || !ALLOWED_COMMANDS.contains(args.getFirst())) {
+            if (args.isEmpty() || !allowedCommands.contains(args.getFirst())) {
                 throw input("OPERATOR_COMMAND_NOT_ALLOWED", "命令不在当前 Skill 的精确允许集合中");
             }
             String command = args.getFirst();
@@ -164,8 +205,8 @@ public final class OperatorMain {
                         throw input("OPERATOR_INPUT_MODE_NOT_ALLOWED", "当前 Skill 不开放自然启动或澄清模式");
                     }
                     JsonNode operation = payload.get("operation");
-                    if (operation == null || !operation.isTextual() || !OPERATIONS.contains(operation.textValue())) {
-                        throw input("OPERATOR_OPERATION_NOT_ALLOWED", "当前 Skill 只允许三种已开放的长篇 operation");
+                    if (operation == null || !operation.isTextual() || !allowedOperations.contains(operation.textValue())) {
+                        throw input("OPERATOR_OPERATION_NOT_ALLOWED", "当前 Skill 不允许该长篇 operation");
                     }
                 }
                 if (command.equals("long.task.resume") && payload.has("inputMode")) {
@@ -194,6 +235,34 @@ public final class OperatorMain {
             diagnostic(stderr, "OPERATOR_RUNTIME_INVALID", "操作员配置、运行包或输入无法安全读取");
             return 3;
         }
+    }
+
+    private static Set<String> allowedCommands(String profile) {
+        return switch (profile) {
+            case DEFAULT_AUTHORIZATION_PROFILE -> ALLOWED_COMMANDS;
+            case WINDOWS_AUTHORIZATION_PROFILE -> WINDOWS_ALLOWED_COMMANDS;
+            default -> throw input("OPERATOR_PROFILE_INVALID", "未知 Operator 授权 profile");
+        };
+    }
+
+    private static Set<String> allowedOperations(String profile) {
+        return switch (profile) {
+            case DEFAULT_AUTHORIZATION_PROFILE -> OPERATIONS;
+            case WINDOWS_AUTHORIZATION_PROFILE -> WINDOWS_OPERATIONS;
+            default -> throw input("OPERATOR_PROFILE_INVALID", "未知 Operator 授权 profile");
+        };
+    }
+
+    private static Path currentJavaExecutable() {
+        Path bin = Path.of(System.getProperty("java.home"), "bin");
+        Path java = bin.resolve(isWindows() ? "java.exe" : "java");
+        if (java.toFile().isFile()) return java;
+        // 某些精简 JRE 仍只暴露无扩展名入口，交给安装校验阶段处理最终身份。
+        return bin.resolve("java");
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 
     private static ConfigStore boundConfig(ConfigStore delegate, OperatorInstallation.Config bound) {

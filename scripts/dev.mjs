@@ -139,6 +139,23 @@ if (occupiedPorts.length > 0) {
   process.exit(1);
 }
 
+// 启动前从同一份契约构建 Java Core，避免误运行上一次留下的 JAR。
+const mavenArguments = ["--batch-mode", "--no-transfer-progress", "-pl", "apps/core-api-java", "-am", "-DskipTests", "package"];
+const build = process.platform === "win32"
+  ? spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/c", "mvnw.cmd", ...mavenArguments], {
+      cwd: root, env: coreEnvironment, stdio: "inherit",
+    })
+  : spawnSync(path.join(root, "mvnw"), mavenArguments, {
+      cwd: root, env: coreEnvironment, stdio: "inherit",
+    });
+if (build.error || build.status !== 0) {
+  console.error("Java Core 构建失败，请先修复 Maven 报错。");
+  process.exit(1);
+}
+const javaExecutable = process.env.JAVA_HOME
+  ? path.join(process.env.JAVA_HOME, "bin", process.platform === "win32" ? "java.exe" : "java")
+  : "java";
+
 const services = [
   {
     name: "Next.js",
@@ -158,21 +175,12 @@ const services = [
   {
     name: "Core API",
     env: coreEnvironment,
-    command: uvicornExecutable,
+    command: javaExecutable,
     args: [
-      "inkforge_core.app:create_app",
-      "--factory",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(LOCAL_DEVELOPMENT_PORTS.coreApi),
-      "--reload",
-      "--reload-dir",
-      path.join(root, "apps", "core-api", "src"),
-      "--reload-dir",
-      path.join(root, "packages", "service-contracts", "src"),
-      "--reload-dir",
-      path.join(root, "packages", "service-auth", "src"),
+      "-jar",
+      path.join(root, "apps", "core-api-java", "target", "inkforge-core-api-0.1.0-SNAPSHOT.jar"),
+      "--server.address=127.0.0.1",
+      `--server.port=${LOCAL_DEVELOPMENT_PORTS.coreApi}`,
     ],
   },
   {

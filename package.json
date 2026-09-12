@@ -9,6 +9,8 @@
     "lint": "npm run lint --workspace @inkforge/web",
     "typecheck": "npm run typecheck --workspace @inkforge/web && npm run typecheck --workspace @inkforge/api-client",
     "start:prod": "npm run start --workspace @inkforge/web",
+    "core:contract": "node scripts/build_core_openapi.mjs",
+    "core:contract:check": "node scripts/build_core_openapi.mjs --check",
     "api:generate": "node scripts/generate_api_client.mjs",
     "api:check": "node scripts/generate_api_client.mjs --check",
     "test:web": "npm test --workspace @inkforge/web && npm test --workspace @inkforge/api-client",

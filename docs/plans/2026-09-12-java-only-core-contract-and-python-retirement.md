@@ -413,7 +413,7 @@ Expected: Java handler、正整数 query 和联网前非法值测试全部存在
 - [ ] **Step 3: 更新 Java CLI 当前说明**
 
 README 统一写当前 152 个普通命令，说明 `long.artifact.get.revision`、Windows Credential Manager、Operator
-45 命令白名单和 Python CLI 已退役；历史数量只标记为历史迁移记录。
+Windows 84 命令／五操作（macOS 45 命令／三操作）白名单和 Python CLI 已退役；历史数量只标记为历史迁移记录。
 
 - [ ] **Step 4: 重新锁定并验证**
 
@@ -447,7 +447,7 @@ git commit -m "重构：彻底移除 Python CLI"
 
 - [ ] **Step 1: 按 writing-skills 规则读取并备份两份活动 Skill**
 
-解析当前 wrapper、固定 JAR、配置目录、Credential Manager target 和 45 命令／三操作白名单。备份只包含将
+解析当前 wrapper、固定 JAR、配置目录、Credential Manager target 和 Windows 84 命令／五操作白名单。备份只包含将
 修改的入口文件和 SHA 清单，不复制凭据或 token。
 
 - [ ] **Step 2: 写 Windows wrapper 红灯测试**

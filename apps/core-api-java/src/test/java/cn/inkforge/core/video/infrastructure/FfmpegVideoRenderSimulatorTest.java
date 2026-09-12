@@ -3,11 +3,13 @@ package cn.inkforge.core.video.infrastructure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import cn.inkforge.contracts.api.VideoShotRenderManifest;
-import cn.inkforge.core.video.application.VideoRenderClaim;
+import cn.inkforge.core.video.application.VideoEpisodeRenderClaim;
+import cn.inkforge.core.video.application.VideoEpisodeRenderInput;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.ObjectMapper;
@@ -23,11 +25,15 @@ class FfmpegVideoRenderSimulatorTest {
         var storage = new VideoAssetStorage(temporary);
         Path working = temporary.resolve("simulation-work");
         var simulator = new FfmpegVideoRenderSimulator(ffmpeg, working, storage, probe, Duration.ofSeconds(30));
-        var manifest = new VideoShotRenderManifest().durationSeconds(4).generateAudio(true)
-                .executionMode(VideoShotRenderManifest.ExecutionModeEnum.SIMULATED)
-                .ratio(VideoShotRenderManifest.RatioEnum.fromValue("9:16"));
-        var result = simulator.render(new VideoRenderClaim("task", "project", "novel", "archiving",
-                "simulated-task", 1, "hash", manifest));
+        var input = new VideoEpisodeRenderInput(
+                "video-production-shot-input/1.0", "shot-1", "shot-version-1", 1,
+                "a".repeat(64), "scene-1", List.of(), "seedance", "seedance-test",
+                "reference", "simulated", false, "prompt-1", "冻结提示词", "9:16", 4,
+                "720p", true, false, "mp4", List.of(), List.of(), Map.of());
+        var claim = new VideoEpisodeRenderClaim(
+                "task", "episode", "baseline", "project", "novel", "shot-1",
+                "shot-version-1", "submitting", null, 0, "b".repeat(64), input);
+        var result = simulator.render(claim);
         assertThat(result.durationMs()).isBetween(3_950, 4_100);
         assertThat(result.stored().byteSize()).isGreaterThan(1_000);
         assertThat(probe.probeVideoDurationMs(result.stored().absolutePath())).isEqualTo(result.durationMs());

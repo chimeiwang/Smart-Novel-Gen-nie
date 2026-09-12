@@ -2,10 +2,9 @@ package cn.inkforge.cli.registry;
 
 import java.util.Objects;
 
-/** Python CLI registry 的语言中立能力投影。 */
+/** Java CLI 对外命令的稳定能力描述。 */
 public record CommandSpec(
         String name,
-        String pythonHandler,
         InputMode inputMode,
         OutputMode outputMode,
         FileOutput fileOutput,
@@ -16,9 +15,6 @@ public record CommandSpec(
     public CommandSpec {
         if (name == null || name.isBlank() || !name.equals(name.trim())) {
             throw new IllegalArgumentException("命令名不能为空或包含首尾空白");
-        }
-        if (pythonHandler == null || pythonHandler.isBlank()) {
-            throw new IllegalArgumentException("命令缺少 Python 基线处理器身份");
         }
         Objects.requireNonNull(inputMode, "命令输入模式不能为空");
         Objects.requireNonNull(outputMode, "命令输出模式不能为空");
