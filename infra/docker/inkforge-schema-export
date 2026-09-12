@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+exec java \
+  -Dloader.main=cn.inkforge.core.platform.db.SchemaExportCommand \
+  -cp /app/inkforge-core-api.jar \
+  org.springframework.boot.loader.launch.PropertiesLauncher "$@"

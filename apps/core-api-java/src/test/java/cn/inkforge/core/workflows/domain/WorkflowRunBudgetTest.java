@@ -115,6 +115,16 @@ class WorkflowRunBudgetTest {
     }
 
     @Test
+    void Run的reasoning和可见输出是独立上限() {
+        WorkflowRunBudget independent = new WorkflowRunBudget(
+                6, 600, 600, 600, 600, 600, 2_000, 900, 2, 1);
+
+        assertThat(independent.requireStepFits(new WorkflowStepBudget(
+                        1, 100, 100, 100, 100, 100, 1_000, 300, 2, 1)))
+                .isNotNull();
+    }
+
+    @Test
     void Run只限制显式协议纠正Step而不重复统计各Step的确定性闭合() {
         WorkflowRunBudgetCharge normal = WorkflowRunBudgetCharge.active(STEP_BUDGET);
         WorkflowRunBudgetCharge correction =

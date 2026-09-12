@@ -1004,10 +1004,9 @@ public final class ExecutionPlanSnapshot {
             Objects.requireNonNull(modelProfile);
             Objects.requireNonNull(outputSchema);
             Objects.requireNonNull(stepBudget);
-            if (("disabled".equals(modelProfile.reasoningMode())
-                            && stepBudget.budget().maxReasoningTokens() != 0)
-                    || ("bounded".equals(modelProfile.reasoningMode())
-                            && stepBudget.budget().maxReasoningTokens() == 0)) {
+            // reasoningMode 是能力开关；disabled 可以保留正额度作为独立计费上限。
+            if ("bounded".equals(modelProfile.reasoningMode())
+                    && stepBudget.budget().maxReasoningTokens() == 0) {
                 throw invalid("Model Profile reasoning 与 Step Budget 不一致");
             }
         }

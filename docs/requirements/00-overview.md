@@ -4,6 +4,11 @@
 
 核对日期：2026-09-10；Episode 视频生产链与 P4 退场状态同步于 2026-09-10
 
+2026-09-12 仓内架构更新：Core 与普通 CLI 只保留 Java；`contracts/core/openapi.json` 为唯一可编辑 HTTP
+契约，公共投影同时服务 Java CLI 与 TypeScript 客户端。Python 仅保留 Agent、其共享协议／鉴权和必要测试工具。
+以下按日期记载的 Python 对照、macOS 45 命令等内容是历史状态；Windows Operator 沿用既有 84 命令／五操作授权。
+本次本地清理不代表已部署，验收以对应审计为准。
+
 代码基线：当前工作树；Java 等价迁移历史基线仍为 `c9afc95`
 
 用途：产品总览、功能盘点、限制说明、Java Core 重写验收入口
@@ -33,7 +38,7 @@
 | Web 路由页面 | 9 | Next.js `page.tsx`；另有 1 个根布局 |
 | Core 公共 API | 141 个路径、182 个操作 | 当前运行时 OpenAPI；其中视频为 56 个路径、67 个操作 |
 | Core 内部操作 | 24 | 不进入公共 OpenAPI 的 `/internal/v1/**`；旧章节视频内部路由已退出 |
-| CLI 命令 | 152 | 普通 Python／Java CLI 当前注册表；其中视频 67 个命令 |
+| CLI 命令 | 152 | 普通 Java CLI 当前注册表；其中视频 67 个命令 |
 | 长篇核心 Agent | 5 | 设定、剧情、写作、校验、编辑 |
 | 长篇 CreativeOperation | 10 | 不含只为历史解析保留的 `sync_lore` |
 | 中短篇显式 Agent 操作 | 4 | 蓝图、正文、选区、全文检查 |
@@ -861,7 +866,7 @@ V2 耐久 Workflow 回调、草案复审及 Episode 剧本／分镜候选物化�
 
 - CLI 不是公共 API 全量镜像；
 - macOS Operator Skill 的 Java 实际入口已切换并完成离线验收，生产登录与 `auth.whoami` 已通过；
-  Python CLI 保留为契约对照，生产隔离 canary 与全量门禁已通过，Windows 实机仍未验收；
+  Python CLI 已退役；Windows Java 入口与凭据验证以本次清理审计为准，历史生产 canary 不代表本次代码已部署；
 - 生产是单机 2 核 2 GB 预算，不是多地域、高可用或水平扩展架构；
 - PostgreSQL schema 默认冻结，应用不能自动迁移；
 - 当前没有公开 Webhook、第三方插件市场或外部开发者 API 产品。
@@ -871,7 +876,7 @@ V2 耐久 Workflow 回调、草案复审及 Episode 剧本／分镜候选物化�
 Java 重写的第一目标是行为等价，不是顺便增加功能。完成迁移至少要证明：
 
 - 两种创作模式、当前 141 个公共路径／182 个操作和 Agent 所需 24 个 Core 内部操作保持契约语义；
-- 当前 152 个普通 CLI 命令在 Python／Java 实现及跨语言 parity 中保持；Operator 的受限白名单另行管理；
+- 当前 152 个普通 CLI 命令在 Java 注册表、handler 双向覆盖和 HTTP／输入输出 golden 测试中保持；Operator 的受限白名单另行管理；
 - 登录 Cookie、资源归属、积分预授权与扣费结果一致；
 - 章节自动保存、状态门禁、质量失效规则和完整字数统计一致；
 - CreativeOperation、ReviewArtifact、部分应用、选区来源绑定、SSE 恢复和任务对账一致；

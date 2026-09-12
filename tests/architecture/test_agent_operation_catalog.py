@@ -146,6 +146,10 @@ RETAINED_EXECUTION_PROFILE_KEYS = frozenset(
         "writer.short_medium_manuscript.v1",
         "writer.short_medium_selection.v1",
         "quality.short_medium_full_check.v1",
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
     }
 )
 RETAINED_OUTPUT_SCHEMA_KEYS = frozenset(
@@ -411,6 +415,9 @@ def test_catalog_and_system_registry_references_are_complete() -> None:
     assert set(step_budgets) == referenced_step_budgets | {
         "step_budget.system.protocol_correction.v1",
         "step_budget.long_serial.write_chapter.generator.v1",
+        "step_budget.long_serial.write_chapter.generator.v2",
+        "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
+        "step_budget.long_serial.write_chapter.reviewer_editorial.v2",
     }
     for profile in profiles.values():
         _assert_key_version(profile)
@@ -842,10 +849,8 @@ def test_step_budget_registry_matches_execution_step_budget_boundaries() -> None
             assert isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
         assert budget["maxPromptCacheMissTokens"] <= budget["maxInputTokens"]
-        assert (
-            budget["maxReasoningTokens"] + budget["maxVisibleOutputTokens"]
-            <= budget["maxCompletionTokens"]
-        )
+        assert budget["maxReasoningTokens"] <= budget["maxCompletionTokens"]
+        assert budget["maxVisibleOutputTokens"] <= budget["maxCompletionTokens"]
         assert budget["maxProviderRetries"] <= 2
         assert budget["maxProtocolCorrections"] <= 1
 
@@ -1164,10 +1169,8 @@ def test_operation_catalog_budgets_are_explicit_and_bounded() -> None:
         assert budget["maxPromptCacheMissTokens"] <= budget["maxInputTokens"]
         assert budget["maxReasoningTokens"] <= budget["maxCompletionTokens"]
         assert budget["maxVisibleOutputTokens"] <= budget["maxCompletionTokens"]
-        assert (
-            budget["maxReasoningTokens"] + budget["maxVisibleOutputTokens"]
-            <= budget["maxCompletionTokens"]
-        )
+        assert budget["maxReasoningTokens"] <= budget["maxCompletionTokens"]
+        assert budget["maxVisibleOutputTokens"] <= budget["maxCompletionTokens"]
 
 
 def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> None:
@@ -1183,15 +1186,15 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
         generator_budget_key = operation["generatorStepBudgetProfile"]
         generator_budget = step_budgets[generator_budget_key]
         assert generator_budget["supported"] is True
-        if profiles[operation["generatorProfile"]]["reasoningMode"] == "disabled":
-            assert generator_budget["budget"]["maxReasoningTokens"] == 0
+        if profiles[operation["generatorProfile"]]["reasoningMode"] == "bounded":
+            assert generator_budget["budget"]["maxReasoningTokens"] > 0
 
         reviewer_budgets = []
         for reviewer_profile_key in review_policy["reviewerProfiles"]:
             reviewer_budget = step_budgets[reviewer_budget_profiles[reviewer_profile_key]]
             assert reviewer_budget["supported"] is True
-            if profiles[reviewer_profile_key]["reasoningMode"] == "disabled":
-                assert reviewer_budget["budget"]["maxReasoningTokens"] == 0
+            if profiles[reviewer_profile_key]["reasoningMode"] == "bounded":
+                assert reviewer_budget["budget"]["maxReasoningTokens"] > 0
             reviewer_budgets.append(reviewer_budget)
 
         review_rounds = 1 + review_policy["maxAutomaticRevisions"]
@@ -1216,6 +1219,48 @@ def test_enabled_operation_step_budgets_are_explicit_supported_and_fit_run() -> 
             budget["maxProviderRetries"] <= run_budget["maxProviderRetriesPerStep"]
             for budget in planned_budgets
         )
+
+
+def test_chapter_draft_reviewer_v2_prompt_closes_verdict_and_nullable_fields() -> None:
+    profiles = _keyed_items(PROFILE_REGISTRY_PATH, "profiles")
+    prompts = _keyed_items(PROMPT_PROFILE_REGISTRY_PATH, "prompts")
+    operations = {operation["key"]: operation for operation in _operations()}
+
+    for operation_key in ("long_serial.write_chapter", "long_serial.rewrite_scene"):
+        operation = operations[operation_key]
+        reviewer_profiles = operation["reviewPolicy"]["reviewerProfiles"]
+        assert reviewer_profiles == [
+            "reviewer.chapter_draft_consistency.v2",
+            "reviewer.chapter_draft_editorial.v2",
+        ]
+        assert set(operation["reviewPolicy"]["reviewerStepBudgetProfiles"]) == set(
+            reviewer_profiles
+        )
+
+    for profile_key in (
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
+    ):
+        profile = profiles[profile_key]
+        assert profile["version"] == 2
+        assert profile["supported"] is True
+        assert profile["deploymentProfileKey"] == "deployment." + profile_key.replace(
+            ".v2", ".v1"
+        )
+        prompt = prompts[profile["promptProfile"]]
+        text = prompt["systemPrompt"]
+        for required in (
+            "只要 findings 中存在任何 info、warning 或 error 问题",
+            "contentVerdict 必须为 issues_found",
+            "contentVerdict 为 pass 或 cannot_assess 时，findings 必须是空数组",
+            "candidateRange（对象",
+            "每个 evidence 必须包含 evidenceItemId、contentSha256 和 range",
+            "confidence（JSON 数字",
+            "不得自行计算或编造",
+            "没有 candidatePatch 时省略该字段，不要填 null",
+        ):
+            assert required in text
+        assert "不输出资源ID、revision、hash" not in text
 
 
 def test_system_step_budgets_fit_every_applicable_run_budget() -> None:
@@ -1257,12 +1302,17 @@ def test_operation_catalog_locks_critical_budget_policies() -> None:
         budget = operations[key]["runBudgetProfile"]
         if key == "long_serial.write_chapter":
             assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 600000
+            assert budget["maxCompletionTokens"] == 600000
+            assert budget["maxReasoningTokens"] == 600000
+            assert budget["maxVisibleOutputTokens"] == 600000
         elif key == "long_serial.rewrite_scene":
             assert budget["maxPromptCacheMissTokens"] == budget["maxInputTokens"] == 180000
+            assert budget["maxReasoningTokens"] <= 16000
+            assert budget["maxVisibleOutputTokens"] <= 24000
         else:
             assert budget["maxPromptCacheMissTokens"] <= 60000
-        assert budget["maxReasoningTokens"] <= 16000
-        assert budget["maxVisibleOutputTokens"] <= 24000
+            assert budget["maxReasoningTokens"] <= 16000
+            assert budget["maxVisibleOutputTokens"] <= 24000
 
     chapter_plan_budget = operations["long_serial.plan_chapter"]["runBudgetProfile"]
     assert chapter_plan_budget["maxPromptCacheMissTokens"] == 120000
@@ -1298,6 +1348,10 @@ def test_video_migration_preserves_existing_operations_except_approved_writing_b
         operation for operation in retained if operation["key"] == "long_serial.write_chapter"
     )
     writing["generatorStepBudgetProfile"] = "step_budget.long_serial.write_chapter.generator.v1"
+    writing["reviewPolicy"]["reviewerProfiles"] = [
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+    ]
     writing["reviewPolicy"]["reviewerStepBudgetProfiles"] = {
         "reviewer.chapter_draft_consistency.v1": (
             "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
@@ -1310,7 +1364,25 @@ def test_video_migration_preserves_existing_operations_except_approved_writing_b
         profile="budget.long_serial.chapter_draft.v1",
         maxInputTokens=180000,
         maxPromptCacheMissTokens=180000,
+        maxCompletionTokens=40000,
+        maxReasoningTokens=16000,
+        maxVisibleOutputTokens=24000,
     )
+    rewrite = next(
+        operation for operation in retained if operation["key"] == "long_serial.rewrite_scene"
+    )
+    rewrite["reviewPolicy"]["reviewerProfiles"] = [
+        "reviewer.chapter_draft_consistency.v1",
+        "reviewer.chapter_draft_editorial.v1",
+    ]
+    rewrite["reviewPolicy"]["reviewerStepBudgetProfiles"] = {
+        "reviewer.chapter_draft_consistency.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_consistency.v1"
+        ),
+        "reviewer.chapter_draft_editorial.v1": (
+            "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+        ),
+    }
     assert hashlib.sha256(canonical_execution_json_bytes(retained)).hexdigest() == (
         "96afc59ca82841eeebbef5e3152c49e14902cfe1ae641501a06933a393642b12"
     )

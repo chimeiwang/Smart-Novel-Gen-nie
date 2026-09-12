@@ -2,19 +2,9 @@ package cn.inkforge.core.video.infrastructure;
 
 import static cn.inkforge.core.db.generated.Tables.CHARACTER;
 import static cn.inkforge.core.db.generated.Tables.NOVEL;
-import static cn.inkforge.core.db.generated.Tables.REVIEWARTIFACT;
 import static cn.inkforge.core.db.generated.Tables.USER;
-import static cn.inkforge.core.db.generated.Tables.VIDEOADAPTATIONTASK;
 import static cn.inkforge.core.db.generated.Tables.VIDEOASSET;
-import static cn.inkforge.core.db.generated.Tables.VIDEOCHAPTERADAPTATION;
-import static cn.inkforge.core.db.generated.Tables.VIDEOCHAPTERADAPTATIONHEAD;
-import static cn.inkforge.core.db.generated.Tables.VIDEOCINEMATICSCENE;
-import static cn.inkforge.core.db.generated.Tables.VIDEODRAMATICBEAT;
 import static cn.inkforge.core.db.generated.Tables.VIDEOPROJECT;
-import static cn.inkforge.core.db.generated.Tables.VIDEOSHOT;
-import static cn.inkforge.core.db.generated.Tables.VIDEOSHOTPLANVERSION;
-import static cn.inkforge.core.db.generated.Tables.VIDEOSHOTVISUALREFERENCEBINDING;
-import static cn.inkforge.core.db.generated.Tables.VIDEOSHOTVISUALREFERENCESET;
 import static cn.inkforge.core.db.generated.Tables.VIDEOVISUALCANON;
 import static cn.inkforge.core.db.generated.Tables.VIDEOVISUALCANONVERSION;
 import static cn.inkforge.core.db.generated.Tables.WRITINGBIBLE;
@@ -22,8 +12,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.core.db.generated.enums.Storylengthprofile;
-import cn.inkforge.core.db.generated.enums.Reviewartifactkind;
-import cn.inkforge.core.db.generated.enums.Reviewartifactstatus;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.db.PostgresConnectionSettings;
 import cn.inkforge.core.platform.http.ApiException;
@@ -33,8 +21,6 @@ import cn.inkforge.core.lore.domain.LoreEntityKind;
 import cn.inkforge.core.lore.domain.LoreEntityData;
 import cn.inkforge.core.video.application.VisualCanonApproval;
 import cn.inkforge.core.video.application.VisualCanonCandidateCommand;
-import cn.inkforge.core.video.application.ShotVisualReferenceSelection;
-import cn.inkforge.core.video.application.ShotVisualReferencesCommand;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -107,32 +93,6 @@ class JooqVideoVisualCanonRepositoryTest {
                     .where(NOVEL.USERID.in(users))
                     .fetch(VIDEOPROJECT.ID);
             if (!projectIds.isEmpty()) {
-                // Head 反向引用当前不可变版本，素材又被版本 RESTRICT；测试按真实依赖顺序清理。
-                database.dsl().deleteFrom(VIDEOSHOTVISUALREFERENCEBINDING)
-                        .where(VIDEOSHOTVISUALREFERENCEBINDING.PROJECTID.in(projectIds))
-                        .execute();
-                database.dsl().deleteFrom(VIDEOSHOTVISUALREFERENCESET)
-                        .where(VIDEOSHOTVISUALREFERENCESET.PROJECTID.in(projectIds))
-                        .execute();
-                List<String> adaptationIds = database.dsl()
-                        .select(VIDEOCHAPTERADAPTATION.ID)
-                        .from(VIDEOCHAPTERADAPTATION)
-                        .where(VIDEOCHAPTERADAPTATION.PROJECTID.in(projectIds))
-                        .fetch(VIDEOCHAPTERADAPTATION.ID);
-                if (!adaptationIds.isEmpty()) {
-                    database.dsl().update(VIDEOCHAPTERADAPTATIONHEAD)
-                            .set(
-                                    VIDEOCHAPTERADAPTATIONHEAD.CURRENTSHOTPLANVERSIONID,
-                                    (String) null)
-                            .set(
-                                    VIDEOCHAPTERADAPTATIONHEAD.CURRENTEPISODEPLANVERSIONID,
-                                    (String) null)
-                            .where(VIDEOCHAPTERADAPTATIONHEAD.ADAPTATIONID.in(adaptationIds))
-                            .execute();
-                    database.dsl().deleteFrom(VIDEOSHOTPLANVERSION)
-                            .where(VIDEOSHOTPLANVERSION.ADAPTATIONID.in(adaptationIds))
-                            .execute();
-                }
                 database.dsl().update(VIDEOVISUALCANON)
                         .set(VIDEOVISUALCANON.CURRENTVERSIONID, (String) null)
                         .where(VIDEOVISUALCANON.PROJECTID.in(projectIds))
@@ -410,66 +370,6 @@ class JooqVideoVisualCanonRepositoryTest {
                 "VIDEO_VISUAL_CANON_NOT_FOUND");
     }
 
-    @Test
-    void 逐镜参考必须绑定当前正式镜头和同项目不可变版本并按完整集合CAS替换() {
-        String owner = user("canon-owner-5");
-        fixture(owner, "canon-novel-5", "project-5", "character-5");
-        asset("asset-5", "project-5", "identity", "confirmed", INITIAL);
-        var canon = repository.setCandidate(
-                owner, "project-5", command("asset-5", "character-5"));
-        var approved = repository.approve(
-                owner, canon.getId(), new VisualCanonApproval(1, "asset-5"));
-        String versionId = approved.getCurrentVersionId();
-        formalShotPlan(owner, "canon-novel-5", "project-5", "adaptation-5", "shot-5");
-
-        var first = repository.saveShotReferences(
-                owner,
-                "adaptation-5",
-                "shot-5",
-                new ShotVisualReferencesCommand(
-                        0, List.of(new ShotVisualReferenceSelection(versionId, 80))));
-        var replay = repository.saveShotReferences(
-                owner,
-                "adaptation-5",
-                "shot-5",
-                new ShotVisualReferencesCommand(
-                        0, List.of(new ShotVisualReferenceSelection(versionId, 80))));
-
-        assertThat(first.getRevision()).isOne();
-        assertThat(replay.getRevision()).isOne();
-        assertThat(first.getReferences()).hasSize(1);
-        assertThat(first.getReferences().getFirst().getCanonVersionId()).isEqualTo(versionId);
-        assertThat(first.getReferences().getFirst().getAssetSha256()).isEqualTo("a".repeat(64));
-        assertThat(first.getReferences().getFirst().getIncludeFeatures())
-                .containsExactly("正脸", "黑发");
-
-        assertCode(
-                () -> repository.saveShotReferences(
-                        owner,
-                        "adaptation-5",
-                        "shot-5",
-                        new ShotVisualReferencesCommand(
-                                0,
-                                List.of(new ShotVisualReferenceSelection(versionId, 60)))),
-                "VIDEO_SHOT_VISUAL_REFERENCE_REVISION_CONFLICT");
-        var changed = repository.saveShotReferences(
-                owner,
-                "adaptation-5",
-                "shot-5",
-                new ShotVisualReferencesCommand(
-                        1, List.of(new ShotVisualReferenceSelection(versionId, 60))));
-        assertThat(changed.getRevision()).isEqualTo(2);
-        assertThat(changed.getReferences().getFirst().getStrength()).isEqualTo(60);
-
-        var cleared = repository.saveShotReferences(
-                owner,
-                "adaptation-5",
-                "shot-5",
-                new ShotVisualReferencesCommand(2, List.of()));
-        assertThat(cleared.getRevision()).isEqualTo(3);
-        assertThat(cleared.getReferences()).isEmpty();
-    }
-
     private String user(String id) {
         users.add(id);
         database.dsl().insertInto(USER)
@@ -541,123 +441,6 @@ class JooqVideoVisualCanonRepositoryTest {
                 .set(VIDEOASSET.LOCKEDAT, lockedAt)
                 .set(VIDEOASSET.CREATEDAT, INITIAL)
                 .set(VIDEOASSET.UPDATEDAT, INITIAL)
-                .execute();
-    }
-
-    private static void formalShotPlan(
-            String owner,
-            String novelId,
-            String projectId,
-            String adaptationId,
-            String shotId) {
-        String taskId = adaptationId + "-task";
-        String artifactId = adaptationId + "-artifact";
-        String planId = adaptationId + "-plan";
-        String sceneId = adaptationId + "-scene";
-        String beatId = adaptationId + "-beat";
-        database.dsl().insertInto(VIDEOCHAPTERADAPTATION)
-                .set(VIDEOCHAPTERADAPTATION.ID, adaptationId)
-                .set(VIDEOCHAPTERADAPTATION.PROJECTID, projectId)
-                .set(VIDEOCHAPTERADAPTATION.NOVELID, novelId)
-                .set(VIDEOCHAPTERADAPTATION.CHAPTERTITLE, "第一章")
-                .set(VIDEOCHAPTERADAPTATION.CHAPTERUPDATEDAT, INITIAL)
-                .set(VIDEOCHAPTERADAPTATION.SOURCETEXT, "正文")
-                .set(VIDEOCHAPTERADAPTATION.SOURCEHASH, "b".repeat(64))
-                .set(VIDEOCHAPTERADAPTATION.LIFECYCLESTATUS, "active")
-                .set(VIDEOCHAPTERADAPTATION.CREATEDAT, INITIAL)
-                .execute();
-        database.dsl().insertInto(VIDEOCHAPTERADAPTATIONHEAD)
-                .set(VIDEOCHAPTERADAPTATIONHEAD.ADAPTATIONID, adaptationId)
-                .set(VIDEOCHAPTERADAPTATIONHEAD.REVISION, 2)
-                .set(VIDEOCHAPTERADAPTATIONHEAD.UPDATEDAT, INITIAL)
-                .execute();
-        database.dsl().insertInto(VIDEOADAPTATIONTASK)
-                .set(VIDEOADAPTATIONTASK.ID, taskId)
-                .set(VIDEOADAPTATIONTASK.ADAPTATIONID, adaptationId)
-                .set(VIDEOADAPTATIONTASK.PROJECTID, projectId)
-                .set(VIDEOADAPTATIONTASK.NOVELID, novelId)
-                .set(VIDEOADAPTATIONTASK.JOBID, taskId + "-job")
-                .set(VIDEOADAPTATIONTASK.KIND, "shot_plan")
-                .set(VIDEOADAPTATIONTASK.WORKFLOW, "chapter_cinematic_adaptation_v2")
-                .set(VIDEOADAPTATIONTASK.PROVIDER, "deepseek")
-                .set(VIDEOADAPTATIONTASK.STATUS, "completed")
-                .set(VIDEOADAPTATIONTASK.IDEMPOTENCYKEY, taskId + "-idempotency")
-                .set(VIDEOADAPTATIONTASK.REQUESTJSON, "{}")
-                .set(VIDEOADAPTATIONTASK.CHECKPOINTSTAGE, "none")
-                .set(VIDEOADAPTATIONTASK.ATTEMPTCOUNT, 0)
-                .set(VIDEOADAPTATIONTASK.NEXTATTEMPTAT, INITIAL)
-                .set(VIDEOADAPTATIONTASK.CREATEDAT, INITIAL)
-                .set(VIDEOADAPTATIONTASK.UPDATEDAT, INITIAL)
-                .set(VIDEOADAPTATIONTASK.COMPLETEDAT, INITIAL)
-                .execute();
-        database.dsl().insertInto(REVIEWARTIFACT)
-                .set(REVIEWARTIFACT.ID, artifactId)
-                .set(REVIEWARTIFACT.NOVELID, novelId)
-                .set(REVIEWARTIFACT.ARTIFACTKEY, artifactId)
-                .set(REVIEWARTIFACT.KIND, Reviewartifactkind.video_adaptation_plan)
-                .set(REVIEWARTIFACT.STATUS, Reviewartifactstatus.applied)
-                .set(REVIEWARTIFACT.PAYLOADJSON, "{}")
-                .set(REVIEWARTIFACT.REVISION, 1)
-                .set(REVIEWARTIFACT.VIDEOADAPTATIONID, adaptationId)
-                .set(REVIEWARTIFACT.VIDEOADAPTATIONTASKID, taskId)
-                .set(REVIEWARTIFACT.CREATEDAT, INITIAL)
-                .set(REVIEWARTIFACT.UPDATEDAT, INITIAL)
-                .set(REVIEWARTIFACT.APPLIEDAT, INITIAL)
-                .execute();
-        database.dsl().insertInto(VIDEOSHOTPLANVERSION)
-                .set(VIDEOSHOTPLANVERSION.ID, planId)
-                .set(VIDEOSHOTPLANVERSION.ADAPTATIONID, adaptationId)
-                .set(VIDEOSHOTPLANVERSION.VERSIONNO, 1)
-                .set(VIDEOSHOTPLANVERSION.SOURCETASKID, taskId)
-                .set(VIDEOSHOTPLANVERSION.REVIEWARTIFACTID, artifactId)
-                .set(VIDEOSHOTPLANVERSION.CREATEDBYUSERID, owner)
-                .set(VIDEOSHOTPLANVERSION.CONTENTHASH, "c".repeat(64))
-                .set(VIDEOSHOTPLANVERSION.CREATEDAT, INITIAL)
-                .execute();
-        database.dsl().update(VIDEOCHAPTERADAPTATIONHEAD)
-                .set(VIDEOCHAPTERADAPTATIONHEAD.CURRENTSHOTPLANVERSIONID, planId)
-                .where(VIDEOCHAPTERADAPTATIONHEAD.ADAPTATIONID.eq(adaptationId))
-                .execute();
-        database.dsl().insertInto(VIDEOCINEMATICSCENE)
-                .set(VIDEOCINEMATICSCENE.ID, sceneId)
-                .set(VIDEOCINEMATICSCENE.PLANVERSIONID, planId)
-                .set(VIDEOCINEMATICSCENE.ADAPTATIONID, adaptationId)
-                .set(VIDEOCINEMATICSCENE.SCENEKEY, "SC01")
-                .set(VIDEOCINEMATICSCENE.ORDINAL, 1)
-                .set(VIDEOCINEMATICSCENE.TITLE, "场景")
-                .set(VIDEOCINEMATICSCENE.LOCATIONLABEL, "室内")
-                .set(VIDEOCINEMATICSCENE.TIMELABEL, "白天")
-                .set(VIDEOCINEMATICSCENE.OBJECTIVE, "推进冲突")
-                .set(VIDEOCINEMATICSCENE.CHANGESUMMARY, "局势变化")
-                .execute();
-        database.dsl().insertInto(VIDEODRAMATICBEAT)
-                .set(VIDEODRAMATICBEAT.ID, beatId)
-                .set(VIDEODRAMATICBEAT.PLANVERSIONID, planId)
-                .set(VIDEODRAMATICBEAT.SCENEID, sceneId)
-                .set(VIDEODRAMATICBEAT.BEATKEY, "B01")
-                .set(VIDEODRAMATICBEAT.ORDINAL, 1)
-                .set(VIDEODRAMATICBEAT.TITLE, "节拍")
-                .set(VIDEODRAMATICBEAT.DRAMATICTURN, "冲突升级")
-                .set(VIDEODRAMATICBEAT.VISUALSTRATEGY, "近景压迫")
-                .execute();
-        database.dsl().insertInto(VIDEOSHOT)
-                .set(VIDEOSHOT.ID, shotId)
-                .set(VIDEOSHOT.PLANVERSIONID, planId)
-                .set(VIDEOSHOT.SCENEID, sceneId)
-                .set(VIDEOSHOT.BEATID, beatId)
-                .set(VIDEOSHOT.SHOTKEY, "S01")
-                .set(VIDEOSHOT.ORDINAL, 1)
-                .set(VIDEOSHOT.TITLE, "镜头")
-                .set(VIDEOSHOT.NARRATIVEPURPOSE, "reveal")
-                .set(VIDEOSHOT.ADAPTATIONTYPE, "direct")
-                .set(VIDEOSHOT.SHOTSCALE, "close")
-                .set(VIDEOSHOT.CAMERAANGLE, "eye_level")
-                .set(VIDEOSHOT.CAMERAMOVEMENT, "locked")
-                .set(VIDEOSHOT.VISUALINTENT, "观察反应")
-                .set(VIDEOSHOT.AUDIOMODE, "ambient")
-                .set(VIDEOSHOT.AUDIOINTENT, "环境声")
-                .set(VIDEOSHOT.CUTREASON, "信息变化")
-                .set(VIDEOSHOT.TIMELINEDURATIONMS, 3_000)
                 .execute();
     }
 

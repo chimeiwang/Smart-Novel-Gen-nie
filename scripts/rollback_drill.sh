@@ -8,7 +8,6 @@ set -eu
 
 env_file="${ROLLBACK_ENV_FILE:-.env.test}"
 override_file="${ROLLBACK_COMPOSE_OVERRIDE_FILE:-infra/compose.test.yaml}"
-python_rollback_file="infra/compose.python-core-rollback.yaml"
 [ "$override_file" = "infra/compose.test.yaml" ] || {
   echo "回滚演练只能使用 infra/compose.test.yaml" >&2
   exit 1
@@ -39,7 +38,6 @@ core_image_runtime_label() {
 classify_core_runtime() {
   case "$1" in
     java) printf '%s\n' java ;;
-    ""|"<no value>") printf '%s\n' python ;;
     *) printf '%s\n' unknown ;;
   esac
 }
@@ -54,62 +52,25 @@ rollback_runtime="$(classify_core_runtime "$(core_image_runtime_label "inkforge-
   echo "回滚 Core 镜像 runtime 标签无法识别" >&2
   exit 1
 }
-if [ "$rollback_runtime" = "python" ]; then
-  [ -f "$python_rollback_file" ] || { echo "缺少历史 Python Core 回滚编排" >&2; exit 1; }
-fi
+for tag in "$CURRENT_IMAGE_TAG" "$ROLLBACK_IMAGE_TAG"; do
+  capability="$(docker image inspect --format '{{ index .Config.Labels "cn.inkforge.durable-route-all" }}' "inkforge-core-api:$tag")"
+  [ "$capability" = "true" ] || { echo "Core 镜像不具备 V2 全量兼容能力" >&2; exit 1; }
+done
 
 compose_java() {
   docker compose --env-file "$env_file" \
     -f infra/compose.yaml -f "$override_file" "$@"
 }
 
-compose_python() {
-  docker compose --env-file "$env_file" \
-    -f infra/compose.yaml -f "$override_file" -f "$python_rollback_file" "$@"
-}
-
-compose_for_runtime() {
-  runtime="$1"
-  shift
-  if [ "$runtime" = "python" ]; then
-    compose_python "$@"
-  else
-    compose_java "$@"
-  fi
-}
-
-# 指纹统一投影到 v1 兼容面，允许比较历史 Python guard 与 Java guard，而不掩盖真实表结构差异。
-java_schema_fingerprint() {
-  sh scripts/verify-running-core-schema.sh "$(compose_java ps -q core-api)" \
-    --compatibility-fingerprint-v1
-}
-
-python_schema_fingerprint() {
-  compose_python exec -T core-api python -c \
-    'import asyncio, inspect, os; from inkforge_core.config import Settings; import inkforge_core.db.schema_guard as guard; from inkforge_core.db import session as db_session; database_url = os.environ["DATABASE_URL"]; profile_factory = getattr(db_session, "schema_profile_for_settings", lambda _settings: "full"); profile = profile_factory(Settings()); verify_options = {"profile": profile} if "profile" in inspect.signature(guard.verify_live_schema).parameters else {}; result = asyncio.run(guard.verify_live_schema(database_url, db_session.SCHEMA_CONTRACT_PATH, **verify_options)); contract = guard.load_schema_contract(db_session.SCHEMA_CONTRACT_PATH); actual = asyncio.run(guard._inspect_live(database_url, str(contract.get("schema", "public")))); projector = getattr(guard, "project_schema_contract", None); actual = projector(actual, profile) if projector is not None else actual; actual["contractVersion"] = 1; [table.pop("checkConstraints", None) for table in actual["tables"]]; print(guard.canonical_fingerprint(actual)); raise SystemExit(0 if result.ready else 1)'
-}
-
 schema_fingerprint() {
-  if [ "$1" = "python" ]; then
-    python_schema_fingerprint
-  else
-    java_schema_fingerprint
-  fi
+  sh scripts/verify-running-core-schema.sh "$(compose_java ps -q core-api)"
 }
 
 run_smoke() {
-  runtime="$1"
-  if [ "$runtime" = "python" ]; then
-    COMPOSE_ENV_FILE="$env_file" \
-      COMPOSE_OVERRIDE_FILE="$override_file" \
-      COMPOSE_ADDITIONAL_OVERRIDE_FILE="$python_rollback_file" \
-      sh scripts/compose_smoke.sh
-  else
-    COMPOSE_ENV_FILE="$env_file" \
-      COMPOSE_OVERRIDE_FILE="$override_file" \
-      COMPOSE_ADDITIONAL_OVERRIDE_FILE= \
-      sh scripts/compose_smoke.sh
-  fi
+  COMPOSE_ENV_FILE="$env_file" \
+    COMPOSE_OVERRIDE_FILE="$override_file" \
+    COMPOSE_ADDITIONAL_OVERRIDE_FILE= \
+    sh scripts/compose_smoke.sh
 }
 
 restore_current() {
@@ -136,7 +97,7 @@ before_fingerprint="$(schema_fingerprint java)"
 
 # 顺序验证“旧栈可启动 → 冒烟/E2E 可用 → schema 未漂移”；EXIT trap 随后恢复当前 Java 栈。
 export INKFORGE_IMAGE_TAG="$ROLLBACK_IMAGE_TAG"
-compose_for_runtime "$rollback_runtime" up -d --no-build --wait
+compose_java up -d --no-build --wait
 run_smoke "$rollback_runtime"
 E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${INKFORGE_PORT:-80}}" npm run test:e2e
 after_fingerprint="$(schema_fingerprint "$rollback_runtime")"

@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from inkforge_core.db.schema_guard import project_schema_contract
 
 from tests.architecture.durable_agent_execution_fixtures import (
     BASE_SCHEMA,
@@ -54,8 +53,122 @@ POSIX_SHELL = shutil.which("sh") or str(
 
 
 def _write_executable(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
     path.chmod(0o755)
+
+
+def _write_python_wrapper(path: Path) -> None:
+    """在 Git Bash 中把 POSIX 绝对路径转换回 Windows Python 可读路径。"""
+    python_path = str(Path(sys.executable).resolve())
+    if os.name != "nt":
+        _write_executable(path, f'#!/bin/sh\nexec "{python_path}" "$@"\n')
+        return
+    _write_executable(
+        path,
+        "#!/bin/bash\n"
+        "args=()\n"
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        '    /*) arg="$(cygpath -w -- "$arg")" ;;\n'
+        "  esac\n"
+        '  args+=("$arg")\n'
+        "done\n"
+        'export PYTHONIOENCODING="utf-8:surrogateescape"\n'
+        f'exec "{python_path}" "${{args[@]}}"\n',
+    )
+
+
+def _write_sha256sum_wrapper(path: Path) -> None:
+    """提供 GNU 校验和的稳定文本格式，避免 Git for Windows 输出 binary 的星号标记。"""
+    if os.name != "nt":
+        command = shutil.which("sha256sum")
+        if command is None:
+            pytest.skip("运维脚本测试需要 GNU sha256sum")
+        _write_executable(path, f'#!/bin/sh\nexec "{command}" "$@"\n')
+        return
+    python_path = str(Path(sys.executable).resolve())
+    _write_executable(
+        path,
+        "#!/bin/bash\n"
+        "args=()\n"
+        'for arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        '    /*) arg="$(cygpath -w -- "$arg")" ;;\n'
+        "  esac\n"
+        '  args+=("$arg")\n'
+        "done\n"
+        f'exec "{python_path}" -c \'\n'
+        "import hashlib, os, sys\n"
+        "def native(value):\n"
+        "    if (\n"
+        "        os.name == \"nt\"\n"
+        "        and len(value) >= 3\n"
+        "        and value[0] == \"/\"\n"
+        "        and value[2] == \"/\"\n"
+        "    ):\n"
+        "        return value[1].upper() + \":\" + value[2:]\n"
+        "    return value\n"
+        "def digest(value):\n"
+        "    with open(native(value), \"rb\") as stream:\n"
+        "        result = hashlib.sha256()\n"
+        "        for chunk in iter(lambda: stream.read(1024 * 1024), b\"\"):\n"
+        "            result.update(chunk)\n"
+        "    return result.hexdigest()\n"
+        "args = sys.argv[1:]\n"
+        "if \"--check\" in args:\n"
+        "    source = (\n"
+        "        sys.stdin\n"
+        "        if args[-1] == \"-\"\n"
+        "        else open(native(args[-1]), encoding=\"utf-8\")\n"
+        "    )\n"
+        "    failed = False\n"
+        "    for line in source:\n"
+        "        value, name = line.rstrip(\"\\n\").split(None, 1)\n"
+        "        name = name[1:] if name.startswith(\"*\") else name\n"
+        "        failed |= digest(name) != value\n"
+        "    if source is not sys.stdin: source.close()\n"
+        "    raise SystemExit(1 if failed else 0)\n"
+        "for value in args:\n"
+        "    if not value.startswith(\"-\"):\n"
+        "        print(digest(value) + \"  \" + value)\n"
+        "\' \"${args[@]}\"\n",
+    )
+
+
+def _write_sha256sum_bash_env(
+    path: Path, command: Path, python_command: Path | None = None
+) -> None:
+    """让嵌套 Git Bash 使用夹具提供的校验和和 Python 命令。"""
+    python_function = ""
+    if python_command is not None:
+        python_function = f'python3() {{ "{_posix_path(python_command)}" "$@"; }}\n'
+    _write_executable(
+        path,
+        f'sha256sum() {{ "{_posix_path(command)}" "$@"; }}\n'
+        + python_function,
+    )
+
+
+def _native_path(value: str) -> Path:
+    """把 Git Bash 返回的 /c/... 路径恢复为 Windows 原生路径。"""
+    if os.name == "nt" and len(value) >= 3 and value[0] == "/" and value[2] == "/":
+        return Path(value[1].upper() + ":" + value[2:])
+    return Path(value)
+
+
+def _shell_with_sha256sum(script: Path, *arguments: str) -> list[str]:
+    """显式在 Bash 进程内导出校验和函数，再执行目标脚本。"""
+    if os.name != "nt":
+        # Linux 的 /bin/sh 可以是 dash，不支持 source 或 export -f。
+        return [POSIX_SHELL, str(script), *arguments]
+    return [
+        POSIX_SHELL,
+        "-c",
+        'source "$BASH_ENV"; export -f sha256sum python3; exec "$@"',
+        "inkforge-test-shell",
+        str(script),
+        *arguments,
+    ]
 
 
 def _posix_path(path: Path) -> str:
@@ -73,7 +186,7 @@ def _write_schema_probe_stub(app_dir: Path) -> None:
         '[ "$1" = "$(printf \'%064d\' 1)" ] || exit 2\n'
         '[ "${FAKE_CONTRACT_GUARD_STATUS:-0}" = 0 ] '
         '|| exit "$FAKE_CONTRACT_GUARD_STATUS"\n'
-        'printf \'%s\\n\' "${FAKE_SCHEMA_GUARD_FINGERPRINT:-}"\n',
+        "printf '%s\\n' \"${FAKE_SCHEMA_GUARD_FINGERPRINT:-}\"\n",
     )
 
 
@@ -125,16 +238,10 @@ def _drain_source_files(
     redis_ms = str(round((observed.timestamp() + skew_seconds) * 1000))
     metric_names = _DRAIN_POSTGRES_METRICS
     if pre_contract:
-        metric_names = {
-            name for name in _DRAIN_POSTGRES_METRICS if not name.startswith("v2")
-        }
-    postgres_metrics: dict[str, list[dict[str, str]]] = {
-        name: [] for name in metric_names
-    }
+        metric_names = {name for name in _DRAIN_POSTGRES_METRICS if not name.startswith("v2")}
+    postgres_metrics: dict[str, list[dict[str, str]]] = {name: [] for name in metric_names}
     if postgres_metric is not None:
-        postgres_metrics[postgres_metric] = [
-            {"id": "oldest-postgres-id", "at": observed_text}
-        ]
+        postgres_metrics[postgres_metric] = [{"id": "oldest-postgres-id", "at": observed_text}]
     postgres = {
         "sourceVersion": "2",
         "database": database,
@@ -158,9 +265,7 @@ def _drain_source_files(
         "running": [],
     }
     if ordinary_category is not None:
-        ordinary[ordinary_category] = [
-            {"id": "job-oldest", "createdAtMs": observed_ms}
-        ]
+        ordinary[ordinary_category] = [{"id": "job-oldest", "createdAtMs": observed_ms}]
     execution: dict[str, object] = {
         "sourceVersion": "2",
         "indexVersion": index_version,
@@ -173,9 +278,7 @@ def _drain_source_files(
         "quarantined": quarantined,
     }
     if execution_category is not None:
-        execution[execution_category] = [
-            {"id": "step-oldest", "acceptedAtMs": observed_ms}
-        ]
+        execution[execution_category] = [{"id": "step-oldest", "acceptedAtMs": observed_ms}]
     files: dict[str, str] = {}
     for name, value in (
         ("FAKE_DRAIN_POSTGRES_FILE", postgres),
@@ -192,8 +295,7 @@ def _drain_source_files(
         postgres_after = {**postgres, "identity": postgres_after_identity}
         path = root / "fake_drain_postgres_after_file.json"
         path.write_text(
-            json.dumps(postgres_after, ensure_ascii=False, separators=(",", ":"))
-            + "\n",
+            json.dumps(postgres_after, ensure_ascii=False, separators=(",", ":")) + "\n",
             encoding="utf-8",
         )
         files["FAKE_DRAIN_POSTGRES_AFTER_FILE"] = _posix_path(path)
@@ -372,10 +474,16 @@ class MigrationFixture:
             **_pre_ddl_redis_files(migrated_sources_dir),
         }
         self._write_commands()
+        self.bash_env = tmp_path / "bash-env"
+        _write_sha256sum_bash_env(
+            self.bash_env,
+            self.bin_dir / "sha256sum",
+            self.bin_dir / "python3",
+        )
 
     def _write_commands(self) -> None:
-        python_path = _posix_path(Path(sys.executable))
-        _write_executable(self.bin_dir / "python3", f'#!/bin/sh\nexec "{python_path}" "$@"\n')
+        _write_python_wrapper(self.bin_dir / "python3")
+        _write_sha256sum_wrapper(self.bin_dir / "sha256sum")
         _write_executable(
             self.bin_dir / "timeout",
             "#!/bin/sh\n"
@@ -444,7 +552,7 @@ esac
         _write_executable(
             self.bin_dir / "pg_dump",
             "#!/bin/sh\n"
-            "printf 'pg_dump %s\\n' \"$*\" >> \"$MIGRATION_LOG\"\n"
+            'printf \'pg_dump %s\\n\' "$*" >> "$MIGRATION_LOG"\n'
             "output=''\n"
             "previous=''\n"
             'for argument in "$@"; do\n'
@@ -453,13 +561,13 @@ esac
             "  previous=$argument\n"
             "done\n"
             '[ -n "$output" ] || exit 43\n'
-            "printf '%s' \"${FAKE_SCHEMA_DUMP_CONTENT:-database-dump-fixture}\" > \"$output\"\n",
+            'printf \'%s\' "${FAKE_SCHEMA_DUMP_CONTENT:-database-dump-fixture}" > "$output"\n',
         )
         _write_executable(self.bin_dir / "pg_restore", "#!/bin/sh\nexit 0\n")
         _write_executable(
             self.bin_dir / "flock",
             "#!/bin/sh\n"
-            "printf 'flock %s\\n' \"$*\" >> \"$MIGRATION_LOG\"\n"
+            'printf \'flock %s\\n\' "$*" >> "$MIGRATION_LOG"\n'
             'exit "${FAKE_FLOCK_STATUS:-0}"\n',
         )
         _write_executable(
@@ -544,14 +652,13 @@ esac
     ) -> subprocess.CompletedProcess[str]:
         schema_state = self.state_path.read_text(encoding="utf-8").strip()
         default_sources = (
-            self.migrated_sources
-            if schema_state == "migrated"
-            else self.pre_contract_sources
+            self.migrated_sources if schema_state == "migrated" else self.pre_contract_sources
         )
         ddl_closed = action in {"backup", "forward", "rollback"}
         env = {
             **os.environ,
             "PATH": f"{self.bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "BASH_ENV": _posix_path(self.bash_env),
             "APP_DIR": _posix_path(self.app_dir),
             "DURABLE_AGENT_MIGRATION_ENV_FILE": _posix_path(self.app_dir / ".env"),
             "DURABLE_AGENT_MIGRATION_BACKUP_ROOT": _posix_path(self.backup_root),
@@ -561,20 +668,16 @@ esac
             "MIGRATION_STATE": _posix_path(self.state_path),
             "V2_STATE": _posix_path(self.v2_path),
             "FORWARD_COUNT": _posix_path(self.forward_count),
-            "DRAIN_POSTGRES_READ_COUNT": _posix_path(
-                self.drain_postgres_read_count
-            ),
+            "DRAIN_POSTGRES_READ_COUNT": _posix_path(self.drain_postgres_read_count),
             "TARGET_DATABASE": self.database,
             **default_sources,
             "FAKE_FLOCK_STATUS": "0",
-            "FAKE_RUNNING_CORE_SCHEMA_READY": (
-                "false" if ddl_closed else "true"
-            ),
+            "FAKE_RUNNING_CORE_SCHEMA_READY": ("false" if ddl_closed else "true"),
             "FAKE_RUNNING_CORE_ROUTE_MODE": "off",
             "FAKE_RUNNING_CORE_V1_FRESH_STARTS": "false",
-            "FAKE_SCHEMA_GUARD_FINGERPRINT": json.loads(
-                POST_CONTRACT.read_text(encoding="utf-8")
-            )["fingerprint"],
+            "FAKE_SCHEMA_GUARD_FINGERPRINT": json.loads(POST_CONTRACT.read_text(encoding="utf-8"))[
+                "fingerprint"
+            ],
         }
         if backup_dir is not None:
             env["DURABLE_AGENT_MIGRATION_BACKUP_DIR"] = _posix_path(backup_dir)
@@ -585,7 +688,7 @@ esac
         if extra_env:
             env.update(extra_env)
         return subprocess.run(  # noqa: S603 - 仅执行仓库固定脚本与测试夹具
-            [POSIX_SHELL, str(HELPER), action, self.database],
+            _shell_with_sha256sum(HELPER, action, self.database),
             cwd=ROOT,
             env=env,
             capture_output=True,
@@ -599,7 +702,7 @@ esac
         result = self.run("backup")
         assert result.returncode == 0, result.stderr
         assert result.stdout.startswith("backup-ok:")
-        return Path(result.stdout.strip().split(":", 1)[1])
+        return _native_path(result.stdout.strip().split(":", 1)[1])
 
     def confirm(self, token: str) -> Path:
         path = self.tmp_path / f"confirm-{hashlib.sha256(token.encode()).hexdigest()[:8]}"
@@ -651,9 +754,7 @@ def test_named_helper_pins_sql_contracts_and_never_sources_env() -> None:
     assert "生产 GUC 只进入 0600 临时 SQL" in source
     gate_source = ROLLOUT_GATE.read_text(encoding="utf-8")
     assert 'sh "$migration_helper" verify-drain' in gate_source
-    route_off_case = gate_source.split("  route-off-drain)", 1)[1].split(
-        "  ddl-rollback)", 1
-    )[0]
+    route_off_case = gate_source.split("  route-off-drain)", 1)[1].split("  ddl-rollback)", 1)[0]
     assert "verify-drain" not in route_off_case
     assert "require_runtime_route_off" in gate_source
 
@@ -753,9 +854,7 @@ def test_joint_drain_status_and_verify_are_versioned_and_awaiting_user_is_nonzer
     awaiting_report = json.loads(awaiting_verify.stdout)
     assert awaiting_report["coreRuntime"]["routeMode"] == "off"
     assert awaiting_report["v1DrainZero"] is False
-    assert awaiting_report["metrics"]["v1ArtifactsAwaitingUser"] | {
-        "setSha256": "ignored"
-    } == {
+    assert awaiting_report["metrics"]["v1ArtifactsAwaitingUser"] | {"setSha256": "ignored"} == {
         "count": 1,
         "oldestId": "oldest-postgres-id",
         "oldestAt": "2026-09-01T03:00:00.000Z",
@@ -844,14 +943,10 @@ def test_named_drain_index_initialization_only_accepts_empty_authoritative_state
         "FAKE_V2_DRAIN_INDEX_VERSION": "__missing__",
     }
 
-    initialized = fixture.run(
-        "initialize-drain-indexes", extra_env=missing_markers
-    )
+    initialized = fixture.run("initialize-drain-indexes", extra_env=missing_markers)
 
     assert initialized.returncode == 0, initialized.stderr
-    assert initialized.stdout.strip() == (
-        "drain-indexes-ready:v1=initialized:v2=initialized"
-    )
+    assert initialized.stdout.strip() == ("drain-indexes-ready:v1=initialized:v2=initialized")
 
     active_v1 = MigrationFixture(tmp_path / "active-v1")
     active_v1.state_path.write_text("migrated\n", encoding="utf-8")
@@ -869,9 +964,7 @@ def test_named_drain_index_initialization_only_accepts_empty_authoritative_state
     existing_v2 = MigrationFixture(tmp_path / "existing-v2")
     existing_v2.state_path.write_text("migrated\n", encoding="utf-8")
     existing_v2.v2_path.write_text("with-v2\n", encoding="utf-8")
-    quarantined = existing_v2.run(
-        "initialize-drain-indexes", extra_env=missing_markers
-    )
+    quarantined = existing_v2.run("initialize-drain-indexes", extra_env=missing_markers)
     assert quarantined.returncode != 0
     assert "已有 V2 数据" in quarantined.stderr
 
@@ -991,9 +1084,7 @@ def test_migration_flock_blocks_overlap_before_database_or_docker(
 
     assert result.returncode != 0
     assert "已有其他生产部署或迁移在运行" in result.stderr
-    assert fixture.log_path.read_text(encoding="utf-8").splitlines() == [
-        "flock -n 9"
-    ]
+    assert fixture.log_path.read_text(encoding="utf-8").splitlines() == ["flock -n 9"]
 
 
 @pytest.mark.parametrize(
@@ -1051,7 +1142,7 @@ def test_joint_drain_stable_window_rejects_every_identity_or_watermark_change(
     source_dir = tmp_path / mutation
     source_dir.mkdir()
     sources = _drain_source_files(source_dir)
-    postgres_before = Path(sources["FAKE_DRAIN_POSTGRES_FILE"])
+    postgres_before = _native_path(sources["FAKE_DRAIN_POSTGRES_FILE"])
     postgres_after = source_dir / "postgres-after.json"
     postgres_after.write_text(postgres_before.read_text(encoding="utf-8"), encoding="utf-8")
     runtime_before = _drain_runtime_file(source_dir / "runtime-before.json")
@@ -1077,7 +1168,7 @@ def test_joint_drain_stable_window_rejects_every_identity_or_watermark_change(
         _drain_runtime_file(runtime_before, v1_fresh_starts=True)
         _drain_runtime_file(runtime_after, v1_fresh_starts=True)
     else:
-        execution_path = Path(sources["FAKE_V2_REDIS_FILE"])
+        execution_path = _native_path(sources["FAKE_V2_REDIS_FILE"])
         value = json.loads(execution_path.read_text(encoding="utf-8"))
         value["indexVersion"] = "0"
         execution_path.write_text(json.dumps(value), encoding="utf-8")
@@ -1104,6 +1195,7 @@ def test_joint_drain_stable_window_rejects_every_identity_or_watermark_change(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -1225,6 +1317,10 @@ def test_forward_is_repeatable_with_one_verified_backup(tmp_path: Path) -> None:
     assert fixture.forward_count.read_text(encoding="utf-8").strip() == "2"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="确认文件的 0600/0644 门禁需要 POSIX 文件模式，NTFS 原生 stat 不提供该语义",
+)
 def test_production_forward_requires_private_exact_confirmation(
     tmp_path: Path,
 ) -> None:
@@ -1252,9 +1348,7 @@ def test_production_forward_requires_private_exact_confirmation(
     assert "confirmation-file:invalid" in rejected_mode.stderr
     assert accepted.returncode == 0, accepted.stderr
     assert accepted.stdout.strip() == "forward-ok"
-    assert "novelwriter:20260831:apply" not in fixture.log_path.read_text(
-        encoding="utf-8"
-    )
+    assert "novelwriter:20260831:apply" not in fixture.log_path.read_text(encoding="utf-8")
     assert _psql_file_execution_count(fixture) == 1
 
 
@@ -1288,6 +1382,7 @@ def test_rollback_is_refused_forever_after_any_v2_fact(tmp_path: Path) -> None:
     assert "20260831_durable_agent_execution.rollback.sql" not in log
 
 
+@pytest.mark.skipif(os.name == "nt", reason="结构证据导出必须验证 POSIX 0700/0600 权限")
 def test_contract_export_and_verify_are_atomic_private_and_credential_safe(
     tmp_path: Path,
 ) -> None:
@@ -1300,15 +1395,9 @@ def test_contract_export_and_verify_are_atomic_private_and_credential_safe(
 
     assert exported.returncode == 0, exported.stderr
     assert verified.returncode == 0, verified.stderr
-    expected_fingerprint = json.loads(POST_CONTRACT.read_text(encoding="utf-8"))[
-        "fingerprint"
-    ]
-    assert exported.stdout.strip() == (
-        f"contract-export-ok:{evidence_dir}:{expected_fingerprint}"
-    )
-    assert verified.stdout.strip() == (
-        f"contract-verify-ok:{evidence_dir}:{expected_fingerprint}"
-    )
+    expected_fingerprint = json.loads(POST_CONTRACT.read_text(encoding="utf-8"))["fingerprint"]
+    assert exported.stdout.strip() == (f"contract-export-ok:{evidence_dir}:{expected_fingerprint}")
+    assert verified.stdout.strip() == (f"contract-verify-ok:{evidence_dir}:{expected_fingerprint}")
     assert {path.name for path in evidence_dir.iterdir()} == {
         "schema-contract.json",
         "schema-only.sql",
@@ -1323,15 +1412,11 @@ def test_contract_export_and_verify_are_atomic_private_and_credential_safe(
     assert exported_contract["fingerprint"] == expected_fingerprint
     assert exported_contract["source"]["product"] == "PostgreSQL"
     assert "databaseName" not in exported_contract["source"]
-    metadata = (evidence_dir / "contract-verification.meta").read_text(
-        encoding="utf-8"
-    )
+    metadata = (evidence_dir / "contract-verification.meta").read_text(encoding="utf-8")
     assert "database=novelwriterdev" in metadata
     assert "schemaState=migrated-empty-v2" in metadata
     assert "schemaProfile=full" in metadata
-    all_evidence = "".join(
-        path.read_text(encoding="utf-8") for path in evidence_dir.iterdir()
-    )
+    all_evidence = "".join(path.read_text(encoding="utf-8") for path in evidence_dir.iterdir())
     log = fixture.log_path.read_text(encoding="utf-8")
     observables = (
         exported.stdout,
@@ -1389,6 +1474,7 @@ def test_contract_export_fails_closed_on_guard_mismatch_without_partial_director
     assert not list(tmp_path.glob(".contract-evidence.partial.*"))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="结构证据复验必须验证 POSIX 0700/0600 权限")
 def test_contract_verify_rejects_schema_dump_drift_and_extra_files(
     tmp_path: Path,
 ) -> None:
@@ -1412,26 +1498,38 @@ def test_contract_verify_rejects_schema_dump_drift_and_extra_files(
 
 
 @pytest.mark.parametrize(
-    ("runtime_profile", "python_profile"),
+    ("runtime_profile", "expected_fingerprint", "table_count"),
     [
-        ("full", "full"),
-        ("without-video-preview", "without_video_preview"),
-        ("without-phone-auth", "without_phone_auth"),
+        ("full", "3a51237c2d642c3b08247adbb6468615ab9b7f651216c74b877d7ca38d8d5e32", 109),
+        (
+            "without-video-preview",
+            "ea1df9ad015cd8d811d6ab250a7098870aa2befcf0afa3273b845255a0ac11b2",
+            50,
+        ),
+        (
+            "without-phone-auth",
+            "fa70448d891837a1dffebb958771570bc4e889e6160a7b7a411c5b83f452fee7",
+            108,
+        ),
         (
             "without-video-preview-and-phone-auth",
-            "without_video_preview_and_phone_auth",
+            "e2bcc725ed42c7128274bbc19ba1e288ff0edc70f90124225e3214ecd03baa46",
+            49,
         ),
     ],
 )
-def test_contract_export_projection_matches_existing_python_contract_logic(
+@pytest.mark.skipif(
+    os.name == "nt", reason="导出投影需要 POSIX 证据目录；指纹另由 Java 四投影测试覆盖"
+)
+def test_contract_export_projection_matches_frozen_structural_fingerprints(
     tmp_path: Path,
     runtime_profile: str,
-    python_profile: str,
+    expected_fingerprint: str,
+    table_count: int,
 ) -> None:
     fixture = MigrationFixture(tmp_path)
     fixture.state_path.write_text("migrated\n", encoding="utf-8")
-    post_contract = json.loads(POST_CONTRACT.read_text(encoding="utf-8"))
-    expected = project_schema_contract(post_contract, python_profile)  # type: ignore[arg-type]
+    # 冻结当前 Java post 契约四种投影；同组字面量由 Java 测试独立校验，不在断言时自生成。
     evidence_dir = tmp_path / f"evidence-{runtime_profile}"
 
     result = fixture.run(
@@ -1439,17 +1537,19 @@ def test_contract_export_projection_matches_existing_python_contract_logic(
         evidence_dir=evidence_dir,
         extra_env={
             "FAKE_SCHEMA_PROFILE": runtime_profile,
-            "FAKE_SCHEMA_GUARD_FINGERPRINT": expected["fingerprint"],
+            "FAKE_SCHEMA_GUARD_FINGERPRINT": expected_fingerprint,
         },
     )
 
     assert result.returncode == 0, result.stderr
     actual = json.loads((evidence_dir / "schema-contract.json").read_text(encoding="utf-8"))
-    actual_without_source = {key: value for key, value in actual.items() if key != "source"}
-    expected_without_source = {
-        key: value for key, value in expected.items() if key != "source"
+    assert actual["fingerprint"] == expected_fingerprint
+    assert len(actual["tables"]) == table_count
+    structural = {
+        key: value for key, value in actual.items() if key not in {"source", "fingerprint"}
     }
-    assert actual_without_source == expected_without_source
+    canonical = json.dumps(structural, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert hashlib.sha256(canonical.encode()).hexdigest() == expected_fingerprint
 
 
 def _run_rollout_gate(
@@ -1469,6 +1569,10 @@ def _run_rollout_gate(
     (app_dir / "scripts").mkdir(parents=True)
     (app_dir / "contracts" / "agent-execution").mkdir(parents=True)
     bin_dir.mkdir()
+    _write_sha256sum_wrapper(bin_dir / "sha256sum")
+    _write_python_wrapper(bin_dir / "python3")
+    bash_env = tmp_path / "bash-env"
+    _write_sha256sum_bash_env(bash_env, bin_dir / "sha256sum", bin_dir / "python3")
     drain_stage = stage in {
         "all",
         "initialize-drain-indexes",
@@ -1546,6 +1650,7 @@ def _run_rollout_gate(
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "BASH_ENV": _posix_path(bash_env),
         "APP_DIR": _posix_path(app_dir),
         "DURABLE_AGENT_MIGRATION_ENV_FILE": _posix_path(app_dir / ".env"),
         "FAKE_AGENT_MANIFEST": agent_manifest_fingerprint,
@@ -1565,6 +1670,7 @@ def _run_rollout_gate(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -1664,28 +1770,41 @@ def test_rollout_all_requires_existing_v2_closed_v1_and_exact_manifest(tmp_path:
         ROOT / "contracts" / "agent-execution" / "manifest.json"
     )
     accepted = _run_rollout_gate(
-        tmp_path / "accepted", stage="all", route_mode="all",
-        migration_state="migrated-with-v2", agent_manifest_fingerprint=expected,
+        tmp_path / "accepted",
+        stage="all",
+        route_mode="all",
+        migration_state="migrated-with-v2",
+        agent_manifest_fingerprint=expected,
         running_core_route_mode="all",
     )
     assert accepted.returncode == 0, accepted.stderr
     assert "gate-ok:all:migrated-with-v2" in accepted.stdout
     empty = _run_rollout_gate(
-        tmp_path / "empty", stage="all", route_mode="all",
-        agent_manifest_fingerprint=expected, running_core_route_mode="all",
+        tmp_path / "empty",
+        stage="all",
+        route_mode="all",
+        agent_manifest_fingerprint=expected,
+        running_core_route_mode="all",
     )
     assert empty.returncode != 0
     assert "不能直接从空 V2 开启" in empty.stderr
     open_v1 = _run_rollout_gate(
-        tmp_path / "v1-open", stage="all", route_mode="all",
-        migration_state="migrated-with-v2", agent_manifest_fingerprint=expected,
-        running_core_route_mode="all", running_core_v1_fresh_starts="true",
+        tmp_path / "v1-open",
+        stage="all",
+        route_mode="all",
+        migration_state="migrated-with-v2",
+        agent_manifest_fingerprint=expected,
+        running_core_route_mode="all",
+        running_core_v1_fresh_starts="true",
     )
     assert open_v1.returncode != 0
     assert "仍开放 V1 新建入口" in open_v1.stderr
     mismatch = _run_rollout_gate(
-        tmp_path / "mismatch", stage="all", route_mode="all",
-        migration_state="migrated-with-v2", agent_manifest_fingerprint="b" * 64,
+        tmp_path / "mismatch",
+        stage="all",
+        route_mode="all",
+        migration_state="migrated-with-v2",
+        agent_manifest_fingerprint="b" * 64,
         running_core_route_mode="all",
     )
     assert mismatch.returncode != 0
@@ -1815,6 +1934,10 @@ def test_postgres_restore_has_named_quarantine_step_but_no_restore_command() -> 
         ),
     ],
 )
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="确认文件的 0600 门禁需要 POSIX 文件模式，NTFS 原生 stat 不提供该语义",
+)
 def test_postgres_restore_quarantine_requires_quiesce_and_local_waitaof_one(
     tmp_path: Path,
     waitaof_ack: str,
@@ -1829,20 +1952,33 @@ def test_postgres_restore_quarantine_requires_quiesce_and_local_waitaof_one(
     bin_dir = tmp_path / "bin"
     backup_dir.mkdir()
     bin_dir.mkdir()
+    _write_sha256sum_wrapper(bin_dir / "sha256sum")
+    _write_python_wrapper(bin_dir / "python3")
+    bash_env = tmp_path / "bash-env"
+    _write_sha256sum_bash_env(bash_env, bin_dir / "sha256sum", bin_dir / "python3")
     database_dump = backup_dir / "database.dump"
     database_dump.write_bytes(b"postgres-backup-fixture")
     database_sha = hashlib.sha256(database_dump.read_bytes()).hexdigest()
     (backup_dir / "recovery-boundary.meta").write_text(
         "postgresRestoreRequiresExecutionQuarantine=true\n", encoding="utf-8"
     )
-    sha256sum = shutil.which("sha256sum")
+    sha256sum = str(bin_dir / "sha256sum")
     assert sha256sum is not None
     with (backup_dir / "SHA256SUMS").open("w", encoding="utf-8") as sums:
         subprocess.run(  # noqa: S603 - 仅执行本机已解析的 sha256sum
-            [sha256sum, "database.dump", "recovery-boundary.meta"],
+            [
+                POSIX_SHELL,
+                "-c",
+                '. "$BASH_ENV"; sha256sum "$@"',
+                "inkforge-sha256sum",
+                "database.dump",
+                "recovery-boundary.meta",
+            ],
             cwd=backup_dir,
+            env={**os.environ, "BASH_ENV": _posix_path(bash_env)},
             check=True,
             text=True,
+            encoding="utf-8",
             stdout=sums,
         )
     epoch = "postgres-restore-test"
@@ -1886,6 +2022,7 @@ def test_postgres_restore_quarantine_requires_quiesce_and_local_waitaof_one(
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "POSTGRES_BACKUP_DIR": _posix_path(backup_dir),
+        "BASH_ENV": _posix_path(bash_env),
         "EXECUTION_REDIS_CONTAINER": "execution-redis-test",
         "RESTORE_EPOCH": epoch,
         "POSTGRES_RESTORE_CONFIRM_FILE": _posix_path(confirm),
@@ -1902,10 +2039,11 @@ def test_postgres_restore_quarantine_requires_quiesce_and_local_waitaof_one(
     }
 
     result = subprocess.run(  # noqa: S603 - 仅执行仓库固定脚本与测试夹具
-        [POSIX_SHELL, str(POSTGRES_QUARANTINE)],
+        _shell_with_sha256sum(POSTGRES_QUARANTINE),
         cwd=ROOT,
         env=env,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
     )
@@ -1958,6 +2096,7 @@ def test_postgres_restore_quarantine_requires_route_off_and_stopped_dispatch(
         cwd=ROOT,
         env=env,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
     )
@@ -2016,6 +2155,7 @@ def test_agent_image_verifier_requires_exact_offline_manifest_fingerprint(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     rejected = subprocess.run(  # noqa: S603 - 仅执行仓库固定脚本与测试夹具
@@ -2030,6 +2170,7 @@ def test_agent_image_verifier_requires_exact_offline_manifest_fingerprint(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -2074,9 +2215,7 @@ def test_status_query_recognizes_real_postgres14_pre_post_and_partial_shapes(
 
     drain_start = source.index("WITH\nobserved AS MATERIALIZED (")
     drain_end = source.index("\nCOMMIT;", drain_start)
-    drain_query = source[drain_start:drain_end].replace(
-        ":'expected_database'", "'novelwriterdev'"
-    )
+    drain_query = source[drain_start:drain_end].replace(":'expected_database'", "'novelwriterdev'")
     empty_drain = json.loads(_scalar(docker, container, drain_query))
     assert all(metric == [] for metric in empty_drain["metrics"].values())
     _psql(
@@ -2122,8 +2261,8 @@ def test_status_query_recognizes_real_postgres14_pre_post_and_partial_shapes(
     _write_executable(
         fixture.bin_dir / "psql",
         "#!/bin/sh\n"
-        "printf 'psql %s\\n' \"$*\" >> \"$MIGRATION_LOG\"\n"
-        "cp \"$PGPASSFILE\" \"$PGPASS_CAPTURE\"\n"
+        'printf \'psql %s\\n\' "$*" >> "$MIGRATION_LOG"\n'
+        'cp "$PGPASSFILE" "$PGPASS_CAPTURE"\n'
         f"exec {docker_command} exec -i {container_name} psql -X "
         "-v ON_ERROR_STOP=1 -v expected_database=novelwriterdev "
         "-Atq -U postgres -d novelwriterdev\n",
@@ -2133,24 +2272,22 @@ def test_status_query_recognizes_real_postgres14_pre_post_and_partial_shapes(
         "#!/bin/sh\n"
         "output=''\n"
         "previous=''\n"
-        "for argument in \"$@\"; do\n"
+        'for argument in "$@"; do\n'
         "  [ \"$previous\" != '--file' ] || output=$argument\n"
-        "  case \"$argument\" in --file=*) output=${argument#--file=};; esac\n"
+        '  case "$argument" in --file=*) output=${argument#--file=};; esac\n'
         "  previous=$argument\n"
         "done\n"
-        "[ -n \"$output\" ] || exit 43\n"
+        '[ -n "$output" ] || exit 43\n'
         f"exec {docker_command} exec {container_name} pg_dump -U postgres "
         "-d novelwriterdev --schema-only --no-owner --no-acl --format=plain "
-        "> \"$output\"\n",
+        '> "$output"\n',
     )
-    expected_fingerprint = json.loads(POST_CONTRACT.read_text(encoding="utf-8"))[
-        "fingerprint"
-    ]
+    expected_fingerprint = json.loads(POST_CONTRACT.read_text(encoding="utf-8"))["fingerprint"]
     _write_executable(
         fixture.bin_dir / "docker",
         "#!/bin/sh\n"
-        "printf 'docker %s\\n' \"$*\" >> \"$MIGRATION_LOG\"\n"
-        "case \" $* \" in\n"
+        'printf \'docker %s\\n\' "$*" >> "$MIGRATION_LOG"\n'
+        'case " $* " in\n'
         "  *' compose version '*) exit 0 ;;\n"
         "  *' compose '*' ps -q core-api '*) printf '%064d\\n' 1 ;;\n"
         "  *'INKFORGE_EXPECTED_DATABASE='*) printf '%s\\n' full ;;\n"
@@ -2165,7 +2302,7 @@ def test_status_query_recognizes_real_postgres14_pre_post_and_partial_shapes(
     assert verified.returncode == 0, verified.stderr
     assert exported.stdout.strip().endswith(f":{expected_fingerprint}")
     assert verified.stdout.strip().endswith(f":{expected_fingerprint}")
-    assert "CREATE TABLE public.\"WorkflowEvidenceBundle\"" in (
+    assert 'CREATE TABLE public."WorkflowEvidenceBundle"' in (
         evidence_dir / "schema-only.sql"
     ).read_text(encoding="utf-8")
     assert fixture.password not in fixture.log_path.read_text(encoding="utf-8")
@@ -2186,9 +2323,7 @@ def test_real_postgres14_concurrent_fresh_fact_invalidates_two_snapshot_window(
     source = HELPER.read_text(encoding="utf-8")
     drain_start = source.index("WITH\nobserved AS MATERIALIZED (")
     drain_end = source.index("\nCOMMIT;", drain_start)
-    drain_query = source[drain_start:drain_end].replace(
-        ":'expected_database'", "'novelwriterdev'"
-    )
+    drain_query = source[drain_start:drain_end].replace(":'expected_database'", "'novelwriterdev'")
     _psql(docker, container, "DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     _psql(docker, container, BASE_SCHEMA.read_text(encoding="utf-8"))
     _psql(docker, container, FORWARD.read_text(encoding="utf-8"))
@@ -2252,6 +2387,7 @@ def test_real_postgres14_concurrent_fresh_fact_invalidates_two_snapshot_window(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 

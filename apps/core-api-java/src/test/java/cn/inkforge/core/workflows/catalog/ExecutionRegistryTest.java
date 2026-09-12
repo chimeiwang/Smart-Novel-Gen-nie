@@ -253,29 +253,29 @@ class ExecutionRegistryTest {
         assertThat(draft.outputSchema().jsonSchema().get("required"))
                 .isEqualTo(java.util.List.of("summary", "content"));
         assertThat(draft.reviewers()).extracting(reviewer -> reviewer.profile().key())
-                .containsExactly("reviewer.chapter_draft_consistency.v1", "reviewer.chapter_draft_editorial.v1");
+                .containsExactly("reviewer.chapter_draft_consistency.v2", "reviewer.chapter_draft_editorial.v2");
         assertThat(draft.operation().reviewPolicy().mergePolicy())
                 .isEqualTo("review.chapter_draft.patch_or_author.v1");
         assertThat(draft.operation().reviewPolicy().maxAutomaticRevisions()).isEqualTo(1);
         assertThat(draft.operation().runBudget().maxModelCalls()).isEqualTo(6);
-        assertThat(draft.operation().runBudget().profile()).isEqualTo("budget.long_serial.chapter_draft.v2");
+        assertThat(draft.operation().runBudget().profile()).isEqualTo("budget.long_serial.chapter_draft.v3");
         assertThat(draft.operation().runBudget().maxInputTokens()).isEqualTo(600_000);
         assertThat(draft.operation().runBudget().maxPromptCacheMissTokens()).isEqualTo(600_000);
         assertThat(draft.generatorStepBudget().key())
-                .isEqualTo("step_budget.long_serial.write_chapter.generator.v2");
+                .isEqualTo("step_budget.long_serial.write_chapter.generator.v3");
         assertThat(draft.generatorStepBudget().budget().maxInputTokens()).isEqualTo(100_000);
         assertThat(draft.generatorStepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(100_000);
-        assertThat(draft.generatorStepBudget().budget().maxCompletionTokens()).isEqualTo(16_000);
+        assertThat(draft.generatorStepBudget().budget().maxCompletionTokens()).isEqualTo(100_000);
         assertThat(draft.reviewers())
                 .extracting(reviewer -> reviewer.stepBudget().key())
                 .containsExactly(
-                        "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
-                        "step_budget.long_serial.write_chapter.reviewer_editorial.v2");
+                        "step_budget.long_serial.write_chapter.reviewer_consistency.v3",
+                        "step_budget.long_serial.write_chapter.reviewer_editorial.v3");
         assertThat(draft.reviewers()).allSatisfy(reviewer -> {
-            assertThat(reviewer.profile().key()).startsWith("reviewer.chapter_draft_").endsWith(".v1");
+            assertThat(reviewer.profile().key()).startsWith("reviewer.chapter_draft_").endsWith(".v2");
             assertThat(reviewer.stepBudget().budget().maxInputTokens()).isEqualTo(100_000);
             assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(100_000);
-            assertThat(reviewer.stepBudget().budget().maxReasoningTokens()).isZero();
+            assertThat(reviewer.stepBudget().budget().maxReasoningTokens()).isEqualTo(100_000);
         });
     }
 
@@ -298,6 +298,7 @@ class ExecutionRegistryTest {
                         "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
                         "step_budget.long_serial.write_chapter.reviewer_editorial.v1");
         assertThat(rewrite.reviewers()).allSatisfy(reviewer -> {
+            assertThat(reviewer.profile().key()).endsWith(".v2");
             assertThat(reviewer.stepBudget().budget().maxInputTokens()).isEqualTo(30_000);
             assertThat(reviewer.stepBudget().budget().maxPromptCacheMissTokens()).isEqualTo(30_000);
         });

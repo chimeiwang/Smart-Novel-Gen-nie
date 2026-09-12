@@ -40,9 +40,10 @@ public record WorkflowStepBudget(
         if (maxPromptCacheMissTokens > maxInputTokens) {
             throw new IllegalArgumentException("cache miss 预算不能超过完整输入预算");
         }
-        if (Math.addExact(maxReasoningTokens, maxVisibleOutputTokens)
-                > maxCompletionTokens) {
-            throw new IllegalArgumentException("reasoning 与可见输出预算之和不能超过 completion 预算");
+        // reasoning 与可见输出是独立上限，不应把两者预先相加切分 completion 额度。
+        if (maxReasoningTokens > maxCompletionTokens
+                || maxVisibleOutputTokens > maxCompletionTokens) {
+            throw new IllegalArgumentException("reasoning 与可见输出预算不能分别超过 completion 预算");
         }
         if (maxProviderRetries < 0 || maxProviderRetries > 2) {
             throw new IllegalArgumentException("供应商重试预算只允许 0..2");

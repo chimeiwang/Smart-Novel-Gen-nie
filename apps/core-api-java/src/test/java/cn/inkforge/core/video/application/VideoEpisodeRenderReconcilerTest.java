@@ -91,11 +91,6 @@ class VideoEpisodeRenderReconcilerTest {
             }
 
             @Override
-            public ArchivedVideoRender render(VideoRenderClaim claim) {
-                throw new AssertionError("不能构造旧 adaptation claim");
-            }
-
-            @Override
             public ArchivedVideoRender render(VideoEpisodeRenderClaim claim) {
                 return new ArchivedVideoRender(
                         claim.taskId(),
@@ -372,7 +367,7 @@ class VideoEpisodeRenderReconcilerTest {
             }
 
             @Override
-            public ArchivedVideoRender render(VideoRenderClaim claim) {
+            public ArchivedVideoRender render(VideoEpisodeRenderClaim claim) {
                 throw new AssertionError("真实任务不能使用模拟器");
             }
         };

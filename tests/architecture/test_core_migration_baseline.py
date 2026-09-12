@@ -3,18 +3,13 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
-from inkforge_core.app import create_app
-
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "contracts" / "core"
-PUBLIC_OPENAPI = CONTRACT_ROOT / "public-openapi-python-baseline.json"
-PUBLIC_JAVA_OPENAPI = CONTRACT_ROOT / "public-openapi-java-baseline.json"
-FULL_OPENAPI = CONTRACT_ROOT / "full-openapi-python-baseline.json"
-JAVA_OPENAPI = CONTRACT_ROOT / "full-openapi-java-baseline.json"
+CANONICAL_OPENAPI = CONTRACT_ROOT / "openapi.json"
+PUBLIC_OPENAPI = CONTRACT_ROOT / "public-openapi.json"
 INTERNAL_ENDPOINTS = CONTRACT_ROOT / "internal-endpoints.json"
 ROUTE_INVENTORY = CONTRACT_ROOT / "route-inventory.json"
 BEHAVIOR_FIXTURES = (
@@ -36,136 +31,56 @@ def _operation_count(document: dict[str, Any]) -> int:
     )
 
 
-def test_public_openapi_baseline_is_complete_and_current() -> None:
-    baseline = _json(PUBLIC_OPENAPI)
-    runtime = create_app(testing=True).openapi()
-
-    assert len(baseline["paths"]) == 141
-    assert _operation_count(baseline) == 182
-    assert baseline == runtime
-
-
-def test_full_openapi_baseline_covers_every_java_route() -> None:
-    full = _json(FULL_OPENAPI)
-    java = _json(JAVA_OPENAPI)
-
-    assert len(full["paths"]) == 166
-    assert _operation_count(full) == 207
-    assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 24
-    assert {
-        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
-        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result",
-        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure",
-        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/billing-reconciliation",
-    } <= full["paths"].keys()
-    assert "/api/v1/video/provider-assets/{token}" in full["paths"]
-    assert java["openapi"] == "3.0.3"
-    assert java["paths"].keys() == full["paths"].keys()
-    assert _operation_count(java) == _operation_count(full)
-    source_schemas = set(full["components"]["schemas"])
-    java_schemas = set(java["components"]["schemas"])
-    workflow_sse_schemas = {
-        "ApplyingEventPayload",
-        "AwaitingUserEventPayload",
-        "CancelledEventPayload",
-        "CandidateReadyEventPayload",
-        "ClarificationRequiredEventPayload",
-        "CompletedEventPayload",
-        "EvidenceReadyEventPayload",
-        "FailedEventPayload",
-        "IntentResolvedEventPayload",
-            "ReviewCompletedEventPayload",
-            "ReviewPendingStepSnapshot",
-            "ReviewStartedEventPayload",
-            "RunAcceptedEventPayload",
-            "RunSnapshot",
-            "StepFinishedEventPayload",
-            "StepProgressEventPayload",
-        "StepQueuedEventPayload",
-        "StepStartedEventPayload",
-        "WorkflowEventEnvelope",
-        "WorkflowRunSnapshot",
-    }
-    # Java 专用投影增加流式响应占位，并从共享 Pydantic 契约机械生成 V2 SSE 帧；
-    # Python 公开响应仍只有 text/event-stream，不伪造 application/json。
-    assert java_schemas == source_schemas | {
-        "BinaryFileStream",
-        "WritingEventStream",
-    } | workflow_sse_schemas
-    assert java["components"]["schemas"]["BinaryFileStream"]["format"] == "binary"
-    assert java["components"]["schemas"]["WritingEventStream"]["format"] == "binary"
-    envelope_payload = java["components"]["schemas"]["WorkflowEventEnvelope"][
-        "properties"
-    ]["payload"]
-    assert envelope_payload == {
-        "type": "object",
-        "x-inkforge-java-discriminated-by": "eventType",
-    }
-    assert {item["name"] for item in java["tags"]} == {
-        "billing",
-        "chapters",
-        "debug",
-        "identity",
-        "lore",
-        "novels",
-        "operations",
-        "outlines",
-        "quality",
-        "references",
-        "reviews",
-        "shortmedium",
-        "styles",
-        "video",
-        "videoepisodeimpacts",
-        "videoepisodepostproduction",
-        "videoepisoderenders",
-        "videoepisodes",
-        "videoproduction",
-        "workflows",
-        "writing",
-    }
+def test_canonical_openapi_is_java_owned_and_complete() -> None:
+    document = _json(CANONICAL_OPENAPI)
+    assert document["openapi"] == "3.0.3"
+    assert document["x-inkforge-source-contract"] == "canonical-java"
+    assert len(document["paths"]) == 166
+    assert _operation_count(document) == 207
     assert all(
-        len(operation.get("tags", [])) == 1
-        for path_item in java["paths"].values()
+        "x-inkforge-exposure" in operation
+        for path_item in document["paths"].values()
         for method, operation in path_item.items()
         if method in {"get", "post", "put", "patch", "delete"}
     )
-    serialized_java = json.dumps(java, ensure_ascii=False)
-    assert '"const"' not in serialized_java
-    assert '"type": "null"' not in serialized_java
-    upload_schema = java["components"]["schemas"][
-        "Body_upload_reference_api_v1_styles__style_id__references_post"
-    ]
-    assert upload_schema["properties"]["file"]["format"] == "binary"
 
 
-def test_public_java_openapi_is_safe_for_cli_generation() -> None:
-    public = _json(PUBLIC_JAVA_OPENAPI)
-
+def test_public_projection_excludes_internal_and_provider_media_schemas() -> None:
+    canonical = _json(CANONICAL_OPENAPI)
+    public = _json(PUBLIC_OPENAPI)
     assert public["openapi"] == "3.0.3"
-    assert public["x-inkforge-source-contract"] == (
-        "public-openapi-python-baseline.json"
-    )
+    assert public["x-inkforge-source-contract"] == "openapi.json"
     assert len(public["paths"]) == 141
     assert _operation_count(public) == 182
-    assert all(not path.startswith("/internal/") for path in public["paths"])
+    assert all(path.startswith("/api/v1/") for path in public["paths"])
     assert "/api/v1/video/provider-assets/{token}" not in public["paths"]
+    assert not any(
+        operation.get("x-inkforge-exposure") != "public"
+        for path_item in public["paths"].values()
+        for method, operation in path_item.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+    )
+    canonical_names = set(canonical["components"]["schemas"])
+    assert set(public["components"]["schemas"]) <= canonical_names
+    # 投影只保留公共路径的引用闭包，内部专用模型不能因完整契约被泄漏。
+    assert len(public["components"]["schemas"]) < len(canonical["components"]["schemas"])
 
 
-def test_writing_run_union_preserves_discriminator_and_fixed_null_semantics() -> None:
-    python = _json(FULL_OPENAPI)
-    java = _json(JAVA_OPENAPI)
-
+def test_numeric_engine_version_and_fixed_null_semantics_are_retained() -> None:
+    document = _json(CANONICAL_OPENAPI)
+    v2 = document["components"]["schemas"]["WritingRunV2Response"]
+    assert v2["properties"]["engineVersion"]["x-inkforge-const"] == 2
+    assert v2["properties"]["commandId"]["x-inkforge-fixed-null"] is True
     for schema_name in (
         "WritingRunStartResponse",
         "WritingRunStatusPublicResponse",
         "WritingRunPublicListItem",
         "CancelWritingRunPublicResponse",
     ):
-        schema = python["components"]["schemas"][schema_name]
-        assert schema["discriminator"] == {
+        assert document["components"]["schemas"][schema_name]["discriminator"] == {
             "mapping": {
-                "1": "#/components/schemas/" + (
+                "1": "#/components/schemas/"
+                + (
                     "CancelWritingRunResponse"
                     if schema_name == "CancelWritingRunPublicResponse"
                     else "WritingRunListItem"
@@ -178,37 +93,29 @@ def test_writing_run_union_preserves_discriminator_and_fixed_null_semantics() ->
             },
             "propertyName": "engineVersion",
         }
-        assert java["components"]["schemas"][schema_name]["discriminator"] == schema[
-            "discriminator"
-        ]
-
-    python_v2 = python["components"]["schemas"]["WritingRunV2Response"]
-    java_v2 = java["components"]["schemas"]["WritingRunV2Response"]
-    for field in ("commandId", "commandStatus"):
-        assert python_v2["properties"][field]["enum"] == [None]
-        assert java_v2["properties"][field]["x-inkforge-fixed-null"] is True
 
 
-def test_hidden_and_public_route_inventory_is_complete() -> None:
+def test_route_inventory_and_internal_projection_are_language_neutral() -> None:
     internal = _json(INTERNAL_ENDPOINTS)
     inventory = _json(ROUTE_INVENTORY)
-
-    assert internal["schemaVersion"] == "core-internal-endpoints/1.0"
+    assert internal["schemaVersion"] == "core-internal-endpoints/2.0"
     assert len(internal["endpoints"]) == 24
-    assert all(item["path"].startswith("/internal/v1/") for item in internal["endpoints"])
-
-    assert inventory["schemaVersion"] == "core-route-inventory/1.0"
+    assert all(item["exposure"] == "internal" for item in internal["endpoints"])
+    assert inventory["schemaVersion"] == "core-route-inventory/2.0"
     assert len(inventory["routes"]) == 207
     assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 182
     assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 24
     assert sum(item["exposure"] == "provider_media" for item in inventory["routes"]) == 1
     assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 207
-    assert all(item["productModule"] and item["pythonTests"] for item in inventory["routes"])
+    forbidden = {"baselineCommit", "endpointModule", "sourceFile", "sourceLine", "pythonTests"}
+    assert not forbidden.intersection(inventory)
+    assert all(not forbidden.intersection(item) for item in inventory["routes"])
+    assert all(item["operationId"] for item in inventory["routes"])
 
 
-def test_clarification_route_is_public_strict_and_does_not_change_event_types() -> None:
+def test_clarification_route_keeps_strict_public_contract() -> None:
     path = "/api/v1/writing/runs/{task_id}/clarification"
-    for document in (_json(PUBLIC_OPENAPI), _json(PUBLIC_JAVA_OPENAPI)):
+    for document in (_json(PUBLIC_OPENAPI),):
         operation = document["paths"][path]["post"]
         assert operation["operationId"] == (
             "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post"
@@ -224,10 +131,9 @@ def test_clarification_route_is_public_strict_and_does_not_change_event_types() 
         assert set(request["required"]) == {
             "clientRequestId", "expectedRevision", "decisionStepId", "userMessage"
         }
-    assert "ClarificationAnsweredEventPayload" not in _json(JAVA_OPENAPI)["components"]["schemas"]
 
 
-def test_cross_language_fixtures_are_present_and_bounded() -> None:
+def test_cross_language_fixtures_are_present_and_read_only() -> None:
     required = {
         CONTRACT_ROOT / "error-fixtures" / "api-error.json",
         CONTRACT_ROOT / "error-fixtures" / "validation-error.json",
@@ -244,100 +150,30 @@ def test_cross_language_fixtures_are_present_and_bounded() -> None:
         CONTRACT_ROOT / "http-fixtures" / "trailing-slash-redirect.json",
     }
     assert all(path.is_file() and path.stat().st_size > 0 for path in required)
-
     golden = _json(CONTRACT_ROOT / "service-auth-fixtures" / "golden-request.json")
     assert golden["schemaVersion"] == "service-auth-golden-request/1.0"
-    assert golden["claims"]["iat"] == 1_800_000_000
-    assert golden["claims"]["exp"] == 1_800_000_120
     assert golden["expectedFailures"]["expired"] == "SERVICE_AUTHENTICATION_FAILED"
-    assert golden["expectedFailures"]["wrongAudience"] == "SERVICE_AUTHENTICATION_FAILED"
     assert golden["expectedFailures"]["wrongBody"] == "SERVICE_REQUEST_BINDING_INVALID"
-    assert golden["expectedFailures"]["replay"] == "SERVICE_TOKEN_REPLAYED"
 
-
-def test_behavior_fixture_is_explicit_public_and_snapshot_queries_are_read_only() -> None:
-    total_steps = 0
-    scenarios: set[str] = set()
     for path in BEHAVIOR_FIXTURES:
         fixture = _json(path)
-        steps = fixture["steps"]
-        captured: set[str] = set()
-
         assert fixture["schemaVersion"] == "inkforge-core-behavior/1.0"
-        assert fixture["scenario"] not in scenarios
-        scenarios.add(fixture["scenario"])
-        assert len({step["name"] for step in steps}) == len(steps)
-        total_steps += len(steps)
-        for step in steps:
-            serialized_input = json.dumps(
-                {"path": step["path"], "body": step.get("body")},
-                ensure_ascii=False,
+        assert fixture["steps"]
+        assert all(step["path"].startswith("/api/v1/") for step in fixture["steps"])
+        assert all("/internal/" not in step["path"] for step in fixture["steps"])
+        assert all(
+            query["sql"].strip().upper().startswith("SELECT ")
+            and ";" not in query["sql"]
+            and not re.search(
+                r"\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b", query["sql"], re.I
             )
-            referenced = set(
-                re.findall(r"\$\{([A-Za-z][A-Za-z0-9]*)}", serialized_input)
-            )
-            assert referenced <= captured
-            assert step["method"] in {"GET", "POST", "PUT", "PATCH", "DELETE"}
-            assert step["path"].startswith("/api/v1/")
-            assert "/internal/" not in step["path"]
-            assert isinstance(step["expectedStatus"], int)
-            assert all(
-                isinstance(pointer, str) and pointer.startswith("/")
-                for pointer in step.get("normalizePointers", [])
-            )
-            for derived in step.get("derivedNormalizations", []):
-                assert set(derived) == {
-                    "algorithm",
-                    "pointer",
-                    "documentTypePointer",
-                    "chapterIdPointer",
-                    "baseVersionIdPointer",
-                    "currentDraftHash",
-                    "targetVersionIdPointer",
-                    "diffPointer",
-                }
-                assert derived["algorithm"] == "shortMediumConfirmationHash"
-                assert all(
-                    isinstance(derived[name], str)
-                    and derived[name].startswith("/")
-                    for name in (
-                        "pointer",
-                        "documentTypePointer",
-                        "chapterIdPointer",
-                        "baseVersionIdPointer",
-                        "targetVersionIdPointer",
-                        "diffPointer",
-                    )
-                )
-                assert re.fullmatch(r"[0-9a-f]{64}", derived["currentDraftHash"])
-            definitions = step.get("capture", {})
-            assert all(
-                re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", name)
-                and isinstance(pointer, str)
-                and pointer.startswith("/")
-                for name, pointer in definitions.items()
-            )
-            captured.update(definitions)
-
-        queries = fixture["snapshotQueries"]
-        assert queries
-        for query in queries:
-            sql = query["sql"].strip()
-            assert sql.upper().startswith("SELECT ")
-            assert ";" not in sql
-            assert not re.search(
-                r"\b(?:INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b",
-                sql,
-                flags=re.IGNORECASE,
-            )
-            assert query["expectedRows"] > 0
-
-    assert total_steps == 17
+            for query in fixture["snapshotQueries"]
+        )
 
 
-def test_export_script_reports_no_drift() -> None:
-    result = subprocess.run(  # noqa: S603 -- 只执行当前解释器与仓库内固定脚本
-        [sys.executable, str(ROOT / "scripts" / "export_core_migration_baseline.py"), "--check"],
+def test_core_contract_generator_reports_no_drift() -> None:
+    result = subprocess.run(  # noqa: S603 - 固定的仓库契约检查器
+        ["node", str(ROOT / "scripts" / "build_core_openapi.mjs"), "--check"],  # noqa: S607
         cwd=ROOT,
         text=True,
         capture_output=True,

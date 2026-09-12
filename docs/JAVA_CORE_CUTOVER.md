@@ -1,69 +1,69 @@
-# Java Core 生产切换手册
+# Java Core 发布与兼容回退手册
 
-本手册只描述把现有 `core-api` 服务从历史 Python 镜像原位替换为 Java 镜像。禁止新增第二个 Core、双写或
-在切换过程中修改未获批准的 PostgreSQL 结构。执行正式切换仍须获得用户单独批准。
+当前 Core 与 CLI 只保留 Java。首次 Python→Java 切换已成为历史；Python Core 镜像没有现正式库回滚资格。
+正式数据库已有 Durable Agent V2 事实，应用回退必须保留 V2 查询与收敛能力，永久禁止 DDL rollback。
+普通代码修改不自动授权生产发布。
 
 ## 前置门禁
 
-- `./mvnw verify`、Python/Web/架构测试、Python/Java 差异测试全部通过；
-- Java 已在 `novelwriterdev` 通过真实 HTTP 业务验收，并按精确用户与作品 ID 清理至零残留；
-- `inkforge-core-api:<sha>` 的 `cn.inkforge.core.runtime` 标签为 `java`，入口为单进程 `java -jar`；
-- Java 镜像在 448 MiB、只读根文件系统、生产 JVM 上限下通过 readiness、schema guard 和 OOM 检查；
-- 已把生产备份恢复到独立验证库并通过结构守卫；正式库备份、校验和及当前数据量基线已记录；
-- Web、Core、Agent 三个现有生产容器完整，容器声明的镜像仓库符合约定，且各自实际使用的不可变镜像 ID
-  仍在服务器；历史标签允许不同，部署会在切换前冻结当前实际运行的精确三服务组合；
-- 第一次 Python→Java 切换使用的回退 Core 镜像，必须从切换前当前提交中的 Python Core 源码精确构建并
-  完成验收；不能拿任意更早的历史标签冒充“上一版”；
-- `.env`、服务密钥归属/权限和 `host.docker.internal` 数据库网关满足部署脚本门禁；
-- 切换窗口内没有活动写作、视频生成或导出任务。
+- Maven verify、Java 独立 HTTP／数据库 golden、契约／路由覆盖、Agent、Web 和架构测试通过；
+- `npm run api:check` 证明 canonical、公共投影和生成客户端无漂移；
+- 三服务使用同一次已验证发布的镜像组合，Core 标签 `cn.inkforge.core.runtime=java`；
+- 镜像在生产资源限额、只读根文件系统、JVM 上限下通过 readiness、schema guard 和 OOM 检查；
+- 核对 V2 schemaReady／route／V1 fresh 配置、execution Redis 和恢复证据，生产视频继续关闭；
+- 当前实际运行的 Web、Core、Agent 不可变镜像 ID 可回查；应用回退不恢复数据库备份、不执行迁移；
+- 环境与服务密钥权限满足部署门禁，发布时没有正在处理的写作／媒体任务。
 
-## 自动切换流程
+## 自动发布与回退
 
-GitHub Actions 先运行 CI，再构建并上传三张提交哈希镜像。服务器上的
-`scripts/deploy-production.sh` 会依次：
+`scripts/deploy-production.sh` 校验提交、环境、密钥、新镜像及 Java runtime，然后冻结同一时刻实际运行的
+三服务精确镜像组合为 `rollback-<提交>`。缺少服务、镜像身份异常、既有标签冲突或当前 Core 非 Java 时，
+在业务迁移与容器切换前拒绝继续；不得拼接任意历史版本成为回退基线。
 
-1. 校验远端提交、`.env`、服务密钥、三张新镜像和新 Core 的 Java runtime 标签；
-2. 读取当前三服务的不可变镜像 ID，分别标记到同一个 `rollback-<部署提交>` 标签并反查验证，再把上一
-   Core 分类为 `java` 或无标签的历史 `python`；该步骤只增加本地镜像标签，不触碰运行中的容器；
-3. 用无网络、最小 `CHOWN` capability 的一次性容器，非递归初始化 `uploads` 与 `agent_logs` 两个既有卷
-   的根目录所有权；
-4. 只通过已审核 helper 处理既有具名 `TokenUsage` 生产迁移门禁；
-5. 以 `--no-build` 原位替换同名服务，不创建第二个 Core；
-6. 使用 `scripts/verify-running-core-schema.sh <完整Core容器ID>`，以运行实例的不可变镜像及实际数据库
-   配置，在独立受限的一次性容器中运行结构守卫；禁止在活动 Core 容器内额外启动 JVM。随后执行
-   上传卷/日志卷真实写入、HTTP、内部路由和 Agent 稳定就绪冒烟；
-7. 任一步失败时保持原始失败码，并按上一 Core 类型恢复第 2 步冻结的精确三服务快照。
+脚本按既有门禁处理具名 TokenUsage 迁移，再以 `--no-build` 原位替换同名服务。普通部署不会执行 Durable V2 DDL。
+结构守卫使用：
 
-回滚标签只是指向三个既有镜像 ID 的本地别名，不会复制镜像层，也不能据此把三个来源不同的历史版本重新
-组合。只有切换前同一时刻实际运行的三容器组合可以成为自动回滚基线；任一服务缺失、仓库名异常、镜像 ID
-缺失、既有同名回滚标签指向其他镜像或标签反查不一致时，部署必须在数据库迁移与容器切换前停止；部署脚本
-不会覆盖已经冻结的恢复点。
+```bash
+scripts/verify-running-core-schema.sh <完整Core容器ID>
+```
 
-正常 Java 启动只使用 `infra/compose.yaml`。`infra/compose.python-core-rollback.yaml` 只允许在恢复无 Java
-runtime 标签的历史 Python Core 时叠加，用于恢复其 Python 健康检查；它不得用于新 Java 版本启动。
+探针复用运行实例的不可变镜像和实际数据库配置，在独立受限一次性容器中执行，禁止在活动 Core 容器内
+额外启动守卫 JVM。随后验证上传／日志卷写入、HTTP、内部路由与 Agent 稳定就绪。任何失败保留原始错误码，
+并恢复被冻结的兼容 Java 三服务组合。Python 健康检查 overlay 和 Python 回退分支已删除。
 
-## 回退演练
+## 本地隔离回退演练
 
-回退演练只能使用 `infra/compose.test.yaml` 和独立测试数据库。当前镜像必须是 Java；回退镜像可以是 Java，
-也可以是无 runtime 标签的 Python。第一次切换使用 Python 回退镜像时，该镜像必须来自同一待切换提交的
-Python Core 源码和冻结依赖，避免用陈旧实现制造虚假的回退把握。脚本会比较忽略 contract 版本号和
-CHECK 元数据的 v1 兼容指纹，但 Java 守卫仍会先执行完整当前契约校验。无论演练成功或失败，脚本最后都
-恢复并验证当前 Java 栈。
+仅使用 `infra/compose.test.yaml` 和独立测试 PostgreSQL。当前及回退 Core 都必须是支持现有 V2 数据的 Java
+镜像。演练比较完整 schema 指纹，最终恢复并验证当前 Java 组合。
 
 ```bash
 ALLOW_ROLLBACK_DRILL=yes \
-CURRENT_IMAGE_TAG=<当前 Java 标签> \
-ROLLBACK_IMAGE_TAG=<上一已验证标签> \
+CURRENT_IMAGE_TAG=<当前已验证Java标签> \
+ROLLBACK_IMAGE_TAG=<上一兼容Java标签> \
 ROLLBACK_ENV_FILE=.env.test \
 scripts/rollback_drill.sh
 ```
 
-`TEST_DATABASE_URL` 是容器内 Core 使用的地址，宿主机 Playwright 使用 `DATABASE_URL`；二者必须指向同一
-个独立测试 PostgreSQL。测试库只通过 `127.0.0.1` 发布，并单独加入只有 PostgreSQL 使用的
-`test_host_net`；Web、Core、Agent、Redis 和生产 Compose 都不得使用该网络。
+容器内 `TEST_DATABASE_URL` 与宿主机浏览器测试的 `DATABASE_URL` 必须指向同一个隔离测试库。
+禁止 `down -v`、恢复生产备份或运行 DDL；数据库恢复须单独授权。
 
-禁止在演练或日常应用回退中执行 `down -v`、恢复生产数据库备份或运行任意 DDL。只有生产数据本身损坏且
-取得单独授权时，才可进入数据库恢复流程。
+## 只读结构导出与恢复验证
+
+结构源为 `apps/core-api-java/src/main/resources/db/` 下的具名 profile。构建 JAR 后可在获准目标使用
+`scripts/export_schema_contract.sh --output <新证据文件>`；数据库 URL 从环境或 stdin 读取，不进入命令参数，
+已有证据默认禁止覆盖。导出不修改数据库，也不自动替换提交的契约。
+
+`ALLOW_RECOVERY_DRILL=yes scripts/recovery_drill.sh` 转入现有 V2 隔离 Compose 最小故障恢复测试；
+它不接受生产 TASK_ID，不删除生产队列键，不再执行 V1 Python Core 维护脚本。
+
+## 发布后观察
+
+至少观察 30 分钟：内存／OOM／重启、数据库连接、失败任务、CRUD P95、SSE 首事件和队列延迟。
+遇到任务丢失、重复候选／扣费、结构漂移或回退失败时停止后续发布并保留证据。
+
+## 历史首次切换证据
+
+以下只用于追溯 2026-08-25 的首次切换机制，不能作为当前 Python 回退或生产执行依据。
 
 ### 2026-08-25 本地预切换证明
 
@@ -74,9 +74,3 @@ scripts/rollback_drill.sh
 - 回退前后兼容结构指纹一致，Java 恢复后 schema guard、readiness 和 smoke 通过；
 - Java 镜像 runtime 标签为 `java`，入口为 `java -jar`，448 MiB 限额下实测 Core 占用约 271.8 MiB；
 - 演练容器和三个具名业务卷均已删除。该记录只证明本地切换机制可运行，不等于生产切换批准或生产部署。
-
-## 切换后观察
-
-至少连续观察 30 分钟：容器内存峰值、OOM/重启次数、数据库连接数、任务失败数、CRUD P95、SSE 首事件
-延迟和队列接受延迟。出现 OOM、任务丢失、重复草案、重复扣费、结构漂移或回退失败时，停止后续发布并保留
-上一镜像。Python Core 源码只能在观察期结束并完成单独删除审核后移除。

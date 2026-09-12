@@ -19,6 +19,21 @@ class SchemaContractFingerprintTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "FULL,3a51237c2d642c3b08247adbb6468615ab9b7f651216c74b877d7ca38d8d5e32,109",
+        "WITHOUT_VIDEO_PREVIEW,ea1df9ad015cd8d811d6ab250a7098870aa2befcf0afa3273b845255a0ac11b2,50",
+        "WITHOUT_PHONE_AUTH,fa70448d891837a1dffebb958771570bc4e889e6160a7b7a411c5b83f452fee7,108",
+        "WITHOUT_VIDEO_PREVIEW_AND_PHONE_AUTH,e2bcc725ed42c7128274bbc19ba1e288ff0edc70f90124225e3214ecd03baa46,49"
+    })
+    void 迁移后四种投影与运维证据使用同一组冻结指纹(
+            SchemaProfile profile, String fingerprint, int tableCount) {
+        SchemaContract projected = SchemaContractProjector.project(
+                SchemaContracts.loadPostDurableAgentV2(), profile);
+        assertThat(projected.fingerprint()).isEqualTo(fingerprint);
+        assertThat(projected.document().path("tables")).hasSize(tableCount);
+    }
+
     @Test
     void 迁移前冻结契约必须与Python指纹完全一致() throws IOException {
         JsonNode document = readContract();

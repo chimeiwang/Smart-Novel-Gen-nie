@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from inkforge_contracts import (
@@ -631,6 +632,17 @@ def test_step_budget_is_strict_and_bounded(field: str, value: object) -> None:
         StepBudget.model_validate(payload)
 
 
+def test_step_budget_allows_independent_reasoning_and_visible_output_caps() -> None:
+    payload = valid_budget_payload()
+    payload.update(
+        maxCompletionTokens=100,
+        maxReasoningTokens=100,
+        maxVisibleOutputTokens=100,
+    )
+
+    assert StepBudget.model_validate(payload).maxCompletionTokens == 100
+
+
 def test_step_budget_does_not_reuse_run_budget_per_step_field_name() -> None:
     schema = StepBudget.model_json_schema()
 
@@ -653,8 +665,16 @@ def test_execution_request_binds_run_evidence_artifact_and_reasoning_budget() ->
 
     disabled_reasoning = valid_request_payload()
     disabled_reasoning["modelProfile"] = valid_profile_payload(reasoning_mode="disabled")
-    with pytest.raises(ValidationError):
-        ExecutionStepRequest.model_validate(disabled_reasoning)
+    disabled_reasoning["budget"] = {
+        **cast(dict[str, object], disabled_reasoning["budget"]),
+        "maxCompletionTokens": 100,
+        "maxReasoningTokens": 100,
+        "maxVisibleOutputTokens": 100,
+    }
+    disabled_reasoning["requestHash"] = sha256(
+        canonical_bytes(request_hash_material(disabled_reasoning))
+    )
+    assert ExecutionStepRequest.model_validate(disabled_reasoning).budget.maxReasoningTokens == 100
 
 
 def test_execution_messages_require_explicit_nullable_novel_binding() -> None:

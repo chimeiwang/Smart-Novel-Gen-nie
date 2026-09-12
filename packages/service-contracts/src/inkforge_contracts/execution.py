@@ -341,8 +341,9 @@ class StepBudget(_StrictModel):
     def validate_token_budget(self) -> Self:
         if self.maxPromptCacheMissTokens > self.maxInputTokens:
             raise ValueError("cache miss token 预算不能超过总输入 token 预算")
-        if self.maxReasoningTokens + self.maxVisibleOutputTokens > self.maxCompletionTokens:
-            raise ValueError("reasoning 与可见输出 token 预算之和不能超过 completion 预算")
+        # 分项是独立上限而非预分配份额，实际总输出仍受 completion 额度约束。
+        if max(self.maxReasoningTokens, self.maxVisibleOutputTokens) > self.maxCompletionTokens:
+            raise ValueError("reasoning 或可见输出 token 预算不能超过 completion 预算")
         return self
 
 
@@ -1094,10 +1095,8 @@ class ExecutionStepRequest(_StrictModel):
             raise ValueError("执行 Step 与 Evidence bundle 必须属于同一 Run")
         if (self.artifactId is None) != (self.artifactRevision is None):
             raise ValueError("artifactId 与 artifactRevision 必须同时提供或同时省略")
-        if self.modelProfile.reasoningMode == "disabled":
-            if self.budget.maxReasoningTokens != 0:
-                raise ValueError("关闭 reasoning 的 Profile 必须使用零 reasoning 预算")
-        elif self.budget.maxReasoningTokens == 0:
+        # 推理模式独立控制开关，正额度不能把 disabled 隐式切换为 enabled。
+        if self.modelProfile.reasoningMode == "bounded" and self.budget.maxReasoningTokens == 0:
             raise ValueError("bounded reasoning Profile 必须具有正 reasoning 预算")
         if self.inputHash != canonical_execution_sha256(self.input):
             raise ValueError("inputHash 与完整 canonical input 不一致")

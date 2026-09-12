@@ -16,16 +16,57 @@ from inkforge_agents.service_auth import (
     install_service_auth_error_handler,
 )
 from inkforge_contracts.jwt_claims import ServiceScope
-from inkforge_core.service_auth import (
-    create_agent_callback_verifier,
-    create_core_request_signer,
-)
 from inkforge_service_auth import (
     RedisReplayStore,
     ServiceAuthorizationError,
     ServiceTokenSigner,
+    ServiceTokenVerifier,
     canonical_json_body,
 )
+
+
+# 使用协议对端夹具验证 Agent。Java Core 的实际签名器由 service-auth-java 跨语言 golden 测试覆盖。
+def create_core_request_signer(*, private_key_path: Path, kid: str) -> ServiceTokenSigner:
+    return ServiceTokenSigner.from_pkcs8_file(
+        private_key_path,
+        issuer="core-api",
+        subject="core-api",
+        audience="agent-service",
+        kid=kid,
+        allowed_scopes=frozenset(
+            {
+                ServiceScope.AGENT_RUN,
+                ServiceScope.AGENT_CANCEL,
+                ServiceScope.AGENT_DEBUG_READ,
+                ServiceScope.VIDEO_RENDER,
+            }
+        ),
+    )
+
+
+def create_agent_callback_verifier(
+    *,
+    jwks_path: Path,
+    replay_store: RedisReplayStore,
+) -> ServiceTokenVerifier:
+    return ServiceTokenVerifier.from_jwks_file(
+        jwks_path,
+        expected_issuer="agent-service",
+        expected_subject="agent-service",
+        audience="core-api",
+        replay_store=replay_store,
+        allowed_scopes=frozenset(
+            scope
+            for scope in ServiceScope
+            if scope
+            not in {
+                ServiceScope.AGENT_RUN,
+                ServiceScope.AGENT_CANCEL,
+                ServiceScope.AGENT_DEBUG_READ,
+                ServiceScope.VIDEO_RENDER,
+            }
+        ),
+    )
 
 
 class DirectionRedis:
@@ -65,9 +106,7 @@ def _write_pair(directory: Path, stem: str, kid: str) -> tuple[Path, Path]:
                     {
                         "kty": "OKP",
                         "crv": "Ed25519",
-                        "x": base64.urlsafe_b64encode(public_bytes)
-                        .rstrip(b"=")
-                        .decode("ascii"),
+                        "x": base64.urlsafe_b64encode(public_bytes).rstrip(b"=").decode("ascii"),
                         "kid": kid,
                         "use": "sig",
                         "alg": "EdDSA",
@@ -149,21 +188,14 @@ async def test_core_to_agent_and_agent_to_core_use_independent_keys(tmp_path: Pa
 
 def test_service_wrappers_hide_generic_auth_types_and_declare_public_surface() -> None:
     import inkforge_agents.service_auth as agent_auth
-    import inkforge_core.service_auth as core_auth
 
-    assert core_auth.__all__ == [
-        "create_agent_callback_verifier",
-        "create_core_request_signer",
-        "install_service_auth_error_handler",
-    ]
     assert agent_auth.__all__ == [
         "create_agent_callback_signer",
         "create_core_request_verifier",
         "install_service_auth_error_handler",
     ]
-    for module in (core_auth, agent_auth):
-        assert not hasattr(module, "ServiceTokenSigner")
-        assert not hasattr(module, "ServiceTokenVerifier")
+    assert not hasattr(agent_auth, "ServiceTokenSigner")
+    assert not hasattr(agent_auth, "ServiceTokenVerifier")
 
 
 @pytest.mark.asyncio

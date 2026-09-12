@@ -18,5 +18,5 @@ if [ -f "$BACKUP_DIR/uploads.tar.gz" ]; then
   tar -tzf "$BACKUP_DIR/uploads.tar.gz" >/dev/null
 fi
 
-DATABASE_URL="$VERIFY_DATABASE_URL" scripts/schema_fingerprint.sh
+DATABASE_URL="$VERIFY_DATABASE_URL" sh scripts/schema_fingerprint.sh
 echo "独立验证库恢复检查通过"

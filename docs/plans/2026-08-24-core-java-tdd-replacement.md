@@ -1,5 +1,9 @@
 # Core Java 单体替换与 TDD 实施计划
 
+当前适用性：本文记录首次 Java 替换阶段。迁移期 Python Core／CLI 与双实现对照已由
+[2026-09-12 退役规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md) 接管；
+当前接口维护与回退依据 ADR-004 和 Java 发布手册，下文历史证据不代表本次清理已发布。
+
 状态：已批准，实施中
 
 基线提交：`c9afc95`

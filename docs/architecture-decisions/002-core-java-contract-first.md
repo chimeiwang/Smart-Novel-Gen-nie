@@ -4,6 +4,9 @@
 
 状态：已接受
 
+当前适用性：本文保留迁移期历史决策。Python Core 契约来源与双实现差异测试要求已由
+[ADR-004](004-java-only-core-contract.md) 取代；契约优先及独立行为证据的要求继续有效。
+
 ## 背景
 
 当前 Web、Python Agent、Python CLI、数据库和运维脚本都依赖 FastAPI Core 的具体行为。只按业务名称

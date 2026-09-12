@@ -281,6 +281,8 @@ class _Store:
         roles = {
             "reviewer.chapter_draft_consistency.v1": "consistency",
             "reviewer.chapter_draft_editorial.v1": "editorial",
+            "reviewer.chapter_draft_consistency.v2": "consistency",
+            "reviewer.chapter_draft_editorial.v2": "editorial",
         }
         role = roles.get(profile_key) if isinstance(profile_key, str) else None
         key = payload.get("idempotencyKey")

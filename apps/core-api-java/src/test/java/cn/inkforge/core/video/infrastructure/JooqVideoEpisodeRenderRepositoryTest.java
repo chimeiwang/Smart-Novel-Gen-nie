@@ -49,7 +49,6 @@ class JooqVideoEpisodeRenderRepositoryTest {
     private static JooqVideoEpisodeProductionRepository production;
     private static JooqVideoEpisodeProductionRepository liveProduction;
     private static JooqVideoEpisodeRenderRepository renders;
-    private static JooqVideoRenderRepository legacyRenders;
     private String userId;
     private String novelId;
     private String projectId;
@@ -103,7 +102,6 @@ class JooqVideoEpisodeRenderRepositoryTest {
                 true,
                 true);
         renders = new JooqVideoEpisodeRenderRepository(database, ids, clock, JSON);
-        legacyRenders = new JooqVideoRenderRepository(database, ids, clock, JSON);
     }
 
     @AfterAll
@@ -210,7 +208,6 @@ class JooqVideoEpisodeRenderRepositoryTest {
 
         assertThat(replay.path("id").asText()).isEqualTo(created.path("id").asText());
         assertThat(created.path("inputSnapshot")).isEqualTo(fixture.inputSnapshot());
-        assertThat(legacyRenders.claimDue(10)).isEmpty();
         assertThat(renders.claimDue(10))
                 .singleElement()
                 .satisfies(claim -> {

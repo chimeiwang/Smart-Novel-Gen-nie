@@ -4,10 +4,5 @@ package cn.inkforge.core.video.application;
 public interface VideoRenderSimulator {
     boolean available();
 
-    ArchivedVideoRender render(VideoRenderClaim claim);
-
-    /** 独立剧集分支复用同一 FFmpeg 模拟器，但保持原生 episode/baseline 身份。 */
-    default ArchivedVideoRender render(VideoEpisodeRenderClaim claim) {
-        throw new UnsupportedOperationException("当前模拟器不支持独立剧集任务");
-    }
+    ArchivedVideoRender render(VideoEpisodeRenderClaim claim);
 }

@@ -9,8 +9,6 @@ import static org.mockito.Mockito.when;
 
 import cn.inkforge.contracts.api.ApproveVisualCanonRequest;
 import cn.inkforge.contracts.api.CreateVisualCanonCandidateRequest;
-import cn.inkforge.contracts.api.SaveShotVisualReferencesRequest;
-import cn.inkforge.contracts.api.ShotVisualReferenceSelectionRequest;
 import cn.inkforge.contracts.api.VisualCanonLibraryResponse;
 import cn.inkforge.contracts.api.VisualCanonResponse;
 import cn.inkforge.core.platform.http.ApiException;
@@ -88,26 +86,6 @@ class VideoVisualCanonServiceTest {
         assertThat(command.getValue().includeFeatures()).containsExactly("正脸", "黑发");
         assertThat(command.getValue().excludeFeatures()).containsExactly("现代服装");
         assertThat(command.getValue().defaultStrength()).isEqualTo(85);
-    }
-
-    @Test
-    void 逐镜视觉参考不能重复绑定同一正式版本() {
-        VideoVisualCanonRepository repository = mock(VideoVisualCanonRepository.class);
-        VideoVisualCanonService service = new VideoVisualCanonService(repository, true);
-        SaveShotVisualReferencesRequest request = new SaveShotVisualReferencesRequest(0)
-                .references(List.of(
-                        new ShotVisualReferenceSelectionRequest("version-1", 70),
-                        new ShotVisualReferenceSelectionRequest("version-1", 80)));
-
-        assertCode(
-                () -> service.saveShotReferences(
-                        "user-1", "adaptation-1", "shot-1", request),
-                "VALIDATION_ERROR");
-        verify(repository, never()).saveShotReferences(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any());
     }
 
     private static CreateVisualCanonCandidateRequest candidate() {

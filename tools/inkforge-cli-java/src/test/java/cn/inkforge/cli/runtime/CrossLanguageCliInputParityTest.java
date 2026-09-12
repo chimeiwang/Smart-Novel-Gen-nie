@@ -19,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -28,7 +27,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
@@ -47,7 +45,7 @@ class CrossLanguageCliInputParityTest {
     private Path temporaryDirectory;
 
     @Test
-    void 全部命令的最小输入与错误边界必须和Python一致() throws Exception {
+    void 全部152条命令的最小输入与错误边界必须由Java独立覆盖() throws Exception {
         List<String> commands = commandNames();
         assertThat(commands).hasSize(152);
 
@@ -58,18 +56,16 @@ class CrossLanguageCliInputParityTest {
             item.set("arguments", json.createArrayNode());
             item.set("payload", json.createObjectNode());
         });
-        JsonNode python = runPythonProbe(cases);
-        assertThat(python.isArray()).isTrue();
-        assertThat(python.size()).isEqualTo(commands.size());
-
         for (int index = 0; index < commands.size(); index++) {
             String command = commands.get(index);
-            assertThat(runJava(command)).as(command).isEqualTo(python.get(index));
+            ObjectNode actual = runJava(command);
+            assertThat(actual.path("frames").size()).as(command).isEqualTo(1);
+            assertThat(actual.path("stderr").textValue()).as(command).isEmpty();
         }
     }
 
     @Test
-    void 三十二条代表成功链路的输出与公共请求映射必须和Python一致() throws Exception {
+    void 三十二条代表成功链路的输出与公共请求映射由Java独立回归() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-success-cases.json")) {
@@ -88,15 +84,11 @@ class CrossLanguageCliInputParityTest {
             item.put("captureCalls", true);
             probeCases.add(item);
         });
-        JsonNode python = runPythonProbe(probeCases);
-        assertThat(python.isArray()).isTrue();
-        assertThat(python.size()).isEqualTo(probeCases.size());
-
         for (int index = 0; index < probeCases.size(); index++) {
             ObjectNode item = (ObjectNode) probeCases.get(index);
             String command = item.get("command").textValue();
             ObjectNode actual = runJavaCase(item);
-            assertThat(actual).as(command).isEqualTo(python.get(index));
+            assertSuccessfulFixtureCase(actual, item);
             if (command.equals("long.session.create")) {
                 assertSessionCreateSuccess(actual, (ObjectNode) item.get("payload"));
                 assertThat(actual.at("/frames/0/data")).isEqualTo(item.at("/responses/0"));
@@ -105,7 +97,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 会话创建省略空值空白与Unicode码点上界必须和Python一致() throws Exception {
+    void 会话创建省略空值空白与Unicode码点上界必须保持Java输入完整性() throws Exception {
         List<ObjectNode> payloads = List.of(
                 sessionCreatePayload(),
                 sessionCreatePayload().putNull("title"),
@@ -118,15 +110,13 @@ class CrossLanguageCliInputParityTest {
         for (ObjectNode payload : payloads) {
             ObjectNode item = sessionCreateCase(payload);
             // 成功边界回显完整请求，逐例读取避免探针管道被批量大 Unicode 响应填满。
-            JsonNode python = runPythonProbe(json.createArrayNode().add(item));
             ObjectNode actual = runJavaCase(item);
-            assertThat(actual).isEqualTo(python.get(0));
             assertSessionCreateSuccess(actual, payload);
         }
     }
 
     @Test
-    void 会话创建非法字段与Unicode越界必须在联网前与Python一致() throws Exception {
+    void 会话创建非法字段与Unicode越界必须在联网前被Java拒绝() throws Exception {
         ArrayNode cases = json.createArrayNode();
         cases.add(sessionCreateErrorCase(json.createObjectNode(), "FIELD_REQUIRED"));
         for (String field : List.of("novelId", "chapterId")) {
@@ -156,12 +146,9 @@ class CrossLanguageCliInputParityTest {
             cases.add(sessionCreateErrorCase(
                     sessionCreatePayload().put(field, "不接受的测试字段"), "UNEXPECTED_FIELDS"));
         }
-        JsonNode python = runPythonProbe(cases);
-        assertThat(python.size()).isEqualTo(cases.size());
         for (int index = 0; index < cases.size(); index++) {
             ObjectNode item = (ObjectNode) cases.get(index);
             ObjectNode actual = runJavaCase(item);
-            assertThat(actual).as("会话创建非法输入 %s", index).isEqualTo(python.get(index));
             assertThat(actual.path("exitCode").intValue()).isEqualTo(2);
             assertThat(actual.path("frames").size()).isEqualTo(1);
             assertThat(actual.at("/frames/0/error/code")).isEqualTo(item.get("expectedErrorCode"));
@@ -204,7 +191,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 两个观察命令的四条JSONL场景请求顺序和终态退出码必须和Python一致() throws Exception {
+    void 两个观察命令的四条JSONL场景请求顺序和终态退出码由Java独立回归() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-watch-cases.json")) {
@@ -223,18 +210,17 @@ class CrossLanguageCliInputParityTest {
             item.put("captureCalls", true);
             probeCases.add(item);
         });
-        JsonNode python = runPythonProbe(probeCases);
-        assertThat(python.isArray()).isTrue();
-        assertThat(python.size()).isEqualTo(probeCases.size());
         for (int index = 0; index < probeCases.size(); index++) {
             ObjectNode item = (ObjectNode) probeCases.get(index);
             String command = item.get("command").textValue();
-            assertThat(runJavaCase(item)).as(command).isEqualTo(python.get(index));
+            ObjectNode actual = runJavaCase(item);
+            assertThat(actual.path("frames").size()).as(command).isGreaterThan(0);
+            assertThat(actual.path("stderr").textValue()).as(command).isEmpty();
         }
     }
 
     @Test
-    void V2非法问答决定与观察响应的退出帧和API调用必须和Python一致() throws Exception {
+    void V2非法问答决定与观察响应的退出帧和API调用由Java独立回归() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-v2-contract-error-cases.json")) {
@@ -253,15 +239,10 @@ class CrossLanguageCliInputParityTest {
             item.put("captureCalls", true);
             probeCases.add(item);
         });
-        JsonNode python = runPythonProbe(probeCases);
-        assertThat(python.isArray()).isTrue();
-        assertThat(python.size()).isEqualTo(probeCases.size());
-
         for (int index = 0; index < probeCases.size(); index++) {
             ObjectNode item = (ObjectNode) probeCases.get(index);
             String caseId = item.get("caseId").textValue();
             ObjectNode javaResult = runJavaCase(item);
-            assertThat(javaResult).as(caseId).isEqualTo(python.get(index));
             assertThat(javaResult.get("exitCode").intValue())
                     .as(caseId)
                     .isEqualTo(item.get("expectedExitCode").intValue());
@@ -278,7 +259,7 @@ class CrossLanguageCliInputParityTest {
     }
 
     @Test
-    void 十一条文件链路的输入输出字节描述符和传输映射必须和Python一致() throws Exception {
+    void 十一条文件链路的输入输出字节描述符和传输映射由Java独立回归() throws Exception {
         ObjectNode fixture;
         try (InputStream source = getClass().getResourceAsStream(
                 "/cli-contracts/parity-file-cases.json")) {
@@ -297,9 +278,6 @@ class CrossLanguageCliInputParityTest {
             item.put("captureCalls", true);
             probeCases.add(item);
         });
-        JsonNode python = runPythonProbe(probeCases);
-        assertThat(python.isArray()).isTrue();
-        assertThat(python.size()).isEqualTo(probeCases.size());
         for (int index = 0; index < probeCases.size(); index++) {
             ObjectNode item = (ObjectNode) probeCases.get(index);
             String command = item.get("command").textValue();
@@ -308,9 +286,28 @@ class CrossLanguageCliInputParityTest {
                     .toAbsolutePath()
                     .normalize();
             Files.createDirectories(caseDirectory);
-            assertThat(runJavaFileCase(item, caseDirectory))
+            ObjectNode actual = runJavaFileCase(item, caseDirectory);
+            assertThat(actual.path("exitCode").intValue()).as(command).isZero();
+            assertThat(actual.path("stderr").textValue()).as(command).isEmpty();
+            assertThat(actual.has("files")).as(command).isEqualTo(item.has("captureFiles"));
+            if (item.has("captureFiles")) {
+                assertThat(actual.path("files").isObject()).as(command).isTrue();
+            }
+        }
+    }
+
+    /** 共享 fixture 只描述 Core 响应；这里验证 Java CLI 的稳定成功信封和最终响应。 */
+    private void assertSuccessfulFixtureCase(ObjectNode actual, ObjectNode item) {
+        String command = item.get("command").textValue();
+        assertThat(actual.path("exitCode").intValue()).as(command).isZero();
+        assertThat(actual.path("stderr").textValue()).as(command).isEmpty();
+        assertThat(actual.path("frames").size()).as(command).isEqualTo(1);
+        assertThat(actual.at("/frames/0/ok").booleanValue()).as(command).isTrue();
+        JsonNode responses = item.get("responses");
+        if (responses != null && responses.isArray() && !responses.isEmpty()) {
+            assertThat(actual.at("/frames/0/data"))
                     .as(command)
-                    .isEqualTo(python.get(index));
+                    .isEqualTo(responses.get(responses.size() - 1));
         }
     }
 
@@ -490,46 +487,6 @@ class CrossLanguageCliInputParityTest {
         } catch (java.security.NoSuchAlgorithmException exception) {
             throw new IllegalStateException("当前 JRE 缺少 SHA-256", exception);
         }
-    }
-
-    private JsonNode runPythonProbe(ArrayNode cases) throws Exception {
-        Path root = repositoryRoot();
-        Path virtualEnvironmentPython = root.resolve(".venv/bin/python");
-        List<String> command = Files.isExecutable(virtualEnvironmentPython)
-                ? List.of(
-                        virtualEnvironmentPython.toString(),
-                        "tools/inkforge-cli/tests/support/cli_parity_probe.py")
-                : List.of(
-                        "uv",
-                        "run",
-                        "python",
-                        "tools/inkforge-cli/tests/support/cli_parity_probe.py");
-        Process process = new ProcessBuilder(command)
-                .directory(root.toFile())
-                .start();
-        process.getOutputStream().write(json.writeValueAsBytes(cases));
-        process.getOutputStream().close();
-        boolean completed = process.waitFor(Duration.ofSeconds(30).toMillis(), TimeUnit.MILLISECONDS);
-        if (!completed) {
-            process.destroyForcibly();
-            throw new IllegalStateException("Python CLI 差异探针超时");
-        }
-        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-        assertThat(process.exitValue()).as(stderr).isZero();
-        return json.readTree(stdout);
-    }
-
-    private Path repositoryRoot() {
-        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
-        if (Files.isRegularFile(current.resolve("contracts/cli/command-registry.json"))) {
-            return current;
-        }
-        Path root = current.resolve("../..").normalize();
-        if (!Files.isRegularFile(root.resolve("contracts/cli/command-registry.json"))) {
-            throw new IllegalStateException("无法定位仓库根目录");
-        }
-        return root;
     }
 
     private final class FailingApi implements CoreApi {

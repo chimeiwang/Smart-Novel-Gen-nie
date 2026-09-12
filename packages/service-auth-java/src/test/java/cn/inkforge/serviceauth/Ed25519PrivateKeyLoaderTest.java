@@ -45,7 +45,15 @@ class Ed25519PrivateKeyLoaderTest {
         Files.writeString(keyFile, pem(keyPair.getPrivate().getEncoded()), StandardCharsets.US_ASCII);
         ownerOnly(keyFile);
         Path link = temporaryDirectory.resolve("linked.pem");
-        Files.createSymbolicLink(link, keyFile);
+        try {
+            Files.createSymbolicLink(link, keyFile);
+        } catch (java.nio.file.FileSystemException exception) {
+            // Windows 普通用户可能没有创建符号链接权限；不把夹具创建失败当作加载器行为。
+            org.junit.jupiter.api.Assumptions.assumeFalse(
+                    System.getProperty("os.name").startsWith("Windows"),
+                    "当前 Windows 用户无法创建符号链接夹具");
+            throw exception;
+        }
 
         assertThatThrownBy(() -> Ed25519PrivateKeyLoader.fromPkcs8File(link))
                 .isInstanceOf(ServiceAuthException.class)

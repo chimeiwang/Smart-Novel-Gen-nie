@@ -17,7 +17,6 @@ public final class CommandCatalog {
             Set.of("schemaVersion", "source", "commands");
     private static final Set<String> COMMAND_FIELDS = Set.of(
             "name",
-            "pythonHandler",
             "inputMode",
             "outputMode",
             "fileOutput",
@@ -38,10 +37,12 @@ public final class CommandCatalog {
         JsonNode root = Objects.requireNonNull(json, "JSON 编解码器不能为空").readTree(source);
         requireObject(root, "CLI 命令基线顶层必须是对象");
         requireFields(root, ROOT_FIELDS, "CLI 命令基线字段不完整");
-        if (!"inkforge-cli-command-registry/1.0".equals(text(root, "schemaVersion"))) {
+        if (!"inkforge-cli-command-registry/2.0".equals(text(root, "schemaVersion"))) {
             throw new IllegalArgumentException("CLI 命令基线版本不受支持");
         }
-        text(root, "source");
+        if (!"tools/inkforge-cli-java".equals(text(root, "source"))) {
+            throw new IllegalArgumentException("CLI 命令基线来源不受支持");
+        }
         JsonNode commands = root.get("commands");
         if (commands == null || !commands.isArray()) {
             throw new IllegalArgumentException("CLI 命令列表无效");
@@ -79,7 +80,6 @@ public final class CommandCatalog {
                 nullableText(output, "mediaType"));
         return new CommandSpec(
                 text(value, "name"),
-                text(value, "pythonHandler"),
                 CommandSpec.InputMode.fromWire(text(value, "inputMode")),
                 CommandSpec.OutputMode.fromWire(text(value, "outputMode")),
                 fileOutput,

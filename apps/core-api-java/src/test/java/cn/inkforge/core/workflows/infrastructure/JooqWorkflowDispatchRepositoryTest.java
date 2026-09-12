@@ -212,8 +212,9 @@ class JooqWorkflowDispatchRepositoryTest {
     @Test
     void 解析模型已发生超额用量不能从外层总预算中消失() {
         IntentFixture fixture = budgetFixture("intent-budget-outer", 1, 1);
+        long overBudgetInputTokens = frozenRunMaxInputTokens(fixture) + 1;
         database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE \"runId\" = ? AND purpose = 'resolve_intent'",
-                json.writeValueAsString(Map.of("usageStatus", "partial", "inputTokens", 204001,
+                json.writeValueAsString(Map.of("usageStatus", "partial", "inputTokens", overBudgetInputTokens,
                         "providerAttempts", 1, "protocolCorrections", 0, "wallTimeMillis", 1000)), fixture.runId());
         assertThatThrownBy(() -> reserveIntentGeneration(fixture))
                 .isInstanceOfSatisfying(WorkflowExecutionRejectedException.class,
@@ -1165,6 +1166,14 @@ class JooqWorkflowDispatchRepositoryTest {
                 json.writeValueAsString(WorkflowCallbackValues.resolvedModelMap(resolved)), fixture.activeStepId());
         var coordinator = new WorkflowBillingCoordinator(new CuidV1Generator(CLOCK), json, registry);
         database.transactionResult(tx -> { coordinator.reserve(tx, fixture.runId(), fixture.activeStepId(), resolved, NOW); return null; });
+    }
+
+    private static long frozenRunMaxInputTokens(IntentFixture fixture) {
+        String budgetJson = database.dsl().fetchOne(
+                "SELECT \"budgetJson\" FROM public.\"WorkflowRun\" WHERE id = ?",
+                fixture.runId()).get("budgetJson", String.class);
+        Map<String, Object> budget = json.readValue(budgetJson, new TypeReference<>() {});
+        return ((Number) budget.get("maxInputTokens")).longValue();
     }
 
     private static void completeIntentResolverAndWait(IntentFixture fixture) {

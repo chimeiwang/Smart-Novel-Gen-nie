@@ -4,6 +4,9 @@
 
 ## 当前文档
 
+本次 Java-only 清理结果见 [2026-09-12 审计](audits/2026-09-12-java-only-core-retirement.md)，
+区分仓内回归、Windows 安装、受阻的 Compose 验证与未执行的生产发布。
+
 | 文档 | 用途 |
 | --- | --- |
 | [../AGENTS.md](../AGENTS.md) | 仓库级开发规则、边界、必读入口与验证要求 |
@@ -30,10 +33,11 @@
 | `specs/2026-09-04-personal-durable-agent-release-scope.md` | 个人项目信任模型、最小发布流程与退役企业控制面清单 |
 | `specs/2026-09-04-java-cli-operator-cutover.md` | macOS 两份 Operator Skill 的 Java CLI 实际入口、配置升级与验证 |
 | `specs/2026-09-04-durable-natural-language-entry.md` | 普通新消息、同 Run 澄清、草案返工的持久化与 Web/CLI 分流 |
-| `../tools/inkforge-cli-java/README.md` | Java CLI 构建、Skill 安装入口与 Python 对照范围 |
+| `../tools/inkforge-cli-java/README.md` | Java CLI 构建、Windows／macOS Skill 安装入口与受限授权 |
 | `DURABLE_AGENT_V2_ROLLOUT.md` | Durable Agent V2 人工迁移、contract 复验、allowlist canary 与回滚手册 |
-| `JAVA_CORE_CUTOVER.md` | Java Core 单服务生产切换、验证和历史 Python 回退手册 |
-| `architecture-decisions/001-003` | Java 技术栈、契约优先和生产单 Core 切换决策 |
+| `JAVA_CORE_CUTOVER.md` | Java Core 单服务发布、验证和 V2 兼容 Java 回退手册 |
+| `architecture-decisions/001-004` | Java 技术栈、契约优先、单 Core 切换与 Python 退役决策 |
+| `specs/2026-09-12-java-only-core-contract-and-python-retirement.md` | Java 唯一契约、Python Core／CLI 退役与 Windows Operator 切换 |
 | `specs/2026-08-08-novel-to-video-product-architecture.md` | 长篇小说视频制作系统的产品与架构基线 |
 | `specs/2026-08-08-novel-to-video-detailed-design.md` | 长篇小说视频制作系统的数据、接口、工作台与迁移详细设计 |
 | `specs/2026-08-17-video-preview-hardening.md` | 视频开发预览的数据库约束、结构守卫、生产关闭与真实并发验收 |
@@ -48,7 +52,7 @@
 | `specs/2026-09-09-video-v01-v02-implementation.md` | 已暂停的定妆与模拟单镜实施范围；未提交补丁待新设计审视 |
 | `plans/2026-09-09-video-product-release-plan.md` | 已被新设计取代的原 V0.1／V0.2 版本计划与估算 |
 | `specs/` | 后续需求 spec；先写 spec，再执行修改 |
-| `plans/2026-07-13-python-backend-rewrite-handoff.md` | Python 后端重构当前剩余任务与接手入口 |
+| `plans/2026-07-13-python-backend-rewrite-handoff.md` | 历史 Python 后端重构记录，非当前实施入口 |
 
 Agent Service 当前架构见 `../apps/agent-service/AGENTS.md`。
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
@@ -33,7 +34,7 @@ def test_ci_uses_current_node_python_and_openapi_gates() -> None:
         "npm run build",
         "uv run pytest",
         "uv run ruff check .",
-        "uv run mypy apps/core-api/src apps/agent-service/src "
+        "uv run mypy apps/agent-service/src "
         "packages/service-contracts/src packages/service-auth/src",
     ):
         assert command in source
@@ -117,7 +118,8 @@ def test_source_bundle_upload_is_sha_bound_atomic_and_pinned() -> None:
 
     assert "StrictHostKeyChecking=no" not in source
     assert "ssh-keyscan" not in source
-    assert SOURCE_UPLOAD_SCRIPT.stat().st_mode & 0o111
+    if os.name != "nt":
+        assert SOURCE_UPLOAD_SCRIPT.stat().st_mode & 0o111
 
 
 def test_image_upload_reuses_services_with_unchanged_build_inputs() -> None:
@@ -127,7 +129,6 @@ def test_image_upload_reuses_services_with_unchanged_build_inputs() -> None:
     for build_input in (
         "apps/web",
         "packages/api-client",
-        "apps/core-api",
         "apps/core-api-java",
         "apps/agent-service",
         "packages/service-auth",
@@ -146,11 +147,11 @@ def test_image_upload_reuses_services_with_unchanged_build_inputs() -> None:
     assert "复用构建输入未变化的服务器镜像" in source
 
 
-def test_api_generator_selects_uv_command_for_each_platform() -> None:
+def test_api_generator_consumes_canonical_contract_without_core_process() -> None:
     source = API_GENERATOR.read_text(encoding="utf-8")
 
-    assert 'process.platform === "win32"' in source
-    assert 'execFileSync(uvCommand, uvArgs' in source
+    assert "public-openapi.json" in source
+    assert "execFileSync" not in source
 
 
 def test_python_failures_are_published_to_the_workflow_summary() -> None:

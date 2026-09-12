@@ -95,6 +95,14 @@ class WorkflowStepBudgetTest {
     }
 
     @Test
+    void reasoning和可见输出是独立上限() {
+        WorkflowStepBudget independent = new WorkflowStepBudget(
+                1, 100, 100, 100, 100, 100, 0, 60, 0, 0);
+
+        assertThat(independent.maxCompletionTokens()).isEqualTo(100);
+    }
+
+    @Test
     void 取消和断流允许未知字段但不会把未知伪装成零() {
         WorkflowStepUsage unknown = new WorkflowStepUsage(
                 WorkflowUsageStatus.UNKNOWN,

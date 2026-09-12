@@ -369,12 +369,12 @@
         "profile": "review.chapter_draft.v1",
         "mode": "parallel",
         "reviewerProfiles": [
-          "reviewer.chapter_draft_consistency.v1",
-          "reviewer.chapter_draft_editorial.v1"
+          "reviewer.chapter_draft_consistency.v2",
+          "reviewer.chapter_draft_editorial.v2"
         ],
         "reviewerStepBudgetProfiles": {
-          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v2",
-          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v2"
+          "reviewer.chapter_draft_consistency.v2": "step_budget.long_serial.write_chapter.reviewer_consistency.v3",
+          "reviewer.chapter_draft_editorial.v2": "step_budget.long_serial.write_chapter.reviewer_editorial.v3"
         },
         "reviewerOutputSchema": "output.chapter_draft_review_report.v1",
         "rubricVersion": "rubric.chapter_draft.review.v1",
@@ -386,20 +386,20 @@
       },
       "applyHandler": "apply.chapter_draft.v1",
       "runBudgetProfile": {
-        "profile": "budget.long_serial.chapter_draft.v2",
+        "profile": "budget.long_serial.chapter_draft.v3",
         "maxModelCalls": 6,
         "maxInputTokens": 600000,
         "maxPromptCacheMissTokens": 600000,
-        "maxCompletionTokens": 40000,
-        "maxReasoningTokens": 16000,
-        "maxVisibleOutputTokens": 24000,
+        "maxCompletionTokens": 600000,
+        "maxReasoningTokens": 600000,
+        "maxVisibleOutputTokens": 600000,
         "maxCostMicros": 2000000,
         "maxWallClockSeconds": 900,
         "maxProtocolCorrectionSteps": 1,
         "maxProviderRetriesPerStep": 2
       },
       "lane": "creative",
-      "generatorStepBudgetProfile": "step_budget.long_serial.write_chapter.generator.v2"
+      "generatorStepBudgetProfile": "step_budget.long_serial.write_chapter.generator.v3"
     },
     {
       "key": "long_serial.rewrite_scene",
@@ -430,12 +430,12 @@
         "profile": "review.parallel_chapter.v1",
         "mode": "parallel",
         "reviewerProfiles": [
-          "reviewer.chapter_draft_consistency.v1",
-          "reviewer.chapter_draft_editorial.v1"
+          "reviewer.chapter_draft_consistency.v2",
+          "reviewer.chapter_draft_editorial.v2"
         ],
         "reviewerStepBudgetProfiles": {
-          "reviewer.chapter_draft_consistency.v1": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
-          "reviewer.chapter_draft_editorial.v1": "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
+          "reviewer.chapter_draft_consistency.v2": "step_budget.long_serial.write_chapter.reviewer_consistency.v1",
+          "reviewer.chapter_draft_editorial.v2": "step_budget.long_serial.write_chapter.reviewer_editorial.v1"
         },
         "reviewerOutputSchema": "output.chapter_draft_review_report.v1",
         "rubricVersion": "rubric.chapter_draft.review.v1",

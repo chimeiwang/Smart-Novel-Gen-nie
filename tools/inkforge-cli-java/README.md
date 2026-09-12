@@ -1,7 +1,11 @@
 # InkForge Java CLI
 
+当前入口（2026-09-12）：Python CLI 已退役；本机 Windows 两份 Operator 已切换固定 Java JAR，沿用 84 命令／
+五操作授权。macOS 原有 45 命令／三操作投影独立保留。下文旧日期、旧包哈希和“Windows 尚未验收”均为历史记录，
+本次真实测试及未验证项以 [Java-only 清理审计](../../docs/audits/2026-09-12-java-only-core-retirement.md) 为准。
+
 独立的 Java 21 命令行客户端，只访问 Core `/api/v1/**`；不直接调用 Agent、不连接数据库，不依赖 Spring Core。
-注册表为143个命令，含2026-09-10新增的20个独立分集／剧本命令，并已关闭3个旧章节改编启动命令；完整字段与 JSON/JSONL 规则见 `../inkforge-cli/README.md`。
+Java-owned 注册表当前为152个命令，含2026-09-10新增的20个独立分集／剧本命令，并已关闭3个旧章节改编启动命令；完整字段与 JSON/JSONL 规则见 `../../contracts/cli/`。
 
 ## 构建与直接运行
 
@@ -17,7 +21,7 @@ printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.w
 ```
 
 `auth.login` 只在真实 TTY 隐藏读取密码。macOS 使用 Keychain，Windows 使用 Credential Manager，无明文回退。
-上述直接入口提供143命令；使用 Operator Skill 时必须走下面的受限入口，不能用裸 CLI 扩大其授权范围。
+上述直接入口提供152个命令；使用 Operator Skill 时必须走下面的受限入口，不能用裸 CLI 扩大其授权范围。
 
 `long.session.create` 接收 `novelId/chapterId`、可选 `title/profile`，只映射现有 Core会话创建接口。
 它补齐新小说问答所需的首个会话，不修改 Agent、正文或数据库结构；完整示例与不确定结果对账见共享README。
@@ -45,6 +49,14 @@ Skill 结构检查和独立文档验收已通过，具体结果见
 
 仓内启动器位于 `operator/local/` 与 `operator/production/`。构建 JAR 后，在仓库根目录先备份已有 Skill，
 再安装对应启动器：
+
+Windows 固定 JAR 入口为 `operator/run.ps1` 与 `operator/configure.ps1`，第一个参数必须是 `local` 或
+`production`；脚本只把参数数组传给 `OperatorMain`，不调用 Python、uv 或裸 CLI：
+
+```powershell
+.\tools\inkforge-cli-java\operator\configure.ps1 -Mode local -RepositoryRoot $PWD
+'{"novelId":"n1"}' | .\tools\inkforge-cli-java\operator\run.ps1 local long.novel.get
+```
 
 ```bash
 cli_cutover_backup=$(mktemp -d /tmp/inkforge-skill-backup.XXXXXX)
@@ -116,7 +128,7 @@ printf '{}\n' | "$HOME/.codex/skills/inkforge-production-short-story-operator/sc
 ## 验证范围与兼容保留
 
 CLI 模块验证使用 `./mvnw -pl tools/inkforge-cli-java verify`，提交前还运行根目录完整 `./mvnw verify`。
-现有共享 fixture 直接比较 Python/Java 的143命令最小输入、错误信封、代表成功请求、文件字节及全部 watcher；
+现有共享 fixture 直接回归 Java 的152命令最小输入、错误信封、代表成功请求、文件字节及全部 watcher；
 Operator 的 JUnit 注入模拟 Core 与凭据，验证双环境绑定、配置升级、账号预检、允许集合、TTY、凭据和传输错误。
 另用真实 JAR/shell 进程验证隔离安装、无 Python/uv 启动、无 profile、未授权命令、origin 拒绝和包校验：
 
@@ -128,15 +140,14 @@ tools/inkforge-cli-java/operator/test-launchers.sh "$PWD" "$JAVA_HOME/bin/java"
 业务全链。另行完成的生产 `auth.whoami` 只证明 Java 入口、既有 Keychain 会话与真实身份接线；不能据此宣称
 真实写作业务、Agent V2 上线或 Windows 实机通过。测试结果记录在切换 spec。
 
-`tools/inkforge-cli` 的 Python 源码和差异测试继续保留为兼容对照。它不再是新版 macOS Skill 的执行链；
-保留 Python Agent、共享 Python 契约和旧 Core 回滚代码也不影响 Java CLI 独立运行。
+Python CLI 已退役，不是 Java CLI 的运行时依赖；Python Agent 和共享服务契约仍独立保留，不影响 Java CLI 运行。
 
 章节规划 V2 沿用 `long.agent.start` 的 `plan_chapter` 及既有观察/草案决定命令，完整输入示例、
 `waiting_user`/`completed` 区别、返工和禁止编辑字段见
 `../../docs/specs/2026-09-04-durable-chapter-planning.md`。这条链已通过本分支的隔离 Fake 验收，不代表服务器已启用。
 
 正文写作 V2 的本轮变更允许 `long.artifact.approve` 使用 `editedContent` 或 `editedContentFile` 采用完整
-用户编辑正文；命令仍为 125 个，Skill 仍为 45 个。详情必须先通过 `long.artifact.get` 的 `revision` 精确读取，
+用户编辑正文；普通 Java CLI 当前为152个命令，Windows Skill 为84个、macOS 投影为45个。详情必须先通过 `long.artifact.get` 的 `revision` 精确读取，
 决定继续使用 `expectedRevision`；规划不能直接编辑，选区仍只接受 replacement。完整示例、类型限制和
 Skill 更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md` 的正文编辑专节。
 本轮完整验证后已重新安装本机两份固定 JAR，SHA-256 均为
@@ -147,7 +158,7 @@ Skill 更新清单见 `../../docs/specs/2026-09-01-durable-agent-v2-operator-ski
 ## 自然入口与 Skill 说明更新
 
 当前分支的 `long.agent.start` 增加 `inputMode=natural`，`long.task.resume` 增加明确的
-`inputMode=clarification`；命令总数仍为 125，完整 JSON 示例及澄清 JSONL 见 `../inkforge-cli/README.md`
+`inputMode=clarification`；普通 Java CLI 当前为152个命令，完整 JSON 示例及澄清 JSONL 见 `../../contracts/cli/`
 的自然请求专节。自然消息新建 Run，回答绑定当前 `decisionStepId/expectedRevision`；草案返工仍走
 `long.artifact.revise`。V1 显式 resume 保留，Python Core 回滚镜像拒绝新自然/澄清请求。
 
@@ -186,9 +197,9 @@ Java CLI 的输入映射、watcher 与双环境 Operator 拒绝模式有定向 J
 2026-09-05 本批补接 `create_lore`、`revise_lore`、`create_outline`、`revise_outline`、
 `manage_foreshadowing`，同时补回已实现但 CLI 白名单遗漏的 `rewrite_scene`。新增的是 6 个可选 operation 值，
 命令仍为 125 个，参数形状不变。五项任务使用既有 novel/outline_node/chapter scope，公共 target 始终为当前章；
-完整矩阵与 JSON 示例见 `../inkforge-cli/README.md` 的“结构化资料的显式启动”。
+完整矩阵与 JSON 示例见 `../../contracts/cli/` 中的共享 fixture。
 
-Java 与 Python 对照 CLI 同步校验范围、原样发送指令和 scope，不猜测来源或直接访问 Agent。五项的运行、
+Java CLI 回归校验范围、原样发送指令和 scope，不猜测来源或直接访问 Agent。五项的运行、
 候选与采用均由 Core 组织；五项显式/自然入口与最多一次自动完整返工现已接通，该阶段使仓内 Catalog 达到 12/21，
 当前加上中短篇四项与一致性终检为 17/21。
 公共 HTTP 接线定向验证通过。本批全量门禁及实际跨进程/供应商验收见结构化资料规格，不能据此宣称生产已开放。

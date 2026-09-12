@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -106,8 +107,7 @@ def test_deploy_scripts_contain_no_destructive_or_dynamic_trust_commands() -> No
         assert forbidden not in source
 
     assert "退出码：${original_status}）" in DEPLOY.read_text(encoding="utf-8")
-    assert "schema_profile_for_settings" in DEPLOY.read_text(encoding="utf-8")
-    assert "profile=schema_profile_for_settings(settings)" in DEPLOY.read_text(encoding="utf-8")
+    assert "verify-running-core-schema.sh" in DEPLOY.read_text(encoding="utf-8")
 
 
 def test_backup_files_default_to_private_permissions() -> None:
@@ -196,18 +196,16 @@ def test_quarantine_clear_rejects_waitaof_zero(tmp_path: Path) -> None:
     assert "拒绝解除 quarantine" in result.stderr
 
 
-def test_rollback_drill_normalizes_schema_fingerprints_across_contract_versions() -> None:
+def test_rollback_drill_preserves_full_java_schema_validation() -> None:
     source = ROLLBACK_DRILL.read_text(encoding="utf-8")
 
-    assert 'getattr(db_session, "schema_profile_for_settings"' in source
-    assert "inspect.signature(guard.verify_live_schema).parameters" in source
-    assert 'actual["contractVersion"] = 1' in source
-    assert 'table.pop("checkConstraints", None)' in source
-    assert "guard.canonical_fingerprint(actual)" in source
+    assert "verify-running-core-schema.sh" in source
+    assert "compatibility-fingerprint-v1" not in source
+    assert "cn.inkforge.durable-route-all" in source
 
 
 def _write_executable(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
+    path.write_text(content, encoding="utf-8", newline="\n")
     path.chmod(0o755)
 
 
@@ -348,8 +346,12 @@ def _run_source_upload(
 ) -> tuple[subprocess.CompletedProcess[str], str, Path]:
     bin_dir = tmp_path / "source-bin"
     runner_temp = tmp_path / "source-runner"
+    source_root = tmp_path / "source-checkout"
     bin_dir.mkdir()
     runner_temp.mkdir()
+    # upload-deploy-source.sh 必须拒绝非 Git checkout；测试使用隔离的最小
+    # checkout，避免依赖当前测试工作树的 .git 文件/目录形态。
+    (source_root / ".git").mkdir(parents=True)
     known_hosts = tmp_path / "source-known-hosts"
     known_hosts.write_text("example ssh-ed25519 fixture\n", encoding="utf-8")
     log_path = tmp_path / "source-upload.log"
@@ -403,6 +405,7 @@ def _run_source_upload(
         "SSH_KEY_PATH": _posix_path(tmp_path / "source-key"),
         "SSH_KNOWN_HOSTS_FILE": _posix_path(known_hosts),
         "DEPLOY_SHA": deploy_sha,
+        "DEPLOY_SOURCE_ROOT": _posix_path(source_root),
         "RUNNER_TEMP": _posix_path(runner_temp),
         "SOURCE_UPLOAD_LOG": _posix_path(log_path),
         "SOURCE_UPLOAD_COUNTER": _posix_path(counter_path),
@@ -490,7 +493,7 @@ def _run_deploy(
     active_v2_run_count: int = 0,
     running_core_route_mode: str = "off",
     new_core_runtime: str = "java",
-    previous_core_runtime: str = "",
+    previous_core_runtime: str = "java",
     deploy_sha: str = "new-tag",
     deploy_bundle: bool = False,
     flock_status: int = 0,
@@ -518,10 +521,6 @@ def _run_deploy(
     (app_dir / "infra" / "compose.yaml").write_text(
         "services:\n  core-api:\n    extra_hosts:\n      - host.docker.internal:host-gateway\n",
         encoding="utf-8",
-    )
-    shutil.copy2(
-        ROOT / "infra" / "compose.python-core-rollback.yaml",
-        app_dir / "infra" / "compose.python-core-rollback.yaml",
     )
     for key_file in (
         "core-to-agent-private.pem",
@@ -640,6 +639,9 @@ def _run_deploy(
         'printf \'flock %s\\n\' "$*" >> "$FAKE_DOCKER_LOG"\n'
         'exit "$FAKE_FLOCK_STATUS"\n',
     )
+    # Windows 的 python3.exe 是 Microsoft Store 占位符；Git Bash 中会被
+    # PATH 优先命中并返回失败。用真实 Python 转发部署脚本的内嵌校验。
+    _write_executable(bin_dir / "python3", "#!/bin/sh\nexec python \"$@\"\n")
     log_path = tmp_path / "docker.log"
     agent_counter_path = tmp_path / "agent-ready-counter"
     migration_state_path = tmp_path / "migration-state"
@@ -647,15 +649,19 @@ def _run_deploy(
     snapshot_state_dir = tmp_path / "snapshot-state"
     snapshot_state_dir.mkdir()
     # 必须使用与生产脚本相同的固定目录，SHA 让并行测试互不覆盖。
-    bundle_root = Path("/tmp")  # noqa: S108
-    bundle_path = bundle_root / f"inkforge-deploy-{deploy_sha}.bundle"
+    # Git Bash 将 `/tmp` 映射到 Windows 的 tempfile 目录；PowerShell 的
+    # `Path("/tmp")` 则可能解析为当前盘根目录，测试文件必须写入前者。
+    bundle_path = Path(tempfile.gettempdir()) / f"inkforge-deploy-{deploy_sha}.bundle"
+    bundle_posix_path = (
+        f"/tmp/inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108 - Git Bash 的固定 bundle 目录契约
+    )
     if deploy_bundle:
         bundle_path.write_text("bundle fixture", encoding="utf-8")
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
         "DEPLOY_SHA": deploy_sha,
-        "DEPLOY_BUNDLE_PATH": bundle_path.as_posix() if deploy_bundle else "",
+        "DEPLOY_BUNDLE_PATH": bundle_posix_path if deploy_bundle else "",
         "INKFORGE_IMAGE_TAG": "new-tag",
         "FAKE_DOCKER_LOG": _posix_path(log_path),
         "FAKE_NEW_TAG": "new-tag",
@@ -727,8 +733,10 @@ def test_deploy_fetches_from_bundle_without_contacting_origin_and_cleans_file(
 ) -> None:
     # SHA-1 只用于生成 Git 风格测试标识，不承担密码学安全职责。
     deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
-    bundle_root = Path("/tmp")  # noqa: S108
-    bundle_path = bundle_root / f"inkforge-deploy-{deploy_sha}.bundle"
+    bundle_path = Path(tempfile.gettempdir()) / f"inkforge-deploy-{deploy_sha}.bundle"
+    bundle_posix_path = (
+        f"/tmp/inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108 - Git Bash 的固定 bundle 目录契约
+    )
     try:
         result, log = _run_deploy(
             tmp_path,
@@ -738,7 +746,7 @@ def test_deploy_fetches_from_bundle_without_contacting_origin_and_cleans_file(
         )
 
         assert result.returncode == 0, result.stderr
-        assert f"fetch {bundle_path} HEAD" in log
+        assert f"fetch {bundle_posix_path} HEAD" in log
         assert "fetch --depth=1 origin" not in log
         assert bundle_path.exists() is False
     finally:
@@ -813,7 +821,7 @@ def test_current_running_bundle_is_snapshotted_by_exact_image_id_before_switch(
         )
         assert matching_index < first_switch_index
 
-    assert "已冻结当前生产三服务精确回滚快照：rollback-new-tag（python）" in result.stdout
+    assert "已冻结当前生产三服务精确回滚快照：rollback-new-tag（java）" in result.stdout
 
 
 def test_existing_conflicting_rollback_snapshot_is_not_overwritten(
@@ -906,8 +914,8 @@ def test_deployment_requires_java_core_label_and_uses_java_schema_guard() -> Non
     assert "cn.inkforge.core.runtime" in source
     assert "新 Core 镜像不是 Java runtime" in source
     assert "verify-running-core-schema.sh" in source
-    assert "compose_python_rollback" in source
-    assert "compose.python-core-rollback.yaml" in source
+    assert "compose_python_rollback" not in source
+    assert "compose.python-core-rollback.yaml" not in source
 
 
 def test_non_java_new_core_is_rejected_before_version_switch(tmp_path: Path) -> None:
@@ -964,12 +972,8 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
         "tag=new-tag",
         "tag=rollback-new-tag",
     ]
-    assert (
-        " compose --env-file .env -f infra/compose.yaml "
-        "-f infra/compose.python-core-rollback.yaml ps"
-    ) in log
-    assert "-f infra/compose.python-core-rollback.yaml" in up_lines[1]
-    assert " exec -T core-api python -c" in log
+    assert " compose --env-file .env -f infra/compose.yaml ps" in log
+    assert "schema-probe container-core-api" in log
     assert "新版本部署失败，旧版本已恢复" in result.stdout
     assert "生产编排已启动" not in result.stdout
 
@@ -1183,7 +1187,7 @@ def test_rejected_overlapping_deploy_does_not_delete_active_bundle(
     tmp_path: Path,
 ) -> None:
     deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
-    bundle_path = Path("/tmp") / f"inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108
+    bundle_path = Path(tempfile.gettempdir()) / f"inkforge-deploy-{deploy_sha}.bundle"
     try:
         result, log = _run_deploy(
             tmp_path,
@@ -1240,10 +1244,11 @@ def test_post_durable_schema_rejects_v1_only_python_rollback_target(
         tmp_path,
         previous_state="valid",
         durable_migration_state="migrated-empty-v2",
+        previous_core_runtime="",
     )
 
     assert result.returncode != 0
-    assert "V1-only Python Core" in result.stderr
+    assert "上一 Core 镜像 runtime 标签无法识别" in result.stderr
     assert _full_stack_up_lines(log) == []
 
 

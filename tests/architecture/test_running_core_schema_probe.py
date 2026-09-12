@@ -20,6 +20,14 @@ POSIX_SHELL = shutil.which("sh") or str(
     Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "sh.exe"
 )
 
+
+def _posix_path(path: Path) -> str:
+    resolved = path.resolve()
+    if os.name != "nt":
+        return resolved.as_posix()
+    return f"/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}"
+
+
 FAKE_DOCKER = r'''#!/usr/bin/env python3
 import json
 import os
@@ -121,8 +129,11 @@ if arguments[:1] == ["run"]:
         "DATABASE_URL", "VIDEO_PREVIEW_ENABLED", "PHONE_AUTH_ENABLED", "PHONE_AUTH_SEND_ENABLED"
     }
     assert "schema-probe-password-must-not-leak" in environment["DATABASE_URL"]
-    assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(env_path.parent.stat().st_mode) == 0o700
+    if os.name != "nt":
+        # Windows 不保留 Unix 执行位；真实权限由脚本创建时的 chmod 负责，
+        # POSIX 环境才在夹具中精确核对数值。
+        assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(env_path.parent.stat().st_mode) == 0o700
     (state_dir / "environment-check.json").write_text(json.dumps({
         "keys": sorted(environment),
         "envPath": str(env_path),
@@ -177,17 +188,42 @@ def run_probe(
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]], Path]:
     binary_dir = tmp_path / "bin"
     binary_dir.mkdir()
-    fake_docker = binary_dir / "docker"
-    fake_docker.write_text(
-        FAKE_DOCKER.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1),
+    python_path = _posix_path(Path(sys.executable))
+    python_wrapper = binary_dir / "python3"
+    python_wrapper.write_text(
+        "#!/bin/sh\n"
+        # Git Bash 会把 PATH 转成 POSIX 形式，但 Windows Python 的
+        # subprocess.CreateProcess 需要 Windows 形式才能找到 docker.exe。
+        'if command -v cygpath >/dev/null 2>&1; then '
+        'PATH="$(cygpath -wp "$PATH")"; export PATH; fi\n'
+        f'exec "{python_path}" "$@"\n',
         encoding="utf-8",
+        newline="\n",
     )
-    fake_docker.chmod(0o700)
+    python_wrapper.chmod(0o700)
+    if os.name == "nt":
+        # 真实探针在 Windows Python 中通过 CreateProcess 直接调用 docker，
+        # 因而不能使用无扩展名的 shell 夹具。复制当前解释器作为 docker.exe，
+        # 再让 cwd 下的 inspect/run/rm/ps 文件承接 Python 的脚本参数。
+        shutil.copy2(Path(sys.executable), binary_dir / "docker.exe")
+        fake_docker_source = FAKE_DOCKER.replace(
+            "arguments = sys.argv[1:]",
+            "arguments = [Path(sys.argv[0]).name, *sys.argv[1:]]",
+            1,
+        )
+        for command_name in ("inspect", "run", "rm", "ps"):
+            (tmp_path / command_name).write_text(fake_docker_source, encoding="utf-8")
+    else:
+        # POSIX 直接执行脚本；无须把 docker 子命令伪装成 Python 脚本名。
+        docker_wrapper = binary_dir / "docker"
+        docker_wrapper.write_text(FAKE_DOCKER, encoding="utf-8", newline="\n")
+        docker_wrapper.chmod(0o700)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
+    path_value = f"{binary_dir}{os.pathsep}{os.environ['PATH']}"
     environment = {
         **os.environ,
-        "PATH": str(binary_dir) + os.pathsep + os.environ["PATH"],
+        "PATH": path_value,
         "FAKE_SCHEMA_PROBE_STATE": str(state_dir),
         "FAKE_SCHEMA_PROBE_SCENARIO": scenario,
         "INKFORGE_SCHEMA_PROBE_TIMEOUT_SECONDS": (
@@ -196,6 +232,7 @@ def run_probe(
     }
     result = subprocess.run(  # noqa: S603 - 测试只执行仓库固定脚本和离线 Docker 夹具
         [POSIX_SHELL, str(RUNNER), *arguments],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         env=environment,

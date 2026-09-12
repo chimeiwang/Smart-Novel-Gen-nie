@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -468,6 +467,11 @@ def perform(action, database, scope_path, directory, app_dir, env_file):
 
 
 def main():
+    # 具名维护只允许 Linux 服务器执行；纯清单和时间校验仍可跨平台复验。
+    if os.name != "posix":
+        raise ArchiveError("具名旧执行维护只支持 POSIX 服务器")
+    import fcntl
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("preview", "backup", "apply", "verify"))
     parser.add_argument("database", choices=("novelwriterdev", "novelwriter"))
