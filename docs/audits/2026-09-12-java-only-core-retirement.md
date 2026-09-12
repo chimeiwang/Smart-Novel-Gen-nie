@@ -2,7 +2,8 @@
 
 日期：2026-09-12
 
-状态：代码迁移与构建修复已实施，Java／Python／Web 回归通过；Compose 恢复演练受镜像仓库网络阻塞。
+状态：代码迁移与初次 Java／Python／Web／Compose 回归通过；追加发布前发现并保全线上独有修复，
+最终候选全量回归与生产发布进行中。各轮结果分开记录，未通过的中间版本不作为发布依据。
 本记录初次提交时未推送、未部署、未修改服务器数据库。用户随后明确授权重试验证，测试通过后普通应用部署；
 以下历史结果不等同于追加发布已经成功，追加执行结果单独记录。
 
@@ -91,3 +92,49 @@ Windows CLI JUnit 147 项全通过、零跳过；服务身份 11 项（1 项缺�
   改用第三方镜像或放宽应用验收。
 - 最新成功发布来自 `codex/chapter-input-budget-release` 的 `57524ab6`，不是 `origin/main`；发布前必须完成
   与本次候选的差异和 execution manifest 核对，不能只以 main 为线上基线。
+- 官方基础镜像通过 Docker 现有代理全部预拉成功；`8b481ad7` 的 Java Core 和 Agent 镜像构建通过，
+  隔离 Compose 最小恢复验收通过（20:11:05 至 20:17:42）：幂等、回执丢失、Agent 终态重放、Core 重启、
+  派发前取消五场景以及 execution Redis AOF 重启均通过，重启前后数据库事实哈希和 Provider 调用事实一致。
+  容器、网络、卷零残留；未访问开发库、生产库或真实供应商。报告保存在
+  `logs/java-only/mac-recovery-8b481ad7-report.json`；后续热修复合并后的最终候选仍需重新验证。
+- 分支已推送并创建 PR 13。首轮远端 CI `34692779148` 的 Java Core 为 1210 项、1 失败、5 跳过；
+  唯一失败为 SSE 慢消费者注销测试等待超时，其他阶段尚未执行，正在独立复现修复。
+
+### 生产只读基线与兼容差异
+
+- 经已固定主机身份的既有 SSH 通道确认，生产源码和三业务镜像标签均为 `57524ab6`，各服务一份且 healthy。
+- 生产 V2 为 `schemaReady=true / route=all / V1 fresh=false`，两份 allowlist 为空；
+  `active-v2-count novelwriter=0`，`all` 门禁为 `gate-ok:all:migrated-with-v2`。
+- Core 重启次数基线 1，其他业务及 Redis 为 0，均 `OOMKilled=false`；Core 内存约 357.1/448 MiB。
+  宿主机可用内存约 431 MiB，无 swap，磁盘使用率约 81%。这些是发布前采样，不是新版本验收。
+- 生产 manifest 为 `2faa340853bfe503c99569675dca481274d8c7d8b6594df83bc6fa52d981dd8b`；
+  初次 Java-only 候选为 `aa9d1838a436ea5588ae034e4097fde419ca9e8300324443fb55a1f90c1d1fec`。
+  除 Episode 迁移外，候选还遗漏生产正文 v3 十万 token 预算、Reviewer v2 输出协议、安全字段路径诊断和
+  精确历史首次派发兼容。因此禁止直接部署初次候选，先保全线上热修复并重新验证。
+- 最终 manifest 仍会因 Episode 迁移变化。待镜像上传完成后才短暂关闭新建路由，核对实际运行 Core 为 off
+  且权威活动 V2 为零，再切换；后续恢复原 all 路由并执行全量门禁，不取消、删除或改写任何历史任务。
+
+### 热修复与测试夹具同步
+
+- 仅保全生产 `37285460`／`91812ba4` 的正文 Step v3、Reviewer v2、独立 token 上限语义、安全 JSON Pointer
+  和精确历史首次派发兼容；保留当前 Episode 迁移及一次自动修订／六次调用，不带入其他任务的未合入配置。
+- SSE 原测试没有确定制造队列溢出，依赖初轮查询时序。只在测试中连续发布两个未消费事件；生产实现未改，
+  定向连续 12 次通过，完整测试类 11 项通过。
+- 中间全量回归暴露的旧 v2/v1 断言及余额夹具按生产既有修复同步：返工测试依据冻结 Run token 预算准备余额，
+  不修改真实余额、费率、业务上限或历史固定快照断言。
+- Agent execution 目录 654 通过、1 跳过；Catalog 架构与共享执行契约 110 通过；Ruff、Mypy 131 源码及
+  API 生成漂移检查通过。中间全量失败已保留日志，最终全量和 Compose 正在重跑。
+
+### 最终候选本地验收
+
+- 最终 manifest 为 `08ed0e1a9d7d2f965a039c0aa37f875233f8314b3f59185891df86adb29633a9`。
+  `write_chapter`、`rewrite_scene` 两个完整 Operation 与生产 `57524ab6` 逐项相等。
+- 最终 Windows Python 全量（继续拆出已在 Mac 验证的运维迁移夹具）3478 通过、20 跳过；
+  Ruff、Mypy 131 源码和执行资产派生检查通过。日志为 `logs/java-only/python-release-final-green.log`。
+- Mac 最终完整 Maven verify：service-auth 11、service-contracts 5、Core 1212（3 个外部环境门禁跳过）、
+  CLI 147，零失败／错误，BUILD SUCCESS；日志为 `logs/java-only/mac-release-verify-final.log`。
+- 最终 Compose 最小恢复再次通过五场景及 AOF 验收，报告 `logs/java-only/mac-final-recovery-report.json`。
+- 最终正文写作 Compose 八场景通过：Core 重启后丢弃、幂等采用、作者返工、自动完整返工、局部 patch 后双审、
+  patch 冲突、编辑批准全文和派发前取消。报告 `logs/java-only/mac-final-chapter-writing-report.json`。
+  两轮均使用独立 Fake Provider／测试数据库，容器、网络、卷零残留，不接触真实创作数据或供应商。
+- 上述结果尚不代表远端 CI 或生产发布成功，后续发布状态单独记录。

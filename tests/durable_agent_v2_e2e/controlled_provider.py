@@ -29,6 +29,8 @@ else:
 _WRITING_REVIEW_ROLES = {
     "reviewer.chapter_draft_consistency.v1": "consistency",
     "reviewer.chapter_draft_editorial.v1": "editorial",
+    "reviewer.chapter_draft_consistency.v2": "consistency",
+    "reviewer.chapter_draft_editorial.v2": "editorial",
 }
 
 

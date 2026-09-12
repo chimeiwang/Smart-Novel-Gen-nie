@@ -163,6 +163,9 @@ class WorkflowEventTailObserverTest {
                                         .isEqualTo("WORKFLOW_STREAM_LIMIT_EXCEEDED"));
             }
             repository.publish(key, event(key.runId(), 1), "running");
+            // 队列容量为 1；连续两个未消费的 tail 更新才能确定触发慢消费者背压，
+            // 不依赖首轮高水位查询恰好先于发布完成。
+            repository.publish(key, event(key.runId(), 2), "running");
             observer.wake();
             await(() -> observer.activeConnectionCount() == 0);
         }

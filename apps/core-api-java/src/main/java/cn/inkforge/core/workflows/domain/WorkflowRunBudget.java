@@ -41,9 +41,10 @@ public record WorkflowRunBudget(
                 || maxProtocolCorrectionSteps > 1) {
             throw new IllegalArgumentException("Run 预算不能为负数或无界");
         }
+        // Run 只约束各维度的独立上限；实际完成量仍由 completion 总上限收口。
         if (maxPromptCacheMissTokens > maxInputTokens
-                || Math.addExact(maxReasoningTokens, maxVisibleOutputTokens)
-                        > maxCompletionTokens) {
+                || maxReasoningTokens > maxCompletionTokens
+                || maxVisibleOutputTokens > maxCompletionTokens) {
             throw new IllegalArgumentException("Run token 预算内部不一致");
         }
     }

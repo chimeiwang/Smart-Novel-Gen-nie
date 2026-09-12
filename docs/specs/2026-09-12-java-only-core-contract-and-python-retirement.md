@@ -4,8 +4,9 @@
 
 状态：已批准，实施中
 
-实施记录：代码迁移与本地回归见 [清理审计](../audits/2026-09-12-java-only-core-retirement.md)；
-Compose 恢复演练因 Docker Hub 网络中断尚未通过，不据此宣称生产或全部环境验收完成。
+实施记录：代码迁移与本地回归见 [清理审计](../audits/2026-09-12-java-only-core-retirement.md)。
+Docker Hub 网络问题已通过官方镜像预拉解决，初次 Compose 恢复演练通过；发布前补齐线上独有修复后
+正在重跑最终版本验证，尚未据此宣称生产或全部环境验收完成。
 
 ## 背景
 
@@ -57,6 +58,22 @@ Agent 必需的 Python 契约、鉴权库。最初确认不包含生产部署；
 - 不因目录后缀做大规模无语义移动。`apps/core-api-java` 直接治理为正式且唯一的 Core 源码目录。
 
 ## 核心决策
+
+### 发布前保留线上独有修复
+
+追加发布检查发现，生产实际运行 `57524ab6`，其正文各项十万 token 预算、正文 Reviewer v2 输出协议、
+安全 JSON Pointer 诊断及历史冻结依赖首次派发兼容尚未全部进入 main。本次发布必须先在 Java-only 分支
+保留这些已上线能力，不能把 main 较旧的正文预算和 Reviewer 当作期望回退。
+
+- 精确保留线上新增的 v3 正文生成／双复审 Step Budget、Reviewer v2 Profile／Prompt，以及对应旧 v1/v2
+  首次派发和恢复兼容；只按已知依赖组合兼容，不接受任意版本或任意预算。
+- 新 Run 的单 Step 各 token 上限保持线上 100,000；当前与线上共同的一次自动修订、六次模型调用策略保留，
+  Run 各累计 token 上限保持线上 600,000，不引入其他任务尚未合入的预算扩容。
+- thinking 策略与预算维度区分：disabled 仍必须关闭供应商思考，但不能仅因历史快照具有非零 reasoning
+  预算上限就拒绝读取；不得改写历史 Run、Step、Artifact 或计费事实。
+- 保留当前 Episode 新链和旧视频退役边界，不整分支覆盖线上代码，不复活旧视频操作。
+- 补齐上述兼容后重新跑 Agent／共享契约／Java 全量与隔离 Compose；manifest 必然仍因 Episode 迁移
+  不同，发布时使用现有 route-off、权威 active V2 为零、兼容 Java 快照及恢复全量门禁流程，不删除在途任务。
 
 ### 1. 唯一 canonical OpenAPI
 

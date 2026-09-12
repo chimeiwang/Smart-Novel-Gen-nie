@@ -213,6 +213,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   Reviewer 的结构化 candidatePatch 与 suggestion 解释文字严格区分；Core 独占局部修改、全篇返工、
   不可变 revision 和正式采用。零模型 candidate_patch 是 Core 的 persistence/control Step，不调用 Agent，
   不伪造模型用量或积分预留；最多一次自动修改后必须再次双复审，剩余问题交作者。
+  正文和场景改写新计划的双 Reviewer 使用 v2 提示词，明确 verdict/findings、必需范围 null 与证据引用
+  的既有协议，旧 v1 冻结依赖保留。Schema 失败日志只补充白名单字段路径，不新增纠正模型调用。
 - V2 `long_serial.review_chapter` 使用独立 `editor.chapter_review_text.v1`，消费完整
   `chapter_writing_context`，只输出非空白完整 report；Core 负责只读完成和可选会话消息，不产生 Artifact。
   它不是输出 contentVerdict/findings 的候选 Reviewer，也不更新质量终检。`rewrite_scene` 使用场景专用

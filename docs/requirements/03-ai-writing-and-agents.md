@@ -78,9 +78,13 @@ Seedance 2.5 真实 POST／GET 只位于 Provider 的 `_create_live_task()`／`_
   不截断邻章正文冒充摘要。生成、双复审、返工使用同一不可变 Evidence。
 - Writer 只输出完整 summary/content，程序派生哈希与字数；两位 Reviewer 分别核对正文一致性和编辑质量。
   每次调用与累计 Run 均有冻结预算，过长来源或不完整输出明确失败，不以截断掩盖。
-  正文写作新 Run 的生成与双复审使用 v2 输入预算：每 Step 的输入及冷缓存输入上限均为 100,000，
-  Run 对应累计上限均为 600,000；保留旧 v1 预算及其他操作额度。调整范围和验收见
-  [正文写作输入预算调整](../specs/2026-09-11-chapter-writing-input-budget.md)。
+  正文写作新 Run 的生成与双复审保留已上线 v3 预算：每 Step 的输入、冷缓存输入、总输出、推理、可见输出
+  上限均为 100,000，Run 五项累计上限均为 600,000。分项是独立上限，实际总输出仍受共同上限约束，
+  复审保持关闭推理。旧 v1/v2 冻结预算与其他操作额度不变；兼容保全见
+  [Java-only 发布规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
+- 正文写作与场景改写的新计划保留已上线的 Reviewer v2 提示词：有任意级别问题时返回 issues_found，
+  pass/cannot_assess 必须配空 findings；证据引用复制冻结项 id/哈希，必需范围无定位时显式填 null。
+  输出 Schema 和复审编排不变，旧 v1 Profile/Prompt 继续支持精确首次派发和恢复，不增加模型纠正调用。
 - 两位 Reviewer 一致发现高置信局部问题时，Core 最多自动修改一次：全部有可唯一定位且无冲突的结构化 patch
   时执行零模型局部替换；全部无 patch 时可完整返工。混合、冲突、结构问题或第二轮问题保留给作者。
   自动修改后必须再次双复审，正式正文仍不变化。

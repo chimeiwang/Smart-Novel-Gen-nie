@@ -390,6 +390,11 @@ approve 必须复验同一来源和当前 revision，编辑批准先形成新的
 
 ## WorkflowRun 与调试
 
+正文候选复审的 contentVerdict/findings 必须一致：任何 info/warning/error 问题都对应 issues_found，
+pass 和 cannot_assess 对应空列表。格式错误仍按执行失败处理，不删除问题或改写结论放行。
+Java-only 发布保留已上线 Reviewer v2 提示词及旧 v1 冻结依赖；安全字段路径诊断只用于定位，
+不增加模型格式纠正调用。兼容范围见 [Java-only 发布规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
+
 2026-09-04 共享 V2 快照已增加可选 clarification（问题原文、代码、decisionStepId），只能在未取消的
 waiting_user 中出现且与 Artifact 互斥，缺省时不改变旧快照。当前分支已实现具名 clarification 回答入口、
 同 Run 解析与业务续接，完整本地回归和隔离五场景验收已通过，真实环境尚未验收，不能宣称生产开放。

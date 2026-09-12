@@ -69,7 +69,7 @@ def _refresh_manifest_hash(root: Path, entry_name: str) -> None:
 def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     registry = load_execution_registry(CONTRACT_ROOT, environment="production")
     assert registry.manifest_fingerprint == (
-        "aa9d1838a436ea5588ae034e4097fde419ca9e8300324443fb55a1f90c1d1fec"
+        "08ed0e1a9d7d2f965a039c0aa37f875233f8314b3f59185891df86adb29633a9"
     )
 
     legacy_agent_updates = registry.output_schemas["output.agent_updates.v1"]
@@ -154,6 +154,17 @@ def test_loader_resolves_complete_enabled_long_serial_operations() -> None:
     assert "title" not in outline.output_schema.json_schema
     assert "title" not in outline.output_schema.json_schema["properties"]["replacement"]
     assert outline.operation.run_budget.max_prompt_cache_miss_tokens == 90_000
+
+    chapter = registry.resolve("long_serial", "write_chapter")
+    assert [profile.key for profile in chapter.reviewer_profiles] == [
+        "reviewer.chapter_draft_consistency.v2",
+        "reviewer.chapter_draft_editorial.v2",
+    ]
+    assert chapter.generator_step_budget.max_completion_tokens == 100_000
+    assert chapter.generator_step_budget.max_reasoning_tokens == 100_000
+    assert chapter.generator_step_budget.max_visible_output_tokens == 100_000
+    assert chapter.operation.run_budget.profile == "budget.long_serial.chapter_draft.v3"
+    assert chapter.operation.run_budget.max_completion_tokens == 600_000
 
     with pytest.raises(FrozenInstanceError):
         resolved.operation.v2_enabled = False  # type: ignore[misc]
