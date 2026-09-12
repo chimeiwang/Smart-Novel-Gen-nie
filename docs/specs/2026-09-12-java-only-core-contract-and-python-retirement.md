@@ -18,7 +18,9 @@ Java Core 已原位接管生产，但仓库仍把 Python FastAPI Core 当作公�
 - 最新 `main` 已删除旧视频公共契约中的 DTO，但未删除引用这些 DTO 的 Java 死代码，导致 Maven 编译失败。
 
 用户确认进入迁移观察期后的最终清理阶段：Core 和普通 CLI 只保留 Java 实现，Python 只保留 Agent 进程及
-Agent 必需的 Python 契约、鉴权库。该确认不授权数据库 DDL、服务器数据迁移、生产视频开放或生产部署。
+Agent 必需的 Python 契约、鉴权库。最初确认不包含生产部署；用户随后于 2026-09-12 明确要求重试验证，
+测试通过后部署，因此追加授权本次分支推送、CI 和普通应用发布。该追加授权仍不包含数据库 DDL、
+服务器数据迁移或生产视频开放。
 
 ## 当前事实
 
@@ -47,7 +49,7 @@ Agent 必需的 Python 契约、鉴权库。该确认不授权数据库 DDL、�
 ## 非目标
 
 - 不修改 PostgreSQL schema，不执行视频退役 DDL，不连接或写入服务器数据库；
-- 不部署到生产，不推送远端，不把本地通过描述成生产完成；
+- 不绕过验证直接发布，不把本地通过描述成生产完成；推送、CI、部署和生产回读分别记录结果；
 - 不改变 API 路径、operationId、字段、状态码、错误、Cookie、SSE、文件或业务状态机；
 - 不迁移 Python Agent、LangGraph、模型、提示词、供应商或队列；
 - 不删除 Agent 仍使用的 `packages/service-contracts`、`packages/service-auth` 或 Agent 契约生成流程；
@@ -197,7 +199,9 @@ HTTP／JSON、Ed25519 服务身份和 Core 内部工具网关交互，禁止数�
 5. 升级 CLI registry、删除 Python CLI，验证 Java 152 命令和 Windows Credential Manager。
 6. 更新仓内 Operator 入口及本机两份已安装 Skill，保持授权不变。
 7. 更新 ADR、requirements、DOCS／README、Java CLI 文档和审计记录。
-8. 运行定向、全量和静态残留检查；仅提交本地分支，不推送、不部署。
+8. 运行定向、全量和静态残留检查；按追加授权重试隔离 Compose 验收，通过后推送并经 CI 执行普通应用部署。
+9. 发布前核对当前生产版本的独有修复、execution manifest 和可回滚 Java 镜像组合；发布后验证运行版本、
+   readiness、只读 schema guard 和既有生产 smoke，保持生产视频关闭，不执行数据库迁移。
 
 每一步必须保持分支可构建。不得先删除 Python 源码，再留下生成、CI 或运维链路待后续修补。
 
