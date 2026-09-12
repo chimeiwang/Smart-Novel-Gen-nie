@@ -156,6 +156,14 @@ RETIRED_JAVA_METHODS = {
     "saveStoryPlanCheckpointInternalV1VideoScenesSceneIdStoryCheckpointPost",
 }
 
+RETIRED_JAVA_SOURCES = (
+    "video/application/VideoAdaptationService.java",
+    "video/application/LegacyVideoPlanService.java",
+    "video/application/VideoRenderService.java",
+    "video/application/VideoPostProductionService.java",
+    "agentgateway/VideoAdaptationAgentSubmitter.java",
+)
+
 
 def _source(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
@@ -253,6 +261,14 @@ def test_retired_cli_and_web_entry_points_remain_absent() -> None:
     assert RETIRED_CLI_COMMANDS.isdisjoint(command_names)
     assert 'from "./production/episode-workspace"' in workspace
     assert "ChapterAdaptationWorkspace" not in workspace
+
+
+def test_retired_java_video_sources_are_physically_removed() -> None:
+    java_root = ROOT / "apps/core-api-java/src/main/java/cn/inkforge/core"
+    leftovers = [
+        path for path in RETIRED_JAVA_SOURCES if (java_root / path).exists()
+    ]
+    assert leftovers == []
 
 
 def test_retirement_migration_preserves_shared_media_and_guards_old_branches() -> None:
