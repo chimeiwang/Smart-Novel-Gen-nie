@@ -201,17 +201,23 @@ def run_probe(
         newline="\n",
     )
     python_wrapper.chmod(0o700)
-    # 真实探针在 Windows Python 中通过 CreateProcess 直接调用 docker，
-    # 因而不能使用无扩展名的 shell 夹具。复制当前解释器作为 docker.exe，
-    # 再让 cwd 下的 inspect/run/rm/ps 文件承接 Python 的脚本参数。
-    shutil.copy2(Path(sys.executable), binary_dir / "docker.exe")
-    fake_docker_source = FAKE_DOCKER.replace(
-        "arguments = sys.argv[1:]",
-        "arguments = [Path(sys.argv[0]).name, *sys.argv[1:]]",
-        1,
-    )
-    for command_name in ("inspect", "run", "rm", "ps"):
-        (tmp_path / command_name).write_text(fake_docker_source, encoding="utf-8")
+    if os.name == "nt":
+        # 真实探针在 Windows Python 中通过 CreateProcess 直接调用 docker，
+        # 因而不能使用无扩展名的 shell 夹具。复制当前解释器作为 docker.exe，
+        # 再让 cwd 下的 inspect/run/rm/ps 文件承接 Python 的脚本参数。
+        shutil.copy2(Path(sys.executable), binary_dir / "docker.exe")
+        fake_docker_source = FAKE_DOCKER.replace(
+            "arguments = sys.argv[1:]",
+            "arguments = [Path(sys.argv[0]).name, *sys.argv[1:]]",
+            1,
+        )
+        for command_name in ("inspect", "run", "rm", "ps"):
+            (tmp_path / command_name).write_text(fake_docker_source, encoding="utf-8")
+    else:
+        # POSIX 直接执行脚本；无须把 docker 子命令伪装成 Python 脚本名。
+        docker_wrapper = binary_dir / "docker"
+        docker_wrapper.write_text(FAKE_DOCKER, encoding="utf-8", newline="\n")
+        docker_wrapper.chmod(0o700)
     state_dir = tmp_path / "state"
     state_dir.mkdir()
     path_value = f"{binary_dir}{os.pathsep}{os.environ['PATH']}"

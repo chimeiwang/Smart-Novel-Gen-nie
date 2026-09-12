@@ -138,3 +138,11 @@ Windows CLI JUnit 147 项全通过、零跳过；服务身份 11 项（1 项缺�
   patch 冲突、编辑批准全文和派发前取消。报告 `logs/java-only/mac-final-chapter-writing-report.json`。
   两轮均使用独立 Fake Provider／测试数据库，容器、网络、卷零残留，不接触真实创作数据或供应商。
 - 上述结果尚不代表远端 CI 或生产发布成功，后续发布状态单独记录。
+
+### Linux CI 探针夹具修复
+
+`90c61f11` 的远端 CI `34694456077` 已通过 Java、API 和 Web 测试，但 Python 为 3554 通过、19 失败、
+2 跳过。19 项全部来自同一 schema 探针夹具：此前所有平台只创建 Windows `docker.exe`，POSIX 查找
+`docker` 时未命中替身。现仅在测试内按平台分别创建替身，真实生产探针和全部权限／清理断言不变。
+Windows、macOS、真实隔离 Linux 容器均为 30/30 通过；Linux 容器无网络且仓库只读挂载，仅测试临时目录可写。
+修复后重新执行完整远端 CI，不把此前失败轮次计作发布通过。
