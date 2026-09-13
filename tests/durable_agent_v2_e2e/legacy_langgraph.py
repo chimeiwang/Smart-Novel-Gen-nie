@@ -71,6 +71,19 @@ def _wait_for_completion(acceptance: Acceptance, task_id: str) -> dict[str, obje
 
 
 def scenarios(acceptance: Acceptance) -> Iterator[Scenario]:
+    # 必须模拟真实生产未开放的列，开发库超集不能证明普通写作查询兼容生产。
+    missing_video_column = acceptance.stack.psql(
+        """
+        SELECT NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'ReviewArtifact'
+            AND column_name = 'videoEpisodeId'
+        );
+        """,
+        variables={},
+    ).strip()
+    if missing_video_column != "t":
+        raise AssertionError("Legacy 联调未模拟生产缺少 videoEpisodeId 的结构")
     before = _documents(acceptance)
     if not isinstance(before.get("outline"), str):
         raise AssertionError("隔离小说缺少可保护的大纲")
@@ -124,6 +137,8 @@ def scenarios(acceptance: Acceptance) -> Iterator[Scenario]:
     tool_names = {call.get("tool_name") for call in matching_calls}
     if "get_writing_context" not in tool_names:
         raise AssertionError("V1 LangGraph 没有通过工具网关读取写作上下文")
+    if "list_outline_summary" not in tool_names:
+        raise AssertionError("V1 模型没有通过工具网关实际读取大纲")
 
     decision = acceptance.request(
         "POST",
@@ -161,6 +176,7 @@ def scenarios(acceptance: Acceptance) -> Iterator[Scenario]:
         "gatewayCalls": matching_calls,
         "chapterExactMatch": True,
         "outlineUnchanged": True,
+        "productionVideoEpisodeColumnAbsent": True,
     }
     yield Scenario(
         name="legacy_langgraph_web_v1_round_trip",

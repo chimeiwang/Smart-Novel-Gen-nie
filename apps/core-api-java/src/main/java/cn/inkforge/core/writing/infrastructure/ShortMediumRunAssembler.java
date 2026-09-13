@@ -13,6 +13,7 @@ import cn.inkforge.core.db.generated.tables.records.ChapterRecord;
 import cn.inkforge.core.db.generated.tables.records.OutlineRecord;
 import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.shortmedium.domain.ShortMediumText;
 import cn.inkforge.core.shortmedium.domain.ShortMediumVersionPayload;
 import java.util.ArrayList;
@@ -178,13 +179,16 @@ final class ShortMediumRunAssembler {
             throw new ApiException(
                     404, "SHORT_MEDIUM_OUTLINE_NOT_FOUND", "中短篇大纲工作稿不存在");
         }
-        ReviewartifactRecord source = transaction.selectFrom(REVIEWARTIFACT)
+        // 起始素材只读查询显式限定已部署字段，保持旧库可用。
+        ReviewartifactRecord source = transaction
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.NOVELID.eq(request.getNovelId()),
                         REVIEWARTIFACT.ARTIFACTKEY.eq(
                                 "short-medium:source:" + request.getNovelId()),
                         REVIEWARTIFACT.STATUS.eq(Reviewartifactstatus.applied))
-                .fetchOne();
+                .fetchOneInto(REVIEWARTIFACT);
         if (source == null) {
             throw new ApiException(409, "SHORT_MEDIUM_SOURCE_MISSING", "中短篇起始素材不存在");
         }
@@ -293,13 +297,15 @@ final class ShortMediumRunAssembler {
 
     private List<Version> versions(
             DSLContext transaction, String novelId, String artifactKey) {
-        List<ReviewartifactRecord> artifacts = transaction.selectFrom(REVIEWARTIFACT)
+        List<ReviewartifactRecord> artifacts = transaction
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.NOVELID.eq(novelId),
                         REVIEWARTIFACT.ARTIFACTKEY.eq(artifactKey))
                 .orderBy(REVIEWARTIFACT.CREATEDAT.asc(), REVIEWARTIFACT.ID.asc())
                 .forUpdate()
-                .fetch();
+                .fetchInto(REVIEWARTIFACT);
         List<Version> result = new ArrayList<>();
         for (ReviewartifactRecord artifact : artifacts) {
             try {

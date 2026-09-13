@@ -18,6 +18,7 @@ import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
@@ -374,13 +375,15 @@ final class JooqWritingRunQueryRepository implements WritingRunQueryRepository {
     private static List<ReviewartifactRecord> artifacts(
             DSLContext context, List<String> taskIds) {
         if (taskIds.isEmpty()) return List.of();
-        return context.selectFrom(REVIEWARTIFACT)
+        // 写作状态只需要这些基础字段；不能用 selectFrom 隐式带出尚未部署到生产的未开放视频列。
+        return context.select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(REVIEWARTIFACT.TASKID.in(taskIds))
                 .orderBy(
                         REVIEWARTIFACT.TASKID.asc(),
                         REVIEWARTIFACT.CREATEDAT.desc(),
                         REVIEWARTIFACT.ID.desc())
-                .fetch();
+                .fetchInto(ReviewartifactRecord.class);
     }
 
     private static Map<String, List<WritingruncommandRecord>> groupCommands(

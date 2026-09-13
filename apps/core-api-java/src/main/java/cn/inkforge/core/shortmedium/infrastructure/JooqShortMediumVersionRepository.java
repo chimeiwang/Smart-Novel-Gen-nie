@@ -23,6 +23,7 @@ import cn.inkforge.core.db.generated.tables.records.ChapterRecord;
 import cn.inkforge.core.db.generated.tables.records.OutlineRecord;
 import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
@@ -306,8 +307,9 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
     @Override
     public ShortMediumVersion requireVersion(
             String userId, String novelId, String versionId) {
+        // 版本读取统一使用生产冻结列，避免 selectFrom 把视频扩展列带入 SQL。
         ReviewartifactRecord artifact = database.dsl()
-                .select(REVIEWARTIFACT.fields())
+                .select(ReviewArtifactRowProjection.fields())
                 .from(REVIEWARTIFACT)
                 .join(NOVEL)
                 .on(NOVEL.ID.eq(REVIEWARTIFACT.NOVELID))
@@ -727,14 +729,17 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
 
         @Override
         public ShortMediumVersion currentOutlineVersion() {
-            return transaction.selectFrom(REVIEWARTIFACT)
+            return transaction
+                    .select(ReviewArtifactRowProjection.fields())
+                    .from(REVIEWARTIFACT)
                     .where(
                             REVIEWARTIFACT.NOVELID.eq(document.novelId()),
                             REVIEWARTIFACT.ARTIFACTKEY.eq(OUTLINE_PREFIX + document.novelId()),
                             REVIEWARTIFACT.STATUS.eq(Reviewartifactstatus.applied))
                     .orderBy(REVIEWARTIFACT.CREATEDAT.asc(), REVIEWARTIFACT.ID.asc())
-                    .fetch(JooqShortMediumVersionRepository.this::map)
+                    .fetchInto(REVIEWARTIFACT)
                     .stream()
+                    .map(JooqShortMediumVersionRepository.this::map)
                     .max(Comparator.comparingInt(ShortMediumVersion::versionNumber))
                     .orElse(null);
         }
@@ -805,12 +810,15 @@ final class JooqShortMediumVersionRepository implements ShortMediumVersionReposi
 
     private static List<ReviewartifactRecord> loadArtifacts(
             DSLContext context, String novelId, String artifactKey, boolean lock) {
-        var query = context.selectFrom(REVIEWARTIFACT)
+        var query = context.select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.NOVELID.eq(novelId),
                         REVIEWARTIFACT.ARTIFACTKEY.eq(artifactKey))
                 .orderBy(REVIEWARTIFACT.CREATEDAT.asc(), REVIEWARTIFACT.ID.asc());
-        return lock ? query.forUpdate().fetch() : query.fetch();
+        return lock
+                ? query.forUpdate().fetchInto(REVIEWARTIFACT)
+                : query.fetchInto(REVIEWARTIFACT);
     }
 
     private ShortMediumVersion map(ReviewartifactRecord artifact) {

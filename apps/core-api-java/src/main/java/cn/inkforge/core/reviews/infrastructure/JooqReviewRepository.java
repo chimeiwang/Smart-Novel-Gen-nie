@@ -31,6 +31,7 @@ import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.db.generated.tables.records.ReviewartifactevaluationRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
@@ -237,13 +238,16 @@ final class JooqReviewRepository implements ReviewRepository {
         if (ownedTask == null) {
             throw new ApiException(404, "WRITING_TASK_NOT_FOUND", "写作任务不存在");
         }
-        ReviewartifactRecord artifact = database.dsl().selectFrom(REVIEWARTIFACT)
+        // 普通审核查询保留业务字段，显式排除生产尚未部署的视频列。
+        ReviewartifactRecord artifact = database.dsl()
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.TASKID.eq(taskId),
                         REVIEWARTIFACT.STATUS.in(ACTIVE_STATUSES))
                 .orderBy(REVIEWARTIFACT.UPDATEDAT.desc(), REVIEWARTIFACT.ID.desc())
                 .limit(1)
-                .fetchOne();
+                .fetchOneInto(REVIEWARTIFACT);
         return artifact == null ? null : response(database.dsl(), artifact, true, artifact.getRevision());
     }
 
@@ -262,11 +266,13 @@ final class JooqReviewRepository implements ReviewRepository {
         // V1 已发布兼容入口不混入 V2 Artifact；V2/Web 使用显式 summary + revision detail。
         conditions.add(REVIEWARTIFACT.TASKID.isNotNull());
         conditions.add(REVIEWARTIFACT.WORKFLOWRUNID.isNull());
-        List<ReviewartifactRecord> artifacts = database.dsl().selectFrom(REVIEWARTIFACT)
+        List<ReviewartifactRecord> artifacts = database.dsl()
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(conditions)
                 .orderBy(REVIEWARTIFACT.CREATEDAT.desc(), REVIEWARTIFACT.ID.desc())
                 .limit(limit + 1)
-                .fetch();
+                .fetchInto(REVIEWARTIFACT);
         boolean more = artifacts.size() > limit;
         if (more) artifacts = new ArrayList<>(artifacts.subList(0, limit));
         List<ReviewArtifactResponse> items = artifacts.stream()
@@ -362,10 +368,12 @@ final class JooqReviewRepository implements ReviewRepository {
             Reviewartifactkind value = Reviewartifactkind.lookupLiteral(kind);
             conditions.add(value == null ? DSL.falseCondition() : REVIEWARTIFACT.KIND.eq(value));
         }
-        return database.dsl().selectFrom(REVIEWARTIFACT)
+        return database.dsl()
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(conditions)
                 .orderBy(REVIEWARTIFACT.UPDATEDAT.desc(), REVIEWARTIFACT.ID.desc())
-                .fetch()
+                .fetchInto(REVIEWARTIFACT)
                 .stream()
                 .map(artifact -> new ReviewArtifactSummary(
                         artifact.getId(),
@@ -411,14 +419,16 @@ final class JooqReviewRepository implements ReviewRepository {
             String artifactKey = nullable(request.getArtifactKey());
             ReviewartifactRecord existing = artifactKey == null
                     ? null
-                    : transaction.selectFrom(REVIEWARTIFACT)
+                    : transaction
+                            .select(ReviewArtifactRowProjection.fields())
+                            .from(REVIEWARTIFACT)
                             .where(
                                     REVIEWARTIFACT.NOVELID.eq(request.getNovelId()),
                                     REVIEWARTIFACT.TASKID.eq(request.getTaskId()),
                                     REVIEWARTIFACT.ARTIFACTKEY.eq(artifactKey),
                                     REVIEWARTIFACT.STATUS.in(REVISABLE_STATUSES))
                             .forUpdate()
-                            .fetchOne();
+                            .fetchOneInto(REVIEWARTIFACT);
             Integer expectedRevision = nullable(request.getExpectedRevision());
             if (existing == null && expectedRevision != null) {
                 throw revisionConflict(expectedRevision, null, "新建草案不得携带 expectedRevision");
@@ -536,13 +546,15 @@ final class JooqReviewRepository implements ReviewRepository {
                     .forUpdate()
                     .fetchOne();
             if (task == null) throw taskMismatch("复审结论与待审核草案资源不匹配");
-            ReviewartifactRecord artifact = transaction.selectFrom(REVIEWARTIFACT)
+            ReviewartifactRecord artifact = transaction
+                    .select(ReviewArtifactRowProjection.fields())
+                    .from(REVIEWARTIFACT)
                     .where(
                             REVIEWARTIFACT.ID.eq(artifactId),
                             REVIEWARTIFACT.NOVELID.eq(request.getNovelId()),
                             REVIEWARTIFACT.TASKID.eq(request.getTaskId()))
                     .forUpdate()
-                    .fetchOne();
+                    .fetchOneInto(REVIEWARTIFACT);
             if (artifact == null) throw taskMismatch("复审结论与待审核草案资源不匹配");
             requireCurrentJob(transaction, request.getTaskId(), request.getJobId());
             if (!artifact.getRevision().equals(request.getRevision())) {
@@ -609,13 +621,15 @@ final class JooqReviewRepository implements ReviewRepository {
                     .fetchOne();
             if (task == null) throw taskMismatch("待审核草案与写作任务资源不匹配");
             requireCurrentJob(transaction, request.getTaskId(), request.getJobId());
-            ReviewartifactRecord artifact = transaction.selectFrom(REVIEWARTIFACT)
+            ReviewartifactRecord artifact = transaction
+                    .select(ReviewArtifactRowProjection.fields())
+                    .from(REVIEWARTIFACT)
                     .where(
                             REVIEWARTIFACT.ID.eq(artifactId),
                             REVIEWARTIFACT.TASKID.eq(request.getTaskId()),
                             REVIEWARTIFACT.NOVELID.eq(request.getNovelId()))
                     .forUpdate()
-                    .fetchOne();
+                    .fetchOneInto(REVIEWARTIFACT);
             if (artifact == null) throw taskMismatch("待审核草案与写作任务资源不匹配");
             if (artifact.getStatus() == Reviewartifactstatus.under_review) {
                 artifact.setStatus(Reviewartifactstatus.awaiting_user);
@@ -1133,13 +1147,16 @@ final class JooqReviewRepository implements ReviewRepository {
 
     private ReviewartifactRecord ownedArtifact(
             DSLContext context, String userId, String artifactId, boolean lock) {
-        var query = context.selectFrom(REVIEWARTIFACT)
+        var query = context.select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.ID.eq(artifactId),
                         REVIEWARTIFACT.NOVELID.in(context.select(NOVEL.ID)
                                 .from(NOVEL)
                                 .where(NOVEL.USERID.eq(userId))));
-        return lock ? query.forUpdate().fetchOne() : query.fetchOne();
+        return lock
+                ? query.forUpdate().fetchOneInto(REVIEWARTIFACT)
+                : query.fetchOneInto(REVIEWARTIFACT);
     }
 
     private List<Condition> artifactListConditions(

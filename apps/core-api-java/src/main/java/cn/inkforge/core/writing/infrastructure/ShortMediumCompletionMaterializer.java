@@ -12,6 +12,7 @@ import cn.inkforge.core.db.generated.tables.records.OutlineRecord;
 import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
@@ -445,13 +446,16 @@ final class ShortMediumCompletionMaterializer {
 
     private List<Version> loadVersions(
             DSLContext transaction, String novelId, String artifactKey) {
-        List<ReviewartifactRecord> artifacts = transaction.selectFrom(REVIEWARTIFACT)
+        // 完成物化前读取历史版本，不能因视频扩展列缺失阻断中短篇回调。
+        List<ReviewartifactRecord> artifacts = transaction
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.NOVELID.eq(novelId),
                         REVIEWARTIFACT.ARTIFACTKEY.eq(artifactKey))
                 .orderBy(REVIEWARTIFACT.CREATEDAT.asc(), REVIEWARTIFACT.ID.asc())
                 .forUpdate()
-                .fetch();
+                .fetchInto(REVIEWARTIFACT);
         List<Version> result = new ArrayList<>();
         for (ReviewartifactRecord artifact : artifacts) {
             try {

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
+import yaml
 from inkforge_agents.providers.base import (
     ModelExecutionPolicy,
     ModelMessage,
@@ -11,6 +13,19 @@ from inkforge_agents.providers.base import (
 )
 
 from . import run_e2e
+
+
+def test_legacy_phase_reproduces_missing_production_video_episode_column() -> None:
+    folder = Path(__file__).parent
+    override = yaml.safe_load(
+        (folder / "compose.legacy-langgraph.yaml").read_text(encoding="utf-8")
+    )
+    mounts = override["services"]["postgres"]["volumes"]
+    assert any("003-production-writing.sql:ro" in mount for mount in mounts)
+    fixture = (folder / "legacy-production-writing.sql").read_text(encoding="utf-8")
+    assert "current_database()" in fixture and "current_user" in fixture
+    assert 'DROP COLUMN "videoEpisodeId"' in fixture
+    assert "CASCADE" not in fixture
 
 
 def test_legacy_langgraph_phase_has_explicit_v1_rollback_gate() -> None:

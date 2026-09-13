@@ -24,6 +24,7 @@ import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
@@ -236,7 +237,10 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
             TaskIdentity identity = taskIdentity(transaction, userId, taskId);
             WritingtaskRecord task = lockTask(
                     transaction, userId, identity.novelId(), identity.chapterId(), taskId);
-            ReviewartifactRecord awaitingArtifact = transaction.selectFrom(REVIEWARTIFACT)
+            // 取消前读取审核产物时限定已部署列，避免旧任务因视频扩展列缺失而无法收敛。
+            ReviewartifactRecord awaitingArtifact = transaction
+                    .select(ReviewArtifactRowProjection.fields())
+                    .from(REVIEWARTIFACT)
                     .where(
                             REVIEWARTIFACT.TASKID.eq(taskId),
                             REVIEWARTIFACT.STATUS.eq(
@@ -244,7 +248,7 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
                     .orderBy(REVIEWARTIFACT.CREATEDAT.desc(), REVIEWARTIFACT.ID.desc())
                     .limit(1)
                     .forUpdate()
-                    .fetchOne();
+                    .fetchOneInto(REVIEWARTIFACT);
             WritingruncommandRecord current = currentCommand(transaction, taskId, true);
             replay = cancelReplay(
                     transaction,
@@ -263,10 +267,12 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
                     .where(WRITINGRUNCOMMAND.TASKID.eq(taskId))
                     .orderBy(WRITINGRUNCOMMAND.CREATEDAT.desc(), WRITINGRUNCOMMAND.ID.desc())
                     .fetch();
-            List<ReviewartifactRecord> artifacts = transaction.selectFrom(REVIEWARTIFACT)
+            List<ReviewartifactRecord> artifacts = transaction
+                    .select(ReviewArtifactRowProjection.fields())
+                    .from(REVIEWARTIFACT)
                     .where(REVIEWARTIFACT.TASKID.eq(taskId))
                     .orderBy(REVIEWARTIFACT.CREATEDAT.desc(), REVIEWARTIFACT.ID.desc())
-                    .fetch();
+                    .fetchInto(REVIEWARTIFACT);
             // 无效取消必须能恢复取消前公开结果，因此把当下权威投影冻结到取消命令结果中。
             Map<String, Object> priorOutcome = priorOutcome(task, commands, artifacts);
             boolean terminal = task.getPhase() == Writingtaskphase.completed

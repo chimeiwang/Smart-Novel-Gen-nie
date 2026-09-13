@@ -23,6 +23,7 @@ import cn.inkforge.core.db.generated.tables.records.ScenebeatRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.writing.application.WritingCommandPayload;
 import cn.inkforge.core.writing.application.WritingContextRepository;
@@ -334,12 +335,15 @@ final class JooqWritingContextRepository implements WritingContextRepository {
             throw snapshotInvalid();
         }
         if (snapshot.activeArtifactId() == null) return null;
-        ReviewartifactRecord artifact = transaction.selectFrom(REVIEWARTIFACT)
+        // 恢复 Agent 上下文必须保留完整审核产物字段，同时避开未上线的视频列。
+        ReviewartifactRecord artifact = transaction
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.ID.eq(snapshot.activeArtifactId()),
                         REVIEWARTIFACT.TASKID.eq(task.getId()),
                         REVIEWARTIFACT.NOVELID.eq(task.getNovelid()))
-                .fetchOne();
+                .fetchOneInto(REVIEWARTIFACT);
         if (artifact != null && ACTIVE_ARTIFACTS.contains(artifact.getStatus())) {
             Map<String, Object> payload = jsonObject(
                     artifact.getPayloadjson(), artifactPayloadInvalid());

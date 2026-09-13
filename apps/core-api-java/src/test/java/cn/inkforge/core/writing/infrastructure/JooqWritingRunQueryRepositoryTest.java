@@ -139,6 +139,34 @@ class JooqWritingRunQueryRepositoryTest {
     }
 
     @Test
+    void postV2生产缺少未开放视频列时V1的GET和列表仍可投影() {
+        Fixture fixture = fixture("writing-query-v1-post-v2-no-video-column");
+        insertTask(fixture, "task-v1-post-v2-no-video", NOW, null);
+        insertCommand(
+                "task-v1-post-v2-no-video",
+                "command-v1-post-v2-no-video",
+                "review_chapter",
+                "pending",
+                NOW);
+
+        // 仅在真实测试 PostgreSQL 中模拟已上线但尚未包含 videoEpisodeId 的生产结构，禁止依赖本地生成表字段。
+        database.dsl().execute(
+                "ALTER TABLE public.\"ReviewArtifact\" DROP COLUMN \"videoEpisodeId\" CASCADE");
+
+        var status = repository.getPublic(fixture.userId(), "task-v1-post-v2-no-video");
+        assertThat(status).isInstanceOf(WritingRunStatusResponse.class);
+        assertThat(((WritingRunStatusResponse) status).getEngineVersion()).isEqualTo(1);
+
+        var listed = repository.list(
+                fixture.userId(), fixture.novelId(), null, null, null, null, null, 10);
+        assertThat(listed.getItems())
+                .singleElement()
+                .isInstanceOf(WritingRunListItem.class);
+        assertThat(((WritingRunListItem) listed.getItems().getFirst()).getTaskId())
+                .isEqualTo("task-v1-post-v2-no-video");
+    }
+
+    @Test
     void V2读取按持久身份投影完整生命周期且非法归属不回退V1() {
         Fixture owner = fixture("writing-query-v2-owner");
         Fixture other = fixture("writing-query-v2-other");

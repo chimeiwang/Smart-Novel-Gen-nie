@@ -13,6 +13,7 @@ import cn.inkforge.core.db.generated.enums.Storylengthprofile;
 import cn.inkforge.core.db.generated.tables.records.ChapterRecord;
 import cn.inkforge.core.db.generated.tables.records.OutlineRecord;
 import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
@@ -421,13 +422,16 @@ final class JooqWorkflowShortMediumCompletion implements WorkflowShortMediumComp
                 && !"outline".equals(snapshot.documentType())) {
             keys.add(OUTLINE_PREFIX + request.novelId());
         }
-        List<ReviewartifactRecord> artifacts = transaction.selectFrom(REVIEWARTIFACT)
+        // 完成回调需要正文版本字段，但不能隐式选择生产尚未部署的视频扩展列。
+        List<ReviewartifactRecord> artifacts = transaction
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.NOVELID.eq(request.novelId()),
                         REVIEWARTIFACT.ARTIFACTKEY.in(keys))
                 .orderBy(REVIEWARTIFACT.ARTIFACTKEY.asc(), REVIEWARTIFACT.ID.asc())
                 .forUpdate()
-                .fetch();
+                .fetchInto(REVIEWARTIFACT);
         List<Version> result = new ArrayList<>();
         for (ReviewartifactRecord artifact : artifacts) {
             result.add(map(artifact));

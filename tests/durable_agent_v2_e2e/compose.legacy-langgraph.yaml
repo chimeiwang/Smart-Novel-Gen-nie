@@ -1,4 +1,7 @@
 services:
+  postgres:
+    volumes:
+      - ../tests/durable_agent_v2_e2e/legacy-production-writing.sql:/docker-entrypoint-initdb.d/003-production-writing.sql:ro
   core-api:
     environment:
       DURABLE_AGENT_EXECUTION_SCHEMA_READY: "true"

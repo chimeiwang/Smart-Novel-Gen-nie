@@ -23,6 +23,7 @@ import cn.inkforge.core.db.generated.tables.records.ReviewartifactRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.ReviewArtifactRowProjection;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
@@ -219,13 +220,16 @@ final class JooqReviewDecisionStore {
                 .where(WRITINGTASK.ID.eq(taskId), WRITINGTASK.NOVELID.eq(novelId))
                 .forUpdate()
                 .fetchOne();
-        ReviewartifactRecord artifact = transaction.selectFrom(REVIEWARTIFACT)
+        // 审核决策仍需悲观锁，但读取列必须与生产冻结结构一致。
+        ReviewartifactRecord artifact = transaction
+                .select(ReviewArtifactRowProjection.fields())
+                .from(REVIEWARTIFACT)
                 .where(
                         REVIEWARTIFACT.ID.eq(artifactId),
                         REVIEWARTIFACT.NOVELID.eq(novelId),
                         REVIEWARTIFACT.TASKID.eq(taskId))
                 .forUpdate()
-                .fetchOne();
+                .fetchOneInto(REVIEWARTIFACT);
         if (task == null || artifact == null) throw forbidden();
         List<WritingruncommandRecord> commands = transaction.selectFrom(WRITINGRUNCOMMAND)
                 .where(WRITINGRUNCOMMAND.TASKID.eq(taskId))
