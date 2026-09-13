@@ -24,6 +24,21 @@ import httpx
 
 ROOT = Path(__file__).parents[2]
 COMPOSE_FILE = ROOT / "infra" / "compose.durable-agent-v2-e2e.yaml"
+LEGACY_COMPOSE_FILE = ROOT / "tests" / "durable_agent_v2_e2e" / "compose.legacy-langgraph.yaml"
+E2E_PHASES = (
+    "happy",
+    "minimum",
+    "chapter-planning",
+    "chapter-writing",
+    "natural-entry",
+    "review-rewrites",
+    "short-medium",
+    "quality",
+    "style",
+    "rag",
+    "video",
+    "legacy-langgraph",
+)
 SSE_TIMEOUT = httpx.Timeout(45.0, connect=10.0, write=10.0, pool=10.0)
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -33,6 +48,14 @@ def _port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+def phase_config(phase: str) -> dict[str, object]:
+    """返回测试组实际要求的 Core 路由门禁，避免把 V1 开关泄漏到其他组。"""
+
+    if phase == "legacy-langgraph":
+        return {"routeMode": "off", "schemaReady": True, "v1FreshStartsEnabled": True}
+    return {"routeMode": "allowlist", "schemaReady": True}
 
 
 def _safe_error(response: httpx.Response) -> str:
@@ -279,6 +302,7 @@ class ComposeStack:
         self.last_service_restart: dict[str, object] = {}
         self.rag_embeddings = False
         self.video_responses = False
+        self.legacy_langgraph = False
 
     def activate_durable_scope(self, *, user_id: str, novel_id: str) -> None:
         self.environment.update(
@@ -314,6 +338,8 @@ class ComposeStack:
             command.extend(["-f", str(ROOT / "tests/durable_agent_v2_e2e/compose.rag.yaml")])
         if self.video_responses:
             command.extend(["-f", str(ROOT / "tests/durable_agent_v2_e2e/compose.video.yaml")])
+        if self.legacy_langgraph:
+            command.extend(["-f", str(LEGACY_COMPOSE_FILE)])
         return command
 
     def run(
@@ -2164,6 +2190,7 @@ def run(
     stack = ComposeStack(evidence_dir)
     stack.rag_embeddings = phase == "rag"
     stack.video_responses = phase == "video"
+    stack.legacy_langgraph = phase == "legacy-langgraph"
     sampler = ResourceSampler(stack)
     acceptance: Acceptance | None = None
     report: dict[str, object] = {
@@ -2176,6 +2203,7 @@ def run(
         "twoCoreTwoGiBHostGate": "not_proven",
         "status": "failed",
         "phase": phase,
+        "coreRouteConfig": phase_config(phase),
         "infrastructureRetry": infrastructure_retry,
         "reusedBuiltImages": reuse_built_images,
         "rebuiltAgentImage": rebuild_agent,
@@ -2193,6 +2221,10 @@ def run(
         report["composeOverrideSha256"] = hashlib.sha256(
             (ROOT / "tests/durable_agent_v2_e2e/compose.video.yaml").read_bytes()
         ).hexdigest()
+    if phase == "legacy-langgraph":
+        report["composeOverrideSha256"] = hashlib.sha256(
+            LEGACY_COMPOSE_FILE.read_bytes()
+        ).hexdigest()
     try:
         if rebuild_agent:
             stack.build_agent()
@@ -2204,10 +2236,11 @@ def run(
         acceptance = Acceptance(stack)
         acceptance.control_request("POST", "/control/reset")
         acceptance.bootstrap()
-        stack.activate_durable_scope(
-            user_id=acceptance.user_id,
-            novel_id=acceptance.novel_id,
-        )
+        if phase != "legacy-langgraph":
+            stack.activate_durable_scope(
+                user_id=acceptance.user_id,
+                novel_id=acceptance.novel_id,
+            )
         scenarios: list[Scenario] = []
 
         def record_scenario(scenario: Scenario) -> None:
@@ -2274,6 +2307,11 @@ def run(
             for scenario in plan_scenarios(acceptance):
                 record_scenario(scenario)
             record_scenario(acceptance.cancel_before_agent_submit(operation="plan_chapter"))
+        elif phase == "legacy-langgraph":
+            from tests.durable_agent_v2_e2e.legacy_langgraph import scenarios as legacy_scenarios
+
+            for scenario in legacy_scenarios(acceptance):
+                record_scenario(scenario)
         else:
             record_scenario(acceptance.happy_and_idempotency())
         if phase == "minimum":
@@ -2350,19 +2388,7 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument(
         "--phase",
-        choices=(
-            "happy",
-            "minimum",
-            "chapter-planning",
-            "chapter-writing",
-            "natural-entry",
-            "review-rewrites",
-            "short-medium",
-            "quality",
-            "style",
-            "rag",
-            "video",
-        ),
+        choices=E2E_PHASES,
         default="minimum",
         help=(
             "happy 只验成功/幂等/SSE；minimum 继续验 callback 丢回执、"
@@ -2377,6 +2403,8 @@ def main() -> int:
             "style 验证用户级画像完整五节、首节重启重放、原空白与字数规则及单节重做；"
             "rag 验证真实本地 embeddings HTTP、多批索引原子完成、重启重放与未知用量零扣费；"
             "video 验证开发拆镜三阶段、终态重启恢复、作者确认与提示词一次纠正后的原保存路径"
+            "；legacy-langgraph 验证 route-off 下旧 Web V1 LangGraph、工具网关读取、"
+            "草案采用与正文/大纲保护"
         ),
     )
     parser.add_argument(

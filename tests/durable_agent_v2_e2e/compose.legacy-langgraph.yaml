@@ -1,0 +1,6 @@
+services:
+  core-api:
+    environment:
+      DURABLE_AGENT_EXECUTION_SCHEMA_READY: "true"
+      DURABLE_AGENT_EXECUTION_ROUTE_MODE: "off"
+      V1_FRESH_AGENT_STARTS_ENABLED: "true"

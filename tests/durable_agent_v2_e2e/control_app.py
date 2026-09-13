@@ -182,6 +182,15 @@ class _Store:
                   role TEXT NOT NULL, artifact_revision INTEGER NOT NULL, mode TEXT NOT NULL,
                   content_verdict TEXT NOT NULL, decided_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS gateway_call (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  method TEXT NOT NULL,
+                  path TEXT NOT NULL,
+                  tool_name TEXT,
+                  run_id TEXT,
+                  task_id TEXT,
+                  occurred_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -478,6 +487,13 @@ class _Store:
                     "SELECT * FROM chapter_writing_review ORDER BY decided_at, idempotency_key"
                 ).fetchall()
             ]
+            gateway_calls = [
+                dict(row)
+                for row in self._connection.execute(
+                    "SELECT method, path, tool_name, run_id, task_id "
+                    "FROM gateway_call ORDER BY id"
+                ).fetchall()
+            ]
         return {
             "providerCalls": providers,
             "callbackAttempts": callbacks,
@@ -485,6 +501,7 @@ class _Store:
             "chapterPlanReviews": reviews,
             "chapterPlanReviewMode": {"reviseRemaining": review_mode["revise_remaining"]},
             "chapterWritingReviews": writing_reviews,
+            "gatewayCalls": gateway_calls,
         }
 
     def reset(self) -> None:
@@ -495,11 +512,31 @@ class _Store:
             self._connection.execute("DELETE FROM chapter_plan_review")
             self._connection.execute("DELETE FROM chapter_writing_review")
             self._connection.execute("DELETE FROM chapter_writing_review_submission")
+            self._connection.execute("DELETE FROM gateway_call")
             self._connection.execute(
                 "UPDATE chapter_writing_review_mode SET mode = 'pass' WHERE id = 1"
             )
             self._connection.execute(
                 "UPDATE chapter_plan_review_mode SET revise_remaining = 0 WHERE id = 1"
+            )
+
+    def gateway_call(self, *, method: str, path: str, payload: object) -> None:
+        """仅记录工具网关的安全路由身份，不把正文或工具参数写入控制器。"""
+
+        value = payload if isinstance(payload, dict) else {}
+        tool_name = path.rsplit("/", 1)[-1] if "/tools/" in path else None
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT INTO gateway_call (method, path, tool_name, run_id, task_id, occurred_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    method,
+                    path,
+                    tool_name,
+                    value.get("runId") if isinstance(value.get("runId"), str) else None,
+                    value.get("taskId") if isinstance(value.get("taskId"), str) else None,
+                    _now(),
+                ),
             )
 
     def close(self) -> None:
@@ -970,6 +1007,40 @@ def create_app() -> FastAPI:
                 status_code=503,
                 content={"detail": "E2E 已在 Core 回执后丢弃响应"},
             )
+        return Response(
+            status_code=upstream_response.status_code,
+            content=upstream_response.content,
+            headers=response_headers(upstream_response),
+        )
+
+    @app.api_route(
+        "/internal/v1/{path:path}",
+        methods=["GET", "POST", "PUT", "DELETE"],
+    )
+    async def proxy_legacy_core_internal(path: str, request: Request) -> Response:
+        """把 V1 LangGraph 的工具、草案和回调原样转回隔离 Java Core。"""
+
+        body = await request.body()
+        try:
+            payload: object = json.loads(body)
+        except json.JSONDecodeError:
+            payload = {}
+        if path.startswith("tools/"):
+            store.gateway_call(
+                method=request.method,
+                path=request.url.path,
+                payload=payload,
+            )
+        try:
+            upstream_response = await core_http.request(
+                request.method,
+                request.url.path,
+                params=request.query_params,
+                content=body,
+                headers=forwarded_headers(request),
+            )
+        except httpx.HTTPError:
+            return JSONResponse(status_code=503, content={"detail": "Core 暂时不可用"})
         return Response(
             status_code=upstream_response.status_code,
             content=upstream_response.content,

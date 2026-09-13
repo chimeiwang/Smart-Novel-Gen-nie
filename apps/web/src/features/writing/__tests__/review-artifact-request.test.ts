@@ -15,48 +15,41 @@ test("草案三种决策都携带当前修订号", async () => {
   assert.match(source, /handleArtifactDecision\(artifact,\s*"discard"/);
 });
 
-test("V2 草案决定显式声明引擎并继续观察同一个 Run", async () => {
+test("V1 草案决定显式声明引擎，V2 候选不会偷偷走 V1", async () => {
   const conversationUrl = new URL("../writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
   assert.match(source, /type ReviewArtifactData\s*=\s*\{[\s\S]{0,100}engineVersion:\s*1\s*\|\s*2/);
   assert.match(source, /engineVersion:\s*artifact\.engineVersion/);
-  assert.match(source, /resolveReviewArtifactActionTaskId\([\s\S]{0,120}artifact,/);
-  assert.doesNotMatch(source, /engineVersion:\s*isV2Artifact\s*\?/);
-  assert.match(source, /accepted\.engineVersion\s*===\s*2/);
-  assert.match(source, /createWorkflowRunUiState\(accepted\)/);
-  assert.match(source, /processStream\(next\.runId,\s*streamScope\)/);
-  assert.match(
-    source,
-    /selectedUpdateRefs:\s*resolveSelectedUpdateRefsForDecision\(/,
-  );
-  assert.match(source, /sourceBindingStatus\?:\s*"verified"\s*\|\s*"legacy_missing"\s*\|\s*"not_yet_supported"/);
+  assert.match(source, /resolveReviewArtifactActionTaskId\([\s\S]{0,220}artifact/);
+  assert.match(source, /if \(artifact\.engineVersion !== 1\)/);
+  assert.match(source, /当前兼容页面不能继续，请开始新对话/);
+  assert.match(source, /accepted\.engineVersion !== 1/);
+  assert.doesNotMatch(source, /createWorkflowRunUiState|processStream\(next\.runId/);
 });
 
-test("结构化候选说明大纲 replace 的部分采用后果", async () => {
+test("V1 结构化候选仍展示完整大纲差异并要求审核决定", async () => {
   const source = await readFile(new URL("../writing-conversation.tsx", import.meta.url), "utf8");
-  assert.match(source, /updates\.outlineTreeMode\s*===\s*"replace"/);
-  assert.match(source, /用所选节点替换整棵现有树/);
-  assert.match(source, /不自动补选父节点/);
-  assert.match(source, /依赖不完整会整单失败/);
+  assert.match(source, /artifact\.payload\.updates\.outline\?\.length/);
+  assert.match(source, /artifact\.payload\.updates\.outlineAdjustments\?\.length/);
+  assert.match(source, /renderUpdatesPreviewCard\(\{ \.\.\.\(artifact\.payload\?\.updates \?\? \{\}\)/);
+  assert.match(source, /expectedRevision:\s*artifact\.revision/);
 });
 
-test("草案列表只承载摘要且详情按精确 revision 去重缓存", async () => {
+test("V1 草案托盘按会话任务读取完整详情并按版本合并", async () => {
   const conversationUrl = new URL("../writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
-  assert.match(source, /query:\s*\{\s*revision\s*\}/);
-  assert.match(source, /"If-None-Match":\s*cached\.etag/);
-  assert.match(source, /result\.response\.status\s*===\s*304/);
-  assert.match(source, /reviewArtifactDetailRequestsRef\.current\.get\(cacheKey\)/);
-  assert.match(source, /result\.response\.status\s*===\s*403\s*\|\|\s*result\.response\.status\s*===\s*404/);
-  assert.match(source, /detailLoaded:\s*false/);
-  assert.match(source, /detailLoaded:\s*true/);
+  assert.match(source, /"\/api\/v1\/writing\/tasks\/\{task_id\}\/artifact"/);
+  assert.match(source, /Promise\.allSettled\(taskIds\.map/);
+  assert.match(source, /mergeActionableReviewArtifacts/);
+  assert.match(source, /artifactTrayArtifacts\.map/);
 });
 
-test("V2 全文编辑只发送给写章草案且不混入选区字段", async () => {
+test("V1 全文编辑与选区替换字段互斥", async () => {
   const source = await readFile(new URL("../writing-conversation.tsx", import.meta.url), "utf8");
-  assert.match(source, /editedContent:\s*\(!isV2Artifact\s*\|\|\s*isChapterWritingReviewArtifact\(artifact\.kind,\s*artifact\.payload\)\)/);
+  assert.match(source, /editedContent:\s*decision\s*===\s*"approve"\s*&&\s*!selectionArtifact/);
   assert.match(source, /editedReplacement:\s*decision\s*===\s*"approve"\s*&&\s*selectionArtifact/);
-  assert.match(source, /readOnly=\{!canEditText\s*\|\|\s*!awaitingUser\s*\|\|\s*actionLocked\}/);
+  assert.match(source, /readOnly=\{!awaitingUser\s*\|\|\s*actionLocked\}/);
+  assert.match(source, /if \(artifact\.engineVersion !== 1\)/);
 });

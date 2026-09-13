@@ -1,5 +1,13 @@
 # AI 写作与 Agent 需求
 
+## 8 月 29 日写作流程兼容回退
+
+用户于 2026-09-13 要求恢复 LangGraph 自主读取资料的写作流程，生产亦在范围内，正文和大纲必须保全。
+按[兼容回退规格](../specs/2026-09-13-langgraph-aug29-compatible-rollback.md)，写作页面恢复旧输入与图状态观察；
+`schemaReady=true / route=off / V1fresh=true` 时新写作走 V1 LangGraph，仍通过 Core 工具网关读取和提交候选。
+V2-aware 后台、现有数据库及历史引擎身份保留；本次不是原始旧镜像直接部署。实际开放状态见
+[执行审计](../audits/2026-09-13-langgraph-compatible-rollback.md)，以下 V2 能力描述不自动代表新任务路由。
+
 ## Java Core 与独立 Python Agent
 
 Core 与 CLI 已收敛到 Java 工程；Agent 保留 Python、LangGraph 和内部 FastAPI HTTP 入口。

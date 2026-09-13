@@ -79,6 +79,12 @@
 
 ## 有界数据操作与后续设计
 
+- **2026-09-13 LangGraph 兼容回退**：用户要求生产恢复 8 月 29 日写作流程，并明确正文和大纲不受影响、
+  对话历史允许删除。按[兼容回退规格](specs/2026-09-13-langgraph-aug29-compatible-rollback.md)保留现有
+  PostgreSQL 和 V2-aware 后台，关闭 V2 fresh 路由并重新开放 V1 fresh；恢复旧 LangGraph 新任务。
+  本次默认零数据删除，不执行 DDL rollback，不把对话授权扩大成 Task、Command、候选、账务或作品来源删除。
+  原有生产视频关闭要求不变；本条授权不代表已经部署。
+
 - **2026-09-07 旧执行退出与成果保全**：按[具名规格](specs/2026-09-07-durable-release-preserve-novel-assets.md)
   退出精确旧执行历史并完成服务器配置。聊天／旧执行恢复可不兼容，设定、大纲、正文和版本成果必须保全；
   不得物理删除会断开成果来源的 Task／Command 或候选。先备份、锁定精确清单，只退出旧执行状态，

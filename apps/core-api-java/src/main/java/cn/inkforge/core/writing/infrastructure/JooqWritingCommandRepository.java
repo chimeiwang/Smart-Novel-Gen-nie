@@ -329,7 +329,14 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
         return database.transactionResult(transaction -> {
             // legacy key 是已发布兼容面；只能保留原规则，不能改用新版 envelope 后重新解释旧请求。
             advisoryLock(transaction, userId, request.getClientRequestId());
-            WritingRunResponse replay = legacyReplay(transaction, key);
+            CommandIdempotencyStore.Resolution existing = idempotency.resolve(
+                    transaction, userId, request.getClientRequestId(), null);
+            // 旧 key 的重放不能占用已绑定新版信封或其他命令的全局请求身份。
+            if (existing != null && (existing.recordKind() != CommandIdempotencyStore.RecordKind.WRITING_COMMAND
+                    || !"legacy_start".equals(existing.metadata().commandKind()))) {
+                throw CommandIdempotencyStore.reused(request.getClientRequestId());
+            }
+            WritingRunResponse replay = legacyReplay(transaction, userId, request.getClientRequestId());
             if (replay != null) return replay;
             requireOwnedChapter(
                     transaction, userId, request.getNovelId(), request.getChapterId(), true);
@@ -343,7 +350,7 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
                         request.getNovelId(),
                         request.getChapterId());
             }
-            replay = legacyReplay(transaction, key);
+            replay = legacyReplay(transaction, userId, request.getClientRequestId());
             if (replay != null) return replay;
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -483,10 +490,10 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
         String key = CommandIdempotency.legacyKey(userId, request.getClientRequestId());
         // Python 基线允许先快速命中已提交结果；真正创建仍在第二个完整事务内复核并锁定工作稿。
         WritingRunResponse outsideReplay = database.transactionResult(transaction ->
-                legacyReplay(transaction, key));
+                legacyReplay(transaction, userId, request.getClientRequestId()));
         if (outsideReplay != null) return outsideReplay;
         return database.transactionResult(transaction -> {
-            WritingRunResponse replay = legacyReplay(transaction, key);
+            WritingRunResponse replay = legacyReplay(transaction, userId, request.getClientRequestId());
             if (replay != null) return replay;
             ShortMediumRunAssembler.Assembled assembled =
                     shortMedium.assemble(transaction, userId, request);
@@ -610,15 +617,21 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
                 .execute();
     }
 
-    private WritingRunResponse legacyReplay(DSLContext transaction, String key) {
+    private WritingRunResponse legacyReplay(DSLContext transaction, String userId, String clientRequestId) {
         Record row = transaction.select(WRITINGRUNCOMMAND.fields())
                 .select(WRITINGTASK.fields())
+                .select(NOVEL.USERID)
                 .from(WRITINGRUNCOMMAND)
                 .join(WRITINGTASK)
                 .on(WRITINGTASK.ID.eq(WRITINGRUNCOMMAND.TASKID))
-                .where(WRITINGRUNCOMMAND.IDEMPOTENCYKEY.eq(key))
+                .join(NOVEL).on(NOVEL.ID.eq(WRITINGTASK.NOVELID))
+                .where(WRITINGRUNCOMMAND.IDEMPOTENCYKEY.eq(CommandIdempotency.legacyKey(userId, clientRequestId)))
                 .fetchOne();
         if (row == null) return null;
+        // key 只定位旧记录，资源所有者和命令种类仍必须独立验证。
+        if (!userId.equals(row.get(NOVEL.USERID)) || !"start".equals(row.get(WRITINGRUNCOMMAND.KIND))) {
+            throw CommandIdempotencyStore.reused(clientRequestId);
+        }
         return response(
                 row.into(WRITINGTASK).into(WritingtaskRecord.class),
                 row.into(WRITINGRUNCOMMAND).into(WritingruncommandRecord.class));

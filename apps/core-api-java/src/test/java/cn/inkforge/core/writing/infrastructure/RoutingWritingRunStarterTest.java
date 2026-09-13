@@ -998,6 +998,85 @@ class RoutingWritingRunStarterTest {
     }
 
     @Test
+    void postV2路由关闭且允许V1新建时旧WebLegacy请求创建任务命令并保护正文大纲() {
+        Fixture fixture = fixture("route-v1-legacy-post-v2");
+        String contentBefore = fixture.content();
+        String outlineBefore = fixture.outlineContent();
+        String instruction = "旧 Web 继续写作😀\r\n";
+        Map<String, Object> oldWebBody = new java.util.LinkedHashMap<>();
+        oldWebBody.put("clientRequestId", "request-legacy-post-v2-01");
+        oldWebBody.put("novelId", fixture.novelId());
+        oldWebBody.put("chapterId", fixture.chapterId());
+        oldWebBody.put("writingSessionId", fixture.sessionId());
+        oldWebBody.put("targetWordCount", 1000);
+        oldWebBody.put("selectedAgents", List.of("写作"));
+        oldWebBody.put("userMessage", instruction);
+        // 旧 Web 契约没有 workflow，必须由解析器明确归入 V1 Legacy 分支。
+        ParsedWritingRunStartRequest oldWebRequest = parser.parse(
+                new WritingRunStartBody(json.valueToTree(oldWebBody)));
+        assertThat(oldWebRequest).isInstanceOf(ParsedWritingRunStartRequest.Legacy.class);
+
+        // router("off") 的测试配置同时保持 schemaReady=true 和 V1_FRESH_AGENT_STARTS_ENABLED=true。
+        WritingRunResponse first = (WritingRunResponse) router("off")
+                .start(fixture.userId(), oldWebRequest);
+        assertThat(first.getEngineVersion()).isEqualTo(1);
+        assertThat(first.getSelectedAgents()).containsExactly("写作");
+        assertThat(first.getTaskId()).isEqualTo(first.getId());
+        assertThat(first.getCommandId()).isNotBlank();
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingTask\" WHERE id = ?",
+                        first.getTaskId()))
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingRunCommand\" WHERE id = ? AND \"taskId\" = ?",
+                        first.getCommandId(),
+                        first.getTaskId()))
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
+                        fixture.sessionId()))
+                .isEqualTo(1);
+
+        assertThat(database.dsl().fetchOne(
+                                "SELECT content FROM public.\"Chapter\" WHERE id = ?",
+                                fixture.chapterId())
+                        .get("content", String.class))
+                .isEqualTo(contentBefore);
+        assertThat(database.dsl().fetchOne(
+                                "SELECT content FROM public.\"Outline\" WHERE id = ?",
+                                fixture.outlineId())
+                        .get("content", String.class))
+                .isEqualTo(outlineBefore);
+
+        WritingRunResponse replay = (WritingRunResponse) router("off")
+                .start(fixture.userId(), oldWebRequest);
+        assertThat(replay.getId()).isEqualTo(first.getId());
+        assertThat(replay.getCommandId()).isEqualTo(first.getCommandId());
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\" = ?",
+                        fixture.novelId()))
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingRunCommand\" WHERE \"taskId\" = ?",
+                        first.getTaskId()))
+                .isEqualTo(1);
+        assertThat(count(
+                        "SELECT count(*) FROM public.\"WritingMessage\" WHERE \"sessionId\" = ?",
+                        fixture.sessionId()))
+                .isEqualTo(1);
+        assertThat(database.dsl().fetchOne(
+                                "SELECT content FROM public.\"Chapter\" WHERE id = ?",
+                                fixture.chapterId())
+                        .get("content", String.class))
+                .isEqualTo(contentBefore);
+        assertThat(database.dsl().fetchOne(
+                                "SELECT content FROM public.\"Outline\" WHERE id = ?",
+                                fixture.outlineId())
+                        .get("content", String.class))
+                .isEqualTo(outlineBefore);
+    }
+
+    @Test
     void V1已创建请求在打开V2后仍重放V1且跨引擎章节写入互斥() {
         Fixture legacyFixture = fixture("route-v1");
         ParsedWritingRunStartRequest legacyRequest = request(
@@ -1025,6 +1104,41 @@ class RoutingWritingRunStarterTest {
                                 "再尝试 V1")))
                 .isInstanceOfSatisfying(ApiException.class, error ->
                         assertThat(error.code()).isEqualTo("WRITING_TARGET_BUSY"));
+    }
+
+    @Test
+    void 旧恢复命令的请求标识不能用来重新启动() {
+        Fixture fixture = fixture("legacy-resume-key");
+        ParsedWritingRunStartRequest legacy = legacyWebRequest(fixture, "legacy-resume-key-0001");
+        WritingRunResponse first = (WritingRunResponse) router("off").start(fixture.userId(), legacy);
+        database.dsl().execute("UPDATE public.\"WritingRunCommand\" SET kind='resume' WHERE id=?",
+                first.getCommandId());
+        assertThatThrownBy(() -> router("off").start(fixture.userId(), legacy))
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code()).isEqualTo("IDEMPOTENCY_KEY_REUSED"));
+    }
+
+    @Test
+    void 新信封命令的请求标识不能通过旧Web再建任务() {
+        Fixture fixture = fixture("legacy-envelope-key");
+        String key = "legacy-envelope-key-0001";
+        WritingRunResponse first = (WritingRunResponse) router("off")
+                .start(fixture.userId(), request(fixture, key, "原选区改写"));
+        database.dsl().execute("UPDATE public.\"WritingTask\" SET phase='error' WHERE id=?", first.getTaskId());
+        database.dsl().execute("UPDATE public.\"WritingRunCommand\" SET status='failed' WHERE id=?",
+                first.getCommandId());
+        assertThatThrownBy(() -> router("off").start(fixture.userId(), legacyWebRequest(fixture, key)))
+                .isInstanceOfSatisfying(ApiException.class, error ->
+                        assertThat(error.code()).isEqualTo("IDEMPOTENCY_KEY_REUSED"));
+        assertThat(count("SELECT count(*) FROM public.\"WritingTask\" WHERE \"novelId\"=?",
+                fixture.novelId())).isEqualTo(1);
+    }
+
+    private static ParsedWritingRunStartRequest legacyWebRequest(Fixture fixture, String key) {
+        return parser.parse(new WritingRunStartBody(json.valueToTree(Map.of(
+                "clientRequestId", key, "novelId", fixture.novelId(), "chapterId", fixture.chapterId(),
+                "writingSessionId", fixture.sessionId(), "targetWordCount", 1000,
+                "selectedAgents", List.of("写作"), "userMessage", "旧 Web 写作"))));
     }
 
     @ParameterizedTest(name = "V1 operation={0}")

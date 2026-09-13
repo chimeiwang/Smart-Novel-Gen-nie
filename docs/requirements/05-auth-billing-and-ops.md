@@ -4,6 +4,15 @@
 
 提供账号认证、资源归属校验、模型计费、服务间互信、可恢复运行和适合 2 核 2 GB 单机的生产部署。
 
+## LangGraph 兼容回退运维边界
+
+2026-09-13 用户允许生产恢复旧 LangGraph 写作，并要求正文和大纲不受影响。执行
+[兼容回退规格](../specs/2026-09-13-langgraph-aug29-compatible-rollback.md)时保留当前数据库和 V2-aware
+Java/Agent，禁止 DDL rollback。先备份、关闭全部新建并联合排空，再部署兼容应用，最后开放 V1 fresh；
+不把 `route=off` 误解成已有 V2 可以丢弃。旧对话允许删除不等于删除关联 Task、候选、账务或正式内容。
+本次配置授权取代此前“全量后 V1 fresh 始终关闭”的运行选择，但不改变结构和来源保护。
+实际开关、备份、内容摘要与验证结果记录在[执行审计](../audits/2026-09-13-langgraph-compatible-rollback.md)。
+
 ## Java Core 替换状态
 
 用户于 2026-08-24 批准把 Core 及其后台职责和 CLI 迁移到 Java 21 + Spring Boot，保留 Python Agent

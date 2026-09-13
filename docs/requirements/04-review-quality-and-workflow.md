@@ -1,5 +1,12 @@
 # 草案审核、质量检查与工作流需求
 
+## LangGraph 兼容回退的审核边界
+
+[2026-09-13 回退](../specs/2026-09-13-langgraph-aug29-compatible-rollback.md)恢复 V1 写作审核交互，
+仍携带确切 `engineVersion=1`、Artifact revision 和请求标识，不直接写正文或大纲。旧页面遇到 V2 任务或
+候选必须明确拒绝按 V1 续跑；用户不要求恢复旧对话，但这不授权物理删除作品来源或绕过 Core 审核与 CAS。
+现有 V2 后台查询和收尾能力继续保留，生产状态以对应审计为准。
+
 ## Episode 视频候选、正式确认与制作决定
 
 Episode 剧本和分镜都遵循 `proposal -> ReviewArtifact -> 作者编辑／采用到工作稿 -> 独立正式确认 -> Core 创建不可变版本`。

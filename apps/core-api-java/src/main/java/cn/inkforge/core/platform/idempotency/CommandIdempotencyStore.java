@@ -16,6 +16,7 @@ import java.util.Set;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.jooq.Record2;
+import org.jooq.Record4;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,8 +57,9 @@ public final class CommandIdempotencyStore {
             String requestFingerprint) {
         Objects.requireNonNull(transaction);
         List<Resolution> matches = new ArrayList<>();
-        List<Record2<String, String>> commandRows = transaction
-                .select(WRITINGRUNCOMMAND.ID, WRITINGRUNCOMMAND.PAYLOADJSON)
+        List<Record4<String, String, String, String>> commandRows = transaction
+                .select(WRITINGRUNCOMMAND.ID, WRITINGRUNCOMMAND.PAYLOADJSON,
+                        WRITINGRUNCOMMAND.IDEMPOTENCYKEY, WRITINGRUNCOMMAND.KIND)
                 .from(WRITINGRUNCOMMAND)
                 .join(WRITINGTASK)
                 .on(WRITINGTASK.ID.eq(WRITINGRUNCOMMAND.TASKID))
@@ -69,13 +71,20 @@ public final class CommandIdempotencyStore {
                                 CommandIdempotency.envelopedKey(userId, clientRequestId),
                                 CommandIdempotency.legacyKey(userId, clientRequestId)))
                 .fetch();
-        for (Record2<String, String> row : commandRows) {
+        for (Record4<String, String, String, String> row : commandRows) {
             ParsedEnvelope parsed = parse(row.value2());
             if (parsed.invalid()) throw reused(clientRequestId);
             if (parsed.metadata() != null
                     && clientRequestId.equals(parsed.metadata().clientRequestId())) {
                 matches.add(new Resolution(
                         RecordKind.WRITING_COMMAND, row.value1(), parsed.metadata()));
+            } else if (parsed.metadata() == null
+                    && CommandIdempotency.legacyKey(userId, clientRequestId).equals(row.value3())) {
+                if (!"start".equals(row.value4())) throw reused(clientRequestId);
+                // 旧 Web 命令没有信封，但其用户级 key 已是持久身份；必须在会话互斥前识别重放。
+                // 不补造历史请求指纹：显式新协议带指纹来复用此 key 时，后面的比较仍拒绝它。
+                matches.add(new Resolution(RecordKind.WRITING_COMMAND, row.value1(),
+                        new Metadata(clientRequestId, "legacy_start", Map.of(), Map.of(), null)));
             }
         }
 

@@ -8,6 +8,7 @@ import json
 import httpx
 from inkforge_agents.providers.base import (
     ModelStructuredOutputRoute,
+    ModelToolCall,
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
@@ -64,7 +65,13 @@ class ControlledFakeModelProvider:
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         idempotency_key = request.requestIdempotencyKey
         if idempotency_key is None:
-            # E2E 只控制 V2；闲置的 V1 消费器仍可保持与普通 Fake Provider 同形。
+            # V1 回归只在写正文首轮增加一次真实读工具调用，随后继续原有草案工具协议。
+            # 该分支仅属于隔离 ControlledFakeProvider，不改变生产 FakeModelProvider。
+            tool_names = {tool.name for tool in request.tools}
+            if {"list_outline_summary", "begin_artifact_output"} <= tool_names:
+                if any(message.role == "tool" for message in request.messages):
+                    return _legacy_artifact_turn(request)
+                return _legacy_outline_read_turn(request)
             return await self._delegate.complete_turn(request)
         request_sha256 = hashlib.sha256(
             json.dumps(
@@ -164,6 +171,61 @@ class ControlledFakeModelProvider:
     async def aclose(self) -> None:
         await self._http.aclose()
 
+
+def _legacy_outline_read_turn(request: ModelTurnRequest) -> ModelTurnResult:
+    prompt_tokens = sum(len(message.content) for message in request.messages)
+    return ModelTurnResult(
+        content="",
+        toolCalls=[
+            ModelToolCall(
+                id="legacy-fake-outline-read",
+                name="list_outline_summary",
+                arguments={},
+            )
+        ],
+        finishReason="tool_calls",
+        rawFinishReason="tool_calls",
+        usage=ModelUsage(
+            promptTokens=prompt_tokens,
+            cachedTokens=0,
+            completionTokens=0,
+            totalTokens=prompt_tokens,
+        ),
+        diagnostics=ModelUsageDiagnostics(),
+        effectiveMaxOutputTokens=request.maxOutputTokens,
+    )
+
+
+def _legacy_artifact_turn(request: ModelTurnRequest) -> ModelTurnResult:
+    prompt_tokens = sum(len(message.content) for message in request.messages)
+    arguments = {
+        "kind": "chapter_draft",
+        "summary": "模拟章节正文草案。",
+        "content": "这是模拟模型生成的完整章节正文，用于验证待审核草案流程。",
+        "artifactKey": "fake-chapter-draft",
+        "submitForReview": True,
+    }
+    completion_tokens = len(json.dumps(arguments, ensure_ascii=False))
+    return ModelTurnResult(
+        content="",
+        toolCalls=[
+            ModelToolCall(
+                id="legacy-fake-artifact-output",
+                name="begin_artifact_output",
+                arguments=arguments,
+            )
+        ],
+        finishReason="tool_calls",
+        rawFinishReason="tool_calls",
+        usage=ModelUsage(
+            promptTokens=prompt_tokens,
+            cachedTokens=0,
+            completionTokens=completion_tokens,
+            totalTokens=prompt_tokens + completion_tokens,
+        ),
+        diagnostics=ModelUsageDiagnostics(),
+        effectiveMaxOutputTokens=request.maxOutputTokens,
+    )
 
 def _chapter_writing_revision(
     request: ModelTurnRequest,

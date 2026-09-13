@@ -186,21 +186,22 @@ test("当前会话收到权威终态后重新读取持久化消息但不覆盖�
   );
   assert.match(
     source,
-    /event\.eventType === "completed"[\s\S]*workflowEventRequiresSessionMessageRefresh\(event\)[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
+    /case "run_outcome"[\s\S]*decision\.kind === "succeeded"[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
   );
   assert.match(
     source,
-    /event\.payload\.artifactId[\s\S]*loadReviewArtifacts\(\)/,
+    /event\.type === "artifact_applied"[\s\S]*loadReviewArtifacts\(\)/,
   );
 });
 
-test("审核托盘用一次权威摘要列表查询汇总产物并淘汰旧响应", async () => {
+test("V1 审核托盘按会话任务读取权威产物并淘汰旧响应", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
-  assert.match(source, /"\/api\/v1\/review-artifact-summaries"/);
-  assert.match(source, /status: "awaiting_user"/);
-  assert.doesNotMatch(source, /Promise\.allSettled\(taskIds/);
+  assert.match(source, /"\/api\/v1\/writing\/sessions"/);
+  assert.match(source, /"\/api\/v1\/writing\/tasks\/\{task_id\}\/artifact"/);
+  assert.match(source, /collectAwaitingReviewTaskIds/);
+  assert.match(source, /Promise\.allSettled\(taskIds/);
   assert.match(source, /artifactCollectionVersionRef/);
   assert.match(source, /artifactTrayArtifacts\.map/);
   assert.match(source, /mergeActionableReviewArtifacts/);

@@ -543,15 +543,14 @@ test("问答和只读章节审阅完成后回读当前会话权威消息", () =>
   assert.equal(workflowEventRequiresSessionMessageRefresh(artifactCompleted), false);
 });
 
-test("状态卡逐项渲染 activeSteps，currentStep 不再充当并行活动权威", async () => {
+test("V1 前台展示传统 Agent 流程，不渲染 V2 activeSteps", async () => {
   const conversationUrl = new URL("../writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
-  assert.match(source, /workflowRun\.activeSteps\.map\(\(step\)\s*=>/);
-  assert.match(source, /key=\{`\$\{step\.stepId\}:\$\{step\.fencingToken\}`\}/);
-  assert.match(source, /workflowModelRoleLabel\(step\.modelProfile, step\.purpose\)/);
-  assert.match(source, /workflowResolvedModelLabel\(step\.resolvedModel\)/);
-  assert.doesNotMatch(source, /workflowRun\.currentStep/);
+  assert.match(source, /liveAgentRuns\.map\(\(run\)\s*=>/);
+  assert.match(source, /openWritingRunEvents/);
+  assert.match(source, /case "run_outcome"/);
+  assert.doesNotMatch(source, /workflowRun\.activeSteps|createWorkflowRunUiState/);
   assert.doesNotMatch(source, /deploymentFingerprint|deploymentProfileKey|endpointProfile/);
 });
 

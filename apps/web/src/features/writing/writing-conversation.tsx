@@ -24,7 +24,6 @@ import { countTextLength } from "@/shared/lib/word-count";
 import type { SelectionBridge, SelectionAttachment } from "@/features/editor/selection-identity";
 import { buildSelectionRunRequest, selectionPreview } from "@/features/editor/selection-identity";
 import {
-  describeUpdateDiffValue,
   normalizeReviewArtifactDiff,
   type SelectionDiff,
   type UpdateDiffItem,
@@ -53,14 +52,14 @@ import {
   clearReviewArtifactFromMessages,
   createReviewStateEpoch,
   isTerminalReviewArtifact,
-  resolveReviewArtifactExecutionRunId,
   resolveReviewArtifactActionTaskId,
   resolveReviewArtifactTaskId,
-  resolveSelectedUpdateRefsForDecision,
   resolveVisibleReviewArtifact,
 } from "./review-artifact-state";
-import { mergeActionableReviewArtifacts } from "./review-artifact-collection";
-import { isChapterWritingReviewArtifact } from "./review-artifact-edit";
+import {
+  collectAwaitingReviewTaskIds,
+  mergeActionableReviewArtifacts,
+} from "./review-artifact-collection";
 import {
   resolveLoadedSessionRecoveryState,
 } from "./session-task-state";
@@ -85,29 +84,10 @@ import {
   resolvePendingReviewAction,
 } from "./run-outcome-state";
 import { monitorRunStream } from "./run-stream-monitor";
-import { buildClarificationRequest, buildNaturalRunRequest, writingInputDisposition } from "./writing-input";
 import {
   createWritingEventCursors,
   type WritingEventCursors,
 } from "./writing-event-cursor";
-import {
-  applyWorkflowStreamEvent,
-  createWorkflowRunUiState,
-  isWorkflowRunV2,
-  selectForegroundWorkflowRun,
-  workflowEventLabel,
-  workflowEventRequiresSessionMessageRefresh,
-  workflowEventRequiresSnapshotRefresh,
-  workflowModelRoleLabel,
-  workflowProgressPhaseLabel,
-  workflowResolvedModelLabel,
-  workflowRunIsForeground,
-  workflowRunShouldStopObservation,
-  workflowRunStatusTitle,
-  writingRunId,
-  type WorkflowRunUiState,
-  type WritingRunStatusResponse,
-} from "./workflow-run-ui";
 import {
   createEmptySessionWorkspace,
   isCurrentSessionStream,
@@ -156,10 +136,7 @@ async function openWritingRunEvents(
     signal,
   });
   if (response.ok) return response;
-  const error = await response.json().catch(() => null) as { code?: string; message?: string } | null;
-  if (response.status === 409 && error?.code === "WORKFLOW_CURSOR_INVALID") {
-    cursors.clear(taskId);
-  }
+  const error = await response.json().catch(() => null) as { message?: string } | null;
   throw new Error(error?.message || "连接写作事件流失败");
 }
 
@@ -287,7 +264,6 @@ function getSelectionMessageSource(metadata: unknown): {
 }
 
 type PendingUpdatesData = {
-  outlineTreeMode?: "patch" | "replace";
   characters?: Record<string, unknown>[];
   locations?: Record<string, unknown>[];
   items?: Record<string, unknown>[];
@@ -305,8 +281,8 @@ type PendingUpdatesData = {
 };
 
 type ReviewArtifactData = {
-  engineVersion: 1 | 2;
   id: string;
+  engineVersion: 1 | 2;
   taskId: string | null;
   workflowRunId: string | null;
   artifactKey?: string | null;
@@ -314,14 +290,10 @@ type ReviewArtifactData = {
   status: string;
   summary?: string | null;
   revision: number;
-  actionable?: boolean;
-  detailLoaded?: boolean;
-  sourceBindingStatus?: "verified" | "legacy_missing" | "not_yet_supported";
   diff?: UpdateDiffItem[] | SelectionDiff | null;
   payload?: {
     kind?: string;
     operation?: string;
-    target?: { mode?: string; chapterId?: string };
     replacement?: string;
     selection?: {
       resourceType?: string;
@@ -358,16 +330,6 @@ type ReviewArtifactData = {
     requiredChanges?: string | null;
   }>;
   optimisticStatus?: "applying" | "discarding" | "revising";
-};
-
-type ReviewArtifactListData = {
-  items: ReviewArtifactData[];
-  nextCursor: string | null;
-};
-
-type ReviewArtifactDetailCacheEntry = {
-  artifact: ReviewArtifactData;
-  etag: string | null;
 };
 
 type ReviewArtifactActionStatus = "pending" | "succeeded" | "failed";
@@ -576,12 +538,6 @@ function isSelectionReviewArtifact(artifact: ReviewArtifactData): boolean {
     || Boolean(artifact.payload?.selection);
 }
 
-function canEditReviewArtifactText(artifact: ReviewArtifactData): boolean {
-  return Boolean(getReviewArtifactContent(artifact)) && (artifact.engineVersion === 1
-    || isSelectionReviewArtifact(artifact)
-    || isChapterWritingReviewArtifact(artifact.kind, artifact.payload));
-}
-
 function getUpdateActionLabel(action: string) {
   if (action === "create") return "新增";
   if (action === "update") return "修改";
@@ -750,8 +706,6 @@ export function WritingConversation({
   const persistedPhaseKeyRef = useRef<string | null>(null);
   const artifactCollectionVersionRef = useRef(0);
   const reviewStateEpochRef = useRef(createReviewStateEpoch());
-  const reviewArtifactDetailCacheRef = useRef(new Map<string, ReviewArtifactDetailCacheEntry>());
-  const reviewArtifactDetailRequestsRef = useRef(new Map<string, Promise<ReviewArtifactData | null>>());
 
   const replaceSessionWorkspace = useCallback((next: SessionWorkspaceState<ReviewArtifactData>) => {
     currentSessionIdRef.current = next.sessionId;
@@ -812,15 +766,8 @@ export function WritingConversation({
   const [isPending, startTransition] = useTransition();
 
   const [userInput, setUserInput] = useState("");
-  const [revisionArtifact, setRevisionArtifact] = useState<ReviewArtifactData | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [isCancellingWorkflow, setIsCancellingWorkflow] = useState(false);
   const [isAssigningTask, setIsAssigningTask] = useState(false);
-  const [workflowRun, setWorkflowRun] = useState<WorkflowRunUiState | null>(null);
-  const workflowRunRef = useRef<WorkflowRunUiState | null>(null);
-  const inputDisposition = writingInputDisposition({
-    run: workflowRun, legacyTaskId: taskId, revisionArtifactId: revisionArtifact?.id,
-  });
   const [agentLiveRuns, setAgentLiveRuns] = useState<AgentLiveRuns>({});
   const agentLiveRunsRef = useRef<AgentLiveRuns>({});
 
@@ -834,20 +781,8 @@ export function WritingConversation({
     applyAgentLiveAction({ type: "reset" });
   }, [applyAgentLiveAction]);
 
-  const updateWorkflowRun = useCallback((next: WorkflowRunUiState | null) => {
-    workflowRunRef.current = next;
-    setWorkflowRun(next);
-  }, []);
-
   // 中断控制
   const abortRef = useRef<AbortController | null>(null);
-  const processStreamRef = useRef<(
-    streamTaskId: string,
-    scope: StreamUiScope,
-    signal?: AbortSignal,
-  ) => Promise<void>>(async () => {
-    throw new Error("写作事件流尚未初始化");
-  });
   const sendGuardRef = useRef(createAsyncActionGuard());
   const eventCursorsRef = useRef(createWritingEventCursors());
   const completionEffectGuardRef = useRef(createCompletionEffectGuard());
@@ -888,8 +823,6 @@ export function WritingConversation({
   }, []);
 
   const resetSessionContext = useCallback((sessionId: string | null) => {
-    abortRef.current?.abort();
-    abortRef.current = null;
     clearAllSelection?.();
     reviewStateEpochRef.current.invalidate();
     sessionLoadVersionRef.current += 1;
@@ -897,7 +830,6 @@ export function WritingConversation({
     persistedPhaseKeyRef.current = null;
     replaceSessionWorkspace(createEmptySessionWorkspace<ReviewArtifactData>(sessionId));
     setMessages([]);
-    setRevisionArtifact(null);
     setGeneratedContent("");
     setError(null);
     setReviewDialogArtifact(null);
@@ -908,15 +840,11 @@ export function WritingConversation({
     setReviewDraftSourceKey(null);
     setReviewUpdateSelectionSourceKey(null);
     pendingReviewArtifactRefreshRef.current = false;
-    reviewArtifactDetailRequestsRef.current.clear();
     updateReviewArtifactAction(null);
     resetAgentActivity();
     clearAgentLiveRuns();
-    updateWorkflowRun(null);
-    setIsCancellingWorkflow(false);
-    setIsSending(false);
     setIsAssigningTask(false);
-  }, [clearAgentLiveRuns, clearAllSelection, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction, updateWorkflowRun]);
+  }, [clearAgentLiveRuns, clearAllSelection, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   const clearReviewActionCloseTimer = useCallback(() => {
     if (reviewActionCloseTimerRef.current === null) return;
@@ -960,8 +888,7 @@ export function WritingConversation({
     updateReviewArtifactAction(null);
   }, [clearReviewActionCloseTimer, updateReviewArtifactAction]);
 
-  const focusChatForArtifactRevision = useCallback((artifact: ReviewArtifactData) => {
-    setRevisionArtifact(artifact);
+  const focusChatForArtifactRevision = useCallback(() => {
     closeReviewArtifactModal({ force: true });
     setPhase("recording");
     window.setTimeout(() => inputRef.current?.focus(), 0);
@@ -986,7 +913,7 @@ export function WritingConversation({
   }, [clearReviewActionCloseTimer]);
 
   const getLocalReviewDraftForApply = useCallback((artifact: ReviewArtifactData): string | undefined => {
-    if (!canEditReviewArtifactText(artifact)) return undefined;
+    if (!getReviewArtifactContent(artifact)) return undefined;
     const draftSourceKey = `${artifact.id}:${artifact.revision}`;
     if (reviewDraftSourceKey !== draftSourceKey) return undefined;
     return reviewDraftText;
@@ -1032,7 +959,7 @@ export function WritingConversation({
     return [] as Session[];
   }, [novelId, chapterId]);
 
-  const loadReviewArtifacts = useCallback(async (_knownSessions?: readonly Session[]) => {
+  const loadReviewArtifacts = useCallback(async (knownSessions?: readonly Session[]) => {
     // version 淘汰同一会话内的旧请求，epoch 同时覆盖切换会话、应用/删除 Artifact 等语义边界。
     const requestVersion = ++artifactCollectionVersionRef.current;
     const requestEpoch = reviewStateEpochRef.current.capture();
@@ -1041,41 +968,45 @@ export function WritingConversation({
       && reviewStateEpochRef.current.isCurrent(requestEpoch)
     );
     try {
-      const fetchedArtifacts: ReviewArtifactData[] = [];
-      let cursor: string | null = null;
-      do {
-        const response: ReviewArtifactListData = requireApiData(await browserApi.GET(
-          "/api/v1/review-artifact-summaries",
-          {
-            params: {
-              query: {
-                novelId,
-                chapterId,
-                status: "awaiting_user",
-                cursor,
-                limit: 100,
-              },
-            },
-            cache: "no-store",
-          },
-        ));
-        if (!isCurrentRequest()) return;
-        fetchedArtifacts.push(...response.items.flatMap((artifact) => (
-          resolveReviewArtifactExecutionRunId(artifact)
-            ? [{ ...artifact, detailLoaded: false }]
-            : []
-        )));
-        cursor = response.nextCursor;
-      } while (cursor);
+      const sessionList = knownSessions ?? requireApiData(await browserApi.GET(
+        "/api/v1/writing/sessions",
+        { params: { query: { novelId, chapterId } }, cache: "no-store" },
+      )) as Session[];
+      if (!isCurrentRequest()) return;
 
+      const sessionResults = await Promise.allSettled(sessionList.map(async (session) => (
+        requireApiData(await browserApi.GET(
+          "/api/v1/writing/sessions/{session_id}",
+          { params: { path: { session_id: session.id } }, cache: "no-store" },
+        )) as LoadedSessionResponse
+      )));
+      if (!isCurrentRequest()) return;
+
+      const loadedSessions = sessionResults.flatMap((result) => (
+        result.status === "fulfilled" ? [result.value] : []
+      ));
+      const taskIds = collectAwaitingReviewTaskIds(loadedSessions);
+      const artifactResults = await Promise.allSettled(taskIds.map(async (awaitingTaskId) => (
+        requireApiData(await browserApi.GET(
+          "/api/v1/writing/tasks/{task_id}/artifact",
+          { params: { path: { task_id: awaitingTaskId } }, cache: "no-store" },
+        )) as ReviewArtifactData | null
+      )));
+      if (!isCurrentRequest()) return;
+
+      const fetchedArtifacts = artifactResults.flatMap((result) => (
+        result.status === "fulfilled" && result.value ? [result.value] : []
+      ));
+      const hasPartialFailure = sessionResults.some((result) => result.status === "rejected") ||
+        artifactResults.some((result) => result.status === "rejected");
       const visibleCurrentArtifact = activeReviewArtifactRef.current;
+      // 部分请求失败时保留已知事实；全部成功时才允许权威快照清除已不存在的托盘项。
       setReviewArtifacts((previous) => mergeActionableReviewArtifacts(
+        ...(hasPartialFailure ? [previous] : []),
         fetchedArtifacts,
-        previous,
         visibleCurrentArtifact ? [visibleCurrentArtifact] : [],
       ));
     } catch (err) {
-      // 查询失败时保留已有托盘，避免网络抖动把待确认入口清空。
       console.error("加载待确认变更失败", err);
     }
   }, [chapterId, novelId]);
@@ -1085,30 +1016,13 @@ export function WritingConversation({
     sessionId: string,
     options: { preserveWorkspaceState?: boolean } = {},
   ) => {
-    // 同一会话也可能同时存在初始化、终态对账和人工刷新；只允许最后发起的权威读取落地。
     sessionLoadVersionRef.current += 1;
     const requestVersion = sessionLoadVersionRef.current;
     try {
-      const [session, runList] = await Promise.all([
-        browserApi.GET(
-          "/api/v1/writing/sessions/{session_id}",
-          { params: { path: { session_id: sessionId } } },
-        ).then(requireApiData) as Promise<LoadedSessionResponse>,
-        browserApi.GET(
-          "/api/v1/writing/runs",
-          {
-            params: {
-              query: {
-                novelId,
-                chapterId,
-                writingSessionId: sessionId,
-                limit: 20,
-              },
-            },
-            cache: "no-store",
-          },
-        ).then(requireApiData),
-      ]);
+      const session = requireApiData(await browserApi.GET(
+        "/api/v1/writing/sessions/{session_id}",
+        { params: { path: { session_id: sessionId } } },
+      )) as LoadedSessionResponse;
         if (
           currentSessionIdRef.current !== sessionId ||
           sessionLoadVersionRef.current !== requestVersion
@@ -1129,46 +1043,6 @@ export function WritingConversation({
         setMessages(loadedMessages);
         // 终态对账只替换权威消息；当前 SSE 已经收敛出的阶段和审核状态不能被旧快照覆盖。
         if (options.preserveWorkspaceState) return;
-
-        const activeV2Run = selectForegroundWorkflowRun(runList.items);
-        if (activeV2Run) {
-          const next = createWorkflowRunUiState(activeV2Run);
-          updateWorkflowRun(next);
-          replaceSessionWorkspace({
-            sessionId,
-            taskId: next.runId,
-            phase: next.status === "waiting_user" ? "recording" : "generating",
-            currentOperation: null,
-            operationStage: null,
-            activeReviewArtifact: null,
-          });
-          phasePersistenceReadyRef.current = true;
-          resetAgentActivity();
-          clearAgentLiveRuns();
-          setIsAssigningTask(false);
-          pendingReviewArtifactRefreshRef.current = false;
-          if (next.artifact?.actionable) void loadReviewArtifacts();
-          if (next.status === "pending" || next.status === "running") {
-            const controller = new AbortController();
-            abortRef.current = controller;
-            setIsSending(true);
-            void processStreamRef.current(
-              next.runId,
-              { mode: "session", sessionId },
-              controller.signal,
-            ).catch((streamError) => {
-              if ((streamError as Error).name !== "AbortError") {
-                setError(streamError instanceof Error ? streamError.message : "恢复任务观察失败");
-              }
-            }).finally(() => {
-              if (abortRef.current === controller) {
-                abortRef.current = null;
-                setIsSending(false);
-              }
-            });
-          }
-          return;
-        }
 
         const sessionTaskState = resolveLoadedSessionRecoveryState(session.currentTask ?? null);
         setReviewDialogArtifact(null);
@@ -1193,7 +1067,7 @@ export function WritingConversation({
     } catch (err) {
       console.error("加载会话消息失败", err);
     }
-  }, [chapterId, clearAgentLiveRuns, loadReviewArtifacts, novelId, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction, updateWorkflowRun]);
+  }, [clearAgentLiveRuns, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   // 创建新会话
   const createSession = useCallback(async (title: string): Promise<string | null> => {
@@ -1445,147 +1319,32 @@ export function WritingConversation({
     setFlowLogs((prev) => [...prev, newEntry]);
   }, []);
 
-  const stopWorkflowRun = useCallback(async () => {
-    const current = workflowRunRef.current;
-    if (!current || !workflowRunIsForeground(current) || current.cancelRequestedAt) return;
-    setIsCancellingWorkflow(true);
-    setError(null);
-    try {
-      const response = requireApiData(await browserApi.POST(
-        "/api/v1/writing/runs/{task_id}/cancel",
-        {
-          params: { path: { task_id: current.runId } },
-          body: { clientRequestId: createClientRequestId() },
-        },
-      ));
-      if (!isWorkflowRunV2(response)) {
-        throw new Error("取消响应的执行引擎与当前任务不一致");
-      }
-      const next = createWorkflowRunUiState(response);
-      updateWorkflowRun(next);
-      addFlowLog({
-        type: "phase",
-        content: next.status === "cancelled" ? "任务已停止" : "停止请求已受理，正在结算已发生的执行与用量",
-      });
-      if (next.status === "cancelled") setPhase("completed");
-    } catch (cancelError) {
-      setError(cancelError instanceof Error ? cancelError.message : "停止任务失败");
-    } finally {
-      setIsCancellingWorkflow(false);
-    }
-  }, [addFlowLog, setPhase, updateWorkflowRun]);
-
   const setWorkflowReviewArtifact = useCallback((artifact: ReviewArtifactData) => {
     // SSE 只提示“有结果可读”；传入对象必须来自 Core 回读，不能把流事件自身当作 Artifact 权威数据。
-    const detailedArtifact = { ...artifact, detailLoaded: true };
-    const nextTaskId = resolveReviewArtifactTaskId(taskIdRef.current ?? taskId, detailedArtifact);
-    if (!nextTaskId) {
-      console.error("忽略引擎版本与 Run 归属不一致的 ReviewArtifact", {
-        artifactId: detailedArtifact.id,
-        engineVersion: detailedArtifact.engineVersion,
-      });
-      return;
-    }
+    const nextTaskId = resolveReviewArtifactTaskId(taskIdRef.current ?? taskId, artifact);
     if (nextTaskId && nextTaskId !== taskIdRef.current) {
       setTaskId(nextTaskId);
     }
-    setActiveReviewArtifact(detailedArtifact);
-    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [detailedArtifact]));
-    if (detailedArtifact.status === "awaiting_user") setPhase("recording");
-    setMessages((prev) => attachReviewArtifactToConversation<Message, ReviewArtifactData>(prev, detailedArtifact, () => ({
-      id: `restored-review-${detailedArtifact.id}`,
+    setActiveReviewArtifact(artifact);
+    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [artifact]));
+    if (artifact.status === "awaiting_user") setPhase("recording");
+    setMessages((prev) => attachReviewArtifactToConversation<Message, ReviewArtifactData>(prev, artifact, () => ({
+      id: `restored-review-${artifact.id}`,
       role: "system",
       content: "待确认变更已更新。请从聊天顶部的待确认入口查看、修改或应用。",
       timestamp: Date.now(),
     })));
   }, [setActiveReviewArtifact, setPhase, setTaskId, taskId]);
 
-  const loadReviewArtifactDetail = useCallback((
-    artifactId: string,
-    revision: number,
-    options: { revalidate?: boolean } = {},
-  ): Promise<ReviewArtifactData | null> => {
-    const cacheKey = `${artifactId}:${revision}`;
-    const cached = reviewArtifactDetailCacheRef.current.get(cacheKey);
-    if (cached && !options.revalidate) return Promise.resolve(cached.artifact);
-    const pending = reviewArtifactDetailRequestsRef.current.get(cacheKey);
-    if (pending) return pending;
-
-    const request = (async () => {
-      const result = await browserApi.GET(
-        "/api/v1/review-artifacts/{artifact_id}",
-        {
-          params: {
-            path: { artifact_id: artifactId },
-            query: { revision },
-          },
-          headers: cached?.etag ? { "If-None-Match": cached.etag } : undefined,
-          cache: "no-store",
-        },
-      );
-      if (result.response.status === 304 && cached) return cached.artifact;
-      if (result.response.status === 403 || result.response.status === 404) {
-        for (const key of reviewArtifactDetailCacheRef.current.keys()) {
-          if (key.startsWith(`${artifactId}:`)) reviewArtifactDetailCacheRef.current.delete(key);
-        }
-        if (activeReviewArtifactRef.current?.id === artifactId) setActiveReviewArtifact(null);
-        setReviewArtifacts((previous) => previous.filter((artifact) => artifact.id !== artifactId));
-        setMessages((previous) => clearReviewArtifactFromMessages(previous, artifactId));
-        setReviewDialogArtifact((current) => current?.id === artifactId ? null : current);
-        setShowReviewArtifactModal(false);
-        return null;
-      }
-      const authoritativeArtifact = requireApiData(result) as ReviewArtifactData;
-      if (!resolveReviewArtifactExecutionRunId(authoritativeArtifact)) {
-        throw new Error("ReviewArtifact 的引擎版本与 Run 归属不一致");
-      }
-      const artifact = {
-        ...authoritativeArtifact,
-        detailLoaded: true,
-      };
-      reviewArtifactDetailCacheRef.current.set(cacheKey, {
-        artifact,
-        etag: result.response.headers.get("etag"),
-      });
-      while (reviewArtifactDetailCacheRef.current.size > 32) {
-        const oldest = reviewArtifactDetailCacheRef.current.keys().next().value;
-        if (typeof oldest !== "string") break;
-        reviewArtifactDetailCacheRef.current.delete(oldest);
-      }
-      return artifact;
-    })().finally(() => {
-      reviewArtifactDetailRequestsRef.current.delete(cacheKey);
-    });
-    reviewArtifactDetailRequestsRef.current.set(cacheKey, request);
-    return request;
-  }, [setActiveReviewArtifact]);
-
-  const refreshWorkflowReviewArtifact = useCallback(async (artifactId: string, revision: number) => {
-    const requestEpoch = reviewStateEpochRef.current.capture();
-    try {
-      const artifact = await loadReviewArtifactDetail(artifactId, revision);
-      if (!reviewStateEpochRef.current.isCurrent(requestEpoch)) return;
-      if (!artifact) return;
-      setWorkflowReviewArtifact(artifact);
-    } catch (artifactError) {
-      console.warn("[V2 工作流] 回读待确认变更失败", artifactError);
-    }
-  }, [loadReviewArtifactDetail, setWorkflowReviewArtifact]);
-
-  const inspectReviewArtifactFromTray = useCallback(async (artifact: ReviewArtifactData) => {
-    const detail = await loadReviewArtifactDetail(artifact.id, artifact.revision);
-    if (!detail) return;
-    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [detail]));
+  const inspectReviewArtifactFromTray = useCallback((artifact: ReviewArtifactData) => {
+    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [artifact]));
     // 先关闭托盘再开详情，避免两个对话框叠放后焦点和 Esc 关闭顺序失控。
     setShowArtifactTray(false);
-    openReviewArtifactModal(detail);
-  }, [loadReviewArtifactDetail, openReviewArtifactModal]);
+    openReviewArtifactModal(artifact);
+  }, [openReviewArtifactModal]);
 
   const clearDetachedReviewArtifact = useCallback((artifactId: string) => {
     reviewStateEpochRef.current.invalidate();
-    for (const key of reviewArtifactDetailCacheRef.current.keys()) {
-      if (key.startsWith(`${artifactId}:`)) reviewArtifactDetailCacheRef.current.delete(key);
-    }
     if (activeReviewArtifactRef.current?.id === artifactId) {
       setActiveReviewArtifact(null);
     }
@@ -1603,17 +1362,16 @@ export function WritingConversation({
     const transientArtifactIds = new Set<string>();
     const activeArtifact = activeReviewArtifactRef.current;
     const activeBelongsToTask = Boolean(
-      activeArtifact
-      && resolveReviewArtifactExecutionRunId(activeArtifact) === streamTaskId
+      activeArtifact && (
+        activeArtifact.taskId === streamTaskId
+        || (!activeArtifact.taskId && taskIdRef.current === streamTaskId)
+      )
     );
     if (activeArtifact && activeBelongsToTask) {
       transientArtifactIds.add(activeArtifact.id);
       setActiveReviewArtifact(null);
     }
-    if (
-      reviewDialogArtifact
-      && resolveReviewArtifactExecutionRunId(reviewDialogArtifact) === streamTaskId
-    ) {
+    if (reviewDialogArtifact?.taskId === streamTaskId) {
       transientArtifactIds.add(reviewDialogArtifact.id);
     }
 
@@ -1783,7 +1541,7 @@ export function WritingConversation({
     if (scope.mode === "session" && !isCurrentSessionStream(currentSessionIdRef.current, scope.sessionId)) {
       return;
     }
-    if (scope.mode === "artifact" && event.type !== "run_snapshot" && event.type !== "workflow_event") {
+    if (scope.mode === "artifact") {
       handleDetachedArtifactEvent(event, scope.artifactId);
       return;
     }
@@ -1811,75 +1569,6 @@ export function WritingConversation({
     }
 
     switch (event.type) {
-      case "run_snapshot": {
-        const next = applyWorkflowStreamEvent(workflowRunRef.current, event);
-        if (!next) break;
-        updateWorkflowRun(next);
-        setTaskId(event.runId);
-        setIsAssigningTask(false);
-        if (next.status === "pending" || next.status === "running") setPhase("generating");
-        if (next.status === "waiting_user") setPhase("recording");
-        if (next.status === "completed" || next.status === "cancelled") setPhase("completed");
-        if (next.status === "failed") {
-          setPhase("error");
-          setError(`任务执行失败（${next.error?.errorCode ?? "WORKFLOW_FAILED"}）`);
-        }
-        if (next.artifact?.actionable) {
-          void refreshWorkflowReviewArtifact(
-            next.artifact.artifactId,
-            next.artifact.artifactRevision,
-          );
-        }
-        break;
-      }
-
-      case "workflow_event": {
-        const previous = workflowRunRef.current;
-        const next = applyWorkflowStreamEvent(previous, event);
-        if (!next || next === previous) break;
-        updateWorkflowRun(next);
-        setTaskId(event.runId);
-        setIsAssigningTask(false);
-        addFlowLog({ type: "phase", content: workflowEventLabel(event) });
-
-        if (next.status === "pending" || next.status === "running") setPhase("generating");
-        if (event.eventType === "clarification_required") {
-          setPhase("recording");
-          setRevisionArtifact(null);
-        } else if (event.eventType === "awaiting_user") {
-          setPhase("recording");
-          void refreshWorkflowReviewArtifact(
-            event.payload.artifactId,
-            event.payload.artifactRevision,
-          );
-          void loadSessions();
-        } else if (event.eventType === "completed") {
-          setPhase("completed");
-          if (event.payload.artifactId) {
-            void loadReviewArtifacts();
-          }
-          if (
-            scope.mode === "session"
-            && workflowEventRequiresSessionMessageRefresh(event)
-          ) {
-            void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
-          }
-          void loadSessions();
-          onComplete?.();
-        } else if (event.eventType === "failed") {
-          setPhase("error");
-          setError(
-            event.payload.outcomeUnknown
-              ? `模型结果无法安全确认（${event.payload.errorCode}），系统没有重复生成。`
-              : `任务执行失败（${event.payload.errorCode}）。`,
-          );
-        } else if (event.eventType === "cancelled") {
-          setPhase("completed");
-          void loadSessions();
-        }
-        break;
-      }
-
       case "start":
         setTaskId(event.taskId ?? null);
         setFlowLogs([]);
@@ -2188,9 +1877,7 @@ export function WritingConversation({
           void refreshAwaitingReviewArtifact("run_outcome_waiting_user");
           void loadReviewArtifacts();
           void loadSessions();
-          if (scope.mode === "session") {
-            void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
-          }
+          void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
           break;
         }
         clearTerminalReviewState(streamTaskId);
@@ -2213,9 +1900,7 @@ export function WritingConversation({
           addFlowLog({ type: "phase", content: "会话已按权威状态完成" });
           void loadSessions();
           void loadReviewArtifacts();
-          if (scope.mode === "session") {
-            void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
-          }
+          void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
           if (completionEffectGuardRef.current.claim(streamTaskId, event)) {
             onComplete?.();
           }
@@ -2264,15 +1949,15 @@ export function WritingConversation({
         console.debug("[SSE] 未处理的事件类型:", (event as { type: string }).type, event);
         break;
     }
-  }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, clearTerminalReviewState, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, handleDetachedArtifactEvent, loadSessionMessages, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, refreshWorkflowReviewArtifact, scheduleReviewArtifactModalClose, setCurrentOperation, setCurrentOperationStage, setPhase, setTaskId, startActivityRound, updateReviewArtifactAction, updateWorkflowRun]);
+  }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, clearTerminalReviewState, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, handleDetachedArtifactEvent, loadSessionMessages, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, scheduleReviewArtifactModalClose, setCurrentOperation, setCurrentOperationStage, setPhase, setTaskId, startActivityRound, updateReviewArtifactAction]);
 
   const runSendAction = useCallback(<T,>(action: () => Promise<T>) => {
     return sendGuardRef.current.run(action);
   }, []);
 
   const startDiscussionInternal = async (messageOverride?: string, titleOverride?: string) => {
-    const userMessage = messageOverride ?? userInput;
-    if (countTextLength(userMessage) === 0) return;
+    const userMessage = (messageOverride ?? userInput).trim();
+    if (!userMessage) return;
     const attachment = selectionBridge?.attachedSelection ?? null;
     if (attachment?.stale) {
       setError("选区来源已变化，请重新选择后再发送");
@@ -2299,8 +1984,6 @@ export function WritingConversation({
     phasePersistenceReadyRef.current = true;
     setPhase("discussing");
     setIsSending(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
 
     try {
       if (attachment && attachment.resourceType === "chapter_content") {
@@ -2309,41 +1992,31 @@ export function WritingConversation({
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
         body: attachment
           ? { ...buildSelectionRunRequest({ attachment, novelId, chapterId, writingSessionId: sessionIdForRequest, targetWordCount, userInstruction: userMessage }), clientRequestId: createClientRequestId() }
-          : buildNaturalRunRequest({
+          : {
               clientRequestId: createClientRequestId(),
               novelId,
               chapterId,
               targetWordCount,
-              userInstruction: userMessage,
+              selectedAgents,
+              userMessage,
               writingSessionId: sessionIdForRequest,
-            }),
-        signal: controller.signal,
+            },
       }));
-      if (attachment) selectionBridge?.removeSelection();
-      const acceptedRunId = writingRunId(run);
-      if (isWorkflowRunV2(run)) {
-        updateWorkflowRun(createWorkflowRunUiState(run));
-        setCurrentOperation(null);
-        setCurrentOperationStage(null);
-      } else {
-        updateWorkflowRun(null);
+      if (run.engineVersion !== 1) {
+        throw new Error("当前响应属于新版工作流，请开始新对话");
       }
-      setTaskId(acceptedRunId);
+      if (attachment) selectionBridge?.removeSelection();
+      setTaskId(run.id);
       await processStream(
-        acceptedRunId,
+        run.id,
         { mode: "session", sessionId: sessionIdForRequest },
-        controller.signal,
       );
     } catch (err) {
-      if ((err as Error).name === "AbortError") return;
       setError(err instanceof Error ? err.message : "未知错误");
       setPhase("error");
       setIsAssigningTask(false);
     } finally {
-      if (abortRef.current === controller) {
-        abortRef.current = null;
-        setIsSending(false);
-      }
+      setIsSending(false);
       clearAgentLiveRuns();
     }
   };
@@ -2353,103 +2026,102 @@ export function WritingConversation({
     await guarded;
   };
 
-  const handleResumeLegacyTask = async (messageOverride?: string) => {
-    await runSendAction(async () => {
-      const legacyTaskId = taskIdRef.current;
-      const sessionId = currentSessionIdRef.current;
-      const message = messageOverride ?? userInput;
-      if (workflowRunRef.current || !legacyTaskId || !sessionId || countTextLength(message) === 0) return;
-      const controller = new AbortController();
-      abortCurrentAgent();
-      abortRef.current = controller;
-      setIsSending(true);
-      try {
-        const accepted = requireApiData(await browserApi.POST("/api/v1/writing/runs/{task_id}/resume", {
-          params: { path: { task_id: legacyTaskId } },
-          body: { clientRequestId: createClientRequestId(), writingSessionId: sessionId, userMessage: message },
-          signal: controller.signal,
-        }));
-        setUserInput("");
-        addMessage({ role: "user", content: message, sessionId, persist: false });
-        await processStream(accepted.taskId, { mode: "session", sessionId }, controller.signal);
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "旧任务恢复失败");
-      } finally {
-        if (abortRef.current === controller) abortRef.current = null;
-        setIsSending(false);
-        clearAgentLiveRuns();
-      }
-    });
-  };
-
   const handleSendMessage = async (messageOverride?: string) => {
-    const message = messageOverride ?? userInput;
-    if (countTextLength(message) === 0) return;
-    const disposition = writingInputDisposition({
-      run: workflowRunRef.current, legacyTaskId: taskIdRef.current,
-      revisionArtifactId: revisionArtifact?.id,
-    });
-    if (disposition === "artifact_revision" && revisionArtifact) {
-      // 该处理器已有发送锁；不能在另一个发送锁内再次调用。
-      await handleArtifactDecision(revisionArtifact, "revise", message);
-      return;
-    }
     const guarded = runSendAction(async () => {
+      const message = (messageOverride ?? userInput).trim();
+      if (!message) return;
       const attachment = selectionBridge?.attachedSelection ?? null;
-      if (disposition === "new_run" && attachment?.stale) {
+      if (attachment?.stale) {
         setError("选区来源已变化，请重新选择后再发送");
         return;
       }
-      if (disposition === "blocked") {
-        setError("当前任务仍在运行或等待草案决定。请先处理当前任务。");
+
+      if (attachment && taskId && phase !== "idle" && phase !== "completed" && phase !== "error") {
+        setError("当前任务仍在运行，请等待完成或先取消后再发送选区改写");
         return;
       }
-      if (disposition === "clarification" && attachment) {
-        setError("澄清回答不接收新的选区，请先移除选区附件。");
-        return;
-      }
+
+      // 中断当前正在运行的 Agent
       abortCurrentAgent();
-      if (editingMessageId) {
-        // 编辑后重发也产生新 Run，不删除已持久化的历史对话。
-        setEditingMessageId(null);
-      }
-      if (disposition === "new_run") {
+
+      if (!taskId) {
         await startDiscussionInternal(message);
         return;
       }
-      const current = workflowRunRef.current;
-      const sessionIdForRequest = currentSessionIdRef.current;
-      if (!current || !sessionIdForRequest) {
-        setError("当前澄清或写作会话不存在，请刷新状态。");
-        return;
+
+      if (editingMessageId) {
+        const editIndex = messages.findIndex(m => m.id === editingMessageId);
+        if (editIndex !== -1) {
+          setMessages(prev => prev.slice(0, editIndex + 1));
+        }
+        setEditingMessageId(null);
       }
+
+      setUserInput("");
+      addMessage({
+        role: "user",
+        content: message,
+        metadata: attachment ? selectionAttachmentMetadata(attachment) : undefined,
+        persist: false,
+      });
       setIsSending(true);
+
       const controller = new AbortController();
       abortRef.current = controller;
+
       try {
-        const accepted = requireApiData(await browserApi.POST(
-          "/api/v1/writing/runs/{task_id}/clarification",
-          {
-            params: { path: { task_id: current.runId } },
-            body: buildClarificationRequest(current, message, createClientRequestId()),
+        if (attachment) {
+          if (attachment.resourceType === "chapter_content") await flushActiveChapterSave();
+          const accepted = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
+            body: {
+              ...buildSelectionRunRequest({
+                attachment,
+                novelId,
+                chapterId,
+                writingSessionId: currentSessionIdRef.current,
+                targetWordCount,
+                userInstruction: message,
+              }),
+              clientRequestId: createClientRequestId(),
+            },
             signal: controller.signal,
-          },
-        ));
-        updateWorkflowRun(createWorkflowRunUiState(accepted));
-        setTaskId(accepted.runId);
-        setUserInput("");
-        addMessage({ role: "user", content: message, sessionId: sessionIdForRequest, persist: false });
-        setPhase("generating");
-        await processStream(
-          accepted.runId,
-          { mode: "session", sessionId: sessionIdForRequest },
-          controller.signal,
-        );
+          }));
+          if (accepted.engineVersion !== 1) {
+            throw new Error("当前响应属于新版工作流，请开始新对话");
+          }
+          selectionBridge?.removeSelection();
+          const sessionIdForRequest = currentSessionIdRef.current;
+          if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
+          await processStream(
+            accepted.id,
+            { mode: "session", sessionId: sessionIdForRequest },
+            controller.signal,
+          );
+        } else {
+          const accepted = requireApiData(await browserApi.POST(
+            "/api/v1/writing/runs/{task_id}/resume",
+            {
+              params: { path: { task_id: taskId } },
+              body: {
+                clientRequestId: createClientRequestId(),
+                writingSessionId: currentSessionId ?? null,
+                userMessage: message,
+              },
+              signal: controller.signal,
+            },
+          ));
+          const sessionIdForRequest = currentSessionIdRef.current;
+          if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
+          await processStream(
+            accepted.taskId,
+            { mode: "session", sessionId: sessionIdForRequest },
+            controller.signal,
+          );
+        }
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         setError(err instanceof Error ? err.message : "发送失败");
       } finally {
-        if (abortRef.current === controller) abortRef.current = null;
         setIsSending(false);
         clearAgentLiveRuns();
       }
@@ -2479,19 +2151,19 @@ export function WritingConversation({
     if (action.prompt) await runPromptAction(action.prompt, action.label);
   };
 
-  async function processStream(
+  const processStream = async (
     streamTaskId: string,
     scope: StreamUiScope,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<void> => {
     let lastOutcomeSignature: string | null = null;
     // cursor 只负责断线续传和去重；每轮连接最终仍回读 /runs/{taskId}，校正漏帧与代理缓存。
     const sseState = eventCursorsRef.current.state(streamTaskId);
-    let requiresSnapshotRead = false;
 
     const applyFrame = (frame: string): boolean => {
       const parsedFrame = parseSseFrame(`${frame}\n\n`, sseState);
       if (!parsedFrame) return false;
+      eventCursorsRef.current.update(streamTaskId, parsedFrame.id);
       const event = parseSseEvent(parsedFrame.data, parsedFrame.event);
       if (!event) {
         console.warn(
@@ -2499,11 +2171,6 @@ export function WritingConversation({
           parsedFrame.event ?? "message",
         );
         return false;
-      }
-      if (event.type === "run_snapshot") {
-        eventCursorsRef.current.resetToSnapshot(streamTaskId, event.baseSequence);
-      } else {
-        eventCursorsRef.current.update(streamTaskId, parsedFrame.id);
       }
       if (event.type === "run_outcome") {
         lastOutcomeSignature = rememberRunOutcomeSignature(
@@ -2516,15 +2183,11 @@ export function WritingConversation({
           lastOutcomeSignature,
         );
       }
-      if (event.type === "workflow_event"
-        && workflowEventRequiresSnapshotRefresh(workflowRunRef.current, event)) {
-        requiresSnapshotRead = true;
-      }
       handleEvent(event, scope, streamTaskId);
       return true;
     };
 
-    await monitorRunStream<WritingRunStatusResponse>({
+    await monitorRunStream<Extract<WritingSseEvent, { type: "run_outcome" }>>({
       signal,
       open: () => openWritingRunEvents(
         streamTaskId,
@@ -2532,7 +2195,6 @@ export function WritingConversation({
         signal,
       ),
       consume: async (response) => {
-        requiresSnapshotRead = false;
         const reader = response.body?.getReader();
         if (!reader) throw new Error("写作事件流没有响应体");
         const decoder = new TextDecoder();
@@ -2549,10 +2211,6 @@ export function WritingConversation({
           buffer = frames.pop() || "";
           for (const frame of frames) {
             receivedEvent = applyFrame(frame) || receivedEvent;
-            if (requiresSnapshotRead || workflowRunShouldStopObservation(workflowRunRef.current)) {
-              await reader.cancel();
-              return receivedEvent;
-            }
           }
         }
         if (buffer.trim()) {
@@ -2561,36 +2219,20 @@ export function WritingConversation({
         return receivedEvent;
       },
       readOutcome: async () => {
-        return requireApiData(await browserApi.GET(
+        const terminal = requireApiData(await browserApi.GET(
           "/api/v1/writing/runs/{task_id}",
           { params: { path: { task_id: streamTaskId } }, cache: "no-store" },
         ));
-      },
-      handleOutcome: (runStatus) => {
-        if (isWorkflowRunV2(runStatus)) {
-          const next = createWorkflowRunUiState(runStatus);
-          updateWorkflowRun(next);
-          setTaskId(next.runId);
-          setIsAssigningTask(false);
-          if (next.status === "pending" || next.status === "running") setPhase("generating");
-          if (next.status === "waiting_user") setPhase("recording");
-          if (next.status === "completed" || next.status === "cancelled") setPhase("completed");
-          if (next.status === "failed") {
-            setPhase("error");
-            setError(`任务执行失败（${next.error?.errorCode ?? "WORKFLOW_FAILED"}）`);
-          }
-          if (next.artifact?.actionable) {
-            void refreshWorkflowReviewArtifact(
-              next.artifact.artifactId,
-              next.artifact.artifactRevision,
-            );
-          }
-          return;
+        if (terminal.engineVersion !== 1) {
+          throw new Error("当前运行属于新版工作流，请开始新对话");
         }
-        const outcome = parseSseEvent(runStatus.outcome, "run_outcome");
+        const outcome = parseSseEvent(terminal.outcome, "run_outcome");
         if (!outcome || outcome.type !== "run_outcome") {
           throw new Error("权威运行状态响应不符合契约");
         }
+        return outcome;
+      },
+      handleOutcome: (outcome) => {
         const signature = runOutcomeSignature(outcome);
         // 若流中已处理相同 outcome，就跳过重复 UI 副作用；签名不同则以最后一次权威回读收敛。
         if (signature !== lastOutcomeSignature) {
@@ -2598,19 +2240,10 @@ export function WritingConversation({
         }
         lastOutcomeSignature = signature;
       },
-      shouldClose: (runStatus) => {
-        if (isWorkflowRunV2(runStatus)) {
-          return workflowRunShouldStopObservation(createWorkflowRunUiState(runStatus));
-        }
-        return runStatus.outcome.streamShouldClose;
-      },
+      shouldClose: (outcome) => outcome.streamShouldClose,
     });
 
-  }
-
-  useEffect(() => {
-    processStreamRef.current = processStream;
-  });
+  };
 
   const handleAcceptContent = () => {
     const artifact = activeReviewArtifactRef.current;
@@ -2712,14 +2345,13 @@ export function WritingConversation({
 
     const getName = (item: Record<string, unknown>): string => getUpdateItemName(item);
 
-    const renderValue = (value: string | null | undefined, missingText: string) => {
-      const description = describeUpdateDiffValue(value, missingText);
-      return (
-        <div className={description.isPlaceholder ? "diff-value diff-empty" : "diff-value"}>
-          {description.text}
-        </div>
-      );
-    };
+    const isEmptyValue = (value: string | null | undefined) => value === undefined || value === null || value.trim() === "";
+
+    const renderValue = (value: string | null | undefined, emptyText: string) => (
+      <div className={isEmptyValue(value) ? "diff-value diff-empty" : "diff-value"}>
+        {isEmptyValue(value) ? emptyText : value}
+      </div>
+    );
 
     const renderDiffItem = (item: UpdateDiffItem, idx: number) => (
       <details
@@ -2748,14 +2380,11 @@ export function WritingConversation({
                 <div className="diff-columns">
                   <div className="diff-column diff-old">
                     <div className="diff-column-title">当前</div>
-                    {renderValue(field.oldValue, "未设置（null）")}
+                    {renderValue(field.oldValue, "空")}
                   </div>
                   <div className="diff-column diff-new">
                     <div className="diff-column-title">待保存</div>
-                    {renderValue(
-                      field.newValue,
-                      item.action === "delete" ? "将删除" : "未设置（null）",
-                    )}
+                    {renderValue(field.newValue, item.action === "delete" ? "将删除" : "空")}
                   </div>
                 </div>
               </div>
@@ -2982,11 +2611,6 @@ export function WritingConversation({
             </button>
           </div>
         </div>
-        {updates.outlineTreeMode === "replace" ? (
-          <div className="review-dialog-note">
-            大纲整树替换会用所选节点替换整棵现有树；不自动补选父节点，依赖不完整会整单失败。
-          </div>
-        ) : null}
         <div className="review-update-select-list">
           {SELECTABLE_TEXT_UPDATE_SECTIONS.map(({ section, label }) => renderSection(section, label))}
           {SELECTABLE_ARRAY_UPDATE_SECTIONS.map(({ section, label }) => renderSection(section, label))}
@@ -3071,13 +2695,13 @@ export function WritingConversation({
             </div>
           ) : null}
           <div className="review-artifact-actions">
-            {awaitingUser && artifact.detailLoaded ? (
+            {awaitingUser ? (
               <>
               <button
                 className="button ghost sm"
                 type="button"
                 disabled={isSending || isActing || actionLocked}
-                onClick={() => void inspectReviewArtifactFromTray(artifact)}
+                onClick={() => inspectReviewArtifactFromTray(artifact)}
               >
                 查看全文/编辑
               </button>
@@ -3101,7 +2725,7 @@ export function WritingConversation({
                 disabled={isSending || isActing || actionLocked}
                 onClick={() => {
                   if (isCurrentSessionArtifact) {
-                    focusChatForArtifactRevision(artifact);
+                    focusChatForArtifactRevision();
                     return;
                   }
                   void handleArtifactDecision(artifact, "revise", "继续修改待确认变更");
@@ -3122,9 +2746,9 @@ export function WritingConversation({
               <button
                 className="button ghost sm"
                 type="button"
-                onClick={() => void inspectReviewArtifactFromTray(artifact)}
+                onClick={() => inspectReviewArtifactFromTray(artifact)}
               >
-                查看全文并处理
+                查看变更
               </button>
             )}
           </div>
@@ -3144,8 +2768,7 @@ export function WritingConversation({
       artifact.payload.updates.outlineAdjustments?.length
     ));
     const isActing = Boolean(artifact.optimisticStatus) || artifact.status === "applying" || artifact.status === "discarding";
-    const artifactContent = getReviewArtifactContent(artifact);
-    const canEditText = canEditReviewArtifactText(artifact);
+    const canEditText = Boolean(getReviewArtifactContent(artifact));
     const awaitingUser = artifact.status === "awaiting_user";
     const selectedUpdateRefsForApply = getSelectedUpdateRefsForApply(artifact);
     const hasEmptyStructuredSelection = selectedUpdateRefsForApply !== undefined && selectedUpdateRefsForApply.length === 0;
@@ -3154,7 +2777,7 @@ export function WritingConversation({
     const isCurrentSessionArtifact =
       activeReviewArtifact?.id === artifact.id &&
       Boolean(taskId) &&
-      taskId === resolveReviewArtifactExecutionRunId(artifact);
+      taskId === artifact.taskId;
     const approveArtifact = () => {
       // eslint-disable-next-line react-hooks/refs -- 仅在用户点击批准后读取任务引用，不会在渲染阶段执行。
       void handleArtifactDecision(
@@ -3193,13 +2816,13 @@ export function WritingConversation({
           ) : null}
 
           <section className="review-dialog-section">
-            <div className="review-dialog-section-title">{canEditText ? (isSelectionReviewArtifact(artifact) ? "可编辑选区替换" : "可编辑正文") : artifactContent ? "草案预览" : "结构化变更"}</div>
-            {artifactContent ? (
+            <div className="review-dialog-section-title">{canEditText ? (isSelectionReviewArtifact(artifact) ? "可编辑选区替换" : "可编辑正文") : "结构化变更"}</div>
+            {canEditText ? (
               <label className="review-editor">
                 <textarea
-                  value={canEditText ? reviewDraftText : artifactContent}
+                  value={reviewDraftText}
                   onChange={(event) => setReviewDraftText(event.target.value)}
-                  readOnly={!canEditText || !awaitingUser || actionLocked}
+                  readOnly={!awaitingUser || actionLocked}
                   spellCheck={false}
                 />
               </label>
@@ -3251,7 +2874,7 @@ export function WritingConversation({
                 disabled={isSending || isActing || actionLocked}
                 onClick={() => {
                   if (isCurrentSessionArtifact) {
-                    focusChatForArtifactRevision(artifact);
+                    focusChatForArtifactRevision();
                     return;
                   }
                   void handleArtifactDecision(artifact, "revise", "继续修改待确认变更");
@@ -3286,21 +2909,31 @@ export function WritingConversation({
     selectedUpdateRefs?: AgentUpdateSelectionRef[]
   ) {
     const guarded = runSendAction(async () => {
-      const currentUiTaskId = taskIdRef.current ?? taskId;
-      const isVisibleSessionArtifact = activeReviewArtifactRef.current?.id === artifact.id;
-      const currentTaskId = resolveReviewArtifactActionTaskId(
-        isVisibleSessionArtifact ? currentUiTaskId : null,
-        artifact,
-      );
-      if (!currentTaskId) {
-        const identityError = "待确认变更的引擎版本与运行归属不一致。请刷新页面后重试。";
+      if (artifact.engineVersion !== 1) {
+        const message = "这项待确认变更属于新版工作流，当前兼容页面不能继续，请开始新对话。";
         updateReviewArtifactAction({
           artifactId: artifact.id,
           decision,
           status: "failed",
-          message: identityError,
+          message,
         });
-        setError(identityError);
+        setError(message);
+        return;
+      }
+      const currentUiTaskId = taskIdRef.current ?? taskId;
+      const isVisibleSessionArtifact = activeReviewArtifactRef.current?.id === artifact.id;
+      const currentTaskId = resolveReviewArtifactActionTaskId(
+        isVisibleSessionArtifact ? currentUiTaskId : null,
+        artifact
+      );
+      if (!currentTaskId) {
+        updateReviewArtifactAction({
+          artifactId: artifact.id,
+          decision,
+          status: "failed",
+          message: "找不到当前写作任务，无法处理待确认变更。请刷新页面后重试。",
+        });
+        setError("找不到当前写作任务，无法处理待确认变更。请刷新页面后重试。");
         setPhase("error");
         return;
       }
@@ -3308,7 +2941,7 @@ export function WritingConversation({
         activeArtifactId: isVisibleSessionArtifact ? artifact.id : null,
         currentTaskId: currentUiTaskId,
         artifactId: artifact.id,
-        artifactTaskId: currentTaskId,
+        artifactTaskId: artifact.taskId,
       });
       const isCurrentSessionArtifact = interactionScope === "session";
 
@@ -3325,45 +2958,29 @@ export function WritingConversation({
       });
       try {
         const selectionArtifact = isSelectionReviewArtifact(artifact);
-        const isV2Artifact = artifact.engineVersion === 2;
         const accepted = requireApiData(await browserApi.POST(
           "/api/v1/review-artifacts/{artifact_id}/decision",
           {
             params: { path: { artifact_id: artifact.id } },
             body: {
-              engineVersion: artifact.engineVersion,
               clientRequestId: createClientRequestId(),
+              engineVersion: artifact.engineVersion,
               expectedRevision: artifact.revision,
               decision,
-              editedContent: (!isV2Artifact || isChapterWritingReviewArtifact(artifact.kind, artifact.payload))
-                && decision === "approve" && !selectionArtifact
-                ? editedContent ?? null
-                : null,
+              editedContent: decision === "approve" && !selectionArtifact ? editedContent ?? null : null,
               editedReplacement: decision === "approve" && selectionArtifact ? editedContent ?? null : null,
-              selectedUpdateRefs: resolveSelectedUpdateRefsForDecision(
-                artifact,
-                decision,
-                selectedUpdateRefs,
-              ),
+              selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,
               userMessage: userMessage ?? (decision === "revise" ? "继续修改待确认变更" : null),
             },
           },
         ));
+        if (accepted.engineVersion !== 1) {
+          throw new Error("当前响应属于新版工作流，请开始新对话");
+        }
         const streamScope: StreamUiScope = isCurrentSessionArtifact && currentSessionIdRef.current
           ? { mode: "session", sessionId: currentSessionIdRef.current }
           : { mode: "artifact", artifactId: artifact.id };
-        if (revisionArtifact?.id === artifact.id) {
-          setRevisionArtifact(null);
-          setUserInput("");
-        }
-        if (accepted.engineVersion === 2) {
-          const next = createWorkflowRunUiState(accepted);
-          updateWorkflowRun(next);
-          setTaskId(next.runId);
-          await processStream(next.runId, streamScope);
-        } else {
-          await processStream(accepted.taskId, streamScope);
-        }
+        await processStream(accepted.taskId, streamScope);
       } catch (err) {
         const message = err instanceof Error ? err.message : "处理待确认变更失败";
         updateReviewArtifactAction({
@@ -3481,8 +3098,7 @@ export function WritingConversation({
         </div>
         <div className="header-right">
           <span className="phase-indicator">
-            {workflowRun ? workflowRunStatusTitle(workflowRun) :
-             phase === "idle" ? "空闲" :
+            {phase === "idle" ? "空闲" :
              phase === "discussing" ? "讨论中" :
              phase === "generating" ? "生成中" :
              phase === "recording" ? "记录中" :
@@ -3520,7 +3136,7 @@ export function WritingConversation({
                 key={action.kind}
                 type="button"
                 onClick={() => void handleProductAction(action)}
-                disabled={isSending || workflowRunIsForeground(workflowRun)}
+                disabled={isSending}
               >
                 <span>{action.label}</span>
                 <small>{action.description}</small>
@@ -3615,61 +3231,6 @@ export function WritingConversation({
 
         {isAssigningTask ? (
           <div className="assignment-status" aria-live="polite">正在分配任务</div>
-        ) : null}
-
-        {workflowRun ? (
-          <div className={`workflow-run-status-card status-${workflowRun.status}`} aria-live="polite">
-            <div className="workflow-run-status-copy">
-              <div className="workflow-run-status-title">{workflowRunStatusTitle(workflowRun)}</div>
-              <div className="workflow-run-status-detail">
-                {workflowRun.activeSteps.length > 0 ? (
-                  <div className="workflow-run-active-steps" aria-label="当前执行步骤">
-                    {workflowRun.activeSteps.map((step) => {
-                      const resolvedModelLabel = workflowResolvedModelLabel(step.resolvedModel);
-                      return (
-                        <div
-                          className={`workflow-run-active-step status-${step.status}`}
-                          key={`${step.stepId}:${step.fencingToken}`}
-                        >
-                          <span className="workflow-run-step-role">
-                            <span className="workflow-run-step-ordinal">步骤 {step.ordinal}</span>
-                            {workflowModelRoleLabel(step.modelProfile, step.purpose)}
-                          </span>
-                          <span className="workflow-run-step-phase">
-                            {step.progress
-                              ? `${workflowProgressPhaseLabel(step.progress.phase)} · 已等待 ${step.progress.elapsedSeconds} 秒`
-                              : step.status === "pending" ? "等待调度" : "正在启动"}
-                            {step.attemptCount > 1 ? ` · 第 ${step.attemptCount} 次执行` : ""}
-                          </span>
-                          {resolvedModelLabel ? (
-                            <span className="workflow-run-step-model">{resolvedModelLabel}</span>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <span>{workflowRun.activity}</span>
-                )}
-                {workflowRun.artifact?.reviewAvailability === "partial" ? (
-                  <span>自动复审仅部分完成，候选仍由你决定</span>
-                ) : null}
-                {workflowRun.artifact?.reviewAvailability === "unavailable" ? (
-                  <span>自动复审未完成，候选仍由你决定</span>
-                ) : null}
-              </div>
-            </div>
-            {workflowRunIsForeground(workflowRun) && !workflowRun.cancelRequestedAt ? (
-              <button
-                className="workflow-run-stop"
-                type="button"
-                disabled={isCancellingWorkflow}
-                onClick={() => void stopWorkflowRun()}
-              >
-                {isCancellingWorkflow ? "正在请求停止" : "停止任务"}
-              </button>
-            ) : null}
-          </div>
         ) : null}
 
         {liveAgentRuns.map((run) => (
@@ -3786,19 +3347,6 @@ export function WritingConversation({
 
       {/* 输入区域 */}
       <div className="chat-input">
-        {workflowRun?.status === "waiting_user" && workflowRun.clarification ? (
-          <div className="workflow-input-context" role="status">
-            <strong>需要你补充信息</strong>
-            <ParagraphText text={workflowRun.clarification.prompt} />
-            <span className="workflow-input-hint">回答会继续当前任务，不会创建新任务或修改草案。</span>
-          </div>
-        ) : revisionArtifact ? (
-          <div className="workflow-input-context">
-            <strong>修改当前草案 · 版本 {revisionArtifact.revision}</strong>
-            <span className="workflow-input-hint">输入返工要求，草案经复审后仍需你确认采用。</span>
-            <button className="button ghost sm" type="button" onClick={() => setRevisionArtifact(null)} disabled={isSending}>取消返工输入</button>
-          </div>
-        ) : null}
         {selectionBridge?.attachedSelection ? (
           <div className={`selection-attachment-card ${selectionBridge.attachedSelection.stale ? "stale" : ""}`}>
             <div className="selection-attachment-main">
@@ -3811,10 +3359,10 @@ export function WritingConversation({
             <button className="button ghost sm" type="button" onClick={selectionBridge.reselectSelection}>重新选择</button>
           </div>
         ) : null}
-        {generatedContent && activeReviewArtifact?.status === "awaiting_user" && (
+        {generatedContent && (
           <div className="quick-actions">
-            <button onClick={handleAcceptContent} disabled={isSending}>采纳</button>
-            <button onClick={() => focusChatForArtifactRevision(activeReviewArtifact)} disabled={isSending}>修改</button>
+            <button onClick={() => handleSendMessage("采纳")}>采纳</button>
+            <button onClick={() => handleSendMessage("继续修改")}>修改</button>
           </div>
         )}
         {phase !== "idle" && phase !== "completed" && (
@@ -3826,12 +3374,12 @@ export function WritingConversation({
                 editedContent={getLocalReviewDraftForApply(workflowReviewArtifact)}
                 isSending={isSending}
                 onDecision={handleArtifactDecision}
-                onRevise={() => focusChatForArtifactRevision(workflowReviewArtifact)}
+                onRevise={focusChatForArtifactRevision}
               />
-            ) : workflowRunIsForeground(workflowRun) ? null : phase === "reviewing" ? (
+            ) : phase === "reviewing" ? (
               <>
-                <button onClick={() => handleResumeLegacyTask("确认保存")}>确认保存</button>
-                <button onClick={() => handleResumeLegacyTask("取消")}>取消</button>
+                <button onClick={() => handleSendMessage("确认保存")}>确认保存</button>
+                <button onClick={() => handleSendMessage("取消")}>取消</button>
               </>
             ) : (
               <>
@@ -3842,21 +3390,12 @@ export function WritingConversation({
           </div>
         )}
 
-        {!workflowRun && taskId && phase === "recording" && !workflowReviewArtifact && !chapterTargetPrompt ? (
-          <div className="quick-actions">
-            <button onClick={() => handleResumeLegacyTask()} disabled={isSending || countTextLength(userInput) === 0}>
-              继续旧任务
-            </button>
-            <span className="workflow-input-hint">普通发送会新建任务；仅此动作恢复旧版任务。</span>
-          </div>
-        ) : null}
-
         <div className="input-row">
           <textarea
             ref={inputRef}
             value={userInput}
             onChange={(e) => setUserInput(e.target.value)}
-            placeholder={inputDisposition === "clarification" ? "补充当前问题所需的信息" : inputDisposition === "artifact_revision" ? "描述这份草案需要如何修改" : "描述要完成的创作任务，系统会自动分配合适的 Agent"}
+            placeholder="描述要完成的创作任务，系统会自动分配合适的 Agent"
             rows={1}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -3866,10 +3405,10 @@ export function WritingConversation({
                 if (editingMessageId) cancelEdit();
               }
             }}
-            disabled={isSending || inputDisposition === "blocked"}
+            disabled={isSending}
           />
-          <button className="send-btn" onClick={() => handleSendMessage()} disabled={countTextLength(userInput) === 0 || isSending || inputDisposition === "blocked"}>
-            {inputDisposition === "clarification" ? "回答问题" : inputDisposition === "artifact_revision" ? "提交返工" : "发送"}
+          <button className="send-btn" onClick={() => handleSendMessage()} disabled={!userInput.trim() || isSending}>
+            发送
           </button>
         </div>
 
