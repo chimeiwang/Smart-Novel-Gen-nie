@@ -370,7 +370,11 @@ def test_rag_phase_uses_test_only_compose_override_and_original_public_api():
         assert environment["RAG_EMBEDDING_BASE_URL"] == BASE_URL
     assert "RAG_EMBEDDING_API_KEY" not in override["services"]["core-api"]["environment"]
     stack = SimpleNamespace(
-        docker="docker", project="test", rag_embeddings=False, video_responses=False
+        docker="docker",
+        project="test",
+        rag_embeddings=False,
+        video_responses=False,
+        legacy_langgraph=False,
     )
     original = ComposeStack.command.fget(stack)
     stack.rag_embeddings = True

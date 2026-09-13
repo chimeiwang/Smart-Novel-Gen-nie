@@ -48,3 +48,10 @@
   报告为 Mac 隔离目录 `output/legacy-langgraph-final/report.json`。
 - 规格符合性和代码质量两阶段复核完成，两项 P1 已闭合；未因此放宽数据库或审核门禁。
 - 最终完整 Maven：service-auth 11、service-contracts 5、Core 1215（4 跳过）、CLI 147，零失败／错误。
+
+### 首次发布流水线
+
+- 候选 `56f35dcf` 已通过 CI 的 Java、API 契约及 Web 测试，但 Python 全量为 3575 通过、2 跳过、1 失败，
+  因此自动部署被跳过，生产没有切换。
+- 失败来自 RAG 联调测试的 `SimpleNamespace` 夹具遗漏新增 `legacy_langgraph=false` 字段；
+  本地复现同一异常后补齐夹具，不修改生产实现、不删除断言，再运行全量验证。
