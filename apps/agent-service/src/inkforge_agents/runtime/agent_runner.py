@@ -126,6 +126,10 @@ class AgentRunner:
                 else "creative"
             ),
             reviewer=request.executionMode == "reviewer",
+            allow_chapter_artifact_correction=(
+                request.executionMode in {"primary", "reviser"}
+                and request.operationKind in {"write_chapter", "rewrite_scene"}
+            ),
         )
         payload: dict[str, Any] = result.model_dump()
         return AgentRunResult(agentId=definition.id, **payload)

@@ -149,8 +149,9 @@ def _operation_protocol(
         )
     elif operation.kind in {"write_chapter", "rewrite_scene"}:
         lines.append(
-            "调用 begin_artifact_output，并把完整正文直接放入 content 参数；"
-            "content 只放正文，不得省略、概述或截断。"
+            "调用 begin_artifact_output，只提交 kind=chapter_draft、summary 和完整非空 content；"
+            "其余字段省略，不得混入选区身份或 replacement。"
+            "content 参数只放完整正文，不得省略、概述或截断。"
         )
     elif operation.kind == "plan_chapter":
         lines.append(

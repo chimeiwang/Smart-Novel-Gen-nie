@@ -12,6 +12,7 @@ from inkforge_agents.providers.base import (
 )
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import JobCancelledError
+from inkforge_agents.runtime.agent_runner import AgentRunner, AgentRunRequest
 from inkforge_agents.runtime.agent_runtime import (
     AgentRuntime,
     ModelToolProtocolRecoveryFailedError,
@@ -213,6 +214,164 @@ class Cancellation:
         self.checks += 1
         if self.checks >= self.cancel_on_check:
             raise JobCancelledError()
+
+
+def chapter_request(mode: str = "primary", operation: str = "write_chapter") -> AgentRunRequest:
+    return AgentRunRequest.model_validate({
+        "agentId": "写作",
+        "executionMode": mode,
+        "operationKind": operation,
+        "userMessage": "生成完整章节",
+        "toolContext": context("写作"),
+        **({"selectionSnapshot": {}} if operation == "rewrite_chapter_selection" else {}),
+    })
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["primary", "reviser"])
+@pytest.mark.parametrize("operation", ["write_chapter", "rewrite_scene"])
+@pytest.mark.parametrize("read_error", ["json", "schema"])
+async def test_chapter_submission_can_recover_after_read_correction(
+    mode: str, operation: str, read_error: str, caplog: pytest.LogCaptureFixture,
+) -> None:
+    class BillableProvider(ScriptedProvider):
+        billable = True
+
+    raw_value = "不得出现在纠正提示或诊断中的坏参数"
+    full_content = "完整章节正文。" * 3000
+    provider = BillableProvider([
+        invalid_tool_turn() if read_error == "json" else turn(
+            "", ("bad-read", "get_character_detail", {"unexpected": raw_value}),
+        ),
+        turn("", ("read", "get_novel_info", {})),
+        turn(raw_value,
+             ("discard-read", "get_novel_info", {}),
+             ("bad-artifact", "begin_artifact_output",
+              {"kind": "chapter_draft", "summary": raw_value})),
+        turn("", ("artifact", "begin_artifact_output", {
+            "kind": "chapter_draft", "summary": "章节草案", "content": full_content,
+        })),
+    ])
+    billing = RecordingBilling()
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runner = AgentRunner(
+        make_agent_runtime(ModelRuntime(provider, billing=billing), registry), registry
+    )
+
+    result = await runner.run(chapter_request(mode, operation))
+
+    assert len(provider.requests) == 4
+    assert gateway.calls == ["get_novel_info"]
+    assert result.finishReason == "terminal_control_tool"
+    assert result.visibleContent == ""
+    assert len(result.controlEvents) == 1
+    assert result.controlEvents[0]["content"] == full_content
+    correction = provider.requests[3]
+    system_text = "\n".join(
+        message.content for message in correction.messages if message.role == "system"
+    )
+    assert "artifact_content_required" in system_text
+    assert "kind=chapter_draft" in system_text
+    assert "完整非空 content" in system_text
+    assert raw_value not in correction.model_dump_json()
+    assert correction.tools == provider.requests[2].tools
+    assert correction.policy == provider.requests[2].policy
+    assert result.usage.totalTokens == 60
+    authorization_ids = [item["requestId"] for item in billing.authorizations]
+    assert len(set(authorization_ids)) == 4
+    assert [item["requestId"] for item in billing.usages] == authorization_ids
+    assert [item["totalTokens"] for item in billing.usages] == [15] * 4
+    assert "artifact_content_required" in caplog.text
+    assert "corrections_used=1" in caplog.text
+    assert "action=correct_chapter_artifact" in caplog.text
+    assert raw_value not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_chapter_artifact_correction_is_bounded_and_does_not_execute_invalid_package(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    invalid_artifact = turn("不能保存的正文",
+        ("discard-read", "get_novel_info", {}),
+        ("bad-artifact", "begin_artifact_output", {"kind": "chapter_draft", "summary": "草案"}),
+    )
+    provider = ScriptedProvider([
+        invalid_tool_turn(), turn("", ("read", "get_novel_info", {})),
+        invalid_artifact, invalid_artifact,
+    ])
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+
+    with pytest.raises(ModelToolProtocolRecoveryFailedError) as caught:
+        await runner.run(chapter_request())
+
+    assert len(provider.requests) == 4
+    assert gateway.calls == ["get_novel_info"]
+    assert caught.value.retryable is False
+    assert "artifact_content_required" in str(caught.value)
+    assert "corrections_used=2 action=fail" in caplog.text
+    assert "不能保存的正文" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_failure", ["artifact", "mixed", "read_not_recovered", "selection"])
+async def test_chapter_reserve_does_not_expand_other_recovery_paths(first_failure: str) -> None:
+    invalid_artifact = turn("", ("bad", "begin_artifact_output", {
+        "kind": "chapter_draft", "summary": "草案",
+    }))
+    first = invalid_tool_turn()
+    corrected = turn("", ("read", "get_novel_info", {}))
+    if first_failure == "artifact":
+        first = invalid_artifact
+    elif first_failure == "mixed":
+        first = invalid_tool_turn(valid_calls=(("valid-control", "begin_artifact_output", {
+            "kind": "chapter_draft", "summary": "草案", "content": "有效正文",
+        }),))
+    elif first_failure == "read_not_recovered":
+        corrected = invalid_artifact
+    responses = [first, corrected]
+    if first_failure != "read_not_recovered":
+        responses.append(invalid_artifact)
+    provider = ScriptedProvider(responses)
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+    operation = "rewrite_chapter_selection" if first_failure == "selection" else "write_chapter"
+
+    with pytest.raises(ModelToolProtocolRecoveryFailedError):
+        await runner.run(chapter_request(operation=operation))
+
+    assert len(provider.requests) == (2 if first_failure == "read_not_recovered" else 3)
+    assert gateway.calls == ([] if first_failure == "read_not_recovered" else ["get_novel_info"])
+
+
+@pytest.mark.asyncio
+async def test_artifact_first_correction_has_specific_safe_feedback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_value = "不得暴露的草案内容"
+    provider = ScriptedProvider([
+        turn("", ("bad", "begin_artifact_output", {
+            "kind": "chapter_draft", "summary": raw_value, "content": raw_value,
+            "resourceType": "chapter_content",
+        })),
+        turn("", ("good", "begin_artifact_output", {
+            "kind": "chapter_draft", "summary": "草案", "content": "完整正文",
+        })),
+    ])
+    registry = build_default_registry(RecordingGateway())
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+
+    await runner.run(chapter_request())
+
+    correction = provider.requests[1].model_dump_json()
+    assert "artifact_selection_incomplete" in correction
+    assert "其余字段省略" in correction
+    assert raw_value not in correction
+    assert "artifact_selection_incomplete" in caplog.text
+    assert raw_value not in caplog.text
 
 
 @pytest.mark.asyncio

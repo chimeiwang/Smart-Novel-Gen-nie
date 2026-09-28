@@ -517,6 +517,13 @@ DeepSeek strict 通道仅在规范官方 HTTPS 根地址或 `/v1` 地址上自�
 
 DeepSeek 工具 arguments 解析失败时，Provider 必须在可靠 usage 已校验的前提下返回不含原文的无效调用诊断，不得让原始 `ValueError` 穿透；只允许对末尾缺失对象或数组闭合符、补齐后可由标准 JSON 解析且通过本轮原始 JSON Schema 的参数做确定性恢复。AgentRuntime 把单次模型工具响应视为原子协议包，只要包含无效调用就不得接受其中正文或执行任何工具。无效 JSON 或本地 Pydantic 参数在整个 Agent 运行中最多触发一次显式协议纠正：纠正请求不回放坏 assistant 响应或 arguments，保持原工具和策略，并作为新的 `ModelRuntime` 调用独立授权、回报 usage 和记录日志；纠正后仍无合法工具调用时固定以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 失败。成功 HTTP 响应的 JSON、envelope 或 usage 不可信时不可自动再调用模型。质量协议错误日志可以保留原始完成原因、安全大写 `failure_code`、允许列表内工具名、错误分类、参数字符数和确定性恢复计数；Pydantic 失败最多额外记录 10 条脱敏 `loc/type`，不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`。视频既有路由与能力门禁不变。
 
+普通章节存在一个局部例外：`write_chapter` / `rewrite_scene` 的 primary/reviser 若已经成功纠正过纯读取工具包，
+后续 `begin_artifact_output` 的 Pydantic 参数失败可再纠正一次，每次 AgentRuntime 执行最多两次。
+纠正响应再次失败立即终止，选区、复审、质量检查和 V2 单 Step 不扩充预算。正文提交提示只要求
+`kind=chapter_draft`、summary 和完整非空 content；缺正文、空正文及选区字段冲突使用稳定错误分类，
+纠正提示只携带脱敏诊断和固定指令。详见 [临时修补规格](../specs/2026-09-28-chapter-artifact-protocol-hotfix.md)，
+本地实现不代表已经部署生产。
+
 上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 和 2026-08-23
 明确批准的两个 `TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL
 结构调整。两个新增可空诊断字段的代码、契约和迁移脚本已实现，服务器 dev 迁移与 schema-contract 导出

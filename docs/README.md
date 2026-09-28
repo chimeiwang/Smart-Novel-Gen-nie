@@ -52,6 +52,7 @@
 | `specs/2026-09-09-video-v01-v02-implementation.md` | 已暂停的定妆与模拟单镜实施范围；未提交补丁待新设计审视 |
 | `plans/2026-09-09-video-product-release-plan.md` | 已被新设计取代的原 V0.1／V0.2 版本计划与估算 |
 | `specs/` | 后续需求 spec；先写 spec，再执行修改 |
+| [章节正文提交协议临时修补](specs/2026-09-28-chapter-artifact-protocol-hotfix.md) | 普通章节提交的局部纠正预算与脱敏失败反馈 |
 | `plans/2026-07-13-python-backend-rewrite-handoff.md` | 历史 Python 后端重构记录，非当前实施入口 |
 
 Agent Service 当前架构见 `../apps/agent-service/AGENTS.md`。

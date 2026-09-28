@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Coroutine, Sequence
 from typing import Any
@@ -26,6 +27,8 @@ from .turn_result import (
     aggregate_visible_content,
     empty_usage,
 )
+
+logger = logging.getLogger(__name__)
 
 _BUILDER_CONTINUATION_TOOLS = {
     "append_update_batch",
@@ -55,6 +58,14 @@ _TOOL_PROTOCOL_CORRECTION_INSTRUCTION = (
     "必须只使用当前声明的工具，arguments 必须是完整 JSON 对象并严格符合对应 JSON Schema；"
     "不要解释、不要输出纯文本替代工具调用，也不要复述上一轮内容。"
 )
+_ARTIFACT_CORRECTION_HINTS = {
+    "artifact_content_required": "缺少完整正文 content。",
+    "artifact_content_blank": "content 不能只包含空白。",
+    "artifact_selection_incomplete": "混入了不完整的选区字段。",
+    "artifact_selection_content_conflict": "选区 replacement 与完整 content 不能混用。",
+    "artifact_selection_range_invalid": "selectionEnd 必须大于 selectionStart。",
+    "artifact_selection_hash_invalid": "选区哈希必须是小写 SHA-256。",
+}
 
 
 class ModelToolArgumentsInvalidError(RuntimeError):
@@ -102,7 +113,7 @@ class ModelToolArgumentsInvalidError(RuntimeError):
 
 
 class ModelToolProtocolRecoveryFailedError(RuntimeError):
-    """一次有界纠正后仍无合法工具调用；只携带安全派生诊断。"""
+    """有界纠正后仍无合法工具调用；只携带安全派生诊断。"""
 
     code = "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED"
     retryable = False
@@ -187,18 +198,31 @@ def _safe_validation_location(value: object) -> str:
 
 def _with_tool_protocol_correction(
     conversation: Sequence[ModelMessage],
+    error: ModelToolProtocolRecoveryFailedError,
+    *,
+    chapter_artifact: bool,
 ) -> list[ModelMessage]:
-    """插入固定纠正指令，不回放供应商无效响应或 arguments。"""
+    """仅将已脱敏诊断与固定修复指令放入提示，不回放无效响应或参数值。"""
 
     leading_system_count = 0
     for message in conversation:
         if message.role != "system":
             break
         leading_system_count += 1
-    correction = ModelMessage(
-        role="system",
-        content=_TOOL_PROTOCOL_CORRECTION_INSTRUCTION,
+    instructions = [_TOOL_PROTOCOL_CORRECTION_INSTRUCTION]
+    instructions.append(
+        "安全校验诊断：" + "；".join((*error.protocol_issues, *error.validation_issues))
     )
+    for code, hint in _ARTIFACT_CORRECTION_HINTS.items():
+        if any(issue.endswith(f"type={code}") for issue in error.validation_issues):
+            instructions.append(hint)
+    if chapter_artifact:
+        instructions.append(
+            "本次是普通章节正文提交：调用 begin_artifact_output，"
+            "只提交 kind=chapter_draft、summary 和完整非空 content；其余字段省略，"
+            "不得混入选区身份或 replacement，不得概述或截断正文。"
+        )
+    correction = ModelMessage(role="system", content="\n".join(instructions))
     return [
         *conversation[:leading_system_count],
         correction,
@@ -232,6 +256,7 @@ class AgentRuntime:
         model_context: ModelCallContext | None = None,
         model_lane: ModelLane = "interactive",
         reviewer: bool = False,
+        allow_chapter_artifact_correction: bool = False,
     ) -> AgentTurnResult:
         conversation = [
             message if isinstance(message, ModelMessage) else ModelMessage.model_validate(message)
@@ -243,7 +268,8 @@ class AgentRuntime:
         tool_results: list[RuntimeToolResult] = []
         usage = empty_usage()
         active_builder_key: str | None = None
-        protocol_correction_used = False
+        protocol_corrections_used = 0
+        read_correction_used = False
 
         for _ in range(max_iterations):
             available_tools = [
@@ -270,47 +296,85 @@ class AgentRuntime:
                 usage = add_usage(usage, response.usage)
                 self._raise_incomplete_response(response)
 
+                protocol_error: ModelToolProtocolRecoveryFailedError | None = None
+                artifact_arguments_invalid = False
                 if response.invalidToolCallCount:
                     protocol_error = ModelToolProtocolRecoveryFailedError.from_response(
                         response
                     )
-                    if protocol_correction_used or not available_tools:
-                        raise protocol_error from None
-                    protocol_correction_used = True
-                    correction_in_progress = True
-                    request_messages = _with_tool_protocol_correction(conversation)
-                    continue
-
-                if (
+                elif (
                     correction_in_progress
                     and response.finishReason == "tool_calls"
                     and not response.toolCalls
                 ):
-                    raise (
-                        ModelToolProtocolRecoveryFailedError.missing_corrected_tool_call()
-                    ) from None
-                try:
-                    validated_calls = self._preflight_response(
-                        response,
-                        {tool.name: tool for tool in available_tools},
-                        context,
-                        terminal_control_tools,
-                    )
-                except ModelToolArgumentsInvalidError as error:
                     protocol_error = (
-                        ModelToolProtocolRecoveryFailedError.from_arguments_error(error)
-                    )
-                    if protocol_correction_used:
-                        raise protocol_error from None
-                    protocol_correction_used = True
-                    correction_in_progress = True
-                    request_messages = _with_tool_protocol_correction(conversation)
-                    continue
-                if correction_in_progress and not validated_calls:
-                    raise (
                         ModelToolProtocolRecoveryFailedError.missing_corrected_tool_call()
-                    ) from None
-                break
+                    )
+                else:
+                    try:
+                        validated_calls = self._preflight_response(
+                            response,
+                            {tool.name: tool for tool in available_tools},
+                            context,
+                            terminal_control_tools,
+                        )
+                    except ModelToolArgumentsInvalidError as error:
+                        protocol_error = (
+                            ModelToolProtocolRecoveryFailedError.from_arguments_error(error)
+                        )
+                        artifact_arguments_invalid = error.tool_name == "begin_artifact_output"
+                    else:
+                        if correction_in_progress and not validated_calls:
+                            protocol_error = (
+                                ModelToolProtocolRecoveryFailedError.missing_corrected_tool_call()
+                            )
+                if protocol_error is None:
+                    break
+
+                # 只有已成功纠正过纯读取响应，后续正文提交才可使用保留机会；
+                # 同一纠正响应再次失败必须立即结束，不能连续放宽预算。
+                use_chapter_reserve = (
+                    allow_chapter_artifact_correction
+                    and read_correction_used
+                    and protocol_corrections_used == 1
+                    and not correction_in_progress
+                    and artifact_arguments_invalid
+                )
+                can_correct = bool(available_tools) and (
+                    protocol_corrections_used == 0 or use_chapter_reserve
+                )
+                action = (
+                    "correct_chapter_artifact" if use_chapter_reserve
+                    else "correct" if can_correct else "fail"
+                )
+                logger.warning(
+                    "工具协议校验未通过 run_id=%s corrections_used=%s action=%s "
+                    "protocol=%s validation=%s",
+                    context.runId, protocol_corrections_used, action,
+                    protocol_error.protocol_issues, protocol_error.validation_issues,
+                )
+                if not can_correct:
+                    raise protocol_error from None
+                if protocol_corrections_used == 0:
+                    response_tool_names = {
+                        *(call.name for call in response.toolCalls),
+                        *response.invalidToolCallNames,
+                    }
+                    read_tool_names = {
+                        tool.name for tool in available_tools
+                        if tool.toolKind == "read" and tool.permission.readOnly
+                    }
+                    read_correction_used = bool(response_tool_names) and (
+                        response_tool_names <= read_tool_names
+                    )
+                protocol_corrections_used += 1
+                correction_in_progress = True
+                request_messages = _with_tool_protocol_correction(
+                    conversation, protocol_error,
+                    chapter_artifact=(
+                        allow_chapter_artifact_correction and artifact_arguments_invalid
+                    ),
+                )
             if response.content:
                 visible_parts.append(response.content)
             if not validated_calls:

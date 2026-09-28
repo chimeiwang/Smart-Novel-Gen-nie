@@ -14,6 +14,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from ..artifacts.patch import TextReplacePatch
 from .permissions import control_permission
@@ -139,26 +140,38 @@ class BeginArtifactArgs(StrictArgs):
         if any(value is not None for value in selection_fields) and not all(
             value is not None for value in selection_fields
         ):
-            raise ValueError("选区产物必须完整提交 replacement 与冻结身份")
+            raise PydanticCustomError(
+                "artifact_selection_incomplete", "选区产物必须完整提交 replacement 与冻结身份"
+            )
         is_selection = all(value is not None for value in selection_fields)
         if is_selection and self.content is not None:
-            raise ValueError("选区产物不得提交完整 content")
+            raise PydanticCustomError(
+                "artifact_selection_content_conflict", "选区产物不得提交完整 content"
+            )
         if not is_selection and self.content is None:
-            raise ValueError("普通长文本产物必须提交完整 content")
+            raise PydanticCustomError(
+                "artifact_content_required", "普通长文本产物必须提交完整 content"
+            )
         if self.selectionStart is not None and self.selectionEnd is not None:
             if self.selectionStart >= self.selectionEnd:
-                raise ValueError("选区结束位置必须大于开始位置")
+                raise PydanticCustomError(
+                    "artifact_selection_range_invalid", "选区结束位置必须大于开始位置"
+                )
         for field_name in ("baseContentHash", "selectedTextHash"):
             value = getattr(self, field_name)
             if value is not None and any(char not in "0123456789abcdef" for char in value):
-                raise ValueError(f"{field_name} 必须是小写 SHA-256")
+                raise PydanticCustomError(
+                    "artifact_selection_hash_invalid", f"{field_name} 必须是小写 SHA-256"
+                )
         return self
 
     @field_validator("content")
     @classmethod
     def require_non_whitespace_content(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
-            raise ValueError("content 必须包含完整的非空草案正文")
+            raise PydanticCustomError(
+                "artifact_content_blank", "content 必须包含完整的非空草案正文"
+            )
         return value
 
 

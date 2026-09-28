@@ -297,6 +297,9 @@ flowchart TD
 
 只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling。Provider 为该工具生成专用 wire 契约：递归内联本地 `$defs`，不发送 `$defs`、`$def`、`$ref` 或 `type:null`；可选的 `location` 与 `rewriteBrief` 在 wire 中以必填字符串传输，无值时返回空字符串，并只在这两个精确路径归一化为 `None`。非质量 strict 工具必须在 HTTP 前拒绝。报告仍须通过原始 `QualityReportArgs`/Pydantic 完整复验，Provider 不截断或猜测修复业务字段；参数失败最多记录 10 条脱敏 `loc/type`，不得记录字段值、异常正文、`input`、`ctx` 或工具参数。无效工具 JSON 或 Pydantic 参数可以在任何工具副作用前触发整个 Agent 运行最多一次显式协议纠正；纠正调用不得回放坏参数，必须独立授权和结算 usage，仍失败时以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。该行为不是同一请求的 SDK 自动重发或队列盲重试。视频既有路由与能力门禁不变。
 
+普通章节生成的 [正文提交补丁](../specs/2026-09-28-chapter-artifact-protocol-hotfix.md) 允许已纠正读取后再纠正一次正文参数；
+该例外不适用于此处的 quality、reviewer 或选区协议。复审、返工身份与用户确认边界不变。
+
 Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值按既有 HALF_EVEN 规则取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
 
 ## 一致性终检运行流程

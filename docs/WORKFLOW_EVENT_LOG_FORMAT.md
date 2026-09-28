@@ -28,12 +28,19 @@ token 子集，合计等于输入加输出。billable Provider 成功形成规�
 Core 上报 usage；只有 Core 成功接受 report 且配置了 observer，才写入该次人工模型区块。report 失败
 时异常向上传播，不留下该次模型区块。非 billable Provider 成功后直接调用 observer，但只有 observer
 与运行 context 都存在时才写入，且显示“计费请求标识：无”。Provider 在返回可靠 usage 前失败时不得
-伪造 token。AgentRuntime 的一次显式工具协议纠正属于新的模型调用，必须形成独立计费 `requestId`、usage
+伪造 token。AgentRuntime 的每次显式工具协议纠正属于新的模型调用，必须形成独立计费 `requestId`、usage
 回报和模型区块，不能与首次无效调用合并成一条记录。
 
 人工日志不记录 `grantToken`、tools schema、供应商 reasoning、模型 tool_calls、工具参数、工具返回、
 完整运行时对象或底层 checkpoint metadata。工具协议诊断中的 arguments 字符数只是整数，不得附带或重建
 原始 arguments。禁止对已记录的正文、消息、模型输出或状态进行静默截断。
+
+普通章节正文提交的有界例外见 [临时修补规格](specs/2026-09-28-chapter-artifact-protocol-hotfix.md)。
+工具预检发生在人工模型区块写入之后；Agent 服务运行日志另行记录每次预检失败的 runId、脱敏工具分类、
+loc/type、`corrections_used` 和 `action`，包括后来纠正成功的失败。正文跨字段校验使用稳定的
+`artifact_content_required`、`artifact_content_blank` 和 `artifact_selection_*` 分类，
+不再全部退化为根级 `value_error`。纠正请求的 system 消息只加入脱敏诊断和服务端固定指令，
+不回放失败包。这些服务诊断不新增人工日志帧格式或公共接口。
 
 ## 旧版兼容与恢复
 

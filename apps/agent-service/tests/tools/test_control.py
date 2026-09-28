@@ -48,6 +48,42 @@ def test_begin_artifact_rejects_empty_or_whitespace_content(content: str) -> Non
     assert exc_info.value.errors()[0]["loc"] == ("content",)
 
 
+@pytest.mark.parametrize(
+    ("extra", "code"),
+    [
+        ({}, "artifact_content_required"),
+        ({"content": " \n"}, "artifact_content_blank"),
+        ({"content": "正文", "resourceType": "chapter_content"}, "artifact_selection_incomplete"),
+    ],
+)
+def test_artifact_validation_uses_stable_codes(extra: dict[str, object], code: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        BeginArtifactArgs.model_validate({"kind": "chapter_draft", "summary": "草案", **extra})
+
+    assert caught.value.errors(include_input=False, include_context=False)[0]["type"] == code
+
+
+@pytest.mark.parametrize(
+    ("extra", "code"),
+    [
+        ({"content": "正文"}, "artifact_selection_content_conflict"),
+        ({"selectionEnd": 0}, "artifact_selection_range_invalid"),
+        ({"baseContentHash": "G" * 64}, "artifact_selection_hash_invalid"),
+    ],
+)
+def test_selection_validation_uses_stable_codes(extra: dict[str, object], code: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        BeginArtifactArgs.model_validate({
+            "kind": "chapter_draft", "summary": "草案",
+            "operation": "rewrite_chapter_selection", "resourceType": "chapter_content",
+            "resourceId": "chapter-1", "baseUpdatedAt": "2026-09-28T00:00:00Z",
+            "baseContentHash": "a" * 64, "selectedTextHash": "b" * 64,
+            "selectionStart": 0, "selectionEnd": 1, "replacement": "替换文字", **extra,
+        })
+
+    assert caught.value.errors(include_input=False, include_context=False)[0]["type"] == code
+
+
 def _valid_beat_plan_payload() -> dict[str, object]:
     return {
         "title": "第一章",
