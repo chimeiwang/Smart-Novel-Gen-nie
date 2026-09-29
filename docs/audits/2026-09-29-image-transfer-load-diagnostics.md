@@ -27,5 +27,15 @@ git diff --check
 
 ## 生产复测
 
-本地验收时尚未推送；真实运行、分段耗时及发布结果需通过新一次 GitHub Actions 确认。
+首次实现提交 `e0cc0653` 已推送 main，触发运行
+[36559175177](https://github.com/chimeiwang/Smart-Novel-Gen-nie/actions/runs/36559175177)。
+其 Java 门禁报 1218 项测试、0 个断言失败、1 个错误、5 项跳过，部署被跳过，尚未执行新上传流程。
+
+唯一错误来自既有 `WorkflowEventTailObserverTest` 的未知异常恢复用例：订阅即唤醒后台线程，
+预设故障可在 `activate()` 先于 `await()` 可见，旧断言范围只覆盖后者。
+修正仅把激活和等待一起纳入异常断言，保留错误码、旧连接释放和新订阅恢复检查；
+生产 observer 实现不变。定点 JUnit 11 项通过；本地完整 Maven 验证已执行，遇到既有的
+Windows 路径、Docker 缺失和 Mockito 自附加环境问题，不能宣称全量通过。
+完整 PostgreSQL 集成与发布门禁仍由新一次 Linux CI 验证，不跳过该门禁。
+
 原运行 `36426104126` 的 1200 秒混合阶段超时仍不能单独证明网络或 Docker 导入故障。

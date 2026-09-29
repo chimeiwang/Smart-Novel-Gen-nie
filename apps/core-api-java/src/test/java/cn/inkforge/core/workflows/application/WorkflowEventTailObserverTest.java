@@ -343,8 +343,12 @@ class WorkflowEventTailObserverTest {
         repository.put(key, "running", 0);
         repository.explodingTailLookups.set(1);
         try (var observer = observer(repository, 100, 4, 2, 2)) {
-            try (var failed = observer.subscribe(key.userId(), key.runId(), 0).activate()) {
-                assertThatThrownBy(() -> failed.await(WAIT))
+            try (var failed = observer.subscribe(key.userId(), key.runId(), 0)) {
+                // 观察线程可能先完成故障清理，激活或等待都应收到同一失败。
+                assertThatThrownBy(() -> {
+                            failed.activate();
+                            failed.await(WAIT);
+                        })
                         .isInstanceOf(IOException.class)
                         .hasMessageContaining("WORKFLOW_TAIL_OBSERVER_FAILED");
             }
