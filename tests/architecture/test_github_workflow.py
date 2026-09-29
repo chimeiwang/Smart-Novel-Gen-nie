@@ -83,7 +83,7 @@ def test_image_upload_step_has_a_total_timeout() -> None:
     upload_step = source.split("      - name: Upload Docker images", maxsplit=1)[1]
     upload_step = upload_step.split("      - name: Deploy over SSH", maxsplit=1)[0]
 
-    assert "timeout-minutes: 30" in upload_step
+    assert "timeout-minutes: 180" in upload_step
 
 
 def test_deploy_uploads_verified_source_bundle_before_remote_execution() -> None:

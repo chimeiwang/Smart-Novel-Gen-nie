@@ -164,7 +164,8 @@ jobs:
           chmod 600 "$SSH_KNOWN_HOSTS_FILE"
 
       - name: Upload Docker images
-        timeout-minutes: 30
+        # 总预算覆盖三张镜像的独立阶段；单次传输与导入仍由脚本的较短超时约束。
+        timeout-minutes: 180
         env:
           DEPLOY_SHA: ${{ github.sha }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}

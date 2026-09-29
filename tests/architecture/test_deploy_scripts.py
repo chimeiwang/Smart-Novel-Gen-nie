@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -62,14 +63,18 @@ def test_upload_preflights_and_processes_each_image_with_bounded_stages() -> Non
         'stat -c %s "$archive"',
         'stat -f %z "$archive"',
         'timeout --kill-after=30s "$IMAGE_UPLOAD_TIMEOUT_SECONDS"',
-        "bash -o pipefail -c 'gunzip | docker load'",
+        'IMAGE_LOAD_TIMEOUT_SECONDS="${IMAGE_LOAD_TIMEOUT_SECONDS:-600}"',
+        "docker load --input",
         "服务器镜像查询失败",
         "服务器 Docker 容量不足",
-        "image_size * 2 + REMOTE_DOCKER_SAFETY_BYTES",
+        "REMOTE_DOCKER_SAFETY_BYTES",
         "镜像归档完成",
-        "开始传输并导入镜像",
-        "镜像传输并导入完成",
-        "镜像传输或导入失败",
+        "开始镜像传输",
+        "镜像传输完成",
+        "开始镜像校验",
+        "镜像校验完成",
+        "开始镜像导入",
+        "镜像导入完成",
         "服务器镜像查询失败：${service}，退出码 ${current_status}",
     ):
         assert contract in source
@@ -233,12 +238,19 @@ def _run_upload(
     *,
     current_status: int = 20,
     has_image_status: int = 20,
-    upload_status: int = 0,
+    transfer_status: int = 0,
+    checksum_status: int = 0,
+    load_status: int = 0,
+    corrupt_transfer: bool = False,
+    docker_free_kb: int = 2097152,
+    temp_free_kb: int = 2097152,
+    separate_temp_device: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str, Path]:
     bin_dir = tmp_path / "bin"
     runner_temp = tmp_path / "runner"
     bin_dir.mkdir()
     runner_temp.mkdir()
+    remote_dir_record = tmp_path / "remote-dir.txt"
     known_hosts = tmp_path / "known_hosts"
     known_hosts.write_text("example ssh-ed25519 fixture\n", encoding="utf-8")
     log_path = tmp_path / "upload.log"
@@ -250,7 +262,9 @@ def _run_upload(
         'case "$*" in\n'
         "  'image inspect --format={{.Id}} '*) echo 'sha256:fixture' ;;\n"
         "  'image inspect --format={{.Size}} '*) echo '1048576' ;;\n"
+        "  info*) echo '/var/lib/docker' ;;\n"
         "  save*) printf 'fixture-archive' ;;\n"
+        "  'load --input '*) exit \"$FAKE_LOAD_STATUS\" ;;\n"
         "  *) exit 1 ;;\n"
         "esac\n",
     )
@@ -261,13 +275,48 @@ def _run_upload(
         'for argument in "$@"; do command_text=$argument; done\n'
         'printf \'ssh %s\\n\' "$command_text" >> "$UPLOAD_LOG"\n'
         'case "$command_text" in\n'
-        "  *'DockerRootDir'*) echo '服务器 Docker 响应正常'; exit 0 ;;\n"
+        "  *'服务器 SSH 响应正常'*) echo '服务器 Docker 响应正常'; exit 0 ;;\n"
         "  *'container_id='*) exit \"$FAKE_CURRENT_STATUS\" ;;\n"
-        "  *'required_bytes'*) echo '服务器 Docker 容量满足要求'; exit 0 ;;\n"
         '  *\'docker image inspect "$image_id"\'*) exit "$FAKE_HAS_IMAGE_STATUS" ;;\n'
-        "  *'gunzip | docker load'*) cat >/dev/null; exit \"$FAKE_UPLOAD_STATUS\" ;;\n"
-        "  *) exit 0 ;;\n"
-        "esac\n",
+        "  *'gunzip | docker load'*) cat >/dev/null; exit 0 ;;\n"
+        "  *'mktemp -d'*)\n"
+        '    remote_dir="$(/usr/bin/mktemp -d /tmp/inkforge-images.XXXXXXXXXX)" || exit\n'
+        '    printf \'%s\\n\' "$remote_dir" > "$REMOTE_DIR_RECORD"\n'
+        '    printf \'%s\\n\' "$remote_dir"; exit 0 ;;\n'
+        "  *'dd '*)\n"
+        '    if [ "$FAKE_TRANSFER_STATUS" -ne 0 ]; then\n'
+        '      cat >/dev/null; exit "$FAKE_TRANSFER_STATUS"\n'
+        '    fi ;;\n'
+        "  *sha256sum*|*shasum*)\n"
+        '    if [ "$FAKE_CHECKSUM_STATUS" -ne 0 ]; then\n'
+        '      exit "$FAKE_CHECKSUM_STATUS"\n'
+        '    fi ;;\n'
+        "esac\n"
+        'export FAKE_SSH_REMOTE=1\n'
+        'exec /bin/bash -c "$command_text"\n',
+    )
+    _write_executable(
+        bin_dir / "dd",
+        "#!/bin/sh\n"
+        'output=""\n'
+        'for argument in "$@"; do\n'
+        '  case "$argument" in of=*) output="${argument#of=}" ;; esac\n'
+        'done\n'
+        '/usr/bin/dd "$@" || exit\n'
+        'if [ "$FAKE_CORRUPT_TRANSFER" = 1 ] && [ -n "$output" ]; then\n'
+        '  printf x >> "$output"\n'
+        'fi\n',
+    )
+    _write_executable(
+        bin_dir / "df",
+        "#!/bin/sh\n"
+        'printf "Filesystem 1024-blocks Used Available Capacity Mounted on\\n"\n'
+        'case "$*" in\n'
+        '  *"/var/lib/docker"*)\n'
+        '    printf "dockerfs 3000000 0 %s 0%% /var/lib/docker\\n" "$FAKE_DOCKER_FREE_KB" ;;\n'
+        '  *"/tmp"*)\n'
+        '    printf "%s 3000000 0 %s 0%% /tmp\\n" "$FAKE_TEMP_DEVICE" "$FAKE_TEMP_FREE_KB" ;;\n'
+        'esac\n',
     )
     _write_executable(
         bin_dir / "timeout",
@@ -290,7 +339,14 @@ def _run_upload(
         "UPLOAD_LOG": _posix_path(log_path),
         "FAKE_CURRENT_STATUS": str(current_status),
         "FAKE_HAS_IMAGE_STATUS": str(has_image_status),
-        "FAKE_UPLOAD_STATUS": str(upload_status),
+        "FAKE_TRANSFER_STATUS": str(transfer_status),
+        "FAKE_CHECKSUM_STATUS": str(checksum_status),
+        "FAKE_LOAD_STATUS": str(load_status),
+        "FAKE_CORRUPT_TRANSFER": "1" if corrupt_transfer else "0",
+        "FAKE_DOCKER_FREE_KB": str(docker_free_kb),
+        "FAKE_TEMP_FREE_KB": str(temp_free_kb),
+        "FAKE_TEMP_DEVICE": "tempfs" if separate_temp_device else "dockerfs",
+        "REMOTE_DIR_RECORD": _posix_path(remote_dir_record),
     }
     result = subprocess.run(  # noqa: S603 - 仅执行仓库脚本和测试夹具
         [
@@ -313,6 +369,17 @@ def _run_upload(
     return result, log, runner_temp
 
 
+def _assert_remote_archive_cleaned(tmp_path: Path) -> None:
+    record = tmp_path / "remote-dir.txt"
+    assert record.exists()
+    remote_dir = record.read_text(encoding="utf-8").strip()
+    assert re.fullmatch(r"/tmp/inkforge-images\.[A-Za-z0-9]+", remote_dir)  # noqa: S108
+    if os.name == "nt":
+        assert not (Path(tempfile.gettempdir()) / Path(remote_dir).name).exists()
+    else:
+        assert not Path(remote_dir).exists()
+
+
 def test_upload_stops_when_the_server_image_query_fails(tmp_path: Path) -> None:
     result, log, _ = _run_upload(tmp_path, current_status=255)
 
@@ -326,15 +393,65 @@ def test_upload_processes_images_separately_and_cleans_archives(tmp_path: Path) 
 
     assert result.returncode == 0, result.stderr
     assert log.count("docker save ") == 3
-    assert log.count("gunzip | docker load") == 3
+    assert sum(line.startswith("docker load --input ") for line in log.splitlines()) == 3
+    for stage in ("dd ", "sha256sum", "docker load --input"):
+        assert stage in log
+    assert log.index("dd ") < log.index("sha256sum") < log.index("docker load --input")
     assert list(runner_temp.iterdir()) == []
+    _assert_remote_archive_cleaned(tmp_path)
 
 
-def test_upload_timeout_names_the_image_and_stage(tmp_path: Path) -> None:
-    result, _, runner_temp = _run_upload(tmp_path, upload_status=124)
+@pytest.mark.parametrize(
+    ("failure", "status", "diagnostic"),
+    [
+        ("transfer_status", 23, "镜像传输失败"),
+        ("transfer_status", 124, "镜像传输超时"),
+        ("checksum_status", 23, "镜像校验失败"),
+        ("load_status", 23, "镜像导入失败"),
+        ("load_status", 124, "镜像导入超时"),
+    ],
+)
+def test_upload_failure_identifies_stage_and_cleans_archive(
+    tmp_path: Path, failure: str, status: int, diagnostic: str
+) -> None:
+    result, log, runner_temp = _run_upload(tmp_path, **{failure: status})
 
     assert result.returncode != 0
-    assert "镜像传输或导入超时：inkforge-web:" in result.stderr
+    assert f"{diagnostic}：inkforge-web:" in result.stderr
+    if failure in {"transfer_status", "checksum_status"}:
+        assert "docker load --input" not in log
+    assert list(runner_temp.iterdir()) == []
+    _assert_remote_archive_cleaned(tmp_path)
+
+
+def test_upload_rejects_corrupted_remote_archive_before_load(tmp_path: Path) -> None:
+    result, log, runner_temp = _run_upload(tmp_path, corrupt_transfer=True)
+
+    assert result.returncode != 0
+    assert "镜像校验失败：inkforge-web:" in result.stderr
+    assert "docker load --input" not in log
+    assert list(runner_temp.iterdir()) == []
+    _assert_remote_archive_cleaned(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("capacity", "diagnostic"),
+    [
+        ({"docker_free_kb": 526336}, "服务器 Docker 容量不足"),
+        (
+            {"separate_temp_device": True, "temp_free_kb": 524288},
+            "服务器临时目录容量不足",
+        ),
+    ],
+)
+def test_upload_capacity_reserves_archive_before_transfer(
+    tmp_path: Path, capacity: dict[str, int | bool], diagnostic: str
+) -> None:
+    result, log, runner_temp = _run_upload(tmp_path, **capacity)
+
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+    assert "dd bs=1M" not in log
     assert list(runner_temp.iterdir()) == []
 
 
