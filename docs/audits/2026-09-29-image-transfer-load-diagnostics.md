@@ -39,3 +39,36 @@ Windows 路径、Docker 缺失和 Mockito 自附加环境问题，不能宣称�
 完整 PostgreSQL 集成与发布门禁仍由新一次 Linux CI 验证，不跳过该门禁。
 
 原运行 `36426104126` 的 1200 秒混合阶段超时仍不能单独证明网络或 Docker 导入故障。
+
+## 成功复测
+
+测试修正提交 `75bbadbd66da1bf0fed34a24eb688dd6a11d4c12` 已推送 main；
+[运行 36560748898](https://github.com/chimeiwang/Smart-Novel-Gen-nie/actions/runs/36560748898)
+的 CI 与部署均成功，服务器部署在 2026-09-29 11:57:45 UTC（北京时间 19:57:45）完成。
+
+- Linux Maven 构建成功：Core 1218 项、0 个失败和错误、5 项跳过；CLI 147 项无失败和错误。
+- Python：3604 项通过、2 项跳过、1 条警告；Ruff、Mypy（131 个源文件）、类型检查、Lint、Web/API 检查和构建均通过。
+- Web 安全复用既有镜像；Core 与 Agent 经分阶段上传、SHA-256 校验和 Docker 导入成功。
+
+| 镜像 | 压缩归档 | 传输 | SHA-256 校验 | 导入 |
+| --- | --- | --- | --- | --- |
+| Core | 387426449 字节 | 646 秒 | 7 秒 | 28 秒 |
+| Agent | 94738171 字节 | 575 秒 | 4 秒 | 12 秒 |
+
+本次主要耗时明确在传输阶段，尤其 Agent 平均约 165 kB/s；Docker 导入耗时远低于传输。
+这能定位本次瓶颈，但不能把昨日缺少分段日志的超时直接认定为同一具体网络故障。
+镜像上传步骤共用时 22 分 33 秒，源码 bundle 与服务器部署步骤随后均成功。
+
+服务器日志确认源码 HEAD 为 `75bbadbd`，Web、Core、Agent 均使用同一 SHA 标签并 healthy；
+日志出现“编排冒烟检查通过”和“生产编排已启动”。本机随后独立回读
+`https://inkforge.cn/api/v1/health/ready`，状态为 ready，Agent、数据库、Redis、后台任务、
+写作 outbox 与 schema 均为 ok；登录页 HTTP 200。
+
+完整部署日志保存在本机 Git 元数据目录
+`.git/codex-backups/deploy-upload-diagnostics/deploy-36560748898.log`，未见临时目录清理失败。
+本机 Maven 全量日志同目录 `maven-verify-20260929-1116.log` 记录 Windows 环境限制：
+Core 766 项、7 个失败、199 个错误、4 项跳过；目标 observer 类仍为 11 项通过。
+本次最终发布依据的是上述完整 Linux CI 和真实生产验证，不将本机全量验证记为通过。
+
+后续提交仅补齐本审计、规格状态和索引，使用 `[skip ci]` 避免文档记录触发重复生产发布；
+实际运行镜像与业务代码版本仍为 `75bbadbd`。

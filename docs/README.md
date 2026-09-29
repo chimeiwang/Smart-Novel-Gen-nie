@@ -20,7 +20,7 @@
 | `requirements/03-ai-writing-and-agents.md` | AI 写作与 Agent |
 | `requirements/04-review-quality-and-workflow.md` | 草案审核、质量检查与工作流 |
 | `requirements/05-auth-billing-and-ops.md` | 认证、计费与运维 |
-| [镜像传输与导入分阶段诊断](specs/2026-09-29-image-transfer-load-diagnostics.md) | 生产镜像分段上传、远端哈希校验、独立导入与清理的实施规格；生产结果待实际工作流验证 |
+| [镜像传输与导入分阶段诊断](specs/2026-09-29-image-transfer-load-diagnostics.md) | 生产镜像分段上传、远端哈希校验、独立导入与清理；实测结果见 [2026-09-29 审计](audits/2026-09-29-image-transfer-load-diagnostics.md) |
 | `LANGGRAPH_STUDIO.md` | Python LangGraph Studio 调试边界 |
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
