@@ -78,7 +78,7 @@ git diff --check
 - 2 项 bundle 用例在 `tempfile.gettempdir()` 创建文件，却传 `/tmp` 给脚本；macOS 的临时目录不同。
   仅为原始 main 的这两个用例设置 `TMPDIR=/tmp` 后，2 项均通过。
 
-本次没有为消除这些环境失败修改无关部署脚本或测试夹具。Linux CI 的完整部署脚本回归仍需后续发布门禁完成。
+本次没有为消除这些环境失败修改无关部署脚本或测试夹具。后续 Linux CI 的全仓测试已通过，见下文。
 本地应用回归与本记录不代表真实供应商或生产部署验收；jOOQ／PostgreSQL 版本兼容仍为独立事项。
 
 ## 生产发布授权与待验收项
@@ -87,3 +87,45 @@ git diff --check
 CI 和生产部署，继续保留视频关闭、数据库结构冻结及 V2 manifest 不变的边界。
 生产部署完成后补记实际镜像版本、健康状态、只读结构核验、日志与 Nginx 边界检查；
 推送或流水线受理本身不代表生产完成，不以健康检查替代真实模型写作验收。
+
+## 生产发布前检查
+
+- 修复提交 `e47474ddb64d10ca5d47b06582a7233a037ab9be` 已快进合入 main 并普通推送；
+  [运行 36715544281](https://github.com/chimeiwang/Smart-Novel-Gen-nie/actions/runs/36715544281)
+  于 2026-09-30 12:33:46 UTC 启动。
+- 发布前源码和三业务镜像均为 `75bbadbd66da1bf0fed34a24eb688dd6a11d4c12`；六个服务 healthy，
+  重启数 0、无 OOM，发布锁空闲，公开 readiness 为 ready，各检查项 ok。
+- 生产检出无受跟踪代码差异；历史配置、备份、发布锁及辅助 Compose 文件作为未跟踪内容保留。
+  根盘剩余 6.4 GiB，后续仍以镜像上传脚本对 Docker 数据目录和临时目录的容量门禁为准。
+- 通过只读可重复读事务核对生产 `novelwriter`：V1 写作运行态、待作者审核、活动命令均为 0；
+  V2 非终态为 0，终态 completed 58、failed 14、cancelled 1。
+- 运行 Core 与服务器配置均保持 `schemaReady=true`、`route=off`、`V1 fresh=true`；
+  `VIDEO_PREVIEW_ENABLED=false`。`.env` 和四个服务密钥文件存在、可读且非空，未读取输出秘密内容。
+- 已有备份目录 `/srv/smart-novel-gen/.langgraph-rollback-backups/20260913.hIDwZ1`：
+  `database.dump` 为 23197749 字节，数据库归档、execution Redis RDB 及校验清单存在。
+  `sha256sum --check --status SHA256SUMS` 成功；`pg_restore --list database.dump` 成功读取
+  688 个目录条目。该备份日期为 9 月 13 日，本次只验证完整性和归档可读性，没有执行恢复演练或恢复生产库。
+
+## Linux CI 验收
+
+上述运行的 CI job 成功，完整门禁没有跳过或重跑：
+
+- Maven `verify` 成功；服务身份 11 项、共享契约 5 项、Core 1221 项、CLI 147 项，失败和错误均为 0，
+  Core 5 项外部环境用例跳过。
+- Python 全仓 3645 项通过、2 项跳过、1 条既有警告，耗时 228.63 秒；包含部署脚本回归。
+- 生成客户端检查、Web/API 测试、Ruff、Mypy（131 个源文件）、类型检查、Lint 和应用构建全部成功。
+- CI 成功后进入独立 deploy job，在 Runner 构建镜像并使用原上传及部署脚本发布。
+
+## 首次上传失败与重试
+
+首次 deploy job 在服务切换前失败：Core 压缩镜像 387428389 字节，2026-09-30 12:49:18 UTC
+开始传输，13:09:18 UTC 达到 1200 秒上限，接收约 72 MB，退出码 124。
+容量预检通过，需要约 2.58 GB、实际可用约 6.78 GB；没有进入哈希校验、Docker 导入或应用部署。
+Web 构建输入未变化，已复用原镜像内容并添加目标标签；运行容器未切换。
+
+期间主机只读采样显示 CPU 空闲 94–99%、I/O 等待 0%、无 swap 读写，网卡入站约 50.9 kB/s，
+未见其他大流量下载。证据将本次故障定位于传输阶段，不能进一步认定发送端、网络或 SSH 中的具体根因。
+上传日志未报告本次临时目录清理失败。
+
+GitHub 集成的直接重试接口返回 Actions 写权限不足；因此通过本次审计文档提交触发现有 main push
+流程重新发布同一份业务代码，仍执行完整 CI。未调整传输超时、网络配置、部署门禁或产品实现。
