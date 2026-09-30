@@ -2,6 +2,30 @@
   "$id": "https://inkforge.local/contracts/agent/read_tools/OutlineNodeArgs/1.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "node_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id"
+      ]
+    },
+    {
+      "properties": {
+        "node_title": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_title"
+      ]
+    }
+  ],
   "properties": {
     "node_id": {
       "anyOf": [

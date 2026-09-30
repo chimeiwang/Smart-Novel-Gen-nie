@@ -58,7 +58,21 @@ _TOOL_PROTOCOL_CORRECTION_INSTRUCTION = (
     "必须只使用当前声明的工具，arguments 必须是完整 JSON 对象并严格符合对应 JSON Schema；"
     "不要解释、不要输出纯文本替代工具调用，也不要复述上一轮内容。"
 )
-_ARTIFACT_CORRECTION_HINTS = {
+_TOOL_CORRECTION_HINTS = {
+    "outline_locator_required": (
+        "get_outline_node 必须提供 node_id 或 node_title 中至少一个非空字符串。"
+        "尚无真实节点定位时，先调用 list_outline_summary 获取大纲索引，不要编造节点。"
+    ),
+    "item_target_required": "必须提供 targetId、targetKey 或 targetName 中至少一个非空字符串。",
+    "artifact_locator_required": "必须提供 artifactId 或 artifactKey 中至少一个非空字符串。",
+    "evaluation_revision_combination_invalid": (
+        "pass/block 不得携带 revisionMode 或 patches；revise 必须声明 revisionMode；"
+        "patch 必须提交 1 到 20 个 patches，rewrite 不得携带 patches。"
+    ),
+    "artifact_operation_mismatch": (
+        "产物种类和字段必须符合当前操作的工具 Schema；"
+        "普通正文提交 content，选区替换提交 replacement 与完整冻结身份，不能混用。"
+    ),
     "artifact_content_required": "缺少完整正文 content。",
     "artifact_content_blank": "content 不能只包含空白。",
     "artifact_selection_incomplete": "混入了不完整的选区字段。",
@@ -213,7 +227,7 @@ def _with_tool_protocol_correction(
     instructions.append(
         "安全校验诊断：" + "；".join((*error.protocol_issues, *error.validation_issues))
     )
-    for code, hint in _ARTIFACT_CORRECTION_HINTS.items():
+    for code, hint in _TOOL_CORRECTION_HINTS.items():
         if any(issue.endswith(f"type={code}") for issue in error.validation_issues):
             instructions.append(hint)
     if chapter_artifact:
@@ -257,6 +271,7 @@ class AgentRuntime:
         model_lane: ModelLane = "interactive",
         reviewer: bool = False,
         allow_chapter_artifact_correction: bool = False,
+        model_tool_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> AgentTurnResult:
         conversation = [
             message if isinstance(message, ModelMessage) else ModelMessage.model_validate(message)
@@ -284,7 +299,12 @@ class AgentRuntime:
                 response = await self._model_runtime.run_turn(
                     ModelTurnRequest(
                         messages=request_messages,
-                        tools=[tool.as_model_tool() for tool in available_tools],
+                        tools=[
+                            tool.as_model_tool(
+                                parameters=(model_tool_schemas or {}).get(tool.name)
+                            )
+                            for tool in available_tools
+                        ],
                         maxOutputTokens=self._max_output_tokens,
                         policy=policy,
                     ),
@@ -317,6 +337,7 @@ class AgentRuntime:
                             {tool.name: tool for tool in available_tools},
                             context,
                             terminal_control_tools,
+                            model_tool_schemas=model_tool_schemas,
                         )
                     except ModelToolArgumentsInvalidError as error:
                         protocol_error = (
@@ -549,6 +570,8 @@ class AgentRuntime:
         exposed: dict[str, ToolDefinition],
         context: ToolContext,
         terminal_control_tools: set[str] | frozenset[str],
+        *,
+        model_tool_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> list[tuple[ModelToolCall, ToolDefinition, dict[str, Any]]]:
         self._raise_incomplete_response(response)
 
@@ -585,7 +608,10 @@ class AgentRuntime:
                 )
             tool = self._registry.require_authorized(tool, context)
             try:
-                arguments = tool.validate(call.arguments)
+                arguments = tool.validate_model_arguments(
+                    call.arguments,
+                    parameters=(model_tool_schemas or {}).get(tool.name),
+                )
             except ValidationError as exc:
                 raise ModelToolArgumentsInvalidError.from_validation_error(
                     call.name,

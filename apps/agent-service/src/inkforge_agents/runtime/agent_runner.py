@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..definitions.agents import AGENT_DEFINITIONS, AgentId
 from ..operations.contracts import CreativeOperationKind
+from ..tools.control import artifact_model_schema_for_operation
 from ..tools.registry import ToolContext, ToolRegistry
 from .agent_runtime import AgentRuntime
 from .execution import (
@@ -106,6 +107,14 @@ class AgentRunner:
                     "模型策略要求的终止工具不是执行契约终止工具："
                     f"{policy.requiredToolName}"
                 )
+        # 只收窄模型输入，不替换注册工具对象或改变权限与正式产物契约。
+        artifact_schema = artifact_model_schema_for_operation(request.operationKind)
+        model_tool_schemas = (
+            {"begin_artifact_output": artifact_schema}
+            if artifact_schema is not None
+            and any(tool.name == "begin_artifact_output" for tool in tools)
+            else None
+        )
         result = await self._runtime.run(
             messages=messages,
             exposed_tools=tools,
@@ -130,6 +139,7 @@ class AgentRunner:
                 request.executionMode in {"primary", "reviser"}
                 and request.operationKind in {"write_chapter", "rewrite_scene"}
             ),
+            model_tool_schemas=model_tool_schemas,
         )
         payload: dict[str, Any] = result.model_dump()
         return AgentRunResult(agentId=definition.id, **payload)

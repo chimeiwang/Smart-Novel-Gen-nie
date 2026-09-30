@@ -455,6 +455,11 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - AgentRunner 只能暴露当前 Agent toolCapabilities、CreativeOperation 工具白名单和执行模式白名单的交集。
 - 工具自身 permission.agentIds 继续做服务端校验。
 - Runtime 拒绝本轮未暴露的 tool call。
+- 模型可见工具 Schema 须包含定位字段至少一个、普通产物与选区互斥、复审结论组合等可表达规则；
+  `write_chapter/rewrite_scene` 与两种选区 Operation 使用对应产物 Schema，并在执行前用同一 Schema
+  复验。收窄模型输入不能替换工具注册身份、扩大权限或替代本地完整参数及 Core 来源校验。
+- 新模型提交章节计划只填写 `sceneBeats` 等创作字段，`beatCount` 从已校验数组派生，控制事件与 Core
+  接收保留原有整数计数；旧事件、草案和参数模型继续按原契约校验，不重写历史值。
 - 只读且并发安全的工具可以并行；control 或不安全工具必须按顺序执行。
 - 每个 Operation 声明允许工具、终止控制工具、产物事件、产物类型和 artifactKey 策略；错误事件、错误 kind、变化的 artifactKey 或冲突终止产物必须在提交 Core 前失败。
 - 更新构建器只允许在单次运行中启动一次；启动后隐藏开始工具，后续追加和完成必须沿用同一 `artifactKey`。跨一次纠正重试合并事件时，重复开始不得覆盖已经追加的更新。
@@ -523,6 +528,11 @@ DeepSeek 工具 arguments 解析失败时，Provider 必须在可靠 usage 已�
 `kind=chapter_draft`、summary 和完整非空 content；缺正文、空正文及选区字段冲突使用稳定错误分类，
 纠正提示只携带脱敏诊断和固定指令。详见 [临时修补规格](../specs/2026-09-28-chapter-artifact-protocol-hotfix.md)，
 本地实现不代表已经部署生产。
+
+定位及复审组合的跨字段错误使用稳定分类与服务端固定说明。大纲定位纠正明确要求 `node_id` 或
+`node_title`，尚无真实节点时可先读取大纲索引；不编造身份，不回放坏参数。普通产物的操作范围错误
+也在同轮预检内进入原有纠正流程，整轮失败仍不执行任何工具。上述改动保留原纠正预算、独立计费和
+V2 单 Step 协议，详见[工具契约整改规格](../specs/2026-09-30-tool-contract-and-runtime-diagnostics.md)。
 
 上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 和 2026-08-23
 明确批准的两个 `TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL

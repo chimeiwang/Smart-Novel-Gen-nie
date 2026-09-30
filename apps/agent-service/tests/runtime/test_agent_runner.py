@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
 from typing import Any
 
+import jsonschema_rs
 import pytest
 from inkforge_agents.definitions.agents import AGENT_DEFINITIONS
 from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
@@ -263,6 +264,90 @@ async def test_primary_artifact_operations_do_not_expose_wrong_artifact_tool(
     assert expected in names
     assert unexpected not in names
     assert "submit_evaluation" not in names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["primary", "reviser"])
+@pytest.mark.parametrize("operation_kind", [
+    "write_chapter", "rewrite_scene", "rewrite_chapter_selection", "rewrite_outline_selection",
+])
+async def test_实际模型请求按操作约束产物且注册工具保持不变(
+    mode: str, operation_kind: str,
+) -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    tool = registry.require("begin_artifact_output")
+    original_schema = tool.as_model_tool().parameters
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+    is_selection = operation_kind.endswith("_selection")
+    is_outline = operation_kind == "rewrite_outline_selection"
+    agent_id = "剧情" if is_outline else "写作"
+    selection = {
+        "kind": "outline_draft" if is_outline else "chapter_draft",
+        "summary": "选区草案",
+        "operation": "rewrite_outline_selection" if is_outline else "rewrite_chapter_selection",
+        "resourceType": "outline_node_content" if is_outline else "chapter_content",
+        "resourceId": "resource-1", "baseUpdatedAt": "2026-09-30T00:00:00Z",
+        "baseContentHash": "a" * 64, "selectionStart": 1, "selectionEnd": 2,
+        "selectedTextHash": "b" * 64, "replacement": "完整替换文本",
+    }
+    full = {"kind": "chapter_draft", "summary": "章节草案", "content": "完整正文"}
+    run_request = AgentRunRequest(
+        agentId=agent_id, executionMode=mode, operationKind=operation_kind,
+        userMessage="处理当前任务", toolContext=tool_context(agent_id),
+        selectionSnapshot=selection if is_selection else None,
+    )  # type: ignore[arg-type]
+
+    await runner.run(run_request)
+
+    model_tool = next(
+        item for item in provider.requests[0].tools if item.name == "begin_artifact_output"
+    )
+    validator = jsonschema_rs.validator_for(model_tool.parameters)
+    assert validator.is_valid(selection if is_selection else full)
+    assert not validator.is_valid(full if is_selection else selection)
+    assert not validator.is_valid({**selection, "content": "混入全文"})
+    assert registry.require("begin_artifact_output") is tool
+    assert tool.as_model_tool().parameters == original_schema
+
+
+@pytest.mark.asyncio
+async def test_章节计划模型无需填写数量而控制事件保留数量() -> None:
+    provider = TerminalProvider("submit_beat_plan", {
+        "title": "章节计划", "summary": "章节摘要", "chapterGoal": "完成目标",
+        "sceneBeats": [{"goal": "第一个节拍"}, {"goal": "第二个节拍"}],
+    })
+    registry = build_default_registry()
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+
+    result = await runner.run(request(agent_id="剧情", operation_kind="plan_chapter"))
+
+    model_tool = next(
+        item for item in provider.requests[0].tools if item.name == "submit_beat_plan"
+    )
+    assert "beatCount" not in model_tool.parameters["properties"]
+    assert result.controlEvents[0]["beatCount"] == 2
+    assert len(result.controlEvents[0]["sceneBeats"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_旧正文参数的显式空选区字段仍等价于省略() -> None:
+    provider = TerminalProvider("begin_artifact_output", {
+        "kind": "chapter_draft", "summary": "章节草案", "content": "完整正文",
+        "operation": None, "resourceType": None, "resourceId": None,
+        "baseUpdatedAt": None, "baseContentHash": None, "selectionStart": None,
+        "selectionEnd": None, "selectedTextHash": None, "replacement": None,
+    })
+    registry = build_default_registry()
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+
+    result = await runner.run(request())
+
+    assert provider.calls == 1
+    assert result.controlEvents == [{
+        "type": "begin_artifact_output", "kind": "chapter_draft",
+        "summary": "章节草案", "content": "完整正文",
+    }]
 
 
 @pytest.mark.asyncio

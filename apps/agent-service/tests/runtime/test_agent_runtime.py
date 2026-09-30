@@ -26,6 +26,101 @@ from inkforge_agents.tools.registry import (
 )
 
 
+@pytest.mark.asyncio
+async def test_大纲空定位纠正具有具体指令且失败整包无副作用() -> None:
+    class BillableProvider(ScriptedProvider):
+        billable = True
+
+    provider = BillableProvider([
+        turn(
+            "失败包中的正文不能保留",
+            ("读取作品", "get_novel_info", {}),
+            ("缺少定位", "get_outline_node", {"node_id": None}),
+        ),
+        turn("", ("正确定位", "get_outline_node", {"node_id": "node-1"})),
+        turn("读取完成"),
+    ])
+    gateway = RecordingGateway()
+    billing = RecordingBilling()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider, billing=billing), registry)
+    result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
+        messages=[{"role": "user", "content": "读取大纲节点"}],
+        exposed_tools=[registry.require("get_outline_node"), registry.require("get_novel_info")],
+        context=context("剧情"),
+        model_context=ModelCallContext(
+            userId="user-1", novelId="novel-1", taskId="task-1", runId="run-1", agentId="剧情",
+        ),
+    )
+
+    correction = provider.requests[1].messages[0].content
+    assert "outline_locator_required" in correction
+    assert "node_id 或 node_title" in correction
+    assert "list_outline_summary" in correction
+    assert gateway.calls == ["get_outline_node"]
+    assert result.visibleContent == "读取完成"
+    assert "失败包中的正文" not in provider.requests[1].model_dump_json()
+    request_ids = [usage["requestId"] for usage in billing.usages]
+    assert len(request_ids) == len(set(request_ids)) == 3
+    assert request_ids == [grant["requestId"] for grant in billing.authorizations]
+    assert result.usage.totalTokens == 45
+
+
+@pytest.mark.asyncio
+async def test_大纲定位再次失败不会扩大纠正次数(caplog: pytest.LogCaptureFixture) -> None:
+    invalid = turn("", ("空定位", "get_outline_node", {}))
+    provider = ScriptedProvider([invalid, invalid])
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+    with pytest.raises(ModelToolProtocolRecoveryFailedError, match="outline_locator_required"):
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "写作前读取大纲"}],
+            exposed_tools=[registry.require("get_outline_node")],
+            context=context("写作"),
+            allow_chapter_artifact_correction=True,
+        )
+    assert len(provider.requests) == 2
+    assert gateway.calls == []
+    assert "corrections_used=1 action=fail" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_正文操作的错误产物种类在工具执行前纠正() -> None:
+    provider = ScriptedProvider([
+        turn(
+            "无效可见正文",
+            ("读取作品", "get_novel_info", {}),
+            ("错误产物", "begin_artifact_output", {
+                "kind": "outline_draft", "summary": "错误种类", "content": "错误产物正文",
+            }),
+        ),
+        turn("", ("正确产物", "begin_artifact_output", {
+            "kind": "chapter_draft", "summary": "章节草案", "content": "完整章节正文",
+        })),
+    ])
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    original_tool = registry.require("begin_artifact_output")
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+    result = await runner.run(AgentRunRequest(
+        agentId="写作", executionMode="primary", operationKind="write_chapter",
+        userMessage="生成正文", toolContext=context("写作"),
+    ))
+
+    assert registry.require("begin_artifact_output") is original_tool
+    assert gateway.calls == []
+    assert result.controlEvents == [{
+        "type": "begin_artifact_output", "kind": "chapter_draft",
+        "summary": "章节草案", "content": "完整章节正文",
+    }]
+    assert "artifact_operation_mismatch" in provider.requests[1].messages[2].content
+    assert "错误产物正文" not in provider.requests[1].model_dump_json()
+    assert provider.requests[0].tools == provider.requests[1].tools
+
+
 def turn(
     content: str,
     *tool_calls: tuple[str, str, dict[str, object]],

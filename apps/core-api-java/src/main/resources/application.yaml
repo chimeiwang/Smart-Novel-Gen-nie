@@ -16,6 +16,11 @@ spring:
       max-file-size: 200MB
       max-request-size: 201MB
 
+logging:
+  pattern:
+    # 显示 SLF4J fluent 键值；监督器的异常诊断只记录安全栈帧，不传入 Throwable 文本。
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger : %msg %kvp %ex%n"
+
 server:
   port: ${PORT:8000}
   error:

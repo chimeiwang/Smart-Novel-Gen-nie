@@ -55,7 +55,13 @@ def read_tools(gateway: ToolGateway) -> list[ToolDefinition]:
         ("semantic_search_references", "语义检索参考资料。", ReferenceSearchArgs, "lore.read"),
         ("get_style_profile", "读取已应用的文风画像。", EmptyArgs, "style.read"),
         ("list_outline_summary", "读取结构化大纲索引。", OutlineSummaryArgs, "plot.read"),
-        ("get_outline_node", "读取指定大纲节点。", OutlineNodeArgs, "plot.read"),
+        (
+            "get_outline_node",
+            "按真实 node_id 或 node_title 读取大纲节点，至少提供一个非空字符串。"
+            "尚无定位信息时先调用 list_outline_summary 获取索引，不要编造节点。",
+            OutlineNodeArgs,
+            "plot.read",
+        ),
         ("get_plot_progress", "读取当前剧情进度。", EmptyArgs, "plot.read"),
         ("list_foreshadowings_summary", "列出伏笔摘要。", EmptyArgs, "plot.read"),
         ("get_foreshadowing_detail", "读取指定伏笔详情。", ForeshadowingNameArgs, "plot.read"),

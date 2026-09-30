@@ -144,6 +144,28 @@ def test_compose_nginx_preserves_only_trusted_https_forwarding() -> None:
     assert "proxy_set_header X-Forwarded-Proto $scheme;" not in nginx
 
 
+def test_compose_nginx_rejects_server_actions_only_at_web_boundary() -> None:
+    nginx = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+    video_api = nginx.split("location ^~ /api/v1/video/ {", 1)[1].split(
+        "location ^~ /api/v1/ {", 1
+    )[0]
+    core_api = nginx.split("location ^~ /api/v1/ {", 1)[1].split(
+        "location / {", 1
+    )[0]
+    web = nginx.split("location / {", 1)[1]
+
+    assert nginx.count("$http_next_action") == 1
+    assert re.search(
+        r'if\s*\(\$http_next_action\s*!=\s*""\)\s*\{\s*return\s+404;\s*\}',
+        web,
+    )
+    assert web.index("$http_next_action") < web.index("proxy_pass http://inkforge_web;")
+    assert "$http_next_action" not in video_api
+    assert "$http_next_action" not in core_api
+    assert "proxy_pass http://inkforge_core;" in video_api
+    assert "proxy_pass http://inkforge_core;" in core_api
+
+
 def test_compose_nginx_preserves_trusted_real_client_ip() -> None:
     nginx = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
     mapping = re.search(

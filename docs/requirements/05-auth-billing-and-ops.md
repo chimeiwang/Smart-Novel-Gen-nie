@@ -214,9 +214,16 @@ readiness 阻断抽帧、导出和需要本地媒体工具的模拟生成，不�
 - 旧版日志原文进入 `trust=unverified` 的只读 legacy 边界；残缺尾部只在可信运行元数据完整时隔离为
   带 SHA-256 和字节数的恢复文件，并从最后完整帧恢复追加。
 - 不记录 tools schema、tool_calls、工具参数或工具结果。
+- Core 后台监督器的控制台日志须实际显示任务名、错误分类、连续失败数与退避时间，并记录稳定恢复。
+  异常诊断仅保留白名单异常类型、因果关系与栈帧，不写异常消息、原始 SQL、参数、URL 或凭据；
+  正常提前返回须与异常退出区分。日志改进不改变既有重启／readiness 语义，不能代替未知故障的根因验证。
 - 调试读取默认关闭；开启后仍需浏览器认证、用户归属和 `agent:debug:read` 服务权限。
 
 ## 生产编排
+
+Compose Nginx 的 Web 路由拒绝带非空 `Next-Action` 头的请求并返回 404，因为当前 Web 不提供
+Server Action。更优先的 `/api/v1/` 与 `/api/v1/video/` Core 路由不应用此规则，普通页面、API POST、
+SSE 和上传限制保持原行为；将来新增 Server Action 必须同时重新评估该边界。
 
 `infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service、普通 Redis 和独立 execution journal Redis。
 生产 PostgreSQL 14 继续作为宿主机服务运行，只有 Compose Nginx 发布容器端口，并且只能绑定

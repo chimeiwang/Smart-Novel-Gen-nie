@@ -1,6 +1,8 @@
 package cn.inkforge.core.operations.background;
 
+import java.sql.SQLException;
 import java.time.Duration;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -133,6 +135,8 @@ public final class BackgroundTaskRegistry implements AutoCloseable {
                         LOGGER.atError()
                                 .addKeyValue("backgroundTaskName", registration.name)
                                 .addKeyValue("errorCode", "BACKGROUND_STOP_FAILED")
+                                .addKeyValue("exceptionClass", exception.getClass().getName())
+                                .addKeyValue("exceptionFrames", safeExceptionFrames(exception))
                                 .log("请求后台任务停止时发生异常");
                     }
                 });
@@ -166,33 +170,40 @@ public final class BackgroundTaskRegistry implements AutoCloseable {
                 registration.startedNanos = System.nanoTime();
                 registration.state = State.RUNNING;
                 String errorCode = "BACKGROUND_TASK_RETURNED";
+                Exception failure = null;
                 try {
                     registration.worker.run();
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
                     errorCode = "InterruptedException";
+                    failure = exception;
                 } catch (Exception exception) {
                     errorCode = exception.getClass().getSimpleName();
+                    failure = exception;
                 }
 
-                long ranFor = Math.max(0, System.nanoTime() - registration.startedNanos);
                 if (stopping.get() || registration.stopRequested) {
                     registration.state = State.STOPPED;
                     return;
                 }
                 // 连续稳定运行达到窗口后清零旧失败，短暂成功不能掩盖反复崩溃。
-                if (ranFor >= stabilityWindow.toNanos()) {
-                    registration.consecutiveFailures = 0;
+                markStableIfNeeded(registration);
+                int failures;
+                synchronized (registration) {
+                    failures = ++registration.consecutiveFailures;
+                    registration.state = State.BACKOFF;
                 }
-                registration.consecutiveFailures++;
-                registration.state = State.BACKOFF;
-                Duration delay = backoff(registration.consecutiveFailures);
-                LOGGER.atError()
+                Duration delay = backoff(failures);
+                var event = LOGGER.atError()
                         .addKeyValue("backgroundTaskName", registration.name)
                         .addKeyValue("errorCode", errorCode)
-                        .addKeyValue("consecutiveFailures", registration.consecutiveFailures)
-                        .addKeyValue("retryDelayMillis", delay.toMillis())
-                        .log("后台任务意外结束，等待监督器重启");
+                        .addKeyValue("consecutiveFailures", failures)
+                        .addKeyValue("retryDelayMillis", delay.toMillis());
+                if (failure != null) {
+                    event.addKeyValue("exceptionClass", failure.getClass().getName())
+                            .addKeyValue("exceptionFrames", safeExceptionFrames(failure));
+                }
+                event.log("后台任务意外结束，等待监督器重启");
                 try {
                     stoppingSignal.await(delay.toNanos(), TimeUnit.NANOSECONDS);
                 } catch (InterruptedException exception) {
@@ -217,11 +228,60 @@ public final class BackgroundTaskRegistry implements AutoCloseable {
     }
 
     private void markStableIfNeeded(Registration registration) {
-        if (registration.state == State.RUNNING
-                && registration.consecutiveFailures > 0
-                && System.nanoTime() - registration.startedNanos >= stabilityWindow.toNanos()) {
-            registration.consecutiveFailures = 0;
+        if (registration.state != State.RUNNING
+                || registration.consecutiveFailures == 0
+                || System.nanoTime() - registration.startedNanos < stabilityWindow.toNanos()) {
+            return;
         }
+        synchronized (registration) {
+            if (registration.state == State.RUNNING
+                    && registration.consecutiveFailures > 0
+                    && System.nanoTime() - registration.startedNanos >= stabilityWindow.toNanos()) {
+                int recoveredFailures = registration.consecutiveFailures;
+                registration.consecutiveFailures = 0;
+                LOGGER.atInfo()
+                        .addKeyValue("backgroundTaskName", registration.name)
+                        .addKeyValue("recoveredFailures", recoveredFailures)
+                        .addKeyValue("stableWindowMillis", stabilityWindow.toMillis())
+                        .log("后台任务稳定运行，就绪状态已恢复");
+            }
+        }
+    }
+
+    /** 只记录 JVM 栈帧与因果类型；Throwable 文本可能含 SQL 参数、URL 或凭据。 */
+    private static String safeExceptionFrames(Throwable failure) {
+        StringBuilder frames = new StringBuilder();
+        IdentityHashMap<Throwable, Boolean> seen = new IdentityHashMap<>();
+        Throwable current = failure;
+        while (current != null && seen.put(current, Boolean.TRUE) == null) {
+            if (!frames.isEmpty()) {
+                frames.append(" <- ");
+            }
+            frames.append(current.getClass().getName());
+            if (current instanceof SQLException sqlException) {
+                String sqlState = sqlException.getSQLState();
+                if (sqlState != null && sqlState.matches("[0-9A-Z]{5}")) {
+                    frames.append("{sqlState=").append(sqlState).append('}');
+                }
+                frames.append("{vendorCode=").append(sqlException.getErrorCode()).append('}');
+            }
+            frames.append('[');
+            StackTraceElement[] trace = current.getStackTrace();
+            for (int index = 0; index < trace.length; index++) {
+                if (index > 0) {
+                    frames.append(';');
+                }
+                StackTraceElement frame = trace[index];
+                frames.append(frame.getClassName()).append('.').append(frame.getMethodName())
+                        .append(':').append(frame.getLineNumber());
+            }
+            frames.append(']');
+            current = current.getCause();
+        }
+        if (current != null) {
+            frames.append(" <- [因果循环]");
+        }
+        return frames.toString();
     }
 
     private Duration backoff(int failures) {

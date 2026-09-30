@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+import jsonschema_rs
+from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic_core import PydanticCustomError
 
 from ..definitions.capabilities import AGENT_CAPABILITIES
 from ..providers.base import ModelTool
@@ -45,6 +48,7 @@ class ToolDefinition:
     toolKind: ToolKind
     handler: ToolHandler | None = None
     strict: bool = False
+    modelArgumentsModel: type[BaseModel] | None = None
 
     def validate(self, arguments: Mapping[str, object]) -> dict[str, Any]:
         return self.argumentsModel.model_validate(arguments).model_dump(
@@ -52,8 +56,38 @@ class ToolDefinition:
             exclude_none=True,
         )
 
-    def as_model_tool(self) -> ModelTool:
-        schema = self.argumentsModel.model_json_schema()
+    def validate_model_arguments(
+        self,
+        arguments: Mapping[str, object],
+        *,
+        parameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """模型输入可派生确定性字段，但执行参数仍须通过原契约与当前操作约束。"""
+        model_arguments = arguments
+        if self.modelArgumentsModel is not None:
+            model_arguments = self.modelArgumentsModel.model_validate(arguments).model_dump(
+                by_alias=True, exclude_none=True,
+            )
+        validated = self.validate(model_arguments)
+        # 原契约把可选字段的 null 视为省略；操作收窄不应把旧的等价输入升级为错误。
+        if parameters is not None and not jsonschema_rs.validator_for(parameters).is_valid(
+            validated
+        ):
+            raise ValidationError.from_exception_data(
+                self.name,
+                [{
+                    "type": PydanticCustomError(
+                        "artifact_operation_mismatch", "产物参数与当前操作不匹配"
+                    ),
+                    "loc": (),
+                    "input": dict(arguments),
+                }],
+            )
+        return validated
+
+    def as_model_tool(self, *, parameters: dict[str, Any] | None = None) -> ModelTool:
+        model = self.modelArgumentsModel or self.argumentsModel
+        schema = deepcopy(parameters) if parameters is not None else model.model_json_schema()
         schema.pop("title", None)
         return ModelTool(
             name=self.name,

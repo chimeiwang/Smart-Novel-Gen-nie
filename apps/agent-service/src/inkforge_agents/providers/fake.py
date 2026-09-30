@@ -514,7 +514,6 @@ def _select_tool(
             "submit_beat_plan",
             {
                 "title": "模拟章节计划",
-                "beatCount": 1,
                 "summary": "模拟章节计划草案。",
                 "chapterGoal": "推进当前章节。",
                 "totalEstimatedWords": 1000,

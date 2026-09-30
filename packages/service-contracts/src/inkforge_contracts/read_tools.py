@@ -1,6 +1,7 @@
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 
 class StrictArgs(BaseModel):
@@ -49,13 +50,25 @@ class OutlineSummaryArgs(StrictArgs):
 
 
 class OutlineNodeArgs(StrictArgs):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"required": [field], "properties": {field: {"type": "string", "minLength": 1}}}
+                for field in ("node_id", "node_title")
+            ]
+        },
+    )
+
     node_id: str | None = Field(default=None, min_length=1)
     node_title: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def require_locator(self) -> Self:
         if not self.node_id and not self.node_title:
-            raise ValueError("node_id 或 node_title 至少提供一个")
+            raise PydanticCustomError(
+                "outline_locator_required", "node_id 或 node_title 至少提供一个"
+            )
         return self
 
 

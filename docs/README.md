@@ -23,6 +23,7 @@
 | [镜像传输与导入分阶段诊断](specs/2026-09-29-image-transfer-load-diagnostics.md) | 生产镜像分段上传、远端哈希校验、独立导入与清理；实测结果见 [2026-09-29 审计](audits/2026-09-29-image-transfer-load-diagnostics.md) |
 | `LANGGRAPH_STUDIO.md` | Python LangGraph Studio 调试边界 |
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
+| [工具契约与运行诊断整改](specs/2026-09-30-tool-contract-and-runtime-diagnostics.md) | 模型参数约束、有限纠正、后台安全日志与 Web 无效 Action 边界 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
 | `specs/2026-08-24-core-java-replacement.md` | Java Core 单体替换范围、TDD、dev 数据库与部署验收规格 |
 | `specs/2026-09-09-java-comment-guidelines.md` | Java 必要注释的尺度与健康检查示例 |

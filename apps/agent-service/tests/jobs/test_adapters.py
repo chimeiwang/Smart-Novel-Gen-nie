@@ -456,6 +456,42 @@ async def test_artifact_port_creates_revision_and_marks_awaiting_user() -> None:
 
 
 @pytest.mark.asyncio
+async def test_旧章节计划控制事件保留显式数量并形成草案() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "剧情",
+        "currentOperation": {"kind": "plan_chapter", "primaryAgent": "剧情"},
+        "runtimeContext": _runtime_context(),
+    }
+    # 已持久化的控制事件带 beatCount，恢复时直接交给适配器。
+    old_event = {
+        "type": "submit_beat_plan",
+        "artifactKey": "task-1:plan_chapter",
+        "title": "第一章计划",
+        "summary": "章节计划草案",
+        "chapterGoal": "找到线索",
+        "beatCount": 2,
+        "sceneBeats": [
+            {"goal": "进入城门"},
+            {"goal": "找到线索"},
+        ],
+    }
+
+    artifact_id = await port.submit(state, old_event, "章节规划正文")
+
+    assert artifact_id == "artifact-1"
+    assert core.artifacts[0]["kind"] == "beat_plan"
+    assert core.artifacts[0]["payload"]["beatPlan"] == {
+        key: value for key, value in old_event.items() if key != "type"
+    }
+
+
+@pytest.mark.asyncio
 async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None:
     core = CoreClient()
     artifacts = CoreArtifactPort(core)

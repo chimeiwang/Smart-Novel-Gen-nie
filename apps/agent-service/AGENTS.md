@@ -124,6 +124,10 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - Agent 调用显式使用 `primary`、`reviewer`、`reviser`、`quality` 四种执行模式，禁止根据是否存在草案推断当前角色。
 - AgentRunner 只暴露“Agent 能力白名单、CreativeOperation 工具白名单、执行模式工具白名单”的交集；`primary/reviser` 使用 Operation 契约，`reviewer` 无读取工具且只允许 `submit_evaluation`，`quality` 只允许 `submit_quality_report`。
 - ToolRegistry 再次校验 Agent 权限；未暴露工具必须拒绝执行。
+- 模型可见 Schema 必须表达定位、产物及复审的可表达组合规则；固定错误码对应安全纠正说明，不能只给
+  根级通用错误。普通正文与选区按 Operation 收窄模型 Schema，预检使用相同约束，保留原注册工具身份。
+- 新模型 Beat Plan 输入不请求 `beatCount`，只从已校验 `sceneBeats` 派生；控制事件仍保留该字段。
+  历史参数及持久结果继续按原契约读取，不能用新输入 Schema 拒绝旧事件或放行矛盾计数。
 - 26 个只读工具的名称和参数模型统一定义在 `inkforge_contracts.read_tools`；Agent 与 Core 必须共同引用该契约，禁止分别维护同名参数模型。
 - 只读且并发安全的工具可以并行；控制工具按模型返回顺序执行。
 - 每个 CreativeOperation 必须声明上下文策略、允许工具、终止控制工具、产物事件、产物类型和 artifactKey 策略；图层在提交 Core 前确定性拒绝错误事件、错误 kind、变化的 artifactKey 和冲突终止产物。

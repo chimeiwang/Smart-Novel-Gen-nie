@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from copy import deepcopy
+from typing import Annotated, Any, Literal, Self
 
 from inkforge_contracts import ConsistencyQualityReport
 from pydantic import (
@@ -11,6 +12,7 @@ from pydantic import (
     Field,
     JsonValue,
     NonNegativeInt,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -34,9 +36,7 @@ class QualityReportArgs(ConsistencyQualityReport):
 
 class ProposalUpdatesArgs(StrictArgs):
     summary: str = Field(min_length=1, max_length=1000)
-    updates: dict[str, JsonValue] = Field(
-        description=SAFE_STRUCTURED_WRITE_INSTRUCTION
-    )
+    updates: dict[str, JsonValue] = Field(description=SAFE_STRUCTURED_WRITE_INSTRUCTION)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
     submitForReview: bool | None = None
@@ -51,9 +51,7 @@ class StartBuilderArgs(StrictArgs):
 
 class AppendBatchArgs(StrictArgs):
     artifactKey: str = Field(min_length=1, max_length=200)
-    updates: dict[str, JsonValue] = Field(
-        description=SAFE_STRUCTURED_WRITE_INSTRUCTION
-    )
+    updates: dict[str, JsonValue] = Field(description=SAFE_STRUCTURED_WRITE_INSTRUCTION)
     summary: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
@@ -71,6 +69,16 @@ class PutTextBlockArgs(StrictArgs):
 
 
 class PutItemTextBlockArgs(StrictArgs):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"required": [field], "properties": {field: {"type": "string", "minLength": 1}}}
+                for field in ("targetId", "targetKey", "targetName")
+            ]
+        },
+    )
+
     artifactKey: str = Field(min_length=1, max_length=200)
     section: str = Field(min_length=1)
     field: str = Field(min_length=1)
@@ -82,7 +90,7 @@ class PutItemTextBlockArgs(StrictArgs):
     @model_validator(mode="after")
     def require_target(self) -> Self:
         if not self.targetId and not self.targetKey and not self.targetName:
-            raise ValueError("必须提供一个数组项目定位字段")
+            raise PydanticCustomError("item_target_required", "必须提供一个数组项目定位字段")
         return self
 
 
@@ -96,6 +104,64 @@ class FinishBuilderArgs(StartBuilderArgs):
 
 
 class BeginArtifactArgs(StrictArgs):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {
+                    "required": ["content"],
+                    "properties": {
+                        "content": {"type": "string", "minLength": 1},
+                        **{
+                            field: {"type": "null"}
+                            for field in (
+                                "operation",
+                                "resourceType",
+                                "resourceId",
+                                "baseUpdatedAt",
+                                "baseContentHash",
+                                "selectionStart",
+                                "selectionEnd",
+                                "selectedTextHash",
+                                "replacement",
+                            )
+                        },
+                    },
+                },
+                {
+                    "required": [
+                        "operation",
+                        "resourceType",
+                        "resourceId",
+                        "baseUpdatedAt",
+                        "baseContentHash",
+                        "selectionStart",
+                        "selectionEnd",
+                        "selectedTextHash",
+                        "replacement",
+                    ],
+                    "properties": {
+                        "content": {"type": "null"},
+                        "operation": {"type": "string"},
+                        "resourceType": {"type": "string"},
+                        **{
+                            field: {"type": "string", "minLength": 1}
+                            for field in (
+                                "resourceId",
+                                "baseUpdatedAt",
+                                "baseContentHash",
+                                "selectedTextHash",
+                                "replacement",
+                            )
+                        },
+                        "selectionStart": {"type": "integer"},
+                        "selectionEnd": {"type": "integer"},
+                    },
+                },
+            ]
+        },
+    )
+
     kind: Literal[
         "outline_draft",
         "chapter_draft",
@@ -107,21 +173,31 @@ class BeginArtifactArgs(StrictArgs):
         "freeform_markdown",
     ]
     summary: str = Field(min_length=1, max_length=1000)
-    content: str | None = Field(default=None, min_length=1)
+    content: str | None = Field(default=None, min_length=1, json_schema_extra={"pattern": r"\S"})
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
     submitForReview: bool | None = None
     # 选区改写沿用 begin_artifact_output，但只允许提交 replacement 和冻结身份。
     operation: Literal["rewrite_chapter_selection", "rewrite_outline_selection"] | None = None
-    resourceType: Literal[
-        "chapter_content", "outline_content", "outline_node_content"
-    ] | None = None
+    resourceType: Literal["chapter_content", "outline_content", "outline_node_content"] | None = (
+        None
+    )
     resourceId: str | None = Field(default=None, min_length=1, max_length=200)
     baseUpdatedAt: str | None = Field(default=None, min_length=1, max_length=100)
-    baseContentHash: str | None = Field(default=None, min_length=64, max_length=64)
+    baseContentHash: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        json_schema_extra={"pattern": "^[0-9a-f]{64}$"},
+    )
     selectionStart: NonNegativeInt | None = None
     selectionEnd: NonNegativeInt | None = None
-    selectedTextHash: str | None = Field(default=None, min_length=64, max_length=64)
+    selectedTextHash: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        json_schema_extra={"pattern": "^[0-9a-f]{64}$"},
+    )
     replacement: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
@@ -175,7 +251,82 @@ class BeginArtifactArgs(StrictArgs):
         return value
 
 
+def artifact_model_schema_for_operation(operation_kind: str | None) -> dict[str, Any] | None:
+    """只收窄模型可见产物形状，不替换已注册工具及其最终参数校验。"""
+
+    ordinary = operation_kind in {"write_chapter", "rewrite_scene"}
+    selection = operation_kind in {"rewrite_chapter_selection", "rewrite_outline_selection"}
+    if not ordinary and not selection:
+        return None
+
+    schema = deepcopy(BeginArtifactArgs.model_json_schema())
+    properties = schema["properties"]
+    common = {"kind", "summary", "artifactKey", "reviewerAgent", "submitForReview"}
+    selection_fields = {
+        "operation",
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash",
+        "replacement",
+    }
+    allowed = common | (selection_fields if selection else {"content"})
+    schema["properties"] = {name: value for name, value in properties.items() if name in allowed}
+    schema.pop("anyOf", None)
+    schema["required"] = [
+        "kind",
+        "summary",
+        *(sorted(selection_fields) if selection else ["content"]),
+    ]
+    schema["additionalProperties"] = False
+
+    narrowed = schema["properties"]
+    narrowed["kind"] = {
+        "const": "outline_draft"
+        if operation_kind == "rewrite_outline_selection"
+        else "chapter_draft"
+    }
+    if selection:
+        narrowed["operation"] = {"const": operation_kind}
+        narrowed["resourceType"] = {
+            "enum": (
+                ["outline_content", "outline_node_content"]
+                if operation_kind == "rewrite_outline_selection"
+                else ["chapter_content"]
+            )
+        }
+        for name in selection_fields - {"operation", "resourceType"}:
+            narrowed[name] = _non_null_schema(narrowed[name])
+    else:
+        narrowed["content"] = _non_null_schema(narrowed["content"])
+    return schema
+
+
+def _non_null_schema(value: dict[str, Any]) -> dict[str, Any]:
+    branches = value.get("anyOf")
+    if not isinstance(branches, list):
+        return value
+    selected = next(branch for branch in branches if branch.get("type") != "null")
+    return {
+        **{key: item for key, item in value.items() if key not in {"anyOf", "default"}},
+        **selected,
+    }
+
+
 class ShowArtifactArgs(StrictArgs):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {"required": [field], "properties": {field: {"type": "string", "minLength": 1}}}
+                for field in ("artifactId", "artifactKey")
+            ]
+        },
+    )
+
     artifactId: str | None = Field(default=None, min_length=1, max_length=200)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reason: str | None = Field(default=None, min_length=1, max_length=500)
@@ -183,7 +334,9 @@ class ShowArtifactArgs(StrictArgs):
     @model_validator(mode="after")
     def require_locator(self) -> Self:
         if not self.artifactId and not self.artifactKey:
-            raise ValueError("artifactId 或 artifactKey 至少提供一个")
+            raise PydanticCustomError(
+                "artifact_locator_required", "artifactId 或 artifactKey 至少提供一个"
+            )
         return self
 
 
@@ -191,21 +344,18 @@ class BeatPlanSceneArgs(StrictArgs):
     order: int | None = Field(default=None, strict=True, ge=1)
     goal: str = Field(min_length=1, max_length=1000)
     conflict: str | None = Field(default=None, max_length=1000)
-    characters: list[
-        Annotated[str, Field(min_length=1, max_length=100)]
-    ] = Field(default_factory=list, max_length=50)
-    foreshadowingRefs: list[
-        Annotated[str, Field(min_length=1, max_length=200)]
-    ] | None = Field(default=None, max_length=50)
-    estimatedWords: int | None = Field(default=None, strict=True, ge=0)
-    acceptanceCriteria: str | None = Field(
-        default=None, min_length=1, max_length=1000
+    characters: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(
+        default_factory=list, max_length=50
     )
+    foreshadowingRefs: list[Annotated[str, Field(min_length=1, max_length=200)]] | None = Field(
+        default=None, max_length=50
+    )
+    estimatedWords: int | None = Field(default=None, strict=True, ge=0)
+    acceptanceCriteria: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
-class BeatPlanArgs(StrictArgs):
+class BeatPlanFields(StrictArgs):
     title: str = Field(min_length=1, max_length=200)
-    beatCount: int = Field(strict=True, ge=1, le=50)
     summary: str = Field(min_length=1, max_length=2000)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
@@ -216,11 +366,24 @@ class BeatPlanArgs(StrictArgs):
     totalEstimatedWords: int | None = Field(default=None, strict=True, ge=0)
     sceneBeats: list[BeatPlanSceneArgs] = Field(min_length=1, max_length=50)
 
+
+class BeatPlanArgs(BeatPlanFields):
+    beatCount: int = Field(strict=True, ge=1, le=50)
+
     @model_validator(mode="after")
     def require_matching_beat_count(self) -> Self:
         if self.beatCount != len(self.sceneBeats):
             raise ValueError("beatCount 必须等于 sceneBeats 的场景数量")
         return self
+
+
+class BeatPlanInputArgs(BeatPlanFields):
+    """模型只提交场景数组，计数由校验后的数组确定性派生。"""
+
+    @computed_field(return_type=int)  # type: ignore[prop-decorator]
+    @property
+    def beatCount(self) -> int:
+        return len(self.sceneBeats)
 
 
 class ValidationReportArgs(StrictArgs):
@@ -229,6 +392,38 @@ class ValidationReportArgs(StrictArgs):
 
 
 class EvaluationArgs(StrictArgs):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "anyOf": [
+                {
+                    "required": ["verdict"],
+                    "properties": {
+                        "verdict": {"enum": ["pass", "block"]},
+                        "revisionMode": {"type": "null"},
+                        "patches": {"type": "null"},
+                    },
+                },
+                {
+                    "required": ["verdict", "revisionMode", "patches"],
+                    "properties": {
+                        "verdict": {"const": "revise"},
+                        "revisionMode": {"const": "patch"},
+                        "patches": {"type": "array", "minItems": 1, "maxItems": 20},
+                    },
+                },
+                {
+                    "required": ["verdict", "revisionMode"],
+                    "properties": {
+                        "verdict": {"const": "revise"},
+                        "revisionMode": {"const": "rewrite"},
+                        "patches": {"type": "null"},
+                    },
+                },
+            ]
+        },
+    )
+
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     verdict: Literal["pass", "revise", "block"]
     summary: str = Field(min_length=1)
@@ -241,15 +436,27 @@ class EvaluationArgs(StrictArgs):
     def validate_revision_combination(self) -> Self:
         if self.verdict in {"pass", "block"}:
             if self.revisionMode is not None or self.patches is not None:
-                raise ValueError("通过或阻断结论不得携带 revisionMode 或 patches")
+                raise PydanticCustomError(
+                    "evaluation_revision_combination_invalid",
+                    "通过或阻断结论不得携带 revisionMode 或 patches",
+                )
             return self
         if self.revisionMode is None:
-            raise ValueError("revise 结论必须声明 revisionMode")
+            raise PydanticCustomError(
+                "evaluation_revision_combination_invalid",
+                "revise 结论必须声明 revisionMode",
+            )
         if self.revisionMode == "patch":
             if self.patches is None or not 1 <= len(self.patches) <= 20:
-                raise ValueError("patch 模式必须携带 1 到 20 个 patch")
+                raise PydanticCustomError(
+                    "evaluation_revision_combination_invalid",
+                    "patch 模式必须携带 1 到 20 个 patch",
+                )
         elif self.patches is not None:
-            raise ValueError("rewrite 模式不得携带 patches")
+            raise PydanticCustomError(
+                "evaluation_revision_combination_invalid",
+                "rewrite 模式不得携带 patches",
+            )
         return self
 
 
@@ -341,6 +548,7 @@ def control_tools() -> list[ToolDefinition]:
             name=name,
             description=description,
             argumentsModel=model,
+            modelArgumentsModel=(BeatPlanInputArgs if name == "submit_beat_plan" else None),
             permission=control_permission(capability, agent_ids),
             toolKind="control",
             strict=name == "submit_quality_report",

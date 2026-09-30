@@ -810,7 +810,7 @@
       "model": "OutlineNodeArgs",
       "module": "read_tools",
       "path": "read_tools/OutlineNodeArgs.schema.json",
-      "sha256": "83803cc0ae08dbabb6da5140a2e0830796f174ec74b81b1d85defe801ae94cd1"
+      "sha256": "4fe09225fc3faddc943851555512f85258a6067a4ef8392a4a6bc4d926e7f421"
     },
     {
       "model": "OutlineSummaryArgs",
