@@ -22,8 +22,22 @@ from release_manifest import load_manifest
 OVERALL_TIMEOUT_SECONDS = 3000
 SSH_GRACE_SECONDS = 60
 CONNECT_TIMEOUT_SECONDS = 15
-_TOKEN = re.compile(r"[A-Za-z0-9_-]{20,255}\Z")
 _ACTOR = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?\Z")
+
+
+class PullSetupError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def valid_token(value: object) -> bool:
+    if not isinstance(value, str) or not value or any(char in value for char in "\0\r\n"):
+        return False
+    try:
+        return len(value.encode("utf-8")) <= 16384
+    except UnicodeEncodeError:
+        return False
 
 
 # 引导程序通过 SSH 命令行传递，但只包含仓库代码；令牌和清单从标准输入读取。
@@ -50,12 +64,20 @@ SERVICES = ("web", "core-api", "agent-service")
 SAFETY_BYTES = 536870912
 IMAGE_TIMEOUT_SECONDS = 900
 OVERALL_TIMEOUT_SECONDS = 3000
-_TOKEN = re.compile(r"[A-Za-z0-9_-]{20,255}\Z")
 _ACTOR = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?\Z")
 
 
 class PullFailure(Exception):
     pass
+
+
+def valid_token(value):
+    if not isinstance(value, str) or not value or any(char in value for char in "\0\r\n"):
+        return False
+    try:
+        return len(value.encode("utf-8")) <= 16384
+    except UnicodeEncodeError:
+        return False
 
 
 def log(message):
@@ -163,15 +185,15 @@ def receive_payload():
         raise PullFailure("远端输入字段无效")
     actor, token = payload["actor"], payload["token"]
     if not isinstance(actor, str) or not _ACTOR.fullmatch(actor):
-        raise PullFailure("GHCR 用户格式无效")
-    if not isinstance(token, str) or not _TOKEN.fullmatch(token):
-        raise PullFailure("GHCR 令牌格式无效")
+        raise PullFailure("PULL_REMOTE_ACTOR_INVALID：GHCR 用户格式无效")
+    if not valid_token(token):
+        raise PullFailure("PULL_REMOTE_TOKEN_INVALID：GHCR 令牌结构无效")
     try:
         manifest = validate_manifest(
             payload["manifest"], payload["sourceSha"], payload["sourceRunId"], payload["repository"]
         )
     except (ValueError, TypeError) as exc:
-        raise PullFailure("远端发布清单校验失败") from exc
+        raise PullFailure("PULL_REMOTE_MANIFEST_INVALID：发布清单校验失败") from exc
     return manifest, actor, token
 
 
@@ -288,15 +310,22 @@ def checked_environment() -> tuple[str, str, str, str, str, str]:
         "GITHUB_TOKEN", "GITHUB_ACTOR",
     )
     values = tuple(os.environ.get(name, "") for name in names)
-    if any(not value for value in values):
-        raise ValueError("生产镜像拉取缺少 SSH 或 GHCR 环境配置")
     host, user, key_path, known_hosts_path, token, actor = values
-    if not _TOKEN.fullmatch(token) or not _ACTOR.fullmatch(actor):
-        raise ValueError("GHCR 凭据格式无效")
+    if any(not value for value in (host, user, key_path, known_hosts_path)) \
+            or "GITHUB_TOKEN" not in os.environ or "GITHUB_ACTOR" not in os.environ:
+        raise PullSetupError("PULL_MISSING_ENV", "缺少 SSH 或 GHCR 环境配置")
+    if not valid_token(token):
+        raise PullSetupError("PULL_TOKEN_INVALID", "GHCR 令牌结构无效")
+    if not _ACTOR.fullmatch(actor):
+        raise PullSetupError("PULL_ACTOR_INVALID", "GHCR 用户格式无效")
     for path in (key_path, known_hosts_path):
         file = Path(path)
-        if not file.is_file() or not os.access(file, os.R_OK) or file.stat().st_size == 0:
-            raise ValueError("SSH 凭据或已核验主机文件不可读")
+        try:
+            readable = file.is_file() and os.access(file, os.R_OK) and file.stat().st_size > 0
+        except OSError:
+            readable = False
+        if not readable:
+            raise PullSetupError("PULL_SSH_FILE_UNREADABLE", "SSH 凭据或主机文件不可读")
     return host, user, key_path, known_hosts_path, token, actor
 
 
@@ -387,11 +416,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        manifest = load_manifest(
-            args.manifest, args.source_sha, args.source_run_id, args.repository
-        )
+        try:
+            manifest = load_manifest(
+                args.manifest, args.source_sha, args.source_run_id, args.repository
+            )
+        except (ValueError, OSError) as exc:
+            raise PullSetupError("PULL_MANIFEST_INVALID", "发布清单校验失败") from exc
         host, user, key_path, known_hosts_path, token, actor = checked_environment()
-        encoded_program = base64.b64encode(remote_program().encode("utf-8")).decode("ascii")
+        try:
+            encoded_program = base64.b64encode(remote_program().encode("utf-8")).decode("ascii")
+        except (OSError, UnicodeError) as exc:
+            raise PullSetupError("PULL_BOOTSTRAP_UNAVAILABLE", "远端引导代码不可读") from exc
         remote_command = "python3 -c " + shlex.quote(
             'import base64;exec(compile(base64.b64decode("' + encoded_program
             + '"),"<inkforge-ghcr-bootstrap>","exec"))'
@@ -412,14 +447,17 @@ def main(argv: list[str] | None = None) -> int:
         child_env.pop("GITHUB_TOKEN", None)
         # 固定 ssh 可执行文件、参数数组和严格主机检查；不经过本地 shell。
         if run_ssh_streaming(ssh_command, payload, child_env, token, host):
-            raise ValueError("生产镜像拉取未完成")
+            raise PullSetupError("PULL_REMOTE_FAILED", "远端镜像拉取未完成")
         return 0
     except subprocess.TimeoutExpired:
-        print("生产镜像拉取失败：SSH 整体超时", file=sys.stderr)
+        print("生产镜像拉取失败：PULL_SSH_TIMEOUT SSH 整体超时", file=sys.stderr)
         return 1
-    except (ValueError, OSError) as exc:
+    except PullSetupError as exc:
+        print("生产镜像拉取失败：" + exc.code + " " + str(exc), file=sys.stderr)
+        return 1
+    except (ValueError, OSError):
         # 不转写异常原文，避免带出 SSH 地址、凭据或 registry 临时 URL。
-        print("生产镜像拉取失败：" + type(exc).__name__, file=sys.stderr)
+        print("生产镜像拉取失败：PULL_SETUP_ERROR 启动检查异常", file=sys.stderr)
         return 1
 
 

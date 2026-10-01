@@ -119,7 +119,8 @@ def fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def remote_result(
-    doc: dict, *, program: str | None = None, actor: str = "release-bot"
+    doc: dict, *, program: str | None = None, actor: str = "release-bot",
+    token: str = TOKEN,
 ) -> subprocess.CompletedProcess[str]:
     payload = {
         "manifest": doc,
@@ -127,7 +128,7 @@ def remote_result(
         "sourceRunId": 123,
         "repository": REPOSITORY,
         "actor": actor,
-        "token": TOKEN,
+        "token": token,
     }
     # 仅运行当前仓库生成的测试程序，不经过 shell。
     return subprocess.run(  # noqa: S603
@@ -374,3 +375,91 @@ def test_整体超时保留阶段日志并终止SSH(tmp_path: Path, monkeypatch,
     pid = int(pid_path.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+@pytest.mark.parametrize("opaque", ["header.payload.signature", "g!h@i#j%k:l?", "z" * 9000])
+def test_本地与远端接受非预设格式的opaque令牌(fake_docker, tmp_path, monkeypatch, opaque):
+    doc, _state_path, _calls_path = fake_docker
+    key = tmp_path / "key"
+    known_hosts = tmp_path / "known_hosts"
+    key.write_text("test")
+    known_hosts.write_text("test")
+    for name, value in {
+        "SERVER_HOST": "private.example", "SERVER_USER": "deploy",
+        "SSH_KEY_PATH": str(key), "SSH_KNOWN_HOSTS_FILE": str(known_hosts),
+        "GITHUB_TOKEN": opaque, "GITHUB_ACTOR": "chimeiwang",
+    }.items():
+        monkeypatch.setenv(name, value)
+    assert pull.checked_environment()[4] == opaque
+    result = remote_result(doc, token=opaque)
+    assert result.returncode == 0, result.stderr
+    assert opaque not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("invalid", ["", "abc\0def", "abc\rdef", "abc\ndef", "x" * 16385])
+def test_本地与远端拒绝不安全令牌(fake_docker, tmp_path, monkeypatch, invalid):
+    doc, _state_path, _calls_path = fake_docker
+    key = tmp_path / "key"
+    known_hosts = tmp_path / "known_hosts"
+    key.write_text("test")
+    known_hosts.write_text("test")
+    for name, value in {
+        "SERVER_HOST": "private.example", "SERVER_USER": "deploy",
+        "SSH_KEY_PATH": str(key), "SSH_KNOWN_HOSTS_FILE": str(known_hosts),
+        "GITHUB_ACTOR": "chimeiwang",
+    }.items():
+        monkeypatch.setenv(name, value)
+    assert not pull.valid_token(invalid)
+    if "\0" not in invalid:
+        monkeypatch.setenv("GITHUB_TOKEN", invalid)
+        with pytest.raises(pull.PullSetupError) as error:
+            pull.checked_environment()
+        assert error.value.code == "PULL_TOKEN_INVALID"
+    result = remote_result(doc, token=invalid)
+    assert result.returncode != 0
+    assert "PULL_REMOTE_TOKEN_INVALID" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        ("missing_env", "PULL_MISSING_ENV"),
+        ("invalid_token", "PULL_TOKEN_INVALID"),
+        ("invalid_actor", "PULL_ACTOR_INVALID"),
+        ("missing_ssh_file", "PULL_SSH_FILE_UNREADABLE"),
+        ("invalid_manifest", "PULL_MANIFEST_INVALID"),
+    ],
+)
+def test_真实CLI启动错误有固定分类且不泄漏值(tmp_path, failure, expected_code):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest()))
+    key = tmp_path / "key"
+    known_hosts = tmp_path / "known_hosts"
+    key.write_text("test")
+    known_hosts.write_text("test")
+    env = os.environ.copy()
+    env.update({
+        "SERVER_HOST": "private.example", "SERVER_USER": "deploy",
+        "SSH_KEY_PATH": str(key), "SSH_KNOWN_HOSTS_FILE": str(known_hosts),
+        "GITHUB_TOKEN": TOKEN, "GITHUB_ACTOR": "chimeiwang",
+    })
+    if failure == "missing_env":
+        env.pop("SERVER_USER")
+    elif failure == "invalid_token":
+        env["GITHUB_TOKEN"] = TOKEN + "\ninvalid"
+    elif failure == "invalid_actor":
+        env["GITHUB_ACTOR"] = "secret bad actor"
+    elif failure == "missing_ssh_file":
+        env["SSH_KNOWN_HOSTS_FILE"] = str(tmp_path / "absent-secret-file")
+    else:
+        manifest_path.write_text('{"secret":"bad manifest"}')
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, str(ROOT / "scripts" / "pull-release-images.py"),
+         "--manifest", str(manifest_path), "--source-sha", SHA,
+         "--source-run-id", "123", "--repository", REPOSITORY],
+        capture_output=True, text=True, env=env, timeout=3,
+    )
+    assert result.returncode == 1
+    assert expected_code in result.stderr
+    assert "ValueError" not in result.stderr
+    assert "secret" not in result.stderr

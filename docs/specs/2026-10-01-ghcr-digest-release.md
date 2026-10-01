@@ -1,6 +1,6 @@
 # GHCR 分层发布与已验证制品重试
 
-日期：2026-10-01。状态：实现及本地回归完成，待完整 CI 与生产发布验收。
+日期：2026-10-01。状态：首轮完整 CI 与镜像发布通过，拉取器启动校验失败；兼容修复待重新发布验收。
 
 ## 背景与授权
 
@@ -24,7 +24,8 @@
 ## 构建与制品
 
 - CI 后独立发布三张 linux/amd64 镜像至固定前缀 `ghcr.io/chimeiwang/smart-novel-gen-nie`，
-  对应服务 `web`、`core-api`、`agent-service`；包保持受限访问，不自动开放公开权限。
+  对应服务 `web`、`core-api`、`agent-service`；工作流不修改包可见性。包的实际访问能力单独核实，
+  不以仓库关联或默认行为推断私有；生产仍使用短期令牌认证。
 - 使用各服务独立的 BuildKit 构建缓存复用基础层，保留现有 Dockerfile 的产品行为。
 - 生成严格版本化 JSON 清单，字段为 `schemaVersion=1`、`repository`、`sourceSha`、`sourceRunId`、
   `images`。images 必须恰有上述三服务，每项包含 `repository`、`digest`、`imageId`、`sizeBytes`。
@@ -35,7 +36,9 @@
 
 ## 生产拉取
 
-- 独立接入脚本先在 Runner 校验清单，再以 SSH 传给远端；远端再次校验固定绑定及凭据格式。
+- 独立接入脚本先在 Runner 校验清单，再以 SSH 传给远端；远端再次校验固定绑定及凭据结构。
+  令牌视为不透明字符串，只校验非空、UTF-8 不超过 16 KiB 且无 NUL/CR/LF，不猜测前缀或字符集。
+  启动失败使用固定错误码区分清单、缺失环境、令牌、用户名和 SSH 文件问题，不输出原值或异常原文。
 - 对 Docker 数据目录作容量预检，使用逻辑镜像大小和安全余量；不得自动清理镜像、卷或数据腾空间。
 - 顺序按 `repository@digest` 拉取三镜像，验证本地实际 image ID 和 RepoDigests；可复用已存在且准确
   匹配的镜像。全部校验完成后才打现有 `inkforge-服务:sourceSha` 标签，再执行原源码 bundle 上传和部署。
