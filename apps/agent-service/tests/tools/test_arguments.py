@@ -18,12 +18,12 @@ def test_tool_arguments_are_strictly_validated_without_truncation() -> None:
     assert tool.validate({"character_name": long_name})["character_name"] == long_name
 
 
-def test_default_registry_has_only_quality_report_strict_tool() -> None:
+def test质量工具显式开启_strict且其他工具沿用供应商默认() -> None:
     registry = build_default_registry()
 
-    assert {tool.name for tool in registry.all() if tool.as_model_tool().strict} == {
-        "submit_quality_report"
-    }
+    assert registry.require("submit_quality_report").as_model_tool().strict is True
+    assert all(tool.as_model_tool().strict is None
+               for tool in registry.all() if tool.name != "submit_quality_report")
 
 
 def test_quality_tool_validation_keeps_local_length_and_count_limits() -> None:

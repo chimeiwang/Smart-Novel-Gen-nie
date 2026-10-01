@@ -134,14 +134,14 @@ class ModelMessage(BaseModel):
 
 
 class ModelTool(BaseModel):
-    """模型工具声明；strict 只在供应商明确支持时启用。"""
+    """未指定 strict 时由供应商选择默认值；DeepSeek 默认开启。"""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     description: str
     parameters: dict[str, JsonValue]
-    strict: bool = False
+    strict: bool | None = None
 
 
 class ModelStructuredOutputRequest(BaseModel):

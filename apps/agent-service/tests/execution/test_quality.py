@@ -377,7 +377,12 @@ async def test_quality_executor_uses_beta_http_once_and_never_serializes_invalid
     malformed,
 ):
     calls = []
-    raw = '{"report":"禁止持久化的坏参数' if malformed else json.dumps(report(), ensure_ascii=False)
+    # HTTP 替身遵循 quality wire；供应商空字符串由 Provider 归一化为业务 null。
+    wire_report = {**report(), "rewriteBrief": ""}
+    raw = (
+        '{"report":"禁止持久化的坏参数'
+        if malformed else json.dumps(wire_report, ensure_ascii=False)
+    )
 
     def respond(request):
         calls.append(request)

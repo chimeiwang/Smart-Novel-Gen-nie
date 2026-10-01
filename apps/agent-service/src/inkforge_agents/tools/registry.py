@@ -47,7 +47,7 @@ class ToolDefinition:
     permission: ToolPermission
     toolKind: ToolKind
     handler: ToolHandler | None = None
-    strict: bool = False
+    strict: bool | None = None
     modelArgumentsModel: type[BaseModel] | None = None
 
     def validate(self, arguments: Mapping[str, object]) -> dict[str, Any]:

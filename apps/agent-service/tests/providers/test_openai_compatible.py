@@ -431,6 +431,7 @@ async def test_deepseek_rejects_mixed_strict_tools_before_model_invocation() -> 
             ),
             ModelTool(
                 name="legacy_tool",
+                strict=False,
                 description="非严格工具",
                 parameters={
                     "type": "object",

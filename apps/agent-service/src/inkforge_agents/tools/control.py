@@ -551,7 +551,7 @@ def control_tools() -> list[ToolDefinition]:
             modelArgumentsModel=(BeatPlanInputArgs if name == "submit_beat_plan" else None),
             permission=control_permission(capability, agent_ids),
             toolKind="control",
-            strict=name == "submit_quality_report",
+            strict=True if name == "submit_quality_report" else None,
         )
         for name, description, model, capability, agent_ids in specs
     ]

@@ -15,12 +15,12 @@ from inkforge_agents.providers.base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
-from inkforge_agents.providers.deepseek_v4 import (
-    DeepSeekV4Provider,
+from inkforge_agents.providers.deepseek_strict import (
     _normalize_deepseek_quality_arguments,
     _project_deepseek_quality_schema,
     _project_deepseek_strict_schema,
 )
+from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
 from inkforge_agents.runtime.model_policy import (
     CREATIVE_HIGH,
     LEGACY_PROVIDER_DEFAULT,
@@ -622,24 +622,22 @@ async def test_quality_strict_response_is_revalidated_against_original_schema() 
 
 
 @pytest.mark.asyncio
-async def test_non_quality_strict_tool_fails_before_http_request() -> None:
+async def test非质量工具默认使用_strict() -> None:
     provider, requests, client = _provider()
+    request = _request(tools=[{
+        "name": "submit_evaluation", "description": "提交复审",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    }])
     try:
-        with pytest.raises(ValueError, match="只支持 submit_quality_report"):
-            await provider.complete_turn(
-                _request(
-                    policy=REVIEWER_NO_THINKING,
-                    tool_name="submit_evaluation",
-                    strict=True,
-                )
-            )
+        await provider.complete_turn(request)
     finally:
         await client.aclose()
-    assert requests == []
+    assert str(requests[0].url) == "https://api.deepseek.com/beta/chat/completions"
+    assert json.loads(requests[0].content)["tools"][0]["function"]["strict"] is True
 
 
 @pytest.mark.asyncio
-async def test普通工具仍使用标准端点且不发送_strict字段() -> None:
+async def test显式关闭strict工具使用标准端点且不发送_strict字段() -> None:
     provider, requests, client = _provider()
     try:
         await provider.complete_turn(_request(tool_name="lookup", strict=False))
@@ -675,6 +673,7 @@ async def test_strict_and_non_strict_tools_fail_before_http_request() -> None:
                     tools=[
                         {
                             "name": "lookup",
+                            "strict": False,
                             "description": "查询资料",
                             "parameters": {"type": "object", "properties": {}},
                         },

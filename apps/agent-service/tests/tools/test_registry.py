@@ -75,8 +75,8 @@ def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
     assert set(READ_TOOL_NAMES) <= names
 
 
-def test_restricted_tool_model_declaration_is_not_strict_by_default() -> None:
-    assert restricted_tool().as_model_tool().strict is False
+def test普通工具使用供应商默认_strict() -> None:
+    assert restricted_tool().as_model_tool().strict is None
 
 
 def test_for_execution_returns_exact_tools_in_registry_order() -> None:

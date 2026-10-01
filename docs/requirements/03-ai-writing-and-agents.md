@@ -466,7 +466,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 新建/修改设定只使用通用更新构建器，不暴露 `append_outline_tree`；只有创建/修改大纲和管理伏笔可以追加结构化大纲树。
 - 设定 Agent 调用 `propose_updates` 或 `finish_update_builder` 成功后立即结束本轮工具循环。
 - reviewer 不暴露读取工具，只能接收 Core 权威草案并调用一次 `submit_evaluation`；reviser 使用原 Operation 工具契约，接收原草案、revision、artifactKey 和合并后的修改要求后生成同类新 revision。`plan_chapter` 是事实核对特例：reviewer 与 reviser 同时接收主 Agent 生成草案时使用的冻结 `outline` 最小投影，但不得重新查询作品资料。
-- consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`；在本质量 hotfix 中，只有该工具使用 DeepSeek Beta strict Function Calling。
+- consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`；该工具保留专用 DeepSeek Beta strict wire，其他工具也默认启用 strict。
 
 队列 job 与单次 Operation 内并行使用同一个有界预算。2 核 2 GB 生产环境保持一个 Agent Uvicorn worker，默认最多同时处理三个不同 `novelId` 的独立 job，同一 `novelId` 同时只执行一个 job；同项目冲突的 claim 通过租约校验原子回队，成功回队时撤销本次 claim 增加的 attempts，且不等待项目锁占住执行槽。共享 `ModelRuntime` 把所有模型调用的全局峰值限制为三个。Reviewer `Send` 仍可并行，但与其他 job 重叠时也必须等待全局模型槽；`AGENT_MAX_CONCURRENCY=1` 可恢复严格串行。该并行不改变同一任务的命令身份、事件序号、检查点和 ReviewArtifact 顺序。
 
@@ -518,7 +518,9 @@ observer，但只有 observer 与运行 context 都存在时才写区块，并�
 
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
-DeepSeek strict 通道仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、带端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退；在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议，明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。当前只有 `submit_quality_report` 使用专用 strict wire 契约：本地 `$defs` 全部内联且 wire 不含引用或 `type:null`，`location` 与 `rewriteBrief` 以空字符串表达无值并只在 Provider 的这两个精确路径归一化为 `None`；非质量 strict 工具在 HTTP 前失败。原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验，也不做截断或猜测修复。
+DeepSeek 的 Function Calling 默认开启 Beta strict，同时覆盖原始 `deepseek_v4` 与 `generic` 下的 DeepSeek 模型。普通读取、正文提交、Reviewer、Beat Plan、设定更新和质量终检均使用该默认值；非 DeepSeek 沿用原默认。工具显式 `strict=false` 可用于兼容调用，但不能与开启的工具混用；缺少 strict 端点或混用都在 HTTP 前失败，不回退。规范官方 HTTPS 根地址或 `/v1` 自动派生 `/beta`，自定义地址、端口或其他路径必须配置 `OPENAI_STRICT_BASE_URL`。strict 请求不隐式重发，明确可重试的传输错误仍由原队列机制处理。
+
+普通工具使用可逆 wire Schema：闭合且全必填对象，可省略字段与 null 使用显式包装，开放字典及任意/递归 JSON 使用完整 JSON 字符串；历史工具参数仅在进程内按相同方式编码。解码后完整复验原 Schema/Pydantic，不丢字段、不截断、不把空字符串或零等业务值当缺失。质量报告保持专用 wire：内联 `$defs`，不发送引用或 `type:null`，只有 `location` 与 `rewriteBrief` 将空字符串归一化为 `None`。纯文本无 Function Calling strict，既有 JSON Output 与视频 Responses 的冻结路由不迁移；详见 [默认 strict 规格](../specs/2026-10-01-deepseek-default-strict.md)。
 
 DeepSeek 工具 arguments 解析失败时，Provider 必须在可靠 usage 已校验的前提下返回不含原文的无效调用诊断，不得让原始 `ValueError` 穿透；只允许对末尾缺失对象或数组闭合符、补齐后可由标准 JSON 解析且通过本轮原始 JSON Schema 的参数做确定性恢复。AgentRuntime 把单次模型工具响应视为原子协议包，只要包含无效调用就不得接受其中正文或执行任何工具。无效 JSON 或本地 Pydantic 参数在整个 Agent 运行中最多触发一次显式协议纠正：纠正请求不回放坏 assistant 响应或 arguments，保持原工具和策略，并作为新的 `ModelRuntime` 调用独立授权、回报 usage 和记录日志；纠正后仍无合法工具调用时固定以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 失败。成功 HTTP 响应的 JSON、envelope 或 usage 不可信时不可自动再调用模型。质量协议错误日志可以保留原始完成原因、安全大写 `failure_code`、允许列表内工具名、错误分类、参数字符数和确定性恢复计数；Pydantic 失败最多额外记录 10 条脱敏 `loc/type`，不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`。视频既有路由与能力门禁不变。
 

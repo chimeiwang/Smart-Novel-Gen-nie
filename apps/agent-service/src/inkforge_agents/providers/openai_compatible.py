@@ -35,6 +35,7 @@ from .base import (
     ProviderTransportError,
     ProviderTransportErrorCode,
 )
+from .deepseek_strict import prepare_deepseek_tools
 
 _DEEPSEEK_OFFICIAL_HOST = "api.deepseek.com"
 _DEEPSEEK_STANDARD_BASE_URL = "https://api.deepseek.com"
@@ -1931,12 +1932,10 @@ class OpenAICompatibleProvider:
                 validator=validator,
             )
         is_deepseek = _is_deepseek_model(self.model_name)
-        strict_tool_count = sum(tool.strict for tool in request.tools)
-        if is_deepseek and 0 < strict_tool_count < len(request.tools):
-            # DeepSeek strict Beta 要求同一请求中的全部函数都开启 strict；混用时必须在
-            # bind_tools/ainvoke 之前失败，不能静默升级工具或退回普通通道。
-            raise ValueError("DeepSeek 工具请求不能混用 strict 与非 strict 函数")
-        use_deepseek_strict_channel = is_deepseek and strict_tool_count > 0
+        prepared = prepare_deepseek_tools(request) if is_deepseek else None
+        if prepared is not None:
+            request = prepared.request
+        use_deepseek_strict_channel = is_deepseek and any(tool.strict for tool in request.tools)
         if use_deepseek_strict_channel:
             if self._strict_model is None:
                 raise ValueError("DeepSeek strict 工具请求缺少 OPENAI_STRICT_BASE_URL")
@@ -1965,7 +1964,7 @@ class OpenAICompatibleProvider:
                             "name": tool.name,
                             "description": tool.description,
                             "parameters": tool.parameters,
-                            "strict": tool.strict,
+                            "strict": bool(tool.strict),
                         },
                     }
                     for tool in request.tools
@@ -2008,7 +2007,7 @@ class OpenAICompatibleProvider:
             # ChatOpenAI 会把普通 max_tokens 改名，DeepSeek 必须通过 extra_body 保留原字段。
             deepseek_body: dict[str, object] = {"max_tokens": request.maxOutputTokens}
             if request.thinkingMode == "disabled":
-                # V4 默认开启思考；strict 工具任务关闭思考，避免推理 token 挤占预授权输出。
+                # 只按显式策略关闭思考；默认 strict 不改变既有思考模式。
                 deepseek_body["thinking"] = {"type": "disabled"}
             invocation_options["extra_body"] = deepseek_body
         else:
@@ -2111,7 +2110,7 @@ class OpenAICompatibleProvider:
             invalid_tool_call_codes.append("provider_strict_schema_violation")
             # LangChain 已丢失原始 JSON 字符串；不为诊断重新序列化参数正文。
             invalid_tool_call_argument_character_counts.append(0)
-        return ModelTurnResult(
+        result = ModelTurnResult(
             content=response.content,
             toolCalls=tool_calls,
             invalidToolCallCount=(len(invalid_tool_calls) + len(strict_schema_violation_names)),
@@ -2137,3 +2136,4 @@ class OpenAICompatibleProvider:
                 else None
             ),
         )
+        return prepared.decode_result(result) if prepared is not None else result
