@@ -149,3 +149,27 @@ GitHub 集成的直接重试接口返回 Actions 写权限不足；因此通过�
 再设计按不可变 digest 拉取、稳定基础层与构建缓存、保留已验证制品并独立重试部署。
 这些是后续发布链路建议，本轮未擅自建立镜像仓库、增加凭据权限或更改传输方案。
 后续审计提交使用 `[skip ci]`，避免继续以相同传输路线触发重复发布。
+
+## 10 月 1 日补充发布与生产诊断
+
+原修复已经随 `2ee71460bb80253d38f9c869725a77417c9b2f91` 在 2026-10-01 02:11 UTC 完成生产部署。
+该 SHA 的完整 CI 与镜像发布通过；GHCR 直拉仍慢，实际由本机中转已验证镜像并执行原部署脚本，
+没有在生产重新构建。路径、速度与镜像身份见 [GHCR 发布审计](2026-10-01-ghcr-digest-release.md)。
+
+- 六个容器 healthy，重启 0、无 OOM；实时数据库结构、V2 指纹及原 smoke 通过，既有开关和 65 个
+  配置/备份文件哈希不变。没有 DDL、正式内容写入或真实模型调用。
+- 公网首页 200，无效 Next-Action Web POST 返回 404；同一请求头访问 Core readiness 仍为 200。
+  活动 Nginx 规则已确认，探针没有进入 Web 日志或新增 Server Action 异常。
+- 新 Agent 容器启动后观察窗口内，工具参数协议错误计数为 0；该观察没有真实模型请求，不能替代真实写作验收。
+
+新 Core 在 02:09:50.459 UTC 启动；02:10:25.046 UTC，`workflow_cancellation_reconciler`
+记录一次失败，`errorCode=DataAccessException`，因果类为 `java.sql.SQLTransientConnectionException`，
+`consecutiveFailures=1`、退避 1000 ms。安全栈路径为
+`JooqWorkflowQualityCompletion.scan -> findInvalidatedRuns -> WorkflowCancellationReconciler.runOnce`，
+底层落在 `HikariPool.getConnection/createTimeoutException`。本次为从 PostgreSQL 连接池取得连接超时，
+不是已经执行查询后的 SQL 语法或约束错误；现有配置最大 5 个连接、等待上限 5000 ms。
+
+02:11:26.529 UTC 同一任务稳定运行 60 秒后记录 `recoveredFailures=1`，之后的只读观察未见再次失败，
+`background_tasks=ok`。这证明新增诊断字段与自动恢复记录已在线生效。脱敏证据仍不能区分启动并发占满
+连接池与数据库短暂不可达，也不能反推 9 月 29 日旧日志缺失的异常原因。本次没有盲目扩大连接池或调整
+业务调度；若事件重复，应根据连接池活跃/等待数和 PostgreSQL 连接资源进一步定位。

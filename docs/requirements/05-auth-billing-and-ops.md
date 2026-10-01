@@ -243,11 +243,16 @@ SSE 和上传限制保持原行为；将来新增 Server Action 必须同时重�
 
 生产发布由 GitHub Actions 在完整 CI 成功后，在 Runner 上构建 Web、Core API 和 Agent Service 三张
 linux/amd64 镜像，推送至固定 GHCR 仓库并保存与提交 SHA、来源运行 ID 绑定的不可变摘要清单。
-生产按清单中的摘要拉取，核对实际镜像 ID 后补齐原本地版本标签，再以 `--no-build` 启动
+默认生产按清单中的摘要拉取，核对实际镜像 ID 后补齐原本地版本标签，再以 `--no-build` 启动
 `infra/compose.yaml`。构建使用各服务独立的持久构建缓存，避免每轮重新构建未变的基础层。
 2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接
 或可恢复备份时必须停止部署。实现及上线状态见 [GHCR 发布规格](../specs/2026-10-01-ghcr-digest-release.md)
 和 [验收审计](../audits/2026-10-01-ghcr-digest-release.md)。
+
+明确执行的本机中转恢复可以从同一成功 CI 的固定 digest 拉取镜像，核对 image ID、源码 revision 和
+目标架构后经严格 SSH 传输归档。生产导入后必须再核对可信 CI 的 image ID，不得以源码未变替代身份校验，
+也不得把 docker load 后缺失的 RepoDigests 伪装成已验证。容器切换仍使用原部署脚本的全部门禁，
+审计区分自动部署结果和手动恢复结果；不得并发运行两条发布路径。
 
 镜像拉取前必须对远端 Docker 数据目录作容量预检，按镜像逻辑大小计入解包空间及安全余量；
 不得为了腾出空间自动删除生产镜像、容器、卷或数据。只允许固定三仓库、三个服务及清单指定的 SHA256
