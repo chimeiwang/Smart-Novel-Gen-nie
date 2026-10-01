@@ -1,0 +1,170 @@
+name: 部署已验证版本
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      source_run_id:
+        required: true
+        type: string
+      artifact_id:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    if: github.repository == 'chimeiwang/Smart-Novel-Gen-nie' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      ARTIFACT_ID: ${{ inputs.artifact_id }}
+      INKFORGE_IMAGE_TAG: ${{ inputs.source_sha }}
+
+    steps:
+      - name: 校验发布身份
+        shell: bash
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_REPOSITORY" = chimeiwang/Smart-Novel-Gen-nie
+
+      - name: 检出当前 main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 在生产队列内复核发布来源
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 scripts/resolve-release-retry.py \
+            --run-id "$SOURCE_RUN_ID" \
+            --output "$RUNNER_TEMP/release-gate.json"
+          python3 - "$RUNNER_TEMP/release-gate.json" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          actual = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          expected = {
+              "sourceSha": os.environ["SOURCE_SHA"],
+              "sourceRunId": int(os.environ["SOURCE_RUN_ID"]),
+              "artifactId": int(os.environ["ARTIFACT_ID"]),
+          }
+          if actual != expected:
+              raise SystemExit("发布来源与队列前解析结果不一致")
+          PY
+
+      - name: 复核源码提交
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: 下载发布清单
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ inputs.artifact_id }}
+          run-id: ${{ inputs.source_run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+          path: release-artifact
+
+      - name: 校验发布清单
+        shell: bash
+        run: |
+          python3 scripts/release_manifest.py validate \
+            --manifest "release-artifact/inkforge-release-${SOURCE_SHA}-${SOURCE_RUN_ID}.json" \
+            --source-sha "$SOURCE_SHA" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY"
+
+      - name: 准备 SSH
+        env:
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          test -n "$DEPLOY_SSH_KNOWN_HOSTS"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$SSH_KNOWN_HOSTS_FILE"
+          chmod 600 "$SSH_KNOWN_HOSTS_FILE"
+
+      - name: 拉取已验证镜像
+        timeout-minutes: 55
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: /home/runner/.ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          python3 scripts/pull-release-images.py \
+            --manifest "release-artifact/inkforge-release-${SOURCE_SHA}-${SOURCE_RUN_ID}.json" \
+            --source-sha "$SOURCE_SHA" \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --repository "$GITHUB_REPOSITORY"
+
+      - name: 上传部署源码 bundle
+        timeout-minutes: 15
+        env:
+          DEPLOY_SHA: ${{ inputs.source_sha }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: /home/runner/.ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
+        run: scripts/upload-deploy-source.sh
+
+      - name: 通过 SSH 部署
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
+        run: |
+          set +e
+          ssh \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_FILE" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
+            -o TCPKeepAlive=yes \
+            -i ~/.ssh/deploy_key \
+            "${SERVER_USER}@${SERVER_HOST}" \
+            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='$SOURCE_SHA' DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${SOURCE_SHA}.bundle' INKFORGE_IMAGE_TAG='$INKFORGE_IMAGE_TAG' sh -s" \
+            < scripts/deploy-production.sh 2>&1 | tee deploy.log
+          deploy_status=${PIPESTATUS[0]}
+          if [ "$deploy_status" -ne 0 ]; then
+            {
+              echo "## 生产部署失败"
+              echo '```text'
+              tail -n 200 deploy.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            annotation="$(tail -n 80 deploy.log)"
+            annotation="${annotation//'%'/'%25'}"
+            annotation="${annotation//$'\n'/'%0A'}"
+            annotation="${annotation//$'\r'/'%0D'}"
+            echo "::error title=生产部署失败::$annotation"
+          fi
+          exit "$deploy_status"

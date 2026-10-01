@@ -3,11 +3,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
 DEPLOY_SCRIPT = ROOT / "scripts" / "deploy-production.sh"
 IMAGE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-docker-images.sh"
 SOURCE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-deploy-source.sh"
+DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy-release.yml"
+RETRY_WORKFLOW = ROOT / ".github" / "workflows" / "retry-production.yml"
 API_GENERATOR = ROOT / "scripts" / "generate_api_client.mjs"
 
 
@@ -40,14 +44,12 @@ def test_ci_uses_current_node_python_and_openapi_gates() -> None:
         assert command in source
 
 
-def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
+def test_main_push_only_publishes_three_versioned_ghcr_images_after_ci() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
+    jobs = yaml.safe_load(source)["jobs"]
+    publish = jobs["publish-images"]
 
     assert "docker build -t inkforge:latest ." not in source
-    assert (
-        "docker compose --env-file .env.example -f infra/compose.yaml "
-        "build web core-api agent-service"
-    ) in source
     for obsolete in (
         "POSTGRES_DATA_VOLUME",
         "POSTGRES_USER: inkforge",
@@ -55,14 +57,43 @@ def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
         "POSTGRES_DB: inkforge",
     ):
         assert obsolete not in source
-    assert "scripts/upload-docker-images.sh" in source
-    assert "fetch-depth: 0" in source
-    for image in (
-        "inkforge-web:${INKFORGE_IMAGE_TAG}",
-        "inkforge-core-api:${INKFORGE_IMAGE_TAG}",
-        "inkforge-agent-service:${INKFORGE_IMAGE_TAG}",
-    ):
-        assert image in IMAGE_UPLOAD_SCRIPT.read_text(encoding="utf-8")
+    assert "scripts/upload-docker-images.sh" not in source
+    assert publish["needs"] == "ci"
+    assert publish["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/main' "
+        "&& github.repository == 'chimeiwang/Smart-Novel-Gen-nie'"
+    )
+    assert publish["permissions"] == {"contents": "read", "packages": "write"}
+    assert jobs["ci"].get("permissions") is None
+    assert yaml.safe_load(source)["permissions"] == {"contents": "read"}
+    assert publish["outputs"]["artifact-id"] == "${{ steps.release-artifact.outputs.artifact-id }}"
+    steps = publish["steps"]
+    assert any(step.get("uses") == "docker/setup-buildx-action@v4" for step in steps)
+    assert any(step.get("uses") == "docker/login-action@v4" for step in steps)
+    builds = [step for step in steps if step.get("uses") == "docker/build-push-action@v7"]
+    assert len(builds) == 3
+    for step, service in zip(builds, ("web", "core-api", "agent-service"), strict=True):
+        config = step["with"]
+        assert config["context"] == "."
+        assert config["file"] == f"infra/docker/{service}.Dockerfile"
+        assert config["platforms"] == "linux/amd64"
+        assert config["push"] is True
+        assert config["load"] is True
+        assert config["provenance"] is False
+        assert config["tags"] == (
+            f"ghcr.io/chimeiwang/smart-novel-gen-nie/{service}:${{{{ github.sha }}}}"
+        )
+        assert "org.opencontainers.image.revision=${{ github.sha }}" in config["labels"]
+        assert config["cache-from"] == f"type=gha,scope={service}"
+        assert config["cache-to"] == f"type=gha,scope={service},mode=max"
+    create = next(step for step in steps if step.get("name") == "生成发布清单")
+    assert "scripts/release_manifest.py create" in create["run"]
+    for digest in ("WEB_DIGEST", "CORE_DIGEST", "AGENT_DIGEST"):
+        assert digest in create["env"]
+    artifact = next(step for step in steps if step.get("id") == "release-artifact")
+    assert artifact["uses"] == "actions/upload-artifact@v7"
+    assert artifact["with"]["retention-days"] == 30
+    assert artifact["with"]["overwrite"] is False
 
 
 def test_image_upload_reuses_matching_server_images() -> None:
@@ -78,23 +109,30 @@ def test_image_upload_reuses_matching_server_images() -> None:
     assert "docker load" in source
 
 
-def test_image_upload_step_has_a_total_timeout() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
-    upload_step = source.split("      - name: Upload Docker images", maxsplit=1)[1]
-    upload_step = upload_step.split("      - name: Deploy over SSH", maxsplit=1)[0]
-
-    assert "timeout-minutes: 180" in upload_step
+def test_production_pull_has_bounded_step_and_uses_verified_manifest() -> None:
+    source = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+    job = yaml.safe_load(source)["jobs"]["deploy"]
+    steps = job["steps"]
+    pull = next(step for step in steps if step.get("name") == "拉取已验证镜像")
+    assert pull["timeout-minutes"] == 55
+    assert "scripts/pull-release-images.py" in pull["run"]
+    assert pull["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105 - 工作流表达式
+    assert "--manifest" in pull["run"]
+    assert "--source-run-id" in pull["run"]
+    assert steps.index(pull) < next(
+        index for index, step in enumerate(steps) if step.get("name") == "通过 SSH 部署"
+    )
 
 
 def test_deploy_uploads_verified_source_bundle_before_remote_execution() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
 
-    upload_name = "      - name: Upload deployment source bundle"
-    deploy_name = "      - name: Deploy over SSH"
+    upload_name = "      - name: 上传部署源码 bundle"
+    deploy_name = "      - name: 通过 SSH 部署"
     assert upload_name in source
     assert source.index(upload_name) < source.index(deploy_name)
     assert "scripts/upload-deploy-source.sh" in source
-    assert "DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${{ github.sha }}.bundle'" in source
+    assert "DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${SOURCE_SHA}.bundle'" in source
 
 
 def test_source_bundle_upload_is_sha_bound_atomic_and_pinned() -> None:
@@ -179,7 +217,7 @@ def test_ci_does_not_inject_optional_redis_dependency() -> None:
 
 
 def test_deploy_failures_are_published_to_the_workflow_summary() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
 
     assert "deploy.log" in source
     assert "## 生产部署失败" in source
@@ -187,8 +225,9 @@ def test_deploy_failures_are_published_to_the_workflow_summary() -> None:
 
 
 def test_production_deploy_uses_pinned_ssh_host_identity_and_non_cancelled_queue() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
-    workflow_header = source.split("\njobs:", maxsplit=1)[0]
+    source = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+    main = WORKFLOW.read_text(encoding="utf-8")
+    workflow_header = main.split("\njobs:", maxsplit=1)[0]
 
     assert "StrictHostKeyChecking=no" not in source
     assert "DEPLOY_SSH_KNOWN_HOSTS" in source
@@ -201,8 +240,75 @@ def test_production_deploy_uses_pinned_ssh_host_identity_and_non_cancelled_queue
         "    concurrency:\n"
         "      group: ci-${{ github.workflow }}-${{ github.ref }}\n"
         "      cancel-in-progress: true"
-    ) in source
+    ) in main
     assert 'group: production\n      cancel-in-progress: false' in source
+
+
+def test_retry_resolves_a_trusted_run_and_reuses_the_same_deployment() -> None:
+    source = RETRY_WORKFLOW.read_text(encoding="utf-8")
+    jobs = yaml.safe_load(source)["jobs"]
+    assert "workflow_dispatch:" in source
+    assert source.count("      run_id:") == 1
+    assert "source_sha:" not in source.split("permissions:", maxsplit=1)[0]
+    assert "digest:" not in source.split("permissions:", maxsplit=1)[0]
+    resolver = jobs["resolve-release"]
+    assert resolver["if"] == (
+        "github.repository == 'chimeiwang/Smart-Novel-Gen-nie' "
+        "&& github.ref == 'refs/heads/main'"
+    )
+    assert resolver["permissions"] == {"actions": "read", "contents": "read"}
+    assert "scripts/resolve-release-retry.py" in resolver["steps"][-1]["run"]
+    assert "--run-id \"$SOURCE_RUN_ID\"" in resolver["steps"][-1]["run"]
+    deploy = jobs["deploy"]
+    assert deploy["needs"] == "resolve-release"
+    assert deploy["uses"] == "./.github/workflows/deploy-release.yml"
+    assert deploy["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "packages": "read",
+    }
+    assert deploy["with"]["artifact_id"] == "${{ needs.resolve-release.outputs.artifact-id }}"
+
+
+def test_reusable_deployment_keeps_manifest_source_and_environment_gates() -> None:
+    main = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    deploy = main["deploy"]
+    assert deploy["needs"] == "publish-images"
+    assert deploy["if"] == (
+        "github.event_name == 'push' && github.ref == 'refs/heads/main' "
+        "&& github.repository == 'chimeiwang/Smart-Novel-Gen-nie'"
+    )
+    assert deploy["uses"] == "./.github/workflows/deploy-release.yml"
+    assert deploy["permissions"] == {
+        "actions": "read",
+        "contents": "read",
+        "packages": "read",
+    }
+    reusable = yaml.safe_load(DEPLOY_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["deploy"]
+    assert reusable["if"] == (
+        "github.repository == 'chimeiwang/Smart-Novel-Gen-nie' "
+        "&& github.ref == 'refs/heads/main'"
+    )
+    assert reusable["environment"] == "production"
+    steps = reusable["steps"]
+    assert any(step.get("uses") == "actions/download-artifact@v8" for step in steps)
+    download = next(step for step in steps if step.get("uses") == "actions/download-artifact@v8")
+    assert download["with"]["artifact-ids"] == "${{ inputs.artifact_id }}"
+    assert download["with"]["run-id"] == "${{ inputs.source_run_id }}"
+    assert download["with"]["digest-mismatch"] == "error"
+    assert any("scripts/release_manifest.py validate" in step.get("run", "") for step in steps)
+    assert any("git rev-parse HEAD" in step.get("run", "") for step in steps)
+    queue_gate = next(step for step in steps if step.get("name") == "在生产队列内复核发布来源")
+    assert "scripts/resolve-release-retry.py" in queue_gate["run"]
+    assert "--run-id \"$SOURCE_RUN_ID\"" in queue_gate["run"]
+    assert "release-gate.json" in queue_gate["run"]
+    for field in ("sourceSha", "sourceRunId", "artifactId"):
+        assert field in queue_gate["run"]
+    assert steps.index(queue_gate) < next(
+        index for index, step in enumerate(steps) if step.get("name") == "下载发布清单"
+    )
+    checkout = next(step for step in steps if step.get("name") == "检出当前 main")
+    assert checkout["with"]["ref"] == "main"
 
 
 def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:

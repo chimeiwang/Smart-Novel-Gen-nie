@@ -241,9 +241,28 @@ SSE 和上传限制保持原行为；将来新增 Server Action 必须同时重�
 
 宿主机 Nginx 是唯一可从公网直接到达的入口。公开证书由宿主机 Certbot 管理，证书及私钥只保存在 `/etc/letsencrypt`，不得进入 Git 仓库、应用镜像或 `.env`。`certbot.timer` 负责自动续期，续期成功后的 deploy hook 必须先执行 `nginx -t`，通过后才 reload 宿主机 Nginx。
 
-生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接或可恢复备份时必须停止部署。
+生产发布由 GitHub Actions 在完整 CI 成功后，在 Runner 上构建 Web、Core API 和 Agent Service 三张
+linux/amd64 镜像，推送至固定 GHCR 仓库并保存与提交 SHA、来源运行 ID 绑定的不可变摘要清单。
+生产按清单中的摘要拉取，核对实际镜像 ID 后补齐原本地版本标签，再以 `--no-build` 启动
+`infra/compose.yaml`。构建使用各服务独立的持久构建缓存，避免每轮重新构建未变的基础层。
+2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接
+或可恢复备份时必须停止部署。实现及上线状态见 [GHCR 发布规格](../specs/2026-10-01-ghcr-digest-release.md)
+和 [验收审计](../audits/2026-10-01-ghcr-digest-release.md)。
 
-镜像上传必须先对远端 Docker 和相关文件系统可用容量执行只读预检，再把无法复用的镜像逐张归档、压缩、传输和导入。容量预检计入远端临时归档，分别核对 Docker 数据目录与临时目录；两者共用文件系统时预留合计峰值。每张镜像在 Runner 独立归档，并上传到权限受限的远端随机临时目录；接收端输出字节进度，传输完成后先校验归档 SHA-256，再以独立有界命令导入 Docker。日志必须标明镜像名、归档大小、传输、校验和导入各阶段的开始、结果与耗时；传输、远端命令、导入和工作流上传步骤分别设置有界超时。成功或失败均清理本次临时目录内的归档；清理失败须保留原错误并报告残留路径。不得为了腾出空间自动删除生产镜像、容器、卷或数据。分阶段方案见[镜像传输与导入诊断规格](../specs/2026-09-29-image-transfer-load-diagnostics.md)；文档描述实施目标，实际部署状态以当次工作流和生产验收为准。
+镜像拉取前必须对远端 Docker 数据目录作容量预检，按镜像逻辑大小计入解包空间及安全余量；
+不得为了腾出空间自动删除生产镜像、容器、卷或数据。只允许固定三仓库、三个服务及清单指定的 SHA256
+摘要；三镜像全部校验通过才可打本地标签及继续部署。拉取和远端命令必须有界，日志明确服务、阶段及耗时。
+构建 job 使用短期 `GITHUB_TOKEN` 的 `packages:write` 权限，部署只使用 `packages:read`；
+生产登录仅用严格 SSH 标准输入传入的短期令牌和本次私有临时 `DOCKER_CONFIG`，结束及失败时清理，
+不得写入应用 `.env`、常驻容器、命令行、日志或服务器原有 Docker 凭据文件。
+
+独立发布重试只接收原运行 ID，必须核对其当前仓库、固定构建工作流、main push、成功的 CI 与镜像
+发布 job，以及唯一未过期的清单 artifact；清单源码 SHA 必须仍为 main HEAD，检出和部署同一 SHA。
+重试复用原 digest，不重跑 CI 或重建镜像，不接受任意仓库 URL 或 digest 输入；生产环境和回滚门禁不变。
+
+旧 `scripts/upload-docker-images.sh` 的逐镜像归档、严格 SSH、容量、SHA-256、独立导入和清理规则
+保留为显式兼容入口，不作为新流程的自动回退。历史设计与实测见
+[镜像传输与导入诊断规格](../specs/2026-09-29-image-transfer-load-diagnostics.md)。
 
 生产 SSH 必须严格校验管理员离线核对过的主机公钥：
 

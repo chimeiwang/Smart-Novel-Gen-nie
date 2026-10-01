@@ -21,6 +21,7 @@
 | `requirements/04-review-quality-and-workflow.md` | 草案审核、质量检查与工作流 |
 | `requirements/05-auth-billing-and-ops.md` | 认证、计费与运维 |
 | [镜像传输与导入分阶段诊断](specs/2026-09-29-image-transfer-load-diagnostics.md) | 生产镜像分段上传、远端哈希校验、独立导入与清理；实测结果见 [2026-09-29 审计](audits/2026-09-29-image-transfer-load-diagnostics.md) |
+| [GHCR 分层发布与制品重试](specs/2026-10-01-ghcr-digest-release.md) | 固定摘要镜像、构建缓存、短期拉取凭据及已验证制品独立重试；状态见规格与审计 |
 | `LANGGRAPH_STUDIO.md` | Python LangGraph Studio 调试边界 |
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | [工具契约与运行诊断整改](specs/2026-09-30-tool-contract-and-runtime-diagnostics.md) | 模型参数约束、有限纠正、后台安全日志与 Web 无效 Action 边界 |

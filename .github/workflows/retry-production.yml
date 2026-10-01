@@ -1,0 +1,55 @@
+name: 重试已验证生产发布
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 已通过 CI 和镜像发布的原运行 ID
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  resolve-release:
+    if: github.repository == 'chimeiwang/Smart-Novel-Gen-nie' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      source-sha: ${{ steps.resolve.outputs.source-sha }}
+      source-run-id: ${{ steps.resolve.outputs.source-run-id }}
+      artifact-id: ${{ steps.resolve.outputs.artifact-id }}
+    steps:
+      - name: 检出当前 main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: 解析原发布运行
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.run_id }}
+        shell: bash
+        run: |
+          python3 scripts/resolve-release-retry.py \
+            --run-id "$SOURCE_RUN_ID" \
+            --output "$RUNNER_TEMP/retry-release.json"
+
+  deploy:
+    needs: resolve-release
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    uses: ./.github/workflows/deploy-release.yml
+    with:
+      source_sha: ${{ needs.resolve-release.outputs.source-sha }}
+      source_run_id: ${{ needs.resolve-release.outputs.source-run-id }}
+      artifact_id: ${{ needs.resolve-release.outputs.artifact-id }}
+    secrets: inherit
