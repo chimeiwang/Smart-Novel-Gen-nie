@@ -16,6 +16,7 @@ REPOSITORY = "chimeiwang/Smart-Novel-Gen-nie"
 API_ROOT = f"https://api.github.com/repos/{REPOSITORY}"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _REQUIRED_JOBS = ("ci", "publish-images")
+_PARALLEL_CI_JOBS = ("ci-java", "ci-python", "ci-web")
 
 
 def _positive_int(value: object) -> bool:
@@ -73,14 +74,14 @@ def _paginated(reader: GithubReader, path: str, field: str) -> list[dict[str, An
 
 
 def _latest_required_jobs(
-    reader: GithubReader, run_id: int, run_attempt: int
+    reader: GithubReader, run_id: int, run_attempt: object
 ) -> dict[str, dict[str, Any]]:
-    if not _positive_int(run_attempt) or run_attempt > 1000:
+    if type(run_attempt) is not int or not 1 <= run_attempt <= 1000:
         raise ValueError("原构建重跑次数无效")
     latest: dict[str, dict[str, Any]] = {}
     for attempt in range(1, run_attempt + 1):
         jobs = _paginated(reader, f"/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
-        for job_name in _REQUIRED_JOBS:
+        for job_name in (*_REQUIRED_JOBS, *_PARALLEL_CI_JOBS):
             matched = [job for job in jobs if job.get("name") == job_name]
             if len(matched) > 1:
                 raise ValueError(f"原构建 {job_name} 在同次执行中重复")
@@ -122,7 +123,12 @@ def resolve_retry(reader: GithubReader, run_id: int) -> dict[str, object]:
         raise ValueError("原构建源码不是当前 main HEAD")
 
     jobs = _latest_required_jobs(reader, run_id, run.get("run_attempt"))
-    for job_name in _REQUIRED_JOBS:
+    # 历史串行运行只有 ci；出现并行分支后必须核对完整集合，不能让旧汇总成功
+    # 掩盖较新一次分支重跑的失败、取消或尚未完成。
+    required_jobs = _REQUIRED_JOBS + (
+        _PARALLEL_CI_JOBS if any(name in jobs for name in _PARALLEL_CI_JOBS) else ()
+    )
+    for job_name in required_jobs:
         job = jobs.get(job_name)
         if job is None or job.get("conclusion") != "success":
             raise ValueError(f"原构建 {job_name} 未唯一成功")

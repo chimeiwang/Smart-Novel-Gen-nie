@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  ci-java:
     concurrency:
-      group: ci-${{ github.workflow }}-${{ github.ref }}
+      group: ci-java-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
 
@@ -32,34 +32,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Install Python dependencies
-        run: uv sync --frozen --all-packages --group dev
 
       - name: Test Java migration workspace
         shell: bash
@@ -88,11 +66,45 @@ jobs:
           fi
           exit "$verify_status"
 
-      - name: Check generated API client
-        run: npm run api:check
+  ci-python:
+    concurrency:
+      group: ci-python-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
 
-      - name: Test Web and API client
-        run: npm run test:web
+    env:
+      DATABASE_URL: postgresql+asyncpg://inkforge:ci-placeholder@localhost:5432/inkforge
+      JWT_SECRET: ci-placeholder-ci-placeholder-ci-placeholder
+      MODEL_PROVIDER: fake
+      OPENAI_API_KEY: ""
+      OPENAI_BASE_URL: https://api.deepseek.com/v1
+      OPENAI_MODEL: deepseek-v4-flash
+      LANGSMITH_TRACING_ENABLED: "false"
+      WORKFLOW_EVENT_LOG_ENABLED: "false"
+      WORKFLOW_EVENT_DEBUG_ENABLED: "false"
+      LANGGRAPH_STUDIO_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --all-packages --group dev
 
       - name: Test Python workspace
         shell: bash
@@ -121,6 +133,43 @@ jobs:
       - name: Mypy
         run: uv run mypy apps/agent-service/src packages/service-contracts/src packages/service-auth/src
 
+  ci-web:
+    concurrency:
+      group: ci-web-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://inkforge:ci-placeholder@localhost:5432/inkforge
+      JWT_SECRET: ci-placeholder-ci-placeholder-ci-placeholder
+      MODEL_PROVIDER: fake
+      OPENAI_API_KEY: ""
+      OPENAI_BASE_URL: https://api.deepseek.com/v1
+      OPENAI_MODEL: deepseek-v4-flash
+      LANGSMITH_TRACING_ENABLED: "false"
+      WORKFLOW_EVENT_LOG_ENABLED: "false"
+      WORKFLOW_EVENT_DEBUG_ENABLED: "false"
+      LANGGRAPH_STUDIO_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Check generated API client
+        run: npm run api:check
+
+      - name: Test Web and API client
+        run: npm run test:web
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -129,6 +178,28 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # 保留稳定的 ci 检查名；被取消或跳过的分支不能冒充全量验证成功。
+  ci:
+    needs: [ci-java, ci-python, ci-web]
+    if: ${{ always() }}
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - name: 汇总完整 CI 结果
+        env:
+          JAVA_RESULT: ${{ needs.ci-java.result }}
+          PYTHON_RESULT: ${{ needs.ci-python.result }}
+          WEB_RESULT: ${{ needs.ci-web.result }}
+        shell: bash
+        run: |
+          if [ "$JAVA_RESULT" != success ] || [ "$PYTHON_RESULT" != success ] || [ "$WEB_RESULT" != success ]; then
+            echo "::error title=CI 验证未全部成功::Java=${JAVA_RESULT}，Python=${PYTHON_RESULT}，Web=${WEB_RESULT}"
+            exit 1
+          fi
+          echo "Java、Python、Web 验证全部成功"
 
   publish-images:
     needs: ci

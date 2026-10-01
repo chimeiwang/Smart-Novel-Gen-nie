@@ -241,6 +241,11 @@ SSE 和上传限制保持原行为；将来新增 Server Action 必须同时重�
 
 宿主机 Nginx 是唯一可从公网直接到达的入口。公开证书由宿主机 Certbot 管理，证书及私钥只保存在 `/etc/letsencrypt`，不得进入 Git 仓库、应用镜像或 `.env`。`certbot.timer` 负责自动续期，续期成功后的 deploy hook 必须先执行 `nginx -t`，通过后才 reload 宿主机 Nginx。
 
+CI 的 Java、Python、Web 全量验证使用三个独立并行 job，保留各自依赖缓存与原检查范围。
+Python job 仍安装 Node，以运行 Python 架构测试内的契约生成器。稳定的 `ci` 汇总检查必须确认三个
+分支全部成功；失败、取消、跳过或未知结果均阻断发布。各验证 job 使用独立的取消组，不能互相
+取消，也不能取消生产发布队列。实现与验收范围见 [并行 CI 规格](../specs/2026-10-01-parallel-ci-jobs.md)。
+
 生产发布由 GitHub Actions 在完整 CI 成功后，在 Runner 上构建 Web、Core API 和 Agent Service 三张
 linux/amd64 镜像，推送至固定 GHCR 仓库并保存与提交 SHA、来源运行 ID 绑定的不可变摘要清单。
 默认生产按清单中的摘要拉取，核对实际镜像 ID 后补齐原本地版本标签，再以 `--no-build` 启动
@@ -264,6 +269,8 @@ linux/amd64 镜像，推送至固定 GHCR 仓库并保存与提交 SHA、来源�
 独立发布重试只接收原运行 ID，必须核对其当前仓库、固定构建工作流、main push、成功的 CI 与镜像
 发布 job，以及唯一未过期的清单 artifact；清单源码 SHA 必须仍为 main HEAD，检出和部署同一 SHA。
 重试复用原 digest，不重跑 CI 或重建镜像，不接受任意仓库 URL 或 digest 输入；生产环境和回滚门禁不变。
+原运行出现并行 CI 分支时，还必须核对 Java、Python、Web 三项最近实际执行的结果全部成功；
+历史串行运行保留原 `ci` 校验，较新分支失败不能被旧汇总成功覆盖。
 
 旧 `scripts/upload-docker-images.sh` 的逐镜像归档、严格 SSH、容量、SHA-256、独立导入和清理规则
 保留为显式兼容入口，不作为新流程的自动回退。历史设计与实测见

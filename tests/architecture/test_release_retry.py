@@ -78,6 +78,53 @@ def test_原部署失败仍可解析唯一已验证制品() -> None:
     assert "/git/ref/heads/main" in reader.calls
 
 
+def _parallel_reader() -> Reader:
+    reader = Reader()
+    page = reader.pages[f"/actions/runs/{RUN_ID}/attempts/1/jobs?per_page=100&page=1"]
+    page["jobs"].extend({"name": name, "conclusion": "success"}
+                        for name in ("ci-java", "ci-python", "ci-web"))
+    page["total_count"] = len(page["jobs"])
+    return reader
+
+
+def test_并行验证和稳定汇总均成功才允许发布重试() -> None:
+    assert retry.resolve_retry(_parallel_reader(), RUN_ID)["artifactId"] == 456
+
+
+@pytest.mark.parametrize("job_name", ["ci-java", "ci-python", "ci-web"])
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "skipped", None])
+def test_旧汇总成功不能掩盖并行分支重跑未成功(job_name, conclusion) -> None:
+    reader = _parallel_reader()
+    reader.pages[f"/actions/runs/{RUN_ID}"]["run_attempt"] = 2
+    reader.pages[f"/actions/runs/{RUN_ID}/attempts/2/jobs?per_page=100&page=1"] = {
+        "total_count": 1, "jobs": [{"name": job_name, "conclusion": conclusion}],
+    }
+    with pytest.raises(ValueError, match=job_name):
+        retry.resolve_retry(reader, RUN_ID)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate"])
+def test_并行验证集合缺失或重复时拒绝发布(mutation) -> None:
+    reader = _parallel_reader()
+    page = reader.pages[f"/actions/runs/{RUN_ID}/attempts/1/jobs?per_page=100&page=1"]
+    if mutation == "missing":
+        page["jobs"] = [job for job in page["jobs"] if job["name"] != "ci-python"]
+    else:
+        page["jobs"].append({"name": "ci-python", "conclusion": "success"})
+    page["total_count"] = len(page["jobs"])
+    with pytest.raises(ValueError, match="ci-python"):
+        retry.resolve_retry(reader, RUN_ID)
+
+
+def test_并行运行仅重跑部署仍复用三个已成功分支() -> None:
+    reader = _parallel_reader()
+    reader.pages[f"/actions/runs/{RUN_ID}"]["run_attempt"] = 2
+    reader.pages[f"/actions/runs/{RUN_ID}/attempts/2/jobs?per_page=100&page=1"] = {
+        "total_count": 1, "jobs": [{"name": "deploy", "conclusion": "failure"}],
+    }
+    assert retry.resolve_retry(reader, RUN_ID)["artifactId"] == 456
+
+
 def test_接受_github_官方示例使用的_main_工作流路径格式() -> None:
     reader = Reader()
     reader.pages[f"/actions/runs/{RUN_ID}"]["path"] = ".github/workflows/build.yml@main"

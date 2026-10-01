@@ -16,6 +16,7 @@
 ## 目标与不变量
 
 - 保留完整 CI，只有当前仓库 main push 且 CI 成功才能发布镜像；PR 无制品发布或生产权限。
+  验证调度已按 [并行 CI 规格](2026-10-01-parallel-ci-jobs.md) 拆为 Java/Python/Web 三项，`ci` 汇总全部成功后发布；重试同时核对存在的并行分支。
 - 构建仍在 GitHub Runner，生产只拉取预构建镜像，保持单 Core、无 DDL、视频关闭和 V2 指纹检查。
 - 不修改产品、模型工具、计费、正式内容或数据库；保持现有 Compose 服务、镜像本地名称、健康及回滚门禁。
 - 不增加长期访问令牌：构建使用 job 级 packages:write，部署使用 packages:read；均使用短期 GITHUB_TOKEN。

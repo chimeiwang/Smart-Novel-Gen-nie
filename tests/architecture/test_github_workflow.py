@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).parents[2]
@@ -13,6 +15,71 @@ SOURCE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-deploy-source.sh"
 DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy-release.yml"
 RETRY_WORKFLOW = ROOT / ".github" / "workflows" / "retry-production.yml"
 API_GENERATOR = ROOT / "scripts" / "generate_api_client.mjs"
+CI_BRANCHES = ("ci-java", "ci-python", "ci-web")
+
+
+def test_三项完整验证独立运行并保留各自工具链() -> None:
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    expected_commands = {
+        "ci-java": ("./mvnw --batch-mode --no-transfer-progress verify",),
+        "ci-python": (
+            "uv sync --frozen --all-packages --group dev", "uv run pytest -q",
+            "uv run ruff check .",
+            "uv run mypy apps/agent-service/src "
+            "packages/service-contracts/src packages/service-auth/src",
+        ),
+        "ci-web": (
+            "npm ci", "npm run api:check", "npm run test:web", "npm run typecheck",
+            "npm run lint", "npm run build",
+        ),
+    }
+    setups = {}
+    for name, commands in expected_commands.items():
+        job = jobs[name]
+        assert "needs" not in job
+        assert "if" not in job
+        assert not job.get("continue-on-error", False)
+        assert job.get("permissions") is None
+        assert job["env"]["MODEL_PROVIDER"] == "fake"
+        assert job["env"]["OPENAI_API_KEY"] == ""
+        scripts = "\n".join(step.get("run", "") for step in job["steps"])
+        for command in commands:
+            assert command in scripts
+        setups[name] = {step["uses"] for step in job["steps"] if "uses" in step}
+    assert setups["ci-java"] == {"actions/checkout@v7", "actions/setup-java@v5"}
+    assert setups["ci-python"] == {
+        "actions/checkout@v7", "actions/setup-node@v6", "actions/setup-python@v6",
+        "astral-sh/setup-uv@v7",
+    }
+    assert setups["ci-web"] == {"actions/checkout@v7", "actions/setup-node@v6"}
+    python_scripts = "\n".join(step.get("run", "") for step in jobs["ci-python"]["steps"])
+    assert "npm ci" not in python_scripts
+
+
+@pytest.mark.parametrize(
+    "results",
+    [("success", "success", "success")]
+    + [tuple(state if index == changed else "success" for index in range(3))
+       for changed in range(3) for state in ("failure", "cancelled", "skipped", "", "unknown")],
+)
+def test_ci汇总实际执行时只有所有分支成功才放行(results: tuple[str, str, str]) -> None:
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    gate = jobs["ci"]
+    assert gate["needs"] == list(CI_BRANCHES)
+    assert gate["if"] == "${{ always() }}"
+    step = gate["steps"][0]
+    assert step["env"] == {
+        "JAVA_RESULT": "${{ needs.ci-java.result }}",
+        "PYTHON_RESULT": "${{ needs.ci-python.result }}",
+        "WEB_RESULT": "${{ needs.ci-web.result }}",
+    }
+    environment = {**os.environ, **dict(zip(step["env"], results, strict=True))}
+    completed = subprocess.run(  # noqa: S603 - 执行仓内固定汇总脚本，结果来自测试常量
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],  # noqa: S607
+        env=environment, text=True, capture_output=True, check=False,
+    )
+    assert (completed.returncode == 0) == (results == ("success",) * 3)
+    assert jobs["publish-images"]["needs"] == "ci"
 
 
 def test_ci_uses_current_node_python_and_openapi_gates() -> None:
@@ -235,12 +302,13 @@ def test_production_deploy_uses_pinned_ssh_host_identity_and_non_cancelled_queue
     assert "StrictHostKeyChecking=yes" in source
     assert "UserKnownHostsFile=" in source
     assert "\nconcurrency:" not in workflow_header
-    assert (
-        "  ci:\n"
-        "    concurrency:\n"
-        "      group: ci-${{ github.workflow }}-${{ github.ref }}\n"
-        "      cancel-in-progress: true"
-    ) in main
+    jobs = yaml.safe_load(main)["jobs"]
+    groups = []
+    for job_name in (*CI_BRANCHES, "ci"):
+        expected = f"{job_name}-${{{{ github.workflow }}}}-${{{{ github.ref }}}}"
+        assert jobs[job_name]["concurrency"] == {"group": expected, "cancel-in-progress": True}
+        groups.append(expected)
+    assert len(set(groups)) == 4
     assert 'group: production\n      cancel-in-progress: false' in source
 
 
