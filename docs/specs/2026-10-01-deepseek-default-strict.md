@@ -1,6 +1,6 @@
 # DeepSeek 工具调用默认启用 strict
 
-状态：仓内实现与验证完成，未部署、未进行真实供应商验收；见 [验收记录](../audits/2026-10-01-deepseek-default-strict.md)。范围是供应商 Function Calling 的 Beta `strict`，不是 Pydantic 严格校验。
+状态：实现、生产发布及 30 分钟稳定观察完成，未进行真实供应商验收；见 [验收记录](../audits/2026-10-01-deepseek-default-strict.md)。范围是供应商 Function Calling 的 Beta `strict`，不是 Pydantic 严格校验。
 
 ## 目标与边界
 
