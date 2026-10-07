@@ -1,6 +1,6 @@
 # DeepSeek 工具参数包装简化规格
 
-状态：实现、完整 Linux CI、生产发布与新容器离线验证完成；用户 Web 重试收到供应商 Schema 400，兼容修正进行中。本文取代
+状态：平铺及后续 anyOf 分支兼容修正均已通过完整 CI 并发布生产；新容器离线验证通过，最新修正的真实任务仍待重试确认。本文取代
 [默认 strict 规格](2026-10-01-deepseek-default-strict.md)和[空对象兼容规格](2026-10-07-deepseek-strict-empty-object.md)
 中普通字段固定采用多层 value/variant 的表示规则；原业务校验、质量专用映射和安全边界继续有效。
 
@@ -261,3 +261,9 @@ CI 和原发布门禁通过后部署，真实任务仍只经用户 Web 或通过
 12 操作、联合等价、历史三态、类型白名单及条件拒绝均覆盖。最终四个 Provider 测试文件 396 项通过；
 更广 Provider/Runtime 回归在补充类型白名单用例前为 727 项通过。全仓 Ruff、Agent/共享 Mypy
 134 文件通过。真实重试预检仍返回 `SECURE_CREDENTIAL_BACKEND_REQUIRED`；上述结果不替代供应商实测。
+
+兼容修正 `25c2e099178540579ca6f83309c9ff26db9e08be` 已发布生产，完整 Linux CI 的 Python 为
+3960 passed、2 skipped，Java/Web/汇总及镜像发布均成功。原部署脚本退出 0，独立镜像身份、健康、
+配置和结构核对通过；新容器离线探针确认全部工具联合分支具有具体类型、条件与质量哈希保持。
+自动慢速拉取受控停止、同制品中转成功及真实重试未验证的边界见
+[兼容修正发布审计](../audits/2026-10-07-deepseek-anyof-branch-types-release.md)。
