@@ -29,6 +29,7 @@ from inkforge_agents.providers.base import (
     ProviderTransportError,
 )
 from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
+from inkforge_agents.providers.error_details import capture_provider_error_details
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_contracts.execution import canonical_execution_sha256
@@ -1076,3 +1077,78 @@ def _incrementing_attempts() -> Callable[[], Awaitable[int]]:
         return value
 
     return next_attempt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sink_fails", [False, True])
+async def test_provider_400_details_logged_without_changing_v2_terminal(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    sink_fails: bool,
+) -> None:
+    """完整错误只进入 Run/Step 日志；日志故障不改变终态或额外调用模型。"""
+
+    request = execution_request()
+    message = "严格工具参数被拒绝：" + "完整供应商原因" * 10000
+    api_key = "private-v2-provider-key"
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://api.deepseek.com/beta/chat/completions"),
+        json={"error": {"message": message, "param": "tools[0]", "api_key": api_key}},
+        headers={"x-request-id": "req_v2_400"},
+    )
+    details = capture_provider_error_details(response=response, secrets=(api_key,))
+
+    class RejectedModel(RecordingModel):
+        async def run_execution_turn(
+            self,
+            model_request: ModelTurnRequest,
+            *,
+            before_provider: Callable[[], Awaitable[int]],
+            **_: object,
+        ) -> tuple[int, ModelTurnResult]:
+            await before_provider()
+            self.requests.append(model_request)
+            raise ProviderTransportError(
+                code="http_error",
+                statusCode=400,
+                requestId="req_v2_400",
+                details=details,
+            )
+
+    model = RejectedModel(supports_idempotency=False)
+    executor = _executor(model)
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    execution_logger = logging.getLogger("inkforge_agents.execution.executor")
+    if sink_fails:
+        def fail_log_sink(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RuntimeError("测试日志写入失败")
+
+        monkeypatch.setattr(execution_logger, "warning", fail_log_sink)
+    with caplog.at_level(logging.WARNING, logger=execution_logger.name):
+        outcome = await executor.call_provider(
+            request,
+            executor.build_model_request(request, resolved),
+            begin_attempt=_incrementing_attempts(),
+            cancel_event=asyncio.Event(),
+        )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+
+    assert terminal.errorCode == "MODEL_PROVIDER_REJECTED"
+    assert terminal.outcomeUnknown is False
+    assert terminal.usage.providerAttempts == 1
+    assert len(model.requests) == 1
+    public_payload = terminal.model_dump_json()
+    assert message not in public_payload
+    assert "provider_error_details" not in public_payload
+    assert "responseBody" not in public_payload
+    assert api_key not in public_payload
+    if not sink_fails:
+        assert message in caplog.text
+        assert f"run_id={request.runId}" in caplog.text
+        assert f"step_id={request.stepId}" in caplog.text
+        assert "attempt=1" in caplog.text
+        assert "status_code=400" in caplog.text
+        assert "provider_request_id=req_v2_400" in caplog.text
+        assert api_key not in caplog.text

@@ -8,6 +8,13 @@ V2 单 Step 不经过 V1 人工日志 observer。结构化输出失败由 Execut
 诊断 code、keyword 和经过当前 Schema 白名单过滤的字段路径，不记录供应商原回复、未知字段名或字段值。
 该诊断只帮助定位格式错误，不改变失败终态或触发模型纠正调用。
 
+供应商请求失败时，DeepSeek 和通用 OpenAI-compatible 适配器另行保留完整错误诊断：非成功 HTTP
+响应正文与响应头、状态码、方法、脱敏地址、异常消息、因果链和无局部变量的调用栈。错误响应可以是
+JSON、纯文本或 HTML，不按长度截断。API Key、授权头、Cookie、密码及令牌在采集时脱敏。
+V1 的 `model_failure` 帧将详情写入正文，不放入受长度限制的结构头；服务日志使用单行 JSON 转义
+换行，并携带 task/run 身份。V2 不写 V1 人工日志，详情由 Executor 按 run/step 写入服务日志。
+公共错误码、任务状态和计费结果不包含这些详情；详见[完整错误诊断规格](specs/2026-10-07-provider-error-details.md)。
+
 文件名由运行标识的安全哈希生成，禁止把任务标识直接拼接为路径。同一任务首次执行和恢复运行追加到同一文件。没有模型调用或图状态变化的短路操作不创建空日志。
 
 新日志使用 `INKFORGE-HUMAN-LOG/2` 魔数和长度分帧格式。每帧由固定前缀、JSON 结构头的字节长度、
@@ -32,7 +39,8 @@ Core 上报 usage；只有 Core 成功接受 report 且配置了 observer，才�
 回报和模型区块，不能与首次无效调用合并成一条记录。
 
 人工日志不记录 `grantToken`、tools schema、供应商 reasoning、模型 tool_calls、工具参数、工具返回、
-完整运行时对象或底层 checkpoint metadata。工具协议诊断中的 arguments 字符数只是整数，不得附带或重建
+完整运行时对象或底层 checkpoint metadata。失败诊断允许保留供应商实际返回的脱敏错误正文，但不主动
+复制请求正文或成功模型回复。工具协议诊断中的 arguments 字符数只是整数，不得附带或重建
 原始 arguments。禁止对已记录的正文、消息、模型输出或状态进行静默截断。
 
 普通章节正文提交的有界例外见 [临时修补规格](specs/2026-09-28-chapter-artifact-protocol-hotfix.md)。

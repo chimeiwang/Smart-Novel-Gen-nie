@@ -7,6 +7,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
@@ -1202,6 +1203,7 @@ class StatelessExecutionStepExecutor:
                 except ExecutionProviderGateClosed:
                     raise
                 except ProviderTransportError as exc:
+                    _log_provider_failure_details(request, exc, attempts)
                     retry_safe = _safe_to_retry(
                         exc,
                         supports_request_idempotency=supports_idempotency,
@@ -1246,7 +1248,8 @@ class StatelessExecutionStepExecutor:
                         failure_category="provider_transient",
                         failure_code="MODEL_PROVIDER_RETRY_EXHAUSTED",
                     )
-                except ProviderProtocolError:
+                except ProviderProtocolError as exc:
+                    _log_provider_failure_details(request, exc, attempts)
                     return ProviderCallOutcome(
                         result=None,
                         provider_attempts=attempts,
@@ -2668,6 +2671,30 @@ def _retry_delay_seconds(base_seconds: float, attempt: int, request_hash: str) -
     jitter_factor = 0.75 + (0.5 * fraction)
     exponential = 2.0 ** max(0, attempt - 1)
     return base_seconds * exponential * jitter_factor
+
+
+def _log_provider_failure_details(
+    request: ExecutionStepRequest,
+    error: ProviderTransportError | ProviderProtocolError,
+    attempts: int,
+) -> None:
+    """V2 不经过人工日志 observer，直接按 Run/Step 记录已脱敏的完整供应商错误。"""
+
+    if error.details is None:
+        return
+    # 日志故障不能把已知拒绝变成结果未知，更不能额外触发供应商重试。
+    with suppress(Exception):
+        _LOGGER.warning(
+            "V2 模型供应商调用失败 run_id=%s step_id=%s attempt=%s "
+            "failure_code=%s status_code=%s provider_request_id=%s provider_error_details=%s",
+            request.runId,
+            request.stepId,
+            attempts,
+            error.code,
+            error.statusCode,
+            error.requestId,
+            error.details.model_dump_json(),
+        )
 
 
 def _safe_to_retry(

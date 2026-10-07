@@ -37,7 +37,7 @@ from inkforge_contracts.video import (
 )
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
-from openai import APITimeoutError, AsyncOpenAI
+from openai import APIStatusError, APITimeoutError, AsyncOpenAI
 
 
 class ModelTurnRequest(BaseModelTurnRequest):
@@ -138,7 +138,7 @@ def assert_exception_chain_is_sanitized(
     error: BaseException,
     private_text: str,
 ) -> None:
-    """递归审计异常链及常见渲染面，确保底层传输正文没有被保留。"""
+    """递归审计公开异常链及渲染面；完整正文只能保存在独立诊断属性。"""
 
     pending = [error]
     visited: set[int] = set()
@@ -151,7 +151,6 @@ def assert_exception_chain_is_sanitized(
             str(current),
             repr(current),
             repr(current.args),
-            repr(getattr(current, "__dict__", {})),
         )
         assert all(private_text not in surface for surface in surfaces)
         if current.__cause__ is not None:
@@ -2051,11 +2050,11 @@ async def test_deepseek_responses_http_failure_is_not_retried_or_fallbacked(
 
     assert request_paths == ["/responses"]
     error = caught.value
-    assert error.__dict__ == {
-        "code": "http_error",
-        "statusCode": 500,
-        "requestId": "req_safe_500",
-    }
+    assert error.code == "http_error"
+    assert error.statusCode == 500
+    assert error.requestId == "req_safe_500"
+    assert error.details is not None
+    assert private_body in (error.details.responseBody or "")
     assert error.retryable is True
     records = [record for record in caplog.records if record.message == "供应商结构化输出传输失败"]
     assert len(records) == 1
@@ -2533,6 +2532,8 @@ async def test_structured_transport_failure_is_safe_and_not_retried(
     assert error.statusCode is None
     assert error.requestId is None
     assert error.retryable is True
+    assert error.details is not None
+    assert any(private_message in item.message for item in error.details.exceptionChain)
     assert_exception_chain_is_sanitized(error, private_message)
     assert private_message not in caplog.text
 
@@ -2770,3 +2771,194 @@ async def test_structured_output_invalid_json_never_returns_partial_draft(
     assert result.structuredOutputDiagnostic.jsonPointer == ""
     assert result.structuredOutputDiagnostic.keyword == "json_syntax"
     assert "private unfinished value" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("route", ["responses_json_schema_v1", "chat_json_output_v1"])
+@pytest.mark.parametrize("body_kind", ["json", "text"])
+@pytest.mark.asyncio
+async def test_structured_http_400_preserves_full_redacted_details(
+    monkeypatch: pytest.MonkeyPatch,
+    route: str,
+    body_kind: str,
+) -> None:
+    """两条 SDK 路由完整保留错误字段和长正文，凭据不得进入诊断。"""
+
+    api_key = "test-private-api-key-400"
+    message = "供应商拒绝了 tools[0].function.parameters：" + "详细原因" * 20000
+    error_payload = {
+        "error": {
+            "message": message,
+            "type": "invalid_request_error",
+            "code": "invalid_schema",
+            "param": "tools",
+            "api_key": api_key,
+        }
+    }
+    body = (
+        json.dumps(error_payload, ensure_ascii=False)
+        if body_kind == "json" else message + " " + api_key
+    )
+
+    async def handle_request(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            request=request,
+            headers={
+                "x-request-id": "req_400",
+                "set-cookie": "session=private-cookie",
+                "x-key-echo": api_key,
+            },
+            text=body,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle_request)) as client:
+        def build_async_openai(**kwargs: Any) -> AsyncOpenAI:
+            return AsyncOpenAI(**kwargs, http_client=client)
+
+        monkeypatch.setattr(provider_module, "AsyncOpenAI", build_async_openai)
+        provider = OpenAICompatibleProvider(Settings.model_validate({
+            "openai_api_key": api_key,
+            "openai_base_url": "https://api.deepseek.com/v1",
+            "openai_model": "deepseek-v4-flash",
+        }))
+        with pytest.raises(ProviderTransportError) as caught:
+            await provider.complete_turn(structured_request(route=route))
+
+    error = caught.value
+    assert error.statusCode == 400
+    assert error.retryable is True
+    details = error.details
+    assert details is not None
+    assert details.statusCode == 400
+    assert message in (details.responseBody or "")
+    assert details.requestMethod == "POST"
+    assert details.exceptionChain[0].type == "BadRequestError"
+    assert api_key not in details.model_dump_json()
+    assert "private-cookie" not in details.model_dump_json()
+    if body_kind == "json":
+        parsed = json.loads(details.responseBody or "")
+        assert parsed["error"]["param"] == "tools"
+        assert parsed["error"]["code"] == "invalid_schema"
+        assert parsed["error"]["type"] == "invalid_request_error"
+    assert_exception_chain_is_sanitized(error, message)
+
+
+@pytest.mark.asyncio
+async def test_normal_strict_http_400_preserves_full_redacted_details() -> None:
+    """普通 strict 工具通道同样保留 SDK 错误详情，公开异常继续使用摘要。"""
+
+    api_key = "strict-private-api-key"
+    provider = provider_with_response(AIMessage(content="不会返回"))
+    provider._error_secrets = (api_key,)
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://api.deepseek.com/beta/chat/completions"),
+        json={"error": {"message": "不支持的 strict 属性 " + api_key, "param": "tools[0]"}},
+    )
+
+    class FailedModel(StubModel):
+        async def ainvoke(self, messages: object, **kwargs: object) -> AIMessage:
+            del messages, kwargs
+            raise APIStatusError(
+                "不支持的 strict 属性 " + api_key, response=response, body=response.json()
+            )
+
+    provider._strict_model = FailedModel(AIMessage(content="不会返回"))
+    with pytest.raises(ProviderTransportError) as caught:
+        await provider.complete_turn(strict_recovery_request(
+            {"type": "object", "properties": {}, "additionalProperties": False}
+        ))
+
+    error = caught.value
+    assert error.details is not None
+    assert "不支持的 strict 属性" in (error.details.responseBody or "")
+    assert "tools[0]" in (error.details.responseBody or "")
+    assert api_key not in error.details.model_dump_json()
+    assert error.details.requestUrl == "https://api.deepseek.com/beta/chat/completions"
+    assert_exception_chain_is_sanitized(error, "不支持的 strict 属性")
+
+
+@pytest.mark.parametrize("route", ["responses_json_schema_v1", "chat_json_output_v1"])
+@pytest.mark.asyncio
+async def test_replaced_sdk_client_key_is_redacted_in_error_details(
+    monkeypatch: pytest.MonkeyPatch,
+    route: str,
+) -> None:
+    """注入客户端的真实 Key 与配置不同，也必须遮盖错误消息中的裸值。"""
+
+    configured_key = "configured-private-sdk-key"
+    actual_key = "actual-private-sdk-key"
+
+    async def handle_request(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer " + actual_key
+        return httpx.Response(
+            400,
+            request=request,
+            json={"error": {"message": f"拒绝凭据 {actual_key}，原配置 {configured_key}"}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle_request)) as client:
+        def build_async_openai(**kwargs: Any) -> AsyncOpenAI:
+            kwargs["api_key"] = actual_key
+            return AsyncOpenAI(**kwargs, http_client=client)
+
+        monkeypatch.setattr(provider_module, "AsyncOpenAI", build_async_openai)
+        provider = OpenAICompatibleProvider(Settings.model_validate({
+            "openai_api_key": configured_key,
+            "openai_base_url": "https://api.deepseek.com/v1",
+            "openai_model": "deepseek-v4-flash",
+        }))
+        with pytest.raises(ProviderTransportError) as caught:
+            await provider.complete_turn(structured_request(route=route))
+
+    details = caught.value.details
+    assert details is not None
+    assert "拒绝凭据" in (details.responseBody or "")
+    assert actual_key not in details.model_dump_json()
+    assert configured_key not in details.model_dump_json()
+
+
+@pytest.mark.parametrize("key_owner", ["model", "root_async_client"])
+@pytest.mark.asyncio
+async def test_replaced_chat_model_key_is_redacted_in_error_details(key_owner: str) -> None:
+    """普通 strict 通道读取所选模型及其真实异步 SDK 客户端的凭据。"""
+
+    from types import SimpleNamespace
+
+    from pydantic import SecretStr
+
+    configured_key = "configured-private-chat-key"
+    actual_key = "actual-private-chat-key"
+    provider = provider_with_response(AIMessage(content="不会返回"))
+    provider._error_secrets = (configured_key,)
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://api.deepseek.com/beta/chat/completions"),
+        json={"error": {"message": f"请求拒绝 {actual_key}，原配置 {configured_key}"}},
+    )
+
+    class FailedModel(StubModel):
+        async def ainvoke(self, messages: object, **kwargs: object) -> AIMessage:
+            del messages, kwargs
+            raise APIStatusError(
+                f"请求拒绝 {actual_key}，原配置 {configured_key}",
+                response=response,
+                body=response.json(),
+            )
+
+    model = FailedModel(AIMessage(content="不会返回"))
+    if key_owner == "model":
+        model.openai_api_key = SecretStr(actual_key)  # type: ignore[attr-defined]
+    else:
+        model.root_async_client = SimpleNamespace(api_key=actual_key)  # type: ignore[attr-defined]
+    provider._strict_model = model
+    with pytest.raises(ProviderTransportError) as caught:
+        await provider.complete_turn(strict_recovery_request(
+            {"type": "object", "properties": {}, "additionalProperties": False}
+        ))
+
+    details = caught.value.details
+    assert details is not None
+    assert "请求拒绝" in (details.responseBody or "")
+    assert actual_key not in details.model_dump_json()
+    assert configured_key not in details.model_dump_json()

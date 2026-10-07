@@ -5,7 +5,7 @@ import hashlib
 import logging
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from itertools import count
 from time import monotonic
@@ -31,6 +31,7 @@ from ..providers.embeddings import (
     EmbeddingResult,
     ExecutionEmbeddingProvider,
 )
+from ..providers.error_details import ProviderErrorDetails, capture_provider_error_details
 from ..providers.video_responses import (
     ExecutionResponsesProvider,
     VideoResponsesIdentity,
@@ -196,7 +197,7 @@ class ModelCallLogRecord(BaseModel):
 
 
 class ModelCallFailureLogRecord(BaseModel):
-    """模型失败的安全诊断；禁止携带请求、响应或原始异常文本。"""
+    """模型失败诊断；完整错误详情先脱敏，且不进入公共任务状态。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -212,6 +213,7 @@ class ModelCallFailureLogRecord(BaseModel):
     toolCount: int
     structuredRoute: ModelStructuredOutputRoute | None = None
     requestedMaxOutputTokens: int
+    providerErrorDetails: ProviderErrorDetails | None = None
 
 
 class BillingPort(Protocol):
@@ -507,28 +509,32 @@ class ModelRuntime:
         try:
             return await self._provider.complete_turn(request)
         except Exception as exc:
-            record = _model_failure_record(
-                provider=self._provider,
-                request=request,
-                context=context,
-                error=exc,
-                elapsed_ms=max(0, round((monotonic() - started_at) * 1000)),
-            )
-            _log_model_failure(record)
+            record = None
+            # 诊断序列化或日志设备故障不能改变原始错误及其重试决定。
+            with suppress(Exception):
+                record = _model_failure_record(
+                    provider=self._provider,
+                    request=request,
+                    context=context,
+                    error=exc,
+                    elapsed_ms=max(0, round((monotonic() - started_at) * 1000)),
+                )
+                _log_model_failure(record, error=exc)
             callback = getattr(self._observer, "record_model_failure", None)
             if record is not None and callable(callback):
                 try:
                     callback(record)
                 except Exception:
                     # 诊断日志不可用不能覆盖真正的供应商失败，也不能输出异常正文。
-                    logger.warning(
-                        "模型供应商失败记录写入人工日志失败",
-                        extra={
-                            "task_id": record.context.taskId,
-                            "run_id": record.context.runId,
-                            "agent_id": record.context.agentId,
-                        },
-                    )
+                    with suppress(Exception):
+                        logger.warning(
+                            "模型供应商失败记录写入人工日志失败",
+                            extra={
+                                "task_id": record.context.taskId,
+                                "run_id": record.context.runId,
+                                "agent_id": record.context.agentId,
+                            },
+                        )
             raise ModelRuntimeStageError(
                 "MODEL_PROVIDER_FAILED",
                 "模型供应商调用失败",
@@ -675,12 +681,28 @@ def _model_failure_record(
             request.structuredOutput.route if request.structuredOutput is not None else None
         ),
         requestedMaxOutputTokens=request.maxOutputTokens,
+        providerErrorDetails=(
+            provider_error.details
+            if provider_error is not None and provider_error.details is not None
+            else capture_provider_error_details(error=error)
+        ),
     )
 
 
-def _log_model_failure(record: ModelCallFailureLogRecord | None) -> None:
+def _log_model_failure(
+    record: ModelCallFailureLogRecord | None, *, error: Exception | None = None
+) -> None:
     if record is None:
-        logger.warning("模型供应商调用失败 context=missing")
+        details = (
+            error.details
+            if isinstance(error, (ProviderTransportError, ProviderProtocolError))
+            and error.details is not None
+            else capture_provider_error_details(error=error)
+        )
+        logger.warning(
+            "模型供应商调用失败 context=missing provider_error_details=%s",
+            details.model_dump_json(),
+        )
         return
     fields: dict[str, object] = {
         "user_id": record.context.userId,
@@ -699,13 +721,18 @@ def _log_model_failure(record: ModelCallFailureLogRecord | None) -> None:
         "tool_count": record.toolCount,
         "structured_route": record.structuredRoute,
         "requested_max_output_tokens": record.requestedMaxOutputTokens,
+        "provider_error_details": (
+            record.providerErrorDetails.model_dump(mode="json")
+            if record.providerErrorDetails is not None
+            else None
+        ),
     }
     # 默认 Uvicorn 文本格式不会展示 LogRecord.extra，因此消息本身也输出同一组安全字段。
     logger.warning(
         "模型供应商调用失败 task_id=%s run_id=%s agent_id=%s provider=%s model=%s "
         "failure_code=%s exception_type=%s status_code=%s provider_request_id=%s "
         "elapsed_ms=%s message_count=%s tool_count=%s structured_route=%s "
-        "requested_max_output_tokens=%s",
+        "requested_max_output_tokens=%s provider_error_details=%s",
         record.context.taskId,
         record.context.runId,
         record.context.agentId,
@@ -720,6 +747,11 @@ def _log_model_failure(record: ModelCallFailureLogRecord | None) -> None:
         record.toolCount,
         record.structuredRoute,
         record.requestedMaxOutputTokens,
+        (
+            record.providerErrorDetails.model_dump_json()
+            if record.providerErrorDetails is not None
+            else "null"
+        ),
         extra=fields,
     )
 

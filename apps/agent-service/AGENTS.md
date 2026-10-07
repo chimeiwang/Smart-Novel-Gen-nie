@@ -154,6 +154,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 
 ## 数据与信任边界
 
+- DeepSeek 与通用 OpenAI-compatible 请求失败时，完整保存经过凭据脱敏的 HTTP 错误正文、响应头、
+  方法/地址及异常消息、因果链、调用栈，不按长度截断，不采集调用栈局部变量。详情只进入服务诊断
+  和 V1 人工日志的 `model_failure` 帧正文，不进入异常 str/repr、Core 回调、SSE 或聊天回复；
+  V2 由 Executor 记录 run/step 关联详情。禁止把成功模型正文、推理或正常请求另行复制到错误诊断。
+  该失败诊断例外见[规格](../../docs/specs/2026-10-07-provider-error-details.md)，不放宽工具参数协议日志规则。
+
 - 所有业务读取和草案提交都通过 Core `/internal/v1/**`。
 - `semantic_search_references` 的查询向量由 Agent Service 复用现有 embedding 客户端生成，Core 只接收内部查询向量并在当前用户和小说范围内执行 pgvector 检索；未配置 embedding 时必须明确返回未启用。
 - 只有 Core 与 Agent 同时设置 `RAG_INDEX_ENABLED=true` 且 Agent 已配置完整 embedding 客户端时才允许启用索引；启用后 embedding 不可用必须使就绪检查失败，不能静默降级为已就绪。

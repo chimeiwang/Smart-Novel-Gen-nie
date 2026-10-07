@@ -11,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 
+from .error_details import ProviderErrorDetails
+
 ModelFinishReason = Literal[
     "stop",
     "tool_calls",
@@ -57,7 +59,7 @@ ProviderProtocolErrorCode = Literal[
 
 
 class ProviderTransportError(RuntimeError):
-    """不携带供应商响应正文、请求正文或底层 SDK 异常的可重试传输错误。"""
+    """简短可重试传输错误；脱敏详情独立保存，不进入公共错误文本。"""
 
     retryable = True
 
@@ -67,10 +69,12 @@ class ProviderTransportError(RuntimeError):
         code: ProviderTransportErrorCode,
         statusCode: int | None,
         requestId: str | None,
+        details: ProviderErrorDetails | None = None,
     ) -> None:
         self.code = code
         self.statusCode = statusCode
         self.requestId = requestId
+        self.details = details
         super().__init__(
             f"供应商传输失败(code={code},statusCode={statusCode},requestId={requestId})"
         )
@@ -86,7 +90,7 @@ class ProviderTransportError(RuntimeError):
 
 
 class ProviderProtocolError(RuntimeError):
-    """不携带供应商正文或底层异常的不可重试响应协议错误。"""
+    """简短不可重试协议错误；详情不复制成功模型正文。"""
 
     retryable = False
 
@@ -96,10 +100,12 @@ class ProviderProtocolError(RuntimeError):
         code: ProviderProtocolErrorCode,
         statusCode: int | None,
         requestId: str | None,
+        details: ProviderErrorDetails | None = None,
     ) -> None:
         self.code = code
         self.statusCode = statusCode
         self.requestId = requestId
+        self.details = details
         super().__init__(
             f"供应商响应协议失败(code={code},statusCode={statusCode},requestId={requestId})"
         )

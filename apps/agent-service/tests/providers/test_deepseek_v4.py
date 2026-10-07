@@ -884,6 +884,9 @@ async def test_http_error_does_not_expose_response_body() -> None:
     assert error.value.requestId == "deepseek-request-500"
     assert "sk-secret" not in repr(error.value)
     assert "提示" not in repr(error.value)
+    assert error.value.details is not None
+    assert json.loads(error.value.details.responseBody)["error"] == "sk-secret prompt提示"
+    assert error.value.details.requestMethod == "POST"
     assert len(requests) == 1
 
 
@@ -919,6 +922,9 @@ async def test_transport_error_is_classified_without_private_message(
     assert "SECRET" not in repr(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
+    assert caught.value.details is not None
+    assert caught.value.details.requestMethod == "POST"
+    assert "SECRET" in caught.value.details.exceptionChain[0].message
 
 
 @pytest.mark.parametrize(
@@ -1033,6 +1039,12 @@ async def test_deepseek_requires_prompt_cache_hit_tokens() -> None:
     finally:
         await client.aclose()
     assert caught.value.code == "invalid_usage"
+    assert caught.value.details is not None
+    assert caught.value.details.responseBody is None
+    assert any(
+        entry.type == "ValueError" and "prompt_cache_hit_tokens" in entry.message
+        for entry in caught.value.details.exceptionChain
+    )
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from langchain_core.messages import (
 )
 from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from pydantic import SecretStr
 
 from ..config import Settings
 from .base import (
@@ -36,6 +37,7 @@ from .base import (
     ProviderTransportErrorCode,
 )
 from .deepseek_strict import prepare_deepseek_tools
+from .error_details import capture_provider_error_details
 
 _DEEPSEEK_OFFICIAL_HOST = "api.deepseek.com"
 _DEEPSEEK_STANDARD_BASE_URL = "https://api.deepseek.com"
@@ -1237,8 +1239,10 @@ def _safe_provider_request_id(value: object) -> str | None:
 
 def _provider_transport_error(
     error: APIStatusError | APIConnectionError,
+    *,
+    secrets: tuple[str, ...] = (),
 ) -> ProviderTransportError:
-    """把 SDK 异常压缩成不含响应正文和底层 cause 的稳定错误。"""
+    """保留脱敏完整诊断，公开异常文本仍使用稳定的传输错误摘要。"""
 
     code: ProviderTransportErrorCode
     if isinstance(error, APITimeoutError):
@@ -1254,6 +1258,11 @@ def _provider_transport_error(
         code=code,
         statusCode=status_code,
         requestId=_safe_provider_request_id(getattr(error, "request_id", None)),
+        details=capture_provider_error_details(
+            response=error.response if isinstance(error, APIStatusError) else None,
+            error=error,
+            secrets=secrets,
+        ),
     )
 
 
@@ -1291,10 +1300,11 @@ def _capture_structured_transport_error(
     model_name: str,
     structured_output: ModelStructuredOutputRequest,
     error: APIStatusError | APIConnectionError,
+    secrets: tuple[str, ...] = (),
 ) -> ProviderTransportError:
-    """在捕获块内只提取安全字段；调用方必须离开捕获块后再抛出。"""
+    """在捕获块内提取脱敏诊断；调用方离开捕获块后再抛出稳定异常。"""
 
-    safe_error = _provider_transport_error(error)
+    safe_error = _provider_transport_error(error, secrets=secrets)
     _log_structured_transport_failure(
         model_name=model_name,
         structured_output=structured_output,
@@ -1459,6 +1469,7 @@ class OpenAICompatibleProvider:
         if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value():
             raise ValueError("真实模型提供方缺少 OPENAI_API_KEY")
         api_key = settings.openai_api_key.get_secret_value()
+        self._error_secrets = (api_key,)
         self._model = ChatOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
@@ -1504,6 +1515,21 @@ class OpenAICompatibleProvider:
             else "endpoint.openai-compatible-custom.v1"
         )
 
+    def _provider_error_secrets(self, client: object) -> tuple[str, ...]:
+        """读取本次实际调用对象的已知凭据字段，兼容运行时客户端替换。"""
+
+        secrets = list(getattr(self, "_error_secrets", ()))
+        for owner in (client, getattr(client, "root_async_client", None)):
+            if owner is None:
+                continue
+            for field in ("api_key", "openai_api_key"):
+                value = getattr(owner, field, None)
+                if isinstance(value, SecretStr):
+                    value = value.get_secret_value()
+                if isinstance(value, str) and value:
+                    secrets.append(value)
+        return tuple(dict.fromkeys(secrets))
+
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
         """报告当前实例可实际调用的结构化输出路由。"""
 
@@ -1548,12 +1574,14 @@ class OpenAICompatibleProvider:
                 model_name=self.model_name,
                 structured_output=structured_output,
                 error=exc,
+                secrets=self._provider_error_secrets(self._responses_client),
             )
         except (APIStatusError, APIConnectionError) as exc:
             transport_error = _capture_structured_transport_error(
                 model_name=self.model_name,
                 structured_output=structured_output,
                 error=exc,
+                secrets=self._provider_error_secrets(self._responses_client),
             )
         # 必须离开 except 后再抛出，确保原始 SDK 异常不会挂到 __context__。
         if transport_error is not None:
@@ -1764,12 +1792,14 @@ class OpenAICompatibleProvider:
                 model_name=self.model_name,
                 structured_output=structured_output,
                 error=exc,
+                secrets=self._provider_error_secrets(self._structured_chat_client),
             )
         except (APIStatusError, APIConnectionError) as exc:
             transport_error = _capture_structured_transport_error(
                 model_name=self.model_name,
                 structured_output=structured_output,
                 error=exc,
+                secrets=self._provider_error_secrets(self._structured_chat_client),
             )
         # Chat 路由同样要在捕获块外抛出，不能只依赖 `from None` 隐藏上下文。
         if transport_error is not None:
@@ -1942,6 +1972,7 @@ class OpenAICompatibleProvider:
             model: Any = self._strict_model
         else:
             model = self._model
+        invocation_error_secrets = self._provider_error_secrets(model)
         if request.tools:
             # DeepSeek 与 OpenAI 兼容接口都通过函数声明中的 strict 开启结构约束。
             bind_options: dict[str, object] = {}
@@ -2022,10 +2053,14 @@ class OpenAICompatibleProvider:
                 await model.ainvoke(messages, **invocation_options),
             )
         except APITimeoutError as exc:
-            transport_error = _provider_transport_error(exc)
+            transport_error = _provider_transport_error(
+                exc, secrets=invocation_error_secrets
+            )
         except (APIStatusError, APIConnectionError) as exc:
-            transport_error = _provider_transport_error(exc)
-        # 普通工具通道同样在捕获块外抛出，避免 SDK 响应正文留在异常上下文中。
+            transport_error = _provider_transport_error(
+                exc, secrets=invocation_error_secrets
+            )
+        # 在捕获块外抛出，完整详情只保存在独立属性，避免原始 SDK 异常进入公开异常链。
         if transport_error is not None:
             raise transport_error
         if response is None:

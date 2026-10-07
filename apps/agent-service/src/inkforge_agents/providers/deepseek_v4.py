@@ -25,6 +25,7 @@ from .base import (
     ProviderTransportError,
 )
 from .deepseek_strict import prepare_deepseek_tools
+from .error_details import capture_provider_error_details
 from .openai_compatible import (
     StructuredOutputRecoveryCode,
     _append_missing_container_closers,
@@ -147,20 +148,21 @@ class DeepSeekV4Provider:
                 },
                 json=payload,
             )
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as exc:
             transport_error = ProviderTransportError(
                 code="timeout_error",
                 statusCode=None,
                 requestId=None,
+                details=capture_provider_error_details(error=exc, secrets=(self._api_key,)),
             )
         except httpx.HTTPError as exc:
-            del exc
             transport_error = ProviderTransportError(
                 code="connection_error",
                 statusCode=None,
                 requestId=None,
+                details=capture_provider_error_details(error=exc, secrets=(self._api_key,)),
             )
-        # 离开捕获块后再抛出，避免原始网络异常及其请求信息进入异常链和日志。
+        # 先采集脱敏详情，再离开捕获块抛出，避免原始请求进入后续异常链。
         if transport_error is not None:
             raise transport_error
         if response is None:
@@ -170,26 +172,45 @@ class DeepSeekV4Provider:
                 code="http_error",
                 statusCode=response.status_code,
                 requestId=_response_request_id(response),
+                details=capture_provider_error_details(response=response, secrets=(self._api_key,)),
             )
         protocol_error: ProviderProtocolError | None = None
         try:
             body = response.json()
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError) as exc:
             protocol_error = ProviderProtocolError(
                 code="invalid_response_json",
                 statusCode=response.status_code,
                 requestId=_response_request_id(response),
+                details=capture_provider_error_details(
+                    response=response, error=exc, secrets=(self._api_key,)
+                ),
             )
             body = None
         # 与网络错误相同，离开捕获块后再抛出，清除可能携带正文的 JSON 异常上下文。
         if protocol_error is not None:
             raise protocol_error
-        result = _parse_response(
-            body,
-            request,
-            status_code=response.status_code,
-            request_id=_response_request_id(response),
-        )
+        parsed_error: ProviderProtocolError | None = None
+        try:
+            result = _parse_response(
+                body,
+                request,
+                status_code=response.status_code,
+                request_id=_response_request_id(response),
+                secrets=(self._api_key,),
+            )
+        except ProviderProtocolError as exc:
+            details = capture_provider_error_details(
+                response=response,
+                error=exc,
+                secrets=(self._api_key,),
+            )
+            if exc.details is not None:
+                details.exceptionChain.extend(exc.details.exceptionChain)
+            exc.details = details
+            parsed_error = exc
+        if parsed_error is not None:
+            raise parsed_error
         if structured_output is not None:
             if structured_validator is None:
                 raise RuntimeError("DeepSeek V4 结构化输出校验器缺失")
@@ -354,6 +375,7 @@ def _parse_response(
     *,
     status_code: int,
     request_id: str | None,
+    secrets: tuple[str, ...] = (),
 ) -> ModelTurnResult:
     if not isinstance(body, Mapping):
         raise ProviderProtocolError(
@@ -388,11 +410,12 @@ def _parse_response(
     usage_protocol_error: ProviderProtocolError | None = None
     try:
         usage = _parse_usage(body.get("usage"))
-    except ValueError:
+    except ValueError as exc:
         usage_protocol_error = ProviderProtocolError(
             code="invalid_usage",
             statusCode=status_code,
             requestId=request_id,
+            details=capture_provider_error_details(error=exc, secrets=secrets),
         )
         usage = None
     if usage_protocol_error is not None:
@@ -405,11 +428,12 @@ def _parse_response(
     try:
         reasoning_content = _optional_text(message.get("reasoning_content"))
         response_id = _optional_text(body.get("id"))
-    except ValueError:
+    except ValueError as exc:
         envelope_protocol_error = ProviderProtocolError(
             code="invalid_response_envelope",
             statusCode=status_code,
             requestId=request_id,
+            details=capture_provider_error_details(error=exc, secrets=secrets),
         )
         reasoning_content = None
         response_id = None

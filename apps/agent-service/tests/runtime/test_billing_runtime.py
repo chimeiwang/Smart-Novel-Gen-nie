@@ -631,7 +631,9 @@ async def test_billable_runtime_classifies_provider_failure(
     assert "task_id=task-1" in caplog.text
     assert "run_id=run-1" in caplog.text
     assert "failure_code=unexpected_error" in caplog.text
-    assert "供应商拒绝请求" not in caplog.text
+    assert "供应商拒绝请求" in caplog.text
+    assert failure.providerErrorDetails is not None
+    assert failure.providerErrorDetails.exceptionChain[0].message == "供应商拒绝请求"
 
 
 @pytest.mark.asyncio

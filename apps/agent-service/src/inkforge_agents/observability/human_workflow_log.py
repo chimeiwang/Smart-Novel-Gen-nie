@@ -231,7 +231,7 @@ class HumanWorkflowLog:
             )
 
     def record_model_failure(self, record: ModelCallFailureLogRecord) -> None:
-        """写入供应商失败的安全摘要，不复制请求、响应或异常正文。"""
+        """完整错误详情只写帧正文，避免长响应突破结构头的长度上限。"""
 
         with self._lock:
             path = self._require_path(record.context.runId)
@@ -280,7 +280,12 @@ class HumanWorkflowLog:
                             f"工具数：{record.toolCount}",
                             f"结构化路由：{structured_route}",
                             f"请求输出上限：{record.requestedMaxOutputTokens}",
-                            "请求、响应与原始异常正文未写入人工日志",
+                            "完整错误详情（凭据已脱敏）：",
+                            (
+                                record.providerErrorDetails.model_dump_json(indent=2)
+                                if record.providerErrorDetails is not None
+                                else "本次错误未提供详细诊断"
+                            ),
                             "",
                         )
                     ),

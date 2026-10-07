@@ -199,6 +199,10 @@ readiness 阻断抽帧、导出和需要本地媒体工具的模拟生成，不�
 - Agent 日志写入 `/data/agent-logs` 命名卷。
 - 生产部署在版本切换前通过无网络、只挂载日志卷且仅保留 `CHOWN` capability 的一次性初始化容器，把卷根目录所有权设为 `10001:10001`；初始化失败时不得执行 `compose up`。
 - 同一任务恢复运行追加到同一文件。
+- DeepSeek 与通用 OpenAI-compatible 调用失败时，保留完整 HTTP 错误正文（含非 JSON）、响应头、
+  状态、方法/脱敏地址及异常消息、因果链和调用栈；凭据在采集时替换，不截断其他错误信息。
+  V1 将详情写入 `model_failure` 帧正文及服务日志，V2 写入带 run/step 的服务日志；不放入受限结构头、
+  公共状态或业务回调。日志故障不能覆盖供应商错误，详见[完整错误诊断规格](../specs/2026-10-07-provider-error-details.md)。
 - 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
   中出现日志标记或 JSON 不得污染结构解析。
 - 每个模型调用区块记录 `taskId`、`runId`、Core 计费 `requestId`、provider/model 和四项实际 token；

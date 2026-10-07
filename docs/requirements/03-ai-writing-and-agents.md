@@ -516,6 +516,11 @@ DeepSeek 原始 `reasoning_content` 只用于进程内工具轮次回放，绝�
 observer，但只有 observer 与运行 context 都存在时才写区块，并明确显示没有计费请求标识。
 任何日志都不得记录 `grantToken`；Provider 在返回可靠 usage 前失败时不伪造 token。
 
+供应商请求失败时，DeepSeek 与通用 OpenAI-compatible 适配器完整保存脱敏的 HTTP 错误响应及异常
+因果链。V1 在原任务的 `model_failure` 帧正文与服务日志中记录，V2 只按 run/step 记录服务日志。
+该详情不进入公共任务状态、业务回调或用户聊天，也不改变模型调用次数、计费及重试决定；正常请求、
+成功模型回复和推理不另行复制。具体保存字段与边界见[完整错误诊断规格](../specs/2026-10-07-provider-error-details.md)。
+
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
 DeepSeek 的 Function Calling 默认开启 Beta strict，同时覆盖原始 `deepseek_v4` 与 `generic` 下的 DeepSeek 模型。普通读取、正文提交、Reviewer、Beat Plan、设定更新和质量终检均使用该默认值；非 DeepSeek 沿用原默认。工具显式 `strict=false` 可用于兼容调用，但不能与开启的工具混用；缺少 strict 端点或混用都在 HTTP 前失败，不回退。规范官方 HTTPS 根地址或 `/v1` 自动派生 `/beta`，自定义地址、端口或其他路径必须配置 `OPENAI_STRICT_BASE_URL`。strict 请求不隐式重发，明确可重试的传输错误仍由原队列机制处理。
