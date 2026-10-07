@@ -1,6 +1,6 @@
 # 2026-10-07 模型错误诊断发布记录
 
-状态：第一轮日志修补已发布生产；用户重试已复现 HTTP 400 并确认空对象 Schema 原因，根因修复与第二轮发布进行中。
+状态：两轮修补均已发布生产；用户重试已确认空对象 Schema 原因并完成修复，修复后真实模型调用尚待复验。
 
 规格：[完整错误诊断](../specs/2026-10-07-provider-error-details.md)。
 
@@ -72,5 +72,42 @@
 ## 根因修复本地验证
 
 固定标记仅替换供应商层的无属性对象，保留原业务类型、strict、模型、额度及调用次数。Provider/Runtime
-611 项回归、最终 strict 专项 43 项、全仓 Ruff 与 133 源文件 Mypy 通过；尚待本次 CI 和第二轮发布。
+611 项回归、最终 strict 专项 43 项、全仓 Ruff 与 133 源文件 Mypy 通过；正式 CI 和第二轮发布结果见下文。
 生产 CLI 身份预检仍返回安全凭据后端错误，不能通过该入口执行修复后真实模型重试。
+
+## 第二轮提交与发布
+
+- 修复提交：`8423e37bd198e234b75c0aa3ef313f4df1f8c9dd`，已推送 `main`。
+- [CI 37593756907](https://github.com/chimeiwang/Smart-Novel-Gen-nie/actions/runs/37593756907) 的
+  Java、Python、Web、汇总与镜像发布全部成功。Python 共 3809 项通过、2 项跳过、1 条警告，耗时
+  258.04 秒；Ruff 通过，Mypy 检查 133 个源文件通过。
+- 原发布清单 artifact ID 为 `11470586282`；原 ZIP 的 SHA-256 为
+  `0a3dc93ab618b173f402f265227fdb2ad4de99b92710889f2ff7605394deb9f4`，与 GitHub artifact digest
+  一致，仓库 `load_manifest` 精确验证 SHA、run ID、仓库和服务集合。
+- 自动部署停留在首个 Web 镜像的慢速拉取。核对唯一 pull PID、固定摘要、旧版三容器和不存在的源码
+  bundle 后，人工仅对该 pull 客户端发送 SIGTERM。该步骤在 471.7 秒后以 143 退出，自动 job 失败，
+  后续源码上传和部署步骤均跳过；父进程、pull 进程和临时 GHCR 认证目录均已清理。
+  这是受控结束缓存拉取，不是自然网络错误，也没有取消正在执行的版本切换或回滚。
+- 在新的发布临时目录按同轮固定 digest 拉取三镜像，复验 CI image ID、linux/amd64、OCI revision
+  和 RepoDigests。使用上一轮相同的 16 MiB 分片、最多三个严格 SSH 连接、容量和哈希门禁中转，
+  每镜像串行导入后精确复验；未现场构建、复用旧发布状态或改动发布默认流程。
+- 三镜像齐备后，由原 `upload-deploy-source.sh` 上传同 SHA bundle，以 `githubUser` 运行原
+  `deploy-production.sh`，退出 0。自动 Actions 的失败结论与本次人工恢复成功分别保留。
+
+| 服务 | 第二轮生产镜像 ID |
+| --- | --- |
+| Web | `sha256:e714ece1b8a35a756a3495d044497088c8d98df811f67597a7818c5786ddb8bd` |
+| Core | `sha256:67ce7bcbd025445f22c4188d6672d785157750f0ad845965ca90cff0bfab6371` |
+| Agent | `sha256:1ecf5c15a25fed9cfb76b1e6bcc792c65bdf95c6d6472400d4d6c56b683f56d7` |
+
+## 第二轮生产独立回读
+
+- 生产 Git HEAD、三服务标签、镜像 ID 和 OCI revision 均对应上述修复提交及 CI 清单。
+  三服务 healthy，重启数均为 0，无 OOM；其余常驻容器健康。
+- 原脚本的实时结构指纹与第一轮相同，编排冒烟通过；公网 readiness 返回 ready，六项检查均为 ok。
+- `.env` SHA-256 与第一轮相同，运行中视频开关保持 false；未执行 DDL，未改模型额度和计费配置。
+- 旧版三镜像保留在 `rollback-8423e37bd198e234b75c0aa3ef313f4df1f8c9dd`，精确对应第一轮运行镜像；
+  本轮三个远端中转目录与源码 bundle 已清理，没有清理业务数据、卷或生产镜像。
+- 新 Agent 容器内纯编译 `write_chapter` 实际 24 个工具，空对象 Schema 节点数为 0，没有请求供应商。
+  用户的修复前重试已提供根因证据；修复后真实调用、任务完成和候选生成尚未验收，不能由上述检查代证。
+- 本段是发布后的纯文档补记，单独以 `[skip ci]` 提交，不触发重复构建和再次部署。
