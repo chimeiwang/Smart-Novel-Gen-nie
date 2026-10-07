@@ -295,7 +295,7 @@ flowchart TD
 - `report` 必须是非空完整自然语言报告，`rewriteBrief` 可选；
 - 缺字段、额外字段、越界分数、非法 dimension/severity 或空报告都使质量任务失败，不能保存部分报告。
 
-DeepSeek 工具调用默认使用 Beta strict Function Calling，包含 Reviewer 与一致性终检。`submit_quality_report` 保留既有专用映射；普通工具适配见 [默认 strict 规格](../specs/2026-10-01-deepseek-default-strict.md)。Provider 为该工具生成专用 wire 契约：递归内联本地 `$defs`，不发送 `$defs`、`$def`、`$ref` 或 `type:null`；可选的 `location` 与 `rewriteBrief` 在 wire 中以必填字符串传输，无值时返回空字符串，并只在这两个精确路径归一化为 `None`。报告仍须通过原始 `QualityReportArgs`/Pydantic 完整复验，Provider 不截断或猜测修复业务字段；参数失败最多记录 10 条脱敏 `loc/type`，不得记录字段值、异常正文、`input`、`ctx` 或工具参数。无效工具 JSON 或 Pydantic 参数可以在任何工具副作用前触发整个 Agent 运行最多一次显式协议纠正；纠正调用不得回放坏参数，必须独立授权和结算 usage，仍失败时以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。该行为不是同一请求的 SDK 自动重发或队列盲重试。视频既有路由与能力门禁不变。
+DeepSeek 工具调用默认使用 Beta strict Function Calling，包含 Reviewer 与一致性终检。`submit_quality_report` 保留既有专用映射；普通工具适配见 [默认 strict 规格](../specs/2026-10-01-deepseek-default-strict.md)。Provider 为该工具生成专用 wire 契约：递归内联本地 `$defs`，不发送 `$defs`、`$def`、`$ref` 或 `type:null`；可选的 `location` 与 `rewriteBrief` 在 wire 中以必填字符串传输，无值时返回空字符串，并只在这两个精确路径归一化为 `None`。报告仍须通过原始 `QualityReportArgs`/Pydantic 完整复验，Provider 不截断或猜测修复业务字段；公共错误只保留最多 10 条脱敏 `loc/type`；完整失败诊断按[日志规格](../specs/2026-10-07-complete-failure-diagnostics.md)脱敏写入日志，不进入业务状态或模型纠正。无效工具 JSON 或 Pydantic 参数可以在任何工具副作用前触发整个 Agent 运行最多一次显式协议纠正；纠正调用不得回放坏参数，必须独立授权和结算 usage，仍失败时以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。该行为不是同一请求的 SDK 自动重发或队列盲重试。视频既有路由与能力门禁不变。
 
 普通章节生成的 [正文提交补丁](../specs/2026-09-28-chapter-artifact-protocol-hotfix.md) 允许已纠正读取后再纠正一次正文参数；
 该例外不适用于此处的 quality、reviewer 或选区协议。复审、返工身份与用户确认边界不变。
@@ -349,7 +349,9 @@ sequenceDiagram
   WorkflowRun/jobId 重试。明确不可重试错误在失败回调成功后收敛单条任务，不得因此重启整个消费者；未知
   程序异常仍由消费者监督器暴露为不健康。
 - 模型返回长度截断、内容过滤、矛盾完成原因或无合法工具调用的 unknown 响应时，Agent Service 在接受报告或执行回调前失败；日志可以保留原始完成原因字符串。
-- 质量协议的公共错误与模型纠正提示只保留原安全分类。失败原参数、Schema、全部校验错误和异常链按
+- 质量协议的公共错误保留原安全分类，质量专用 wire 不随普通工具平铺改变。普通工具纠正可补充本地从
+  已下发 Schema 生成的字段格式提示，不回放失败参数；见[平铺规格](../specs/2026-10-07-deepseek-flat-wire-study.md)。
+  失败原参数、Schema、全部校验错误和异常链按
   [完整失败诊断规格](../specs/2026-10-07-complete-failure-diagnostics.md)脱敏后保存在诊断日志，
   不进入候选、Core 回调、SSE、journal 或正常结果序列化，也不改变复审结论与纠正预算。
 - 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。

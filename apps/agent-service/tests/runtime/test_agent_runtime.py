@@ -1680,3 +1680,52 @@ async def test_并发工具部分失败且诊断后端故障不改变工具结�
     ]
     assert result.visibleContent == "继续处理"
     assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test纠正使用已下发格式提示但不回放完整错误载荷或增加调用() -> None:
+    from inkforge_agents.providers.deepseek_strict import prepare_deepseek_tools
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.providers.tool_schema_hints import build_tool_schema_hints
+
+    class BillableProvider(ScriptedProvider):
+        billable = True
+
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    model_tool = registry.require("get_recent_chapters").as_model_tool()
+    prepared = prepare_deepseek_tools(ModelTurnRequest(
+        messages=[], tools=[model_tool], maxOutputTokens=256, policy=CREATIVE_HIGH,
+    ))
+    invalid = invalid_tool_turn(
+        name="get_recent_chapters", code="provider_strict_schema_violation",
+    )
+    invalid.toolSchemaHints = build_tool_schema_hints(
+        prepared.request.tools, invalid.invalidToolCallNames,
+    )
+    invalid.failureDiagnostics = [capture_failure_diagnostic(
+        stage="tool.wire_schema", code="provider_strict_schema_violation",
+        payload={"rawArguments": "完整错误原文不能回放"},
+    )]
+    provider = BillableProvider([
+        invalid, turn("", ("合法读取", "get_recent_chapters", {"count": 6})), turn("读取完成"),
+    ])
+    billing = RecordingBilling()
+    result = await make_agent_runtime(ModelRuntime(provider, billing=billing), registry).run(
+        messages=[{"role": "user", "content": "读取最近章节"}],
+        policy=CREATIVE_HIGH, exposed_tools=[registry.require("get_recent_chapters")],
+        context=context("写作"), model_context=ModelCallContext(
+            userId="user-1", novelId="novel-1", taskId="task-1", runId="run-1", agentId="写作",
+        ),
+    )
+    correction = provider.requests[1].model_dump_json()
+    assert "字段 count：类型为 integer" in correction
+    assert "完整错误原文不能回放" not in correction
+    assert "failureDiagnostics" not in correction
+    assert gateway.calls == ["get_recent_chapters"]
+    assert len(provider.requests) == len(billing.authorizations) == len(billing.usages) == 3
+    assert result.usage.totalTokens == 45
+    assert "字段 count" not in result.model_dump_json()
+    error = ModelToolProtocolRecoveryFailedError.from_response(invalid)
+    assert error.schema_hints
+    assert "字段 count" not in str(error)

@@ -22,7 +22,10 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.providers.base import (
     ModelTurnRequest as BaseModelTurnRequest,
 )
-from inkforge_agents.providers.openai_compatible import OpenAICompatibleProvider
+from inkforge_agents.providers.openai_compatible import (
+    OpenAICompatibleProvider,
+    _DeepSeekChatOpenAI,
+)
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_contracts.video import (
     CharacterSettingSnapshot,
@@ -824,9 +827,9 @@ async def test_deepseek_strict_tool_uses_beta_wire_channel(
 
         def build_real_chat_openai(**kwargs: Any) -> ChatOpenAI:
             # 只替换传输层，Provider 仍构造并调用真实 ChatOpenAI。
-            return ChatOpenAI(**kwargs, http_async_client=client)
+            return _DeepSeekChatOpenAI(**kwargs, http_async_client=client)
 
-        monkeypatch.setattr(provider_module, "ChatOpenAI", build_real_chat_openai)
+        monkeypatch.setattr(provider_module, "_DeepSeekChatOpenAI", build_real_chat_openai)
         provider = OpenAICompatibleProvider(
             Settings.model_validate(
                 {
@@ -921,9 +924,9 @@ async def test_deepseek_strict_http_failure_is_not_retried(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle_request)) as client:
 
         def build_real_chat_openai(**kwargs: Any) -> ChatOpenAI:
-            return ChatOpenAI(**kwargs, http_async_client=client)
+            return _DeepSeekChatOpenAI(**kwargs, http_async_client=client)
 
-        monkeypatch.setattr(provider_module, "ChatOpenAI", build_real_chat_openai)
+        monkeypatch.setattr(provider_module, "_DeepSeekChatOpenAI", build_real_chat_openai)
         provider = OpenAICompatibleProvider(
             Settings.model_validate(
                 {
@@ -2987,7 +2990,9 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
     marker = {"_inkforgeEmpty": "empty"}
     wire = marker if returned_tool == "get_character_list" else {
         "kind": "chapter_draft", "summary": "本章草案", "content": "完整章节正文",
-        "artifactKey": marker, "reviewerAgent": marker, "submitForReview": marker,
+        "artifactKey": {"_inkforgeState": "omitted"},
+        "reviewerAgent": {"_inkforgeState": "omitted"},
+        "submitForReview": {"_inkforgeState": "omitted"},
     }
     expected = {} if returned_tool == "get_character_list" else {
         "kind": "chapter_draft", "summary": "本章草案", "content": "完整章节正文",
@@ -3033,7 +3038,7 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
             "openai_api_key": "test-key", "openai_base_url": "https://api.deepseek.com",
             "openai_model": "deepseek-v4-flash",
         }))
-        provider._strict_model = ChatOpenAI(
+        provider._strict_model = _DeepSeekChatOpenAI(
             api_key="test-key", base_url="https://api.deepseek.com/beta",
             model="deepseek-v4-flash", http_async_client=client, max_retries=0,
         )

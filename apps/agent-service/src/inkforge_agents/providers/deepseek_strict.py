@@ -10,6 +10,7 @@ import jsonschema_rs
 
 from .base import ModelTool, ModelTurnRequest, ModelTurnResult
 from .error_details import capture_failure_diagnostic
+from .tool_schema_hints import build_tool_schema_hints
 
 _MISSING = object()
 _EMPTY_MARKER = {"_inkforgeEmpty": "empty"}
@@ -47,13 +48,15 @@ class _WireCodec:
                     issue["location"] = ""
             return result
         if self.kind == "optional":
+            return _marker("missing") if value is _MISSING else self.children["value"].encode(value)
+        if self.kind == "optional_tagged":
             return (
-                dict(_EMPTY_MARKER)
+                {"variant": "omitted"}
                 if value is _MISSING
-                else {"value": self.children["value"].encode(value)}
+                else {"variant": "value", "value": self.children["value"].encode(value)}
             )
         if self.kind in {"null", "empty_object", "missing"}:
-            return dict(_EMPTY_MARKER)
+            return _marker(self.kind)
         if self.kind == "wrapped":
             return {"value": self.children["value"].encode(value)}
         if self.kind == "object":
@@ -74,13 +77,17 @@ class _WireCodec:
         if self.kind == "quality":
             return _normalize_deepseek_quality_arguments(value)
         if self.kind in {"null", "empty_object", "missing"}:
-            if value != _EMPTY_MARKER:
+            if value != _marker(self.kind):
                 raise ValueError("DeepSeek 空值标记不符合约定")
             return {"null": None, "empty_object": {}, "missing": _MISSING}[self.kind]
         if self.kind == "optional":
-            if "value" not in value:
-                return _empty_codec("missing").decode(value)
-            return self.children["value"].decode(value["value"])
+            return _MISSING if value == _marker("missing") else self.children["value"].decode(value)
+        if self.kind == "optional_tagged":
+            return (
+                _MISSING
+                if value["variant"] == "omitted"
+                else self.children["value"].decode(value["value"])
+            )
         if self.kind == "wrapped":
             return self.children["value"].decode(value["value"])
         if self.kind == "object":
@@ -108,27 +115,245 @@ def _reject_constant(value: str) -> Any:
     raise ValueError("DeepSeek JSON 参数包含非有限数字")
 
 
-def _wrapped(child: _WireCodec, *, optional: bool = False) -> _WireCodec:
-    present = _closed_object({"value": child.schema})
-    schema: dict[str, Any] = (
-        {"anyOf": [_empty_codec("missing").schema, present]} if optional else present
+def _marker(kind: str) -> dict[str, str]:
+    return (
+        dict(_EMPTY_MARKER)
+        if kind == "empty_object"
+        else {"_inkforgeState": "omitted" if kind == "missing" else "null"}
     )
-    if optional:
-        schema["description"] = (
-            '省略字段时返回 {"_inkforgeEmpty":"empty"}；提供字段时返回 {"value": 字段值}。'
+
+
+def _wrapped(child: _WireCodec, *, optional: bool = False) -> _WireCodec:
+    if not optional:
+        return _describe_codec(
+            _WireCodec(_closed_object({"value": child.schema}), "wrapped", {"value": child})
         )
-    return _WireCodec(schema, "optional" if optional else "wrapped", {"value": child})
+    omitted = _empty_codec("missing").schema
+    if not jsonschema_rs.is_valid(child.schema, _marker("missing")):
+        return _describe_codec(
+            _WireCodec({"anyOf": [child.schema, omitted]}, "optional", {"value": child})
+        )
+    # 真实业务值可能与省略标记同形，必须保留能表达存在性的最小判别。
+    schema = {
+        "anyOf": [
+            _closed_object({"variant": {"type": "string", "enum": ["omitted"]}}),
+            _closed_object(
+                {"variant": {"type": "string", "enum": ["value"]}, "value": child.schema}
+            ),
+        ]
+    }
+    return _describe_codec(_WireCodec(schema, "optional_tagged", {"value": child}))
 
 
 def _empty_codec(kind: str) -> _WireCodec:
-    """固定标记仅属于供应商表示层，按原类型恢复空对象、null 或字段省略。"""
-    return _WireCodec(
-        {
-            **_closed_object({"_inkforgeEmpty": {"type": "string", "enum": ["empty"]}}),
-            "description": "固定空值标记，业务层会按原类型恢复。",
-        },
-        kind,
+    marker = _marker(kind)
+    key, value = next(iter(marker.items()))
+    return _describe_codec(
+        _WireCodec(_closed_object({key: {"type": "string", "enum": [value]}}), kind)
     )
+
+
+def _schema_example(schema: Mapping[str, Any]) -> Any:
+    for branch in schema.get("anyOf", []):
+        example = _schema_example(branch)
+        if example is not _MISSING and jsonschema_rs.is_valid(dict(schema), example):
+            return example
+    if "enum" in schema:
+        for value in schema["enum"]:
+            if jsonschema_rs.is_valid(dict(schema), value):
+                return deepcopy(value)
+        return _MISSING
+    kind = schema.get("type")
+    if kind == "object":
+        result = {
+            key: _schema_example(child) for key, child in schema.get("properties", {}).items()
+        }
+        if any(value is _MISSING for value in result.values()):
+            return _MISSING
+        return result if jsonschema_rs.is_valid(dict(schema), result) else _MISSING
+    if kind == "array":
+        return []
+    candidates: dict[str, list[Any]] = {
+        "string": ["示例", "example", "a", "", "00000000-0000-0000-0000-000000000000"],
+        "boolean": [False, True],
+        "integer": [schema.get("minimum", 0), schema.get("maximum", 1), 1, 0],
+        "number": [schema.get("minimum", 0), schema.get("maximum", 1), 1, 0],
+    }
+    for value in candidates.get(str(kind), []):
+        if jsonschema_rs.is_valid(dict(schema), value):
+            return value
+    return _MISSING
+
+
+def _describe_codec(codec: _WireCodec, original: str = "") -> _WireCodec:
+    explanation = {
+        "optional": (
+            '正常值直接填写。省略字段用 {"_inkforgeState":"omitted"}，'
+            "不能用零、false或空串代替省略。"
+        ),
+        "optional_tagged": (
+            '业务值可能与省略标记同形；省略用 {"variant":"omitted"}，'
+            '提供值用 {"variant":"value","value":业务值}。'
+        ),
+        "null": "此标记表示显式 null，区别于字段省略。",
+        "missing": "此标记表示字段省略，保留既有缺省语义。",
+        "empty_object": "此非空传输标记表示业务空对象 {}，不是 null 或字段省略。",
+        "union_flat": "直接填写匹配业务分支的值，不添加 value 或数字 variant。",
+        "union_tagged": "分支传输形状重叠且解码不等价，必须使用声明的 variant 和 value。",
+        "wrapped": "函数参数根必须是对象，使用声明的 value 字段携带完整值。",
+    }.get(codec.kind, "")
+    example = _codec_example(codec)
+    if example is not _MISSING and not jsonschema_rs.is_valid(codec.schema, example):
+        example = _MISSING
+    descriptions = [original, codec.schema.get("description", ""), explanation]
+    if codec.kind in {"optional", "optional_tagged"}:
+        descriptions.insert(0, codec.children["value"].schema.get("description", ""))
+    if codec.kind == "union_tagged":
+        descriptions.append(
+            "分支说明："
+            + "；".join(
+                f'variant="{index}" 对应{child.kind}分支，value必须满足该分支Schema'
+                for index, (_, child) in enumerate(codec.branches)
+            )
+        )
+    if example is not _MISSING and explanation:
+        descriptions.append(
+            "合法形状示例：" + json.dumps(example, ensure_ascii=False, separators=(",", ":"))
+        )
+    codec.schema["description"] = " ".join(dict.fromkeys(item for item in descriptions if item))
+    return codec
+
+
+def _codec_example(codec: _WireCodec) -> Any:
+    """从编解码职责生成形状示例，不能把普通字符串当作动态 JSON 的合法值。"""
+    if codec.kind == "json":
+        return "{}"
+    if codec.kind in {"empty_object", "null", "missing"}:
+        return _marker(codec.kind)
+    if codec.kind in {"optional", "optional_tagged", "wrapped"}:
+        value = _codec_example(codec.children["value"])
+        if value is _MISSING:
+            return _MISSING
+        if codec.kind == "optional":
+            return value
+        return {"value": value} if codec.kind == "wrapped" else {"variant": "value", "value": value}
+    if codec.kind == "object":
+        result = {key: _codec_example(child) for key, child in codec.children.items()}
+        return _MISSING if any(value is _MISSING for value in result.values()) else result
+    if codec.kind == "array":
+        return []
+    if codec.kind in {"union_flat", "union_tagged"}:
+        for index, (original, child) in enumerate(codec.branches):
+            example = _codec_example(child)
+            if example is not _MISSING and jsonschema_rs.is_valid(original, child.decode(example)):
+                return (
+                    example
+                    if codec.kind == "union_flat"
+                    else {"variant": str(index), "value": example}
+                )
+        return _MISSING
+    return _schema_example(codec.schema)
+
+
+def _schemas_disjoint(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    if "anyOf" in left:
+        return all(_schemas_disjoint(branch, right) for branch in left["anyOf"])
+    if "anyOf" in right:
+        return all(_schemas_disjoint(left, branch) for branch in right["anyOf"])
+    ltype, rtype = left.get("type"), right.get("type")
+    if ltype and rtype and ltype != rtype and {ltype, rtype} != {"integer", "number"}:
+        return True
+    if "enum" in left and "enum" in right:
+        if not any(
+            jsonschema_rs.is_valid({"enum": [a]}, b) for a in left["enum"] for b in right["enum"]
+        ):
+            return True
+    if ltype == rtype == "object":
+        lp, rp = left.get("properties", {}), right.get("properties", {})
+        if left.get("additionalProperties") is False and right.get("additionalProperties") is False:
+            if set(left.get("required", [])) == set(lp) and set(right.get("required", [])) == set(
+                rp
+            ):
+                if set(lp) != set(rp):
+                    return True
+                return any(_schemas_disjoint(lp[key], rp[key]) for key in lp)
+    return False
+
+
+def _decoders_compatible(left: _WireCodec, right: _WireCodec) -> bool:
+    """证明交集上的解码相同；不能证明时保守保留判别，不依赖抽样。"""
+    if _schemas_disjoint(left.schema, right.schema):
+        return True
+    if left.kind == "union_flat":
+        return all(_decoders_compatible(child, right) for _, child in left.branches)
+    if right.kind == "union_flat":
+        return all(_decoders_compatible(left, child) for _, child in right.branches)
+    if left.kind == right.kind == "optional":
+        return _decoders_compatible(left.children["value"], right.children["value"])
+    if left.kind == "optional":
+        return not jsonschema_rs.is_valid(
+            right.schema, _marker("missing")
+        ) and _decoders_compatible(left.children["value"], right)
+    if right.kind == "optional":
+        return _decoders_compatible(right, left)
+    if left.kind != right.kind:
+        return False
+    if left.kind in {"scalar", "json", "null", "missing", "empty_object"}:
+        return True
+    if left.kind == "object":
+        return set(left.children) == set(right.children) and all(
+            _decoders_compatible(left.children[key], right.children[key]) for key in left.children
+        )
+    if left.kind == "array":
+        return _decoders_compatible(left.children["items"], right.children["items"])
+    if left.kind in {"optional_tagged", "wrapped"}:
+        return _decoders_compatible(left.children["value"], right.children["value"])
+    return False
+
+
+def _union_schema(children: list[_WireCodec]) -> dict[str, Any]:
+    branches = [child.schema for child in children]
+    if all(branch.get("type") == "object" for branch in branches):
+        properties = [branch.get("properties", {}) for branch in branches]
+        if (
+            properties
+            and properties[0]
+            and all(set(item) == set(properties[0]) for item in properties)
+        ):
+            combined = {}
+            for name in properties[0]:
+                alternatives = list(
+                    {
+                        json.dumps(item[name], sort_keys=True, ensure_ascii=False): item[name]
+                        for item in properties
+                    }.values()
+                )
+                combined[name] = (
+                    alternatives[0] if len(alternatives) == 1 else {"anyOf": alternatives}
+                )
+            # 外壳满足 strict 根对象要求；分支仍保留完整条件，不能只使用属性并集。
+            return {
+                **_closed_object(combined),
+                "anyOf": [_without_descriptions(branch) for branch in branches],
+            }
+    return {"anyOf": branches}
+
+
+def _without_descriptions(schema: dict[str, Any]) -> dict[str, Any]:
+    """外壳已经提供字段说明，条件分支只保留约束，避免重复发送整段说明和示例。"""
+    result: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "description":
+            continue
+        if key == "properties":
+            result[key] = {name: _without_descriptions(child) for name, child in value.items()}
+        elif key == "anyOf":
+            result[key] = [_without_descriptions(child) for child in value]
+        elif key == "items" and isinstance(value, dict):
+            result[key] = _without_descriptions(value)
+        else:
+            result[key] = deepcopy(value)
+    return result
 
 
 def _object_alternative(schema: Mapping[str, Any], branch: Mapping[str, Any]) -> dict[str, Any]:
@@ -231,24 +456,52 @@ def _compile_wire(
             wire["description"] = schema["description"]
         return _WireCodec(wire, "object", children)
     if branches is not None:
-        compiled: list[tuple[dict[str, Any], _WireCodec]] = []
-        for branch in branches:
-            child = _compile_wire(branch, definitions, stack=stack)
-            # null 与业务空对象使用相同 wire 标记，必须通过独立分支标签保持类型可逆。
-            tag = str(len(compiled))
-            child = _WireCodec(
-                _closed_object(
-                    {
-                        "variant": {"type": "string", "enum": [tag]},
-                        "value": child.schema,
-                    }
-                ),
-                "object",
-                {"value": child},
+        if "const" in schema or "enum" in schema:
+            values = [schema["const"]] if "const" in schema else schema["enum"]
+            narrowed = []
+            for branch in branches:
+                allowed = [
+                    value
+                    for value in values
+                    if jsonschema_rs.is_valid({**branch, "$defs": dict(definitions)}, value)
+                ]
+                if allowed:
+                    # 条件可能挂在 nullable anyOf 父节点，必须收窄每个子分支后再编译。
+                    narrowed.append({**branch, "enum": allowed})
+            if not narrowed:
+                raise ValueError("DeepSeek 工具联合的 const/enum 条件没有合法分支")
+            branches = narrowed
+        compiled = [
+            (
+                {**branch, "$defs": dict(definitions)},
+                _compile_wire(branch, definitions, stack=stack),
             )
-            original = {**branch, "$defs": dict(definitions)}
-            compiled.append((original, child))
-        return _UnionCodec({"anyOf": [child.schema for _, child in compiled]}, branches=compiled)
+            for branch in branches
+        ]
+        if len(compiled) == 1:
+            return _describe_codec(compiled[0][1], schema.get("description", ""))
+        compatible = all(
+            _decoders_compatible(a[1], b[1])
+            for index, a in enumerate(compiled)
+            for b in compiled[index + 1 :]
+        )
+        if compatible:
+            wire = _union_schema([child for _, child in compiled])
+            return _describe_codec(
+                _UnionCodec(wire, "union_flat", branches=compiled), schema.get("description", "")
+            )
+        tagged = [
+            _WireCodec(
+                _closed_object(
+                    {"variant": {"type": "string", "enum": [str(index)]}, "value": child.schema}
+                )
+            )
+            for index, (_, child) in enumerate(compiled)
+        ]
+        wire = _union_schema(tagged)
+        return _describe_codec(
+            _UnionCodec(wire, "union_tagged", branches=compiled), schema.get("description", "")
+        )
     if kind == "array":
         child = _compile_wire(schema.get("items", {}), definitions, stack=stack)
         wire = {"type": "array", "items": child.schema}
@@ -286,12 +539,42 @@ class _UnionCodec(_WireCodec):
     def encode(self, value: Any) -> Any:
         for index, (original, child) in enumerate(self.branches):
             if jsonschema_rs.is_valid(original, value):
-                return {"variant": str(index), "value": child.children["value"].encode(value)}
+                encoded = child.encode(value)
+                return (
+                    encoded
+                    if self.kind == "union_flat"
+                    else {"variant": str(index), "value": encoded}
+                )
         raise ValueError("DeepSeek 工具历史不符合原始联合类型")
 
     def decode(self, value: Any) -> Any:
-        child = self.branches[int(value["variant"])][1]
-        return child.children["value"].decode(value["value"])
+        if self.kind == "union_tagged":
+            return self.branches[int(value["variant"])][1].decode(value["value"])
+        results = []
+        for original, child in self.branches:
+            if jsonschema_rs.is_valid(child.schema, value):
+                decoded = child.decode(value)
+                if jsonschema_rs.is_valid(original, decoded):
+                    results.append(decoded)
+        if not results:
+            raise ValueError("DeepSeek 工具联合参数没有合法业务分支")
+        if not all(_same_decoded(results[0], result) for result in results[1:]):
+            raise ValueError("DeepSeek 工具联合参数解码存在歧义")
+        return results[0]
+
+
+def _same_decoded(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _same_decoded(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _same_decoded(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return bool(left == right)
 
 
 def _json_codec(schema: Mapping[str, Any]) -> _WireCodec:
@@ -360,6 +643,7 @@ class DeepSeekToolRequest:
             update={
                 "toolCalls": calls,
                 "failureDiagnostics": diagnostics,
+                "toolSchemaHints": build_tool_schema_hints(self.request.tools, names),
                 "invalidToolCallCount": result.invalidToolCallCount + extra,
                 "invalidToolCallNames": names,
                 "invalidToolCallCodes": [

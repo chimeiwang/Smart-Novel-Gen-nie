@@ -247,6 +247,8 @@ class ModelTurnResult(BaseModel):
     failureDiagnostics: list[FailureDiagnostic] = Field(
         default_factory=list, exclude=True, repr=False
     )
+    # 仅由本地已下发 Schema 生成纠正提示，不携带失败输入，也不进入业务序列化。
+    toolSchemaHints: list[str] = Field(default_factory=list, exclude=True, repr=False)
     invalidToolCallCount: NonNegativeInt = 0
     invalidToolCallNames: list[str] = Field(default_factory=list)
     invalidToolCallCodes: list[ModelInvalidToolCallCode] = Field(default_factory=list)

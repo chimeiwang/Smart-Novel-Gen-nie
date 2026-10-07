@@ -36,6 +36,7 @@ from .openai_compatible import (
     _is_official_deepseek_endpoint,
     _log_structured_output_recovery,
     _parse_and_validate_structured_output,
+    _reject_duplicate_json_keys,
     _resolve_deepseek_strict_base_url,
     normalize_finish_reason,
 )
@@ -257,6 +258,7 @@ class DeepSeekV4Provider:
                 result.model_dump(mode="python")
                 | {
                     "failureDiagnostics": result.failureDiagnostics,
+                    "toolSchemaHints": result.toolSchemaHints,
                     "content": "",
                     "reasoningContent": None,
                     "toolCalls": [],
@@ -697,12 +699,16 @@ def _recover_deepseek_tool_call(
 
 
 def _load_strict_json(value: str) -> object:
-    """拒绝 Python JSON 解码器默认接受的 NaN/Infinity 非标准常量。"""
+    """拒绝重复键及非标准常量，禁止新自然参数表示静默覆盖原字段。"""
 
     def reject_nonstandard_constant(_: str) -> None:
         raise ValueError("工具参数包含非标准 JSON 常量")
 
-    return json.loads(value, parse_constant=reject_nonstandard_constant)
+    return json.loads(
+        value,
+        parse_constant=reject_nonstandard_constant,
+        object_pairs_hook=_reject_duplicate_json_keys,
+    )
 
 
 def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:

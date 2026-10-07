@@ -169,6 +169,7 @@ class ModelToolProtocolRecoveryFailedError(RuntimeError):
         *,
         protocol_issues: Sequence[str] = (),
         validation_issues: Sequence[str] = (),
+        schema_hints: Sequence[str] = (),
     ) -> None:
         self.protocol_issues = tuple(
             issue
@@ -180,6 +181,8 @@ class ModelToolProtocolRecoveryFailedError(RuntimeError):
             for issue in validation_issues[:_MAX_VALIDATION_ISSUES]
             if _SAFE_VALIDATION_ISSUE_PATTERN.fullmatch(issue)
         )
+        # 提示来自 Provider 的本地 Schema 编译结果；异常公共文本仍只包含安全分类。
+        self.schema_hints = tuple(schema_hints[:_MAX_PROTOCOL_ISSUES])
         protocol_summary = "|".join(self.protocol_issues) or "none"
         validation_summary = "|".join(self.validation_issues) or "none"
         super().__init__(
@@ -205,7 +208,7 @@ class ModelToolProtocolRecoveryFailedError(RuntimeError):
             issues.append(
                 f"tool={safe_name} code={code} chars={min(character_count, 999_999_999)}"
             )
-        return cls(protocol_issues=issues)
+        return cls(protocol_issues=issues, schema_hints=response.toolSchemaHints)
 
     @classmethod
     def from_arguments_error(
@@ -269,6 +272,7 @@ def _with_tool_protocol_correction(
     instructions.append(
         "安全校验诊断：" + "；".join((*error.protocol_issues, *error.validation_issues))
     )
+    instructions.extend(error.schema_hints)
     for code, hint in _TOOL_CORRECTION_HINTS.items():
         if any(issue.endswith(f"type={code}") for issue in error.validation_issues):
             instructions.append(hint)

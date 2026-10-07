@@ -37,8 +37,8 @@ FIXTURES = Path(__file__).parent.parent / "fixtures" / "deepseek_v4"
 @pytest.mark.parametrize(
     "name,arguments",
     [
-        ("get_recent_chapters", '{"count": 3}'),
-        ("list_outline_summary", '{"scope":"tree_index","include_full_summary":false}'),
+        ("get_recent_chapters", '{"count": {"value": 3}}'),
+        ("list_outline_summary", '{"scope":{"value":"tree_index"},"include_full_summary":false}'),
     ],
 )
 async def test工具wire失败保留完整参数Schema及校验但不进入公共结果(name, arguments):
@@ -81,7 +81,8 @@ async def test工具wire失败保留完整参数Schema及校验但不进入公�
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "arguments,stage",
-    [('{"count":3', "tool.json_parse"), ('{"count":3,"count":4}', "tool.wire_schema")],
+    [('{"count":', "tool.json_parse"), ('{"count":3', "tool.json_recovery"),
+        ('{"count":3,"count":4}', "tool.json_parse")],
 )
 async def test坏JSON完整诊断保留原参数(arguments, stage):
     tool = build_default_registry().require("get_recent_chapters").as_model_tool()
@@ -107,6 +108,14 @@ async def test坏JSON完整诊断保留原参数(arguments, stage):
         await client.aclose()
     assert result.failureDiagnostics[0].stage == stage
     assert json.loads(result.failureDiagnostics[0].payloadJson)["rawArguments"] == arguments
+    assert result.usage.totalTokens == 2
+    if stage == "tool.json_recovery":
+        assert result.recoveredToolCallCount == 1
+        assert result.invalidToolCallCount == 0
+        assert result.toolCalls[0].arguments == {"count": 3}
+    else:
+        assert result.invalidToolCallCount == 1
+        assert result.toolCalls == []
 
 
 def _response_with_usage(usage: object) -> dict[str, Any]:
@@ -1606,9 +1615,9 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
             "kind": "chapter_draft",
             "summary": "本章草案",
             "content": "完整章节正文",
-            "artifactKey": marker,
-            "reviewerAgent": marker,
-            "submitForReview": marker,
+            "artifactKey": {"_inkforgeState": "omitted"},
+            "reviewerAgent": {"_inkforgeState": "omitted"},
+            "submitForReview": {"_inkforgeState": "omitted"},
         }
     )
     expected = (

@@ -2,6 +2,10 @@
 
 状态：实现、生产发布及 30 分钟稳定观察完成，未进行真实供应商验收；见 [验收记录](../audits/2026-10-01-deepseek-default-strict.md)。范围是供应商 Function Calling 的 Beta `strict`，不是 Pydantic 严格校验。
 
+
+普通字段的多层 value/variant 表示由[平铺规格](2026-10-07-deepseek-flat-wire-study.md)取代；
+本文保留先前发布证据、strict 默认值及空对象兼容原因，业务可逆性、质量映射和安全边界继续有效。
+
 ## 目标与边界
 
 - DeepSeek 工具声明未指定 strict 时，默认使用 `/beta/chat/completions`，同一请求全部函数发送 `strict: true`。

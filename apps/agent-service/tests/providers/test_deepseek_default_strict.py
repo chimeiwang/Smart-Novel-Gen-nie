@@ -11,13 +11,18 @@ from inkforge_agents.config import Settings
 from inkforge_agents.providers.base import ModelMessage, ModelTool, ModelToolCall, ModelTurnRequest
 from inkforge_agents.providers.deepseek_strict import _closed_object, prepare_deepseek_tools
 from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
-from inkforge_agents.providers.openai_compatible import OpenAICompatibleProvider
+from inkforge_agents.providers.openai_compatible import (
+    OpenAICompatibleProvider,
+    _DeepSeekChatOpenAI,
+)
 from inkforge_agents.runtime.model_policy import CREATIVE_HIGH
 from inkforge_agents.tools.control import artifact_model_schema_for_operation
 from inkforge_agents.tools.registry import build_default_registry
 from langchain_openai import ChatOpenAI
 
 _EMPTY = {"_inkforgeEmpty": "empty"}
+_OMITTED = {"_inkforgeState": "omitted"}
+_NULL = {"_inkforgeState": "null"}
 
 
 def test闭合对象构造拒绝无属性回归():
@@ -178,14 +183,14 @@ def _provider(kind: str, client: httpx.AsyncClient) -> Any:
         return DeepSeekV4Provider(settings, client=client)
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.model_name = settings.openai_model
-    provider._model = ChatOpenAI(
+    provider._model = _DeepSeekChatOpenAI(
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         model=settings.openai_model,
         http_async_client=client,
         max_retries=0,
     )
-    provider._strict_model = ChatOpenAI(
+    provider._strict_model = _DeepSeekChatOpenAI(
         api_key=settings.openai_api_key,
         base_url="https://api.deepseek.com/beta",
         model=settings.openai_model,
@@ -197,7 +202,7 @@ def _provider(kind: str, client: httpx.AsyncClient) -> Any:
 
 @pytest.mark.parametrize("kind", ["raw", "generic"])
 @pytest.mark.parametrize(
-    "count_wire,expected", [(_EMPTY, {}), ({"value": {"variant": "0", "value": 3}}, {"count": 3})]
+    "count_wire,expected", [(_OMITTED, {}), (3, {"count": 3})]
 )
 async def test默认读取工具经_beta且无损保留省略与值(kind, count_wire, expected):
     requests = []
@@ -323,10 +328,10 @@ def test所有注册工具的默认_schema符合_deepseek子集():
 @pytest.mark.parametrize(
     "value,wire",
     [
-        ({}, {"option": _EMPTY}),
-        ({"option": None}, {"option": {"value": {"variant": "1", "value": _EMPTY}}}),
-        ({"option": ""}, {"option": {"value": {"variant": "0", "value": ""}}}),
-        ({"option": "正文"}, {"option": {"value": {"variant": "0", "value": "正文"}}}),
+        ({}, {"option": _OMITTED}),
+        ({"option": None}, {"option": _NULL}),
+        ({"option": ""}, {"option": ""}),
+        ({"option": "正文"}, {"option": "正文"}),
     ],
 )
 def test省略_null与空串往返独立(value, wire):
@@ -373,7 +378,7 @@ def test动态JSON保留全部键与空值并拒绝坏JSON():
     expected = {
         "artifactKey": "a",
         "updates": '{"自定义":[null,false,0,"",{},[]]}',
-        "summary": _EMPTY,
+        "summary": _OMITTED,
     }
     assert codec.encode(value) == expected
     assert codec.decode(expected) == value
@@ -397,9 +402,9 @@ async def test正文提交保留操作收窄与完整内容(operation, kind):
         "kind": "chapter_draft",
         "summary": "本章草案",
         "content": content,
-        "artifactKey": _EMPTY,
-        "reviewerAgent": _EMPTY,
-        "submitForReview": _EMPTY,
+        "artifactKey": _OMITTED,
+        "reviewerAgent": _OMITTED,
+        "submitForReview": _OMITTED,
     }
     requests = []
 
@@ -482,20 +487,15 @@ async def test非DeepSeek保持原默认值():
 @pytest.mark.parametrize("verdict,accepted", [("pass", True), ("revise", False)])
 async def test复审默认_strict且拒绝不完整返工组合(kind, verdict, accepted):
     tool = build_default_registry().require("submit_evaluation").as_model_tool()
-    # 第零分支只允许 pass/block；revise 必须进入带完整 revisionMode 的其他分支。
+    # pass/block 只要求摘要；revise 必须携带完整 revisionMode 与对应修改资料。
     wire = {
-        "value": {
-            "variant": "0",
-            "value": {
-                "artifactKey": _EMPTY,
-                "artifactId": _EMPTY,
-                "requiredChanges": _EMPTY,
-                "verdict": verdict,
-                "summary": "完整复审报告",
-                "revisionMode": _EMPTY,
-                "patches": _EMPTY,
-            },
-        }
+        "artifactKey": _OMITTED,
+        "artifactId": _OMITTED,
+        "requiredChanges": _OMITTED,
+        "verdict": verdict,
+        "summary": "完整复审报告",
+        "revisionMode": _OMITTED,
+        "patches": _OMITTED,
     }
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(
@@ -518,21 +518,21 @@ async def test节拍计划嵌套默认字段可省略且不请求派生计数(ki
         "title": "进城",
         "summary": "找到线索",
         "chapterGoal": "抵达城门",
-        "artifactKey": _EMPTY,
-        "reviewerAgent": _EMPTY,
-        "submitForReview": _EMPTY,
-        "mainPlotConnection": _EMPTY,
-        "chapterAcceptanceCriteria": _EMPTY,
-        "totalEstimatedWords": _EMPTY,
+        "artifactKey": _OMITTED,
+        "reviewerAgent": _OMITTED,
+        "submitForReview": _OMITTED,
+        "mainPlotConnection": _OMITTED,
+        "chapterAcceptanceCriteria": _OMITTED,
+        "totalEstimatedWords": _OMITTED,
         "sceneBeats": [
             {
                 "goal": "进入城门",
-                "order": _EMPTY,
-                "conflict": _EMPTY,
-                "characters": _EMPTY,
-                "foreshadowingRefs": _EMPTY,
-                "estimatedWords": _EMPTY,
-                "acceptanceCriteria": _EMPTY,
+                "order": _OMITTED,
+                "conflict": _OMITTED,
+                "characters": _OMITTED,
+                "foreshadowingRefs": _OMITTED,
+                "estimatedWords": _OMITTED,
+                "acceptanceCriteria": _OMITTED,
             }
         ],
     }
@@ -555,3 +555,173 @@ async def test节拍计划嵌套默认字段可省略且不请求派生计数(ki
         "beatCount"
         not in json.loads(requests[0].content)["tools"][0]["function"]["parameters"]["properties"]
     )
+
+
+@pytest.mark.parametrize("kind", ["raw", "generic"])
+@pytest.mark.parametrize("tool_name,returned_arguments,business_arguments,accepted", [
+    ("list_outline_summary", {"scope": {"value": "tree_index"},
+        "include_full_summary": {"value": True}},
+        {"scope": "tree_index", "include_full_summary": True}, False),
+    ("get_recent_chapters", {"count": 6}, {"count": 6}, True),
+    ("list_outline_summary", {"scope": {"variant": "0", "value": "tree_index"},
+        "include_full_summary": {"variant": "0", "value": True}},
+        {"scope": "tree_index", "include_full_summary": True}, False),
+    ("get_recent_chapters", {"count": {"variant": "0", "value": 2}}, {"count": 2}, False),
+])
+async def test最新真实失败参数仅自然业务形状直接合法且旧半包装拒绝(
+    kind, tool_name, returned_arguments, business_arguments, accepted,
+):
+    """用真实失败形状区分已简化的合法输入与仍应拒绝的错误包装。"""
+    tool = build_default_registry().require(tool_name).as_model_tool()
+    replies = [returned_arguments, business_arguments]
+    calls = []
+
+    def handler(incoming):
+        calls.append(incoming)
+        return httpx.Response(200, json=_response(tool_name, replies[len(calls) - 1]))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = _provider(kind, client)
+        original = _request([tool])
+        before = original.model_dump()
+        first = await provider.complete_turn(original)
+        corrected = await provider.complete_turn(original)
+    assert original.model_dump() == before
+    assert len(calls) == 2
+    assert first.usage.totalTokens == corrected.usage.totalTokens == 15
+    if accepted:
+        assert first.toolCalls[0].arguments == business_arguments
+        assert first.invalidToolCallCount == 0
+        assert first.failureDiagnostics == []
+    else:
+        assert first.toolCalls == []
+        assert first.invalidToolCallCodes == ["provider_strict_schema_violation"]
+        diagnostic = first.failureDiagnostics[0]
+        assert "wire" in diagnostic.stage
+        failed_payload = json.loads(diagnostic.payloadJson)
+        # 原失败参数完整可查，未自动拆包或降低原业务校验。
+        if "rawArguments" in failed_payload:
+            assert json.loads(failed_payload["rawArguments"]) == returned_arguments
+        else:
+            assert failed_payload["arguments"] == returned_arguments
+        assert "failureDiagnostics" not in first.model_dump()
+    assert corrected.invalidToolCallCount == 0
+    assert corrected.toolCalls[0].arguments == business_arguments
+    assert corrected.failureDiagnostics == []
+    assert "_inkforge_raw_tool_calls" not in corrected.model_dump_json()
+    schema = json.loads(calls[0].content)["tools"][0]["function"]["parameters"]
+    jsonschema_rs.validate(schema, business_arguments)
+    if not accepted:
+        assert not jsonschema_rs.is_valid(schema, returned_arguments)
+
+
+@pytest.mark.parametrize("kind", ["raw", "generic"])
+async def test两轮历史业务参数按新自然wire重编码且不修改原历史(kind):
+    """旧历史保存业务参数；下一轮使用新 wire，业务结果和用量保持完整。"""
+    registry = build_default_registry()
+    tools = [registry.require(name).as_model_tool()
+        for name in ("get_recent_chapters", "list_outline_summary")]
+    calls = []
+
+    def handler(incoming):
+        calls.append(incoming)
+        if len(calls) == 1:
+            return httpx.Response(200, json=_response("get_recent_chapters", {"count": 6}))
+        body = json.loads(incoming.content)
+        previous_call = body["messages"][-2]["tool_calls"][0]
+        assert json.loads(previous_call["function"]["arguments"]) == {"count": 6}
+        return httpx.Response(200, json=_response("list_outline_summary", {
+            "scope": "tree_index", "include_full_summary": True,
+        }))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = _provider(kind, client)
+        first_request = _request(tools)
+        first = await provider.complete_turn(first_request)
+        history = ModelMessage(role="assistant", content="", toolCalls=first.toolCalls,
+            reasoning_content="仅进程内历史思考")
+        second_request = _request(tools)
+        second_request.messages.extend([history, ModelMessage(role="tool",
+            name="get_recent_chapters", toolCallId="call-1", content='{"result":"已读取"}')])
+        before = second_request.model_dump()
+        second = await provider.complete_turn(second_request)
+    assert len(calls) == 2
+    assert second_request.model_dump() == before
+    assert history.tool_calls[0].arguments == {"count": 6}
+    assert history.reasoningContent == "仅进程内历史思考"
+    assert first.invalidToolCallCount == second.invalidToolCallCount == 0
+    assert first.usage.totalTokens == second.usage.totalTokens == 15
+    assert second.toolCalls[0].arguments == {
+        "scope": "tree_index", "include_full_summary": True,
+    }
+    assert second.failureDiagnostics == []
+
+
+@pytest.mark.parametrize("kind", ["raw", "generic"])
+@pytest.mark.parametrize("raw_arguments", [
+    '{"count":3,"count":6}', '{"count":NaN}', '{"count":Infinity}',
+])
+async def test自然参数wire从原JSON拒绝重复键和非有限数且保留完整失败用量(kind, raw_arguments):
+    """不能只信SDK已解析字典；原JSON字段覆盖与非标准常量都必须拒绝。"""
+    tool = build_default_registry().require("get_recent_chapters").as_model_tool()
+    reply = _response(tool.name, {})
+    reply["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = raw_arguments
+    calls = []
+    def handler(incoming):
+        calls.append(incoming)
+        return httpx.Response(200, json=reply)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _provider(kind, client).complete_turn(_request([tool]))
+    assert len(calls) == 1
+    assert result.toolCalls == []
+    assert result.invalidToolCallCount == 1
+    assert result.invalidToolCallCodes == ["json_decode_error"]
+    assert result.invalidToolCallNames == [tool.name]
+    assert result.invalidToolCallArgumentCharacterCounts == [len(raw_arguments)]
+    assert result.recoveredToolCallCount == 0
+    assert result.usage.totalTokens == 15
+    diagnostic = result.failureDiagnostics[0]
+    assert diagnostic.stage == "tool.json_parse"
+    assert json.loads(diagnostic.payloadJson)["rawArguments"] == raw_arguments
+    assert diagnostic.errorDetails.exceptionChain
+    assert "failureDiagnostics" not in result.model_dump()
+
+
+@pytest.mark.parametrize("kind", ["raw", "generic"])
+@pytest.mark.parametrize("raw_arguments,recovered", [
+    ('{"count":3', True),
+    ('{"count":3,"count":4', False),
+    ('{"count":NaN', False),
+])
+async def test唯一必调工具恢复仍拒绝闭合候选重复键和非有限数(kind, raw_arguments, recovered):
+    """追加闭合符不能把会丢字段或非标准数字的原JSON升级成合法工具调用。"""
+    tool = build_default_registry().require("get_recent_chapters").as_model_tool()
+    reply = _response(tool.name, {})
+    reply["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = raw_arguments
+    calls = []
+    def handler(incoming):
+        calls.append(incoming)
+        return httpx.Response(200, json=reply)
+
+    request = _request([tool]).model_copy(update={"requiredToolName": tool.name,
+        "parallelToolCalls": False})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _provider(kind, client).complete_turn(request)
+    assert len(calls) == 1
+    assert result.usage.totalTokens == 15
+    assert result.usage.promptTokens == 10
+    assert result.usage.completionTokens == 5
+    if recovered:
+        assert result.toolCalls[0].arguments == {"count": 3}
+        assert result.invalidToolCallCount == 0
+        assert result.recoveredToolCallCount == 1
+        assert result.recoveredToolCallCodes == ["append_container_closers"]
+        assert result.recoveredToolCallAppendedContainerCounts == [1]
+    else:
+        assert result.toolCalls == []
+        assert result.invalidToolCallCount == 1
+        assert result.invalidToolCallCodes == ["json_decode_error"]
+        assert result.recoveredToolCallCount == 0
+    assert result.failureDiagnostics
+    assert "failureDiagnostics" not in result.model_dump()

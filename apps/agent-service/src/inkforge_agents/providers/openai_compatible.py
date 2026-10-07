@@ -18,8 +18,10 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import BaseModel as OpenAISDKModel
 from pydantic import SecretStr
 
 from ..config import Settings
@@ -1535,8 +1537,12 @@ def _recover_single_strict_tool_call(
         return None
     candidate, appended_count = repaired
     try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError:
+        parsed = json.loads(
+            candidate,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_nonstandard_json_constant,
+        )
+    except (ValueError, RecursionError):
         return None
     if not isinstance(parsed, dict):
         return None
@@ -1555,6 +1561,48 @@ def _recover_single_strict_tool_call(
     )
 
 
+class _DeepSeekChatOpenAI(ChatOpenAI):
+    """保留本轮工具原JSON，防止当前SDK解析字典时静默覆盖重复键。"""
+
+    def _create_chat_result(
+        self,
+        response: dict[str, Any] | OpenAISDKModel,
+        generation_info: dict[str, Any] | None = None,
+    ) -> ChatResult:
+        choices = (
+            response.get("choices")
+            if isinstance(response, dict)
+            else getattr(response, "choices", None)
+        )
+        originals = []
+        for choice in choices if isinstance(choices, list) else []:
+            message = (
+                choice.get("message")
+                if isinstance(choice, Mapping)
+                else getattr(choice, "message", None)
+            )
+            calls = (
+                message.get("tool_calls")
+                if isinstance(message, Mapping)
+                else getattr(message, "tool_calls", None)
+            )
+            originals.append(
+                [
+                    call if isinstance(call, Mapping) else call.model_dump(mode="python")
+                    for call in calls
+                    if isinstance(call, (Mapping, OpenAISDKModel))
+                ]
+                if isinstance(calls, list)
+                else []
+            )
+        result = super()._create_chat_result(response, generation_info)
+        for generation, calls in zip(result.generations, originals, strict=False):
+            if calls and isinstance(generation.message, AIMessage):
+                # 仅供本轮Provider校验，不进入ModelTurnResult、历史、正常日志或持久结果。
+                generation.message.additional_kwargs["_inkforge_raw_tool_calls"] = calls
+        return result
+
+
 class OpenAICompatibleProvider:
     supports_request_idempotency = False
     billable = True
@@ -1567,7 +1615,10 @@ class OpenAICompatibleProvider:
             raise ValueError("真实模型提供方缺少 OPENAI_API_KEY")
         api_key = settings.openai_api_key.get_secret_value()
         self._error_secrets = (api_key,)
-        self._model = ChatOpenAI(
+        chat_model_type = (
+            _DeepSeekChatOpenAI if _is_deepseek_model(settings.openai_model) else ChatOpenAI
+        )
+        self._model = chat_model_type(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
             model=settings.openai_model,
@@ -1575,7 +1626,7 @@ class OpenAICompatibleProvider:
         )
         strict_base_url = _resolve_deepseek_strict_base_url(settings)
         self._strict_model = (
-            ChatOpenAI(
+            chat_model_type(
                 api_key=settings.openai_api_key,
                 base_url=strict_base_url,
                 model=settings.openai_model,
@@ -2302,7 +2353,56 @@ class OpenAICompatibleProvider:
         tool_calls: list[ModelToolCall] = []
         strict_schema_violation_names: list[str] = []
         failure_diagnostics: list[FailureDiagnostic] = []
+        rejected_raw_call_ids: set[str] = set()
+        raw_json_issues: list[tuple[str, int]] = []
+        raw_calls = response.additional_kwargs.get(
+            "_inkforge_raw_tool_calls", response.additional_kwargs.get("tool_calls")
+        )
+        for raw_call in raw_calls if is_deepseek and isinstance(raw_calls, list) else []:
+            if not isinstance(raw_call, Mapping) or not isinstance(
+                raw_call.get("function"), Mapping
+            ):
+                continue
+            function = raw_call["function"]
+            raw_arguments = function.get("arguments")
+            if not isinstance(raw_arguments, str):
+                continue
+            try:
+                # LangChain 已解析的字典可能丢掉重复键；先从原字符串校验JSON无损性。
+                json.loads(
+                    raw_arguments,
+                    object_pairs_hook=_reject_duplicate_json_keys,
+                    parse_constant=_reject_nonstandard_json_constant,
+                )
+            except (_DuplicateJsonKeyError, _NonstandardJsonConstantError) as exc:
+                name = function.get("name")
+                safe_name = (
+                    name if isinstance(name, str) and name in request_tools_by_name else "未知工具"
+                )
+                rejected_raw_call_ids.add(str(raw_call.get("id", "")))
+                raw_json_issues.append((safe_name, len(raw_arguments)))
+                failure_diagnostics.append(
+                    capture_failure_diagnostic(
+                        stage="tool.json_parse",
+                        code="json_decode_error",
+                        error=exc,
+                        payload={
+                            "toolName": name,
+                            "callId": raw_call.get("id"),
+                            "rawArguments": raw_arguments,
+                            "wireSchema": request_tools_by_name[name].parameters
+                            if isinstance(name, str) and name in request_tools_by_name
+                            else None,
+                        },
+                        secrets=invocation_error_secrets,
+                    )
+                )
+            except (ValueError, RecursionError):
+                # 普通缺闭合符仍交给既有唯一工具恢复；这里不新增纠正或重试。
+                continue
         for parsed_tool_call in response.tool_calls:
+            if str(parsed_tool_call.get("id", "")) in rejected_raw_call_ids:
+                continue
             tool_name = str(parsed_tool_call["name"])
             arguments = parsed_tool_call.get("args", {})
             requested_tool = request_tools_by_name.get(tool_name)
@@ -2361,7 +2461,11 @@ class OpenAICompatibleProvider:
         )
         recovered_codes: list[ModelToolRecoveryCode] = []
         recovered_container_counts: list[int] = []
-        invalid_tool_calls = response.invalid_tool_calls
+        invalid_tool_calls = [
+            call
+            for call in response.invalid_tool_calls
+            if str(call.get("id", "")) not in rejected_raw_call_ids
+        ]
         if recovery is not None:
             recovered_call, appended_count = recovery
             tool_calls.append(recovered_call)
@@ -2414,11 +2518,17 @@ class OpenAICompatibleProvider:
             invalid_tool_call_codes.append("provider_strict_schema_violation")
             # LangChain 已丢失原始 JSON 字符串；不为诊断重新序列化参数正文。
             invalid_tool_call_argument_character_counts.append(0)
+        for tool_name, character_count in raw_json_issues:
+            invalid_tool_call_names.append(tool_name)
+            invalid_tool_call_codes.append("json_decode_error")
+            invalid_tool_call_argument_character_counts.append(character_count)
         result = ModelTurnResult(
             failureDiagnostics=failure_diagnostics,
             content=response.content,
             toolCalls=tool_calls,
-            invalidToolCallCount=(len(invalid_tool_calls) + len(strict_schema_violation_names)),
+            invalidToolCallCount=(
+                len(invalid_tool_calls) + len(strict_schema_violation_names) + len(raw_json_issues)
+            ),
             invalidToolCallNames=invalid_tool_call_names,
             invalidToolCallCodes=invalid_tool_call_codes,
             invalidToolCallArgumentCharacterCounts=(invalid_tool_call_argument_character_counts),
