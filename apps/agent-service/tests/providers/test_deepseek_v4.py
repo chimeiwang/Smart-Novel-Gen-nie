@@ -1588,8 +1588,10 @@ async def test_http_redirect_with_valid_model_json_is_rejected_without_body_leak
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("returned_tool", ["get_character_list", "begin_artifact_output"])
-async def test章节写作完整24工具请求拒绝空Schema且标记恢复业务参数(returned_tool: str) -> None:
-    """替身按供应商规则拒绝任何空对象，覆盖真实操作收窄的完整写作工具集。"""
+async def test章节写作完整24工具请求拒绝空或无类型联合Schema且标记恢复业务参数(
+    returned_tool: str,
+) -> None:
+    """替身拒绝空对象及联合分支缺少类型，覆盖真实操作收窄的完整写作工具集。"""
 
     from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
     from inkforge_agents.tools.control import artifact_model_schema_for_operation
@@ -1631,24 +1633,29 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
     )
     requests: list[httpx.Request] = []
 
-    def has_empty_object(node: object) -> bool:
+    def has_invalid_strict_schema(node: object) -> bool:
         if isinstance(node, dict):
             if node.get("type") == "object" and not node.get("properties"):
                 return True
-            return any(has_empty_object(value) for value in node.values())
+            if any("type" not in branch for branch in node.get("anyOf", [])):
+                return True
+            return any(has_invalid_strict_schema(value) for value in node.values())
         if isinstance(node, list):
-            return any(has_empty_object(value) for value in node)
+            return any(has_invalid_strict_schema(value) for value in node)
         return False
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         payload = json.loads(request.content)
-        if any(has_empty_object(tool["function"]["parameters"]) for tool in payload["tools"]):
+        if any(
+            has_invalid_strict_schema(tool["function"]["parameters"])
+            for tool in payload["tools"]
+        ):
             return httpx.Response(
                 400,
                 json={
                     "error": {
-                        "message": "An object with no properties is not allowed.",
+                        "message": "Empty object or anyOf branch missing type.",
                     }
                 },
             )

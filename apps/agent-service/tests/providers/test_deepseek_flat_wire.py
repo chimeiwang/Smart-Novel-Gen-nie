@@ -4,19 +4,37 @@ from copy import deepcopy
 
 import jsonschema_rs
 import pytest
+from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
 from inkforge_agents.providers.base import ModelMessage, ModelToolCall, ModelTurnRequest
 from inkforge_agents.providers.deepseek_strict import (
     _compile_wire,
     _describe_codec,
     _UnionCodec,
+    normalize_deepseek_anyof,
     prepare_deepseek_tools,
+    validate_deepseek_wire_dialect,
 )
 from inkforge_agents.runtime.model_policy import CREATIVE_HIGH
+from inkforge_agents.tools.control import artifact_model_schema_for_operation
 from inkforge_agents.tools.registry import build_default_registry
 
 OMITTED = {"_inkforgeState": "omitted"}
 NULL = {"_inkforgeState": "null"}
 EMPTY = {"_inkforgeEmpty": "empty"}
+
+
+def assert供应商联合分支有具体类型(schema, path="$"):
+    """供应商解析器要求联合的直接分支有 type，通用 JSON Schema 合法性不足以证明。"""
+    if not isinstance(schema, dict):
+        return
+    for index, branch in enumerate(schema.get("anyOf", [])):
+        assert "type" in branch, f"{path}/anyOf/{index} 缺少 type: {branch}"
+        assert branch["type"] != "anyOf"
+        assert供应商联合分支有具体类型(branch, f"{path}/anyOf/{index}")
+    for key, child in schema.get("properties", {}).items():
+        assert供应商联合分支有具体类型(child, f"{path}/properties/{key}")
+    if isinstance(schema.get("items"), dict):
+        assert供应商联合分支有具体类型(schema["items"], f"{path}/items")
 
 
 def prepared_tool(name: str):
@@ -227,20 +245,23 @@ def test完整选区输入不造字段并拒绝缺失冻结定位():
     assert not jsonschema_rs.is_valid(codec.schema, wire)
 
 
-def test历史业务参数按新codec重编码且原消息不修改():
+@pytest.mark.parametrize("arguments", [{"count": 6}, {"count": None}, {}])
+def test历史业务参数按新codec重编码且原消息不修改(arguments):
     _, request = prepared_tool("get_recent_chapters")
     request.messages.append(
         ModelMessage(
             role="assistant",
             content="",
             toolCalls=[
-                ModelToolCall(id="history", name="get_recent_chapters", arguments={"count": 6})
+                ModelToolCall(id="history", name="get_recent_chapters", arguments=arguments)
             ],
         )
     )
     before = deepcopy(request.model_dump())
     prepared = prepare_deepseek_tools(request)
-    assert prepared.request.messages[-1].tool_calls[0].arguments == {"count": 6}
+    wire = prepared.request.messages[-1].tool_calls[0].arguments
+    assert prepared.codecs["get_recent_chapters"].decode(wire) == arguments
+    assert供应商联合分支有具体类型(prepared.request.tools[0].parameters)
     assert request.model_dump() == before
 
 
@@ -260,10 +281,131 @@ def test全工具闭合全必填非空且质量专用投影保持():
     for tool in build_default_registry().all():
         prepared, _ = prepared_tool(tool.name)
         inspect(prepared.request.tools[0].parameters)
+        assert供应商联合分支有具体类型(prepared.request.tools[0].parameters)
         if tool.name == "submit_quality_report":
             assert prepared.codecs[tool.name].kind == "quality"
         if tool.name == "list_available_data":
             assert roundtrip(prepared.codecs[tool.name], {}) == EMPTY
+
+
+@pytest.mark.parametrize("operation", sorted(OPERATION_DEFINITIONS))
+def test全部操作收窄后的供应商联合分支有具体类型(operation):
+    registry = build_default_registry()
+    tools = [
+        registry.require(name).as_model_tool(
+            parameters=(
+                artifact_model_schema_for_operation(operation)
+                if name == "begin_artifact_output" else None
+            )
+        )
+        for name in sorted(OPERATION_DEFINITIONS[operation].allowedToolNames)
+    ]
+    request = ModelTurnRequest(
+        messages=[ModelMessage(role="user", content="操作方言回归")],
+        tools=tools, maxOutputTokens=256, policy=CREATIVE_HIGH,
+    )
+    original = deepcopy(request.model_dump())
+    prepared = prepare_deepseek_tools(request)
+    assert len(build_default_registry().all()) == 45
+    assert len(OPERATION_DEFINITIONS) == 12
+    if operation == "write_chapter":
+        assert len(prepared.request.tools) == 24
+    for tool in prepared.request.tools:
+        assert供应商联合分支有具体类型(tool.parameters, tool.name)
+    assert request.model_dump() == original
+
+
+def test展开nullable可选联合有效值集合与说明保持且不修改输入():
+    schema = {
+        "anyOf": [
+            {
+                "anyOf": [
+                    {"type": "integer", "minimum": 1, "maximum": 20, "description": "数量"},
+                    _compile_wire({"type": "null"}, {}).schema,
+                ],
+                "description": "显式值",
+            },
+            {
+                "type": "object",
+                "properties": {"_inkforgeState": {"type": "string", "enum": ["omitted"]}},
+                "required": ["_inkforgeState"],
+                "additionalProperties": False,
+            },
+        ],
+        "description": "外层说明",
+    }
+    original = deepcopy(schema)
+    with pytest.raises(ValueError, match="type"):
+        validate_deepseek_wire_dialect(schema)
+    normalized = normalize_deepseek_anyof(schema)
+    validate_deepseek_wire_dialect(normalized)
+    assert供应商联合分支有具体类型(normalized)
+    assert schema == original
+    assert normalized["description"] == "外层说明"
+    assert "显式值" in normalized["anyOf"][0]["description"]
+    assert "数量" in normalized["anyOf"][0]["description"]
+    for value in (1, 6, 20, NULL, EMPTY, OMITTED, 0, 21, None, False, "6", {}, {"value": 6}):
+        assert jsonschema_rs.is_valid(schema, value) == jsonschema_rs.is_valid(normalized, value)
+
+
+def test带类型和属性的条件对象联合不可按纯联合展开():
+    constrained = {
+        "type": "object",
+        "properties": {"choice": {"type": "integer", "enum": [1]}},
+        "required": ["choice"],
+        "additionalProperties": False,
+        "anyOf": [
+            {
+                "type": "object",
+                "properties": {"choice": {"type": "integer", "enum": [1, 2]}},
+                "required": ["choice"],
+                "additionalProperties": False,
+            }
+        ],
+    }
+    schema = {"anyOf": [constrained, _compile_wire({"type": "null"}, {}).schema]}
+    normalized = normalize_deepseek_anyof(schema)
+    assert normalized["anyOf"][0] == constrained
+    assert normalized["anyOf"][0]["anyOf"]
+    validate_deepseek_wire_dialect(normalized)
+    assert jsonschema_rs.is_valid(normalized, {"choice": 1})
+    assert not jsonschema_rs.is_valid(normalized, {"choice": 2})
+    for value in ({"choice": 1}, {"choice": 2}, {}, NULL, None):
+        assert jsonschema_rs.is_valid(schema, value) == jsonschema_rs.is_valid(normalized, value)
+
+
+def test无类型联合携带额外约束不得通过展开丢失限制():
+    constrained = {
+        "anyOf": [{"type": "integer", "minimum": 1}, {"type": "string"}],
+        "enum": [1, "唯一"],
+    }
+    schema = {"anyOf": [constrained, _compile_wire({"type": "null"}, {}).schema]}
+    normalized = normalize_deepseek_anyof(schema)
+    assert normalized["anyOf"][0] == constrained
+    assert not jsonschema_rs.is_valid(normalized, 2)
+    with pytest.raises(ValueError, match="type"):
+        validate_deepseek_wire_dialect(normalized)
+
+
+@pytest.mark.parametrize(
+    "invalid_type", ["anyOf", "null", "未知类型", "", None, ["string", "null"]]
+)
+def test供应商联合分支拒绝伪类型及不支持类型并定位字段(invalid_type):
+    schema = {
+        "type": "object",
+        "properties": {"count": {"anyOf": [{"type": invalid_type}, {"type": "integer"}]}},
+        "required": ["count"],
+        "additionalProperties": False,
+    }
+    with pytest.raises(ValueError, match=r"\$/properties/count/anyOf/0"):
+        validate_deepseek_wire_dialect(schema)
+
+
+@pytest.mark.parametrize(
+    "allowed_type", ["object", "string", "number", "integer", "boolean", "array"]
+)
+def test供应商联合分支允许明确支持的六种类型(allowed_type):
+    validate_deepseek_wire_dialect({"anyOf": [{"type": allowed_type}]})
 
 
 def test必填字段保留业务描述且非空正常例子符合实际wire():

@@ -16,6 +16,81 @@ _MISSING = object()
 _EMPTY_MARKER = {"_inkforgeEmpty": "empty"}
 
 
+def normalize_deepseek_anyof(schema: dict[str, Any]) -> dict[str, Any]:
+    """展开纯联合的嵌套分支；带类型或条件约束的联合仍保留完整交集。"""
+    result = deepcopy(schema)
+    for key in ("properties", "$defs", "definitions", "patternProperties"):
+        children = result.get(key)
+        if isinstance(children, dict):
+            result[key] = {
+                name: normalize_deepseek_anyof(child) if isinstance(child, dict) else child
+                for name, child in children.items()
+            }
+    for key in ("items", "additionalProperties", "not", "if", "then", "else"):
+        child = result.get(key)
+        if isinstance(child, dict):
+            result[key] = normalize_deepseek_anyof(child)
+    for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+        children = result.get(key)
+        if isinstance(children, list):
+            result[key] = [
+                normalize_deepseek_anyof(child) if isinstance(child, dict) else child
+                for child in children
+            ]
+    branches = result.get("anyOf")
+    if isinstance(branches, list):
+        flattened = []
+        for branch in branches:
+            if (
+                isinstance(branch, dict)
+                and set(branch) <= {"anyOf", "description"}
+                and isinstance(branch.get("anyOf"), list)
+            ):
+                for child in branch["anyOf"]:
+                    child = deepcopy(child)
+                    if isinstance(child, dict) and branch.get("description"):
+                        descriptions = [branch["description"], child.get("description")]
+                        child["description"] = "\n".join(
+                            dict.fromkeys(text for text in descriptions if text)
+                        )
+                    flattened.append(child)
+            else:
+                flattened.append(branch)
+        result["anyOf"] = flattened
+    return result
+
+
+def validate_deepseek_wire_dialect(schema: dict[str, Any]) -> None:
+    """供应商要求 anyOf 的直接分支有具体类型；普通联合容器无需伪造类型。"""
+    def visit(node: Any, path: str) -> None:
+        if not isinstance(node, dict):
+            return
+        branches = node.get("anyOf")
+        if isinstance(branches, list):
+            for index, branch in enumerate(branches):
+                if (
+                    not isinstance(branch, dict)
+                    or not isinstance(branch.get("type"), str)
+                    or branch["type"]
+                    not in {"object", "string", "number", "integer", "boolean", "array"}
+                ):
+                    raise ValueError(f"DeepSeek anyOf 直接分支缺少具体 type：{path}/anyOf/{index}")
+        for key in ("properties", "$defs", "definitions", "patternProperties"):
+            children = node.get(key)
+            if isinstance(children, dict):
+                for name, child in children.items():
+                    visit(child, f"{path}/{key}/{name}")
+        for key in ("items", "additionalProperties", "not", "if", "then", "else"):
+            visit(node.get(key), f"{path}/{key}")
+        for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+            children = node.get(key)
+            if isinstance(children, list):
+                for index, child in enumerate(children):
+                    visit(child, f"{path}/{key}/{index}")
+
+    visit(schema, "$")
+
+
 def _closed_object(properties: dict[str, Any]) -> dict[str, Any]:
     if not properties:
         raise ValueError("DeepSeek strict 对象必须至少声明一个属性")
@@ -675,6 +750,7 @@ def prepare_deepseek_tools(
             tools.append(tool)
             continue
         schema: dict[str, Any] = tool.parameters
+        codec: _WireCodec | None = None
         try:
             jsonschema_rs.validator_for(schema)
             if tool.name == _QUALITY_TOOL_NAME and "rewriteBrief" in schema.get("properties", {}):
@@ -683,13 +759,19 @@ def prepare_deepseek_tools(
                 codec = _compile_wire(schema, schema.get("$defs", {}))
                 if codec.schema.get("type") != "object":
                     codec = _wrapped(codec)
+                codec.schema = normalize_deepseek_anyof(codec.schema)
+            validate_deepseek_wire_dialect(codec.schema)
         except Exception as exc:
             exc.failureDiagnostics = [  # type: ignore[attr-defined]
                 capture_failure_diagnostic(
                     stage="tool.schema_prepare",
                     code="schema_prepare_failed",
                     error=exc,
-                    payload={"toolName": tool.name, "businessSchema": schema},
+                    payload={
+                        "toolName": tool.name,
+                        "businessSchema": schema,
+                        **({"wireSchema": codec.schema} if codec is not None else {}),
+                    },
                     secrets=secrets,
                 )
             ]
