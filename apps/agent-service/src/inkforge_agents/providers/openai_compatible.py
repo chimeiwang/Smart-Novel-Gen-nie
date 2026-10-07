@@ -9,6 +9,7 @@ from math import isfinite
 from typing import Any, Literal, cast
 from urllib.parse import unquote, urlparse
 
+import httpx
 import jsonschema_rs
 from langchain_core.messages import (
     AIMessage,
@@ -37,7 +38,12 @@ from .base import (
     ProviderTransportErrorCode,
 )
 from .deepseek_strict import prepare_deepseek_tools
-from .error_details import capture_provider_error_details
+from .error_details import (
+    FailureDiagnostic,
+    capture_failure_diagnostic,
+    capture_provider_error_details,
+    log_failure_diagnostic,
+)
 
 _DEEPSEEK_OFFICIAL_HOST = "api.deepseek.com"
 _DEEPSEEK_STANDARD_BASE_URL = "https://api.deepseek.com"
@@ -80,6 +86,15 @@ StructuredOutputRecoveryCode = Literal[
     "normalize_cinematography_unsigned_magnitudes",
 ]
 logger = logging.getLogger(__name__)
+
+
+def _safe_provider_log(level: str, message: str, *args: Any, **kwargs: Any) -> None:
+    """供应商诊断输出失败不得覆盖原响应或额外消耗模型调用。"""
+    try:
+        getattr(logger, level)(message, *args, **kwargs)
+    except Exception:  # noqa: S110
+        # 日志系统本身失败时无法再安全回写同一 sink，保留原执行结果。
+        pass
 
 
 def _is_deepseek_model(model_name: str) -> bool:
@@ -490,9 +505,8 @@ def _json_decode_keyword(error: ValueError) -> str:
         return "json_duplicate_key"
     if isinstance(error, _NonstandardJsonConstantError):
         return "json_constant"
-    if (
-        isinstance(error, json.JSONDecodeError)
-        and error.msg.startswith("Invalid control character")
+    if isinstance(error, json.JSONDecodeError) and error.msg.startswith(
+        "Invalid control character"
     ):
         return "json_control_character"
     return "json_syntax"
@@ -940,8 +954,7 @@ def _parse_and_validate_structured_output(
     except ValueError as error:
         keyword: str | None = _json_decode_keyword(error)
         repaired = (
-            _escape_json_string_controls(json_text)
-            if keyword == "json_control_character" else None
+            _escape_json_string_controls(json_text) if keyword == "json_control_character" else None
         )
         if repaired is not None:
             try:
@@ -1147,7 +1160,8 @@ def _log_structured_output_diagnostic(
 ) -> None:
     """日志只记录安全诊断、Schema 指纹和用量，不记录供应商正文。"""
 
-    logger.warning(
+    _safe_provider_log(
+        "warning",
         "供应商结构化输出未通过本地验收 code=%s pointer=%s keyword=%s",
         diagnostic.code,
         json.dumps(diagnostic.jsonPointer, ensure_ascii=True),
@@ -1177,7 +1191,8 @@ def _log_structured_output_recovery(
     """记录确定性解析恢复；只暴露固定恢复码与安全审计元数据。"""
 
     schema_audit = _structured_schema_audit_fields(structured_output)
-    logger.warning(
+    _safe_provider_log(
+        "warning",
         "供应商结构化输出已执行确定性恢复 code=%s schema=%s schema_sha256=%s",
         recovery_code,
         structured_output.name,
@@ -1208,7 +1223,8 @@ def _log_structured_output_audit(
 ) -> None:
     """每次供应商响应只记录安全元数据，成功和失败都不记录输入输出正文。"""
 
-    logger.info(
+    _safe_provider_log(
+        "info",
         "供应商结构化输出审计",
         extra={
             "provider_name": "openai_compatible",
@@ -1275,7 +1291,8 @@ def _log_structured_transport_failure(
     """传输失败只记录安全异常字段，禁止读取或输出 SDK 错误正文。"""
 
     provider_status = f"http_{error.statusCode}" if error.statusCode is not None else error.code
-    logger.warning(
+    _safe_provider_log(
+        "warning",
         "供应商结构化输出传输失败",
         extra={
             "provider_name": "openai_compatible",
@@ -1313,6 +1330,71 @@ def _capture_structured_transport_error(
     return safe_error
 
 
+def _structured_failure_diagnostic(
+    *,
+    payload: Any,
+    structured_request: ModelStructuredOutputRequest,
+    diagnostic: ModelStructuredOutputDiagnostic | None,
+    recovery_code: StructuredOutputRecoveryCode | None,
+    recovered_output: Any,
+    secrets: tuple[str, ...],
+) -> FailureDiagnostic:
+    """保存失败结构文本及全部校验错误；正常结构输出不新增副本。"""
+    try:
+        errors: list[str] = []
+        parse_error = None
+        texts = []
+        if isinstance(payload, Mapping):
+            for choice in payload.get("choices", []) or []:
+                if isinstance(choice, Mapping) and isinstance(choice.get("message"), Mapping):
+                    texts.append(choice["message"].get("content"))
+            for output in payload.get("output", []) or []:
+                if isinstance(output, Mapping) and output.get("type") == "message":
+                    for block in output.get("content", []) or []:
+                        if isinstance(block, Mapping) and block.get("type") == "output_text":
+                            texts.append(block.get("text"))
+        for text in texts:
+            if not isinstance(text, str):
+                continue
+            try:
+                parsed = json.loads(
+                    text,
+                    parse_constant=_reject_nonstandard_json_constant,
+                    object_pairs_hook=_reject_duplicate_json_keys,
+                )
+                errors.extend(
+                    str(item)
+                    for item in jsonschema_rs.validator_for(
+                        structured_request.jsonSchema
+                    ).iter_errors(parsed)
+                )
+            except (ValueError, TypeError) as exc:
+                parse_error = exc
+                errors.append(str(exc))
+        return capture_failure_diagnostic(
+            stage="structured_output",
+            code=diagnostic.code if diagnostic is not None else "recovered_json",
+            payload={
+                "providerResponse": payload,
+                "schema": structured_request.jsonSchema,
+                "diagnostic": diagnostic.model_dump() if diagnostic is not None else None,
+                "validationErrors": errors,
+                "recoveryCode": recovery_code,
+                "recoveredOutput": recovered_output if recovery_code is not None else None,
+            },
+            error=parse_error,
+            secrets=secrets,
+        )
+    except Exception as failure:
+        return capture_failure_diagnostic(
+            stage="structured_output",
+            code=diagnostic.code if diagnostic is not None else "recovered_json",
+            payload={"providerResponse": payload, "schema": structured_request.jsonSchema},
+            error=failure,
+            secrets=secrets,
+        )
+
+
 def _structured_turn_result(
     *,
     model_name: str,
@@ -1323,6 +1405,8 @@ def _structured_turn_result(
     finish_reason: ModelFinishReason,
     raw_finish_reason: str | None,
     recovery_code: StructuredOutputRecoveryCode | None = None,
+    failure_payload: Any = None,
+    failure_secrets: tuple[str, ...] = (),
 ) -> ModelTurnResult:
     """统一构造无可见正文、无工具调用的结构化结果。"""
 
@@ -1343,7 +1427,20 @@ def _structured_turn_result(
             diagnostic=diagnostic,
             usage=usage,
         )
+    failure_diagnostics = []
+    if diagnostic is not None or recovery_code is not None:
+        failure_diagnostics.append(
+            _structured_failure_diagnostic(
+                payload=failure_payload,
+                structured_request=structured_request,
+                diagnostic=diagnostic,
+                recovery_code=recovery_code,
+                recovered_output=structured_output,
+                secrets=failure_secrets,
+            )
+        )
     return ModelTurnResult(
+        failureDiagnostics=failure_diagnostics,
         content="",
         toolCalls=[],
         structuredOutput=structured_output,
@@ -1530,6 +1627,30 @@ class OpenAICompatibleProvider:
                     secrets.append(value)
         return tuple(dict.fromkeys(secrets))
 
+    def _log_sdk_failure(
+        self, error: Exception, client: object, *, secrets: tuple[str, ...] | None = None
+    ) -> None:
+        """SDK 成功 HTTP 的解析异常也保留失败证据，继续抛出原异常。"""
+        error_secrets = self._provider_error_secrets(client) if secrets is None else secrets
+        response = getattr(error, "response", None)
+        details = capture_provider_error_details(
+            response=response if isinstance(response, httpx.Response) else None,
+            error=error,
+            secrets=error_secrets,
+            include_success_body=True,
+        )
+        log_failure_diagnostic(
+            logger,
+            capture_failure_diagnostic(
+                stage="sdk_response",
+                code=type(error).__name__,
+                details=details,
+                secrets=error_secrets,
+            ),
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
         """报告当前实例可实际调用的结构化输出路由。"""
 
@@ -1548,6 +1669,7 @@ class OpenAICompatibleProvider:
 
         if self._responses_client is None:
             raise ValueError("responses_json_schema_v1 仅支持 DeepSeek 官方 deepseek-v4-flash")
+        client_for_diagnostics = self._responses_client
         wire_schema = _compile_responses_wire_schema(structured_output)
         call_options: dict[str, Any] = {
             "model": self.model_name,
@@ -1583,13 +1705,31 @@ class OpenAICompatibleProvider:
                 error=exc,
                 secrets=self._provider_error_secrets(self._responses_client),
             )
+        except Exception as exc:
+            self._log_sdk_failure(exc, client_for_diagnostics)
+            raise
         # 必须离开 except 后再抛出，确保原始 SDK 异常不会挂到 __context__。
         if transport_error is not None:
             raise transport_error
         if response is None:
             raise RuntimeError("供应商 Responses SDK 未返回响应")
         payload = cast(dict[str, Any], response.model_dump(mode="python"))
-        usage = _usage_from_payload(payload, responses=True)
+        try:
+            usage = _usage_from_payload(payload, responses=True)
+        except Exception as exc:
+            log_failure_diagnostic(
+                logger,
+                capture_failure_diagnostic(
+                    stage="usage",
+                    code="invalid_usage",
+                    payload={"usage": payload.get("usage")},
+                    error=exc,
+                    secrets=self._provider_error_secrets(client_for_diagnostics),
+                ),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+            raise
         status = payload.get("status")
         details = payload.get("incomplete_details")
         raw_incomplete_reason = details.get("reason") if isinstance(details, Mapping) else None
@@ -1631,6 +1771,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="response_incomplete",
@@ -1649,6 +1791,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="response_failed",
@@ -1663,6 +1807,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="unexpected_output",
@@ -1708,6 +1854,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="response_incomplete",
@@ -1722,6 +1870,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="unexpected_output",
@@ -1736,6 +1886,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="multiple_text_outputs",
@@ -1755,6 +1907,8 @@ class OpenAICompatibleProvider:
         return _structured_turn_result(
             model_name=self.model_name,
             request=request,
+            failure_payload=payload,
+            failure_secrets=self._provider_error_secrets(client_for_diagnostics),
             structured_output=parsed,
             diagnostic=diagnostic,
             usage=usage,
@@ -1772,6 +1926,7 @@ class OpenAICompatibleProvider:
     ) -> ModelTurnResult:
         """调用普通 Chat JSON Output；只保证 JSON 语法，Schema 仍由本地复验。"""
 
+        client_for_diagnostics = self._structured_chat_client
         if not any("json" in message.content.casefold() for message in request.messages):
             # DeepSeek 官方要求提示正文显式包含 json；缺失时可能持续输出空白直至耗尽额度。
             raise ValueError("chat_json_output_v1 的消息正文必须显式包含 json")
@@ -1801,13 +1956,31 @@ class OpenAICompatibleProvider:
                 error=exc,
                 secrets=self._provider_error_secrets(self._structured_chat_client),
             )
+        except Exception as exc:
+            self._log_sdk_failure(exc, client_for_diagnostics)
+            raise
         # Chat 路由同样要在捕获块外抛出，不能只依赖 `from None` 隐藏上下文。
         if transport_error is not None:
             raise transport_error
         if response is None:
             raise RuntimeError("供应商 Chat SDK 未返回响应")
         payload = cast(dict[str, Any], response.model_dump(mode="python"))
-        usage = _usage_from_payload(payload, responses=False)
+        try:
+            usage = _usage_from_payload(payload, responses=False)
+        except Exception as exc:
+            log_failure_diagnostic(
+                logger,
+                capture_failure_diagnostic(
+                    stage="usage",
+                    code="invalid_usage",
+                    payload={"usage": payload.get("usage")},
+                    error=exc,
+                    secrets=self._provider_error_secrets(client_for_diagnostics),
+                ),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+            raise
         raw_choices = payload.get("choices")
         choices = raw_choices if isinstance(raw_choices, list) else []
         audit_choice = choices[0] if len(choices) == 1 else None
@@ -1830,6 +2003,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="multiple_text_outputs",
@@ -1844,6 +2019,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="empty_output",
@@ -1862,6 +2039,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="response_incomplete",
@@ -1876,6 +2055,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="response_failed",
@@ -1890,6 +2071,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="unexpected_output",
@@ -1906,6 +2089,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="unexpected_output",
@@ -1921,6 +2106,8 @@ class OpenAICompatibleProvider:
             return _structured_turn_result(
                 model_name=self.model_name,
                 request=request,
+                failure_payload=payload,
+                failure_secrets=self._provider_error_secrets(client_for_diagnostics),
                 structured_output=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
                     code="unexpected_output",
@@ -1939,6 +2126,8 @@ class OpenAICompatibleProvider:
         return _structured_turn_result(
             model_name=self.model_name,
             request=request,
+            failure_payload=payload,
+            failure_secrets=self._provider_error_secrets(client_for_diagnostics),
             structured_output=parsed,
             diagnostic=diagnostic,
             usage=usage,
@@ -1962,7 +2151,15 @@ class OpenAICompatibleProvider:
                 validator=validator,
             )
         is_deepseek = _is_deepseek_model(self.model_name)
-        prepared = prepare_deepseek_tools(request) if is_deepseek else None
+        preparation_model = (
+            getattr(self, "_strict_model", None)
+            if is_deepseek and any(tool.strict is not False for tool in request.tools)
+            else self._model
+        )
+        preparation_secrets = self._provider_error_secrets(preparation_model)
+        prepared = (
+            prepare_deepseek_tools(request, secrets=preparation_secrets) if is_deepseek else None
+        )
         if prepared is not None:
             request = prepared.request
         use_deepseek_strict_channel = is_deepseek and any(tool.strict for tool in request.tools)
@@ -2053,32 +2250,58 @@ class OpenAICompatibleProvider:
                 await model.ainvoke(messages, **invocation_options),
             )
         except APITimeoutError as exc:
-            transport_error = _provider_transport_error(
-                exc, secrets=invocation_error_secrets
-            )
+            transport_error = _provider_transport_error(exc, secrets=invocation_error_secrets)
         except (APIStatusError, APIConnectionError) as exc:
-            transport_error = _provider_transport_error(
-                exc, secrets=invocation_error_secrets
-            )
+            transport_error = _provider_transport_error(exc, secrets=invocation_error_secrets)
+        except Exception as exc:
+            self._log_sdk_failure(exc, model, secrets=invocation_error_secrets)
+            raise
         # 在捕获块外抛出，完整详情只保存在独立属性，避免原始 SDK 异常进入公开异常链。
         if transport_error is not None:
             raise transport_error
         if response is None:
             raise RuntimeError("供应商 Chat SDK 未返回响应")
         if not isinstance(response.content, str):
+            log_failure_diagnostic(
+                logger,
+                capture_failure_diagnostic(
+                    stage="response_content",
+                    code="non_text_content",
+                    payload=response.content,
+                    secrets=invocation_error_secrets,
+                ),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
             raise ValueError("模型返回了不支持的非文本可见内容")
 
         usage: Mapping[str, Any] = response.usage_metadata or {}
-        input_details = usage.get("input_token_details") or {}
-        prompt_tokens = int(usage.get("input_tokens", 0))
-        completion_tokens = int(usage.get("output_tokens", 0))
-        total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
-        cached_tokens = int(input_details.get("cache_read", 0))
+        try:
+            input_details = usage.get("input_token_details") or {}
+            prompt_tokens = int(usage.get("input_tokens", 0))
+            completion_tokens = int(usage.get("output_tokens", 0))
+            total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
+            cached_tokens = int(input_details.get("cache_read", 0))
+        except Exception as exc:
+            log_failure_diagnostic(
+                logger,
+                capture_failure_diagnostic(
+                    stage="usage",
+                    code="invalid_usage",
+                    payload={"usage": usage},
+                    error=exc,
+                    secrets=invocation_error_secrets,
+                ),
+                provider=self.provider_name,
+                model=self.model_name,
+            )
+            raise
         provider_finish_reason = response.response_metadata.get("finish_reason")
         finish_reason = normalize_finish_reason(provider_finish_reason)
         request_tools_by_name = {tool.name: tool for tool in request.tools}
         tool_calls: list[ModelToolCall] = []
         strict_schema_violation_names: list[str] = []
+        failure_diagnostics: list[FailureDiagnostic] = []
         for parsed_tool_call in response.tool_calls:
             tool_name = str(parsed_tool_call["name"])
             arguments = parsed_tool_call.get("args", {})
@@ -2087,10 +2310,30 @@ class OpenAICompatibleProvider:
                 try:
                     # LangChain 解析成功只证明 JSON 可读；进入业务层前仍以本轮原 Schema 为准。
                     jsonschema_rs.validate(requested_tool.parameters, arguments)
-                except ValueError:
+                except ValueError as exc:
+                    failure_diagnostics.append(
+                        capture_failure_diagnostic(
+                            stage="tool_wire_schema",
+                            code="provider_strict_schema_violation",
+                            payload={
+                                "toolName": tool_name,
+                                "arguments": arguments,
+                                "schema": requested_tool.parameters,
+                                "validationErrors": [
+                                    str(item)
+                                    for item in jsonschema_rs.validator_for(
+                                        requested_tool.parameters
+                                    ).iter_errors(arguments)
+                                ],
+                            },
+                            error=exc,
+                            secrets=invocation_error_secrets,
+                        )
+                    )
                     schema_sha256 = _schema_sha256(requested_tool.parameters)
                     strict_schema_violation_names.append(tool_name)
-                    logger.warning(
+                    _safe_provider_log(
+                        "warning",
                         "供应商 strict 工具参数未通过本地 Schema 复验",
                         extra={
                             "model_name": self.model_name,
@@ -2124,11 +2367,37 @@ class OpenAICompatibleProvider:
             tool_calls.append(recovered_call)
             recovered_codes.append("append_container_closers")
             recovered_container_counts.append(appended_count)
+            failure_diagnostics.append(
+                capture_failure_diagnostic(
+                    stage="tool_json_recovery",
+                    code="append_container_closers",
+                    payload={
+                        "invalidToolCalls": response.invalid_tool_calls,
+                        "recoveredCall": recovered_call,
+                        "appendedCount": appended_count,
+                        "schema": request_tools_by_name[recovered_call.name].parameters,
+                    },
+                    secrets=invocation_error_secrets,
+                )
+            )
             invalid_tool_calls = []
         allowed_tool_names = {tool.name for tool in request.tools}
         invalid_tool_call_names: list[str] = []
         for invalid_tool_call in invalid_tool_calls:
             raw_name = invalid_tool_call.get("name")
+            failure_diagnostics.append(
+                capture_failure_diagnostic(
+                    stage="tool_json",
+                    code=_invalid_tool_call_code(invalid_tool_call),
+                    payload={
+                        "toolCall": invalid_tool_call,
+                        "schema": request_tools_by_name[raw_name].parameters
+                        if isinstance(raw_name, str) and raw_name in request_tools_by_name
+                        else None,
+                    },
+                    secrets=invocation_error_secrets,
+                )
+            )
             invalid_tool_call_names.append(
                 raw_name
                 if isinstance(raw_name, str) and raw_name in allowed_tool_names
@@ -2146,6 +2415,7 @@ class OpenAICompatibleProvider:
             # LangChain 已丢失原始 JSON 字符串；不为诊断重新序列化参数正文。
             invalid_tool_call_argument_character_counts.append(0)
         result = ModelTurnResult(
+            failureDiagnostics=failure_diagnostics,
             content=response.content,
             toolCalls=tool_calls,
             invalidToolCallCount=(len(invalid_tool_calls) + len(strict_schema_violation_names)),

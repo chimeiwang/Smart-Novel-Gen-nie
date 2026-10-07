@@ -600,10 +600,7 @@ async def test_consumer_treats_non_cancelled_heartbeat_lease_loss_as_known_condi
     )
     run = asyncio.create_task(consumer.run_once())
     await asyncio.wait_for(started.wait(), timeout=1)
-    assert (
-        await queue.recover_expired(now=datetime.now(UTC) + timedelta(seconds=1))
-        == 1
-    )
+    assert await queue.recover_expired(now=datetime.now(UTC) + timedelta(seconds=1)) == 1
 
     try:
         assert await asyncio.wait_for(run, timeout=1) is True
@@ -737,3 +734,33 @@ async def test_consumer_propagates_persistent_infrastructure_failure() -> None:
         await asyncio.wait_for(consumer.run(), timeout=0.05)
 
     assert queue.calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken_helper", ["capture_failure_diagnostic", "log_failure_diagnostic"])
+async def test_队列诊断故障仍按原显式决定重试并在额度耗尽后终止(monkeypatch, broken_helper):
+    import inkforge_agents.queue.consumer as consumer_module
+
+    def broken_log(*args, **kwargs):
+        raise OSError("诊断日志设备不可用")
+
+    monkeypatch.setattr(consumer_module, broken_helper, broken_log)
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue-log-fault")
+    await queue.enqueue(job("retry-log-fault"))
+    attempts = 0
+
+    class RetryableFailure(RuntimeError):
+        retryable = True
+
+    async def handler(current):
+        nonlocal attempts
+        attempts += 1
+        raise RetryableFailure("原可重试任务错误")
+
+    consumer = QueueConsumer(queue, {"writing": handler}, max_attempts=2, retry_delay=timedelta(0))
+    assert await consumer.run_once() is True
+    assert await queue.status("retry-log-fault") == "queued"
+    assert attempts == 1
+    assert await consumer.run_once() is True
+    assert await queue.status("retry-log-fault") == "failed"
+    assert attempts == 2

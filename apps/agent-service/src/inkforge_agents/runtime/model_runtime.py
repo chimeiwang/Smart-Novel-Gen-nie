@@ -31,7 +31,13 @@ from ..providers.embeddings import (
     EmbeddingResult,
     ExecutionEmbeddingProvider,
 )
-from ..providers.error_details import ProviderErrorDetails, capture_provider_error_details
+from ..providers.error_details import (
+    FailureDiagnostic,
+    ProviderErrorDetails,
+    capture_failure_diagnostic,
+    capture_provider_error_details,
+    log_failure_diagnostic,
+)
 from ..providers.video_responses import (
     ExecutionResponsesProvider,
     VideoResponsesIdentity,
@@ -111,10 +117,7 @@ class _LaneAwareModelLimiter:
         # creative/batch 在无竞争 lane 时可以借满；一旦 interactive 到达，
         # 借槽不抢占正在执行的调用，但下一个释放槽必须先归还。
         interactive = self._oldest_eligible("interactive")
-        lower_lane_active = (
-            self._active_by_lane["creative"]
-            + self._active_by_lane["batch_media"]
-        )
+        lower_lane_active = self._active_by_lane["creative"] + self._active_by_lane["batch_media"]
         if (
             interactive is not None
             and self._active_by_lane["interactive"] == 0
@@ -130,16 +133,12 @@ class _LaneAwareModelLimiter:
 
     def _oldest_eligible(self, lane: ModelLane) -> _LaneWaiter | None:
         eligible = [
-            waiter
-            for waiter in self._waiters
-            if waiter.lane == lane and self._eligible(waiter)
+            waiter for waiter in self._waiters if waiter.lane == lane and self._eligible(waiter)
         ]
         return min(eligible, key=lambda value: value.sequence, default=None)
 
     def _eligible(self, waiter: _LaneWaiter) -> bool:
-        interactive_waiting = any(
-            value.lane == "interactive" for value in self._waiters
-        )
+        interactive_waiting = any(value.lane == "interactive" for value in self._waiters)
         foreground_waiting = any(
             value.lane in {"interactive", "creative"} for value in self._waiters
         )
@@ -214,6 +213,10 @@ class ModelCallFailureLogRecord(BaseModel):
     structuredRoute: ModelStructuredOutputRoute | None = None
     requestedMaxOutputTokens: int
     providerErrorDetails: ProviderErrorDetails | None = None
+    failureDiagnostics: list[FailureDiagnostic] = Field(default_factory=list)
+    diagnosticOnly: bool = False
+    providerResponseId: str | None = None
+    billingRequestId: str | None = None
 
 
 class BillingPort(Protocol):
@@ -328,8 +331,102 @@ class ModelRuntime:
         lane: ModelLane = "interactive",
         reviewer: bool = False,
     ) -> ModelTurnResult:
-        async with self._limiter.acquire(lane, reviewer=reviewer):
-            return await self._run_turn_limited(request, context=context)
+        try:
+            async with self._limiter.acquire(lane, reviewer=reviewer):
+                return await self._run_turn_limited(request, context=context)
+        except ModelRuntimeStageError:
+            raise
+        except Exception as exc:
+            self._record_stage_failure("runtime", "MODEL_RUNTIME_FAILED", exc, context)
+            raise
+
+    def record_failure_diagnostic(
+        self,
+        diagnostic: FailureDiagnostic,
+        context: ModelCallContext | None = None,
+        *,
+        provider_response_id: str | None = None,
+        billing_request_id: str | None = None,
+    ) -> None:
+        """日志专用诊断同时交给服务日志及 V1 帧正文，设备故障不改变执行结果。"""
+        with suppress(Exception):
+            log_failure_diagnostic(
+                logger,
+                diagnostic,
+                task_id=context.taskId if context is not None else None,
+                run_id=context.runId if context is not None else None,
+                agent_id=context.agentId if context is not None else None,
+                provider=self.provider_name,
+                model=self.model_name,
+                provider_response_id=provider_response_id,
+                billing_request_id=billing_request_id,
+            )
+        callback = getattr(self._observer, "record_model_failure", None)
+        if context is not None and callable(callback):
+            try:
+                callback(
+                    ModelCallFailureLogRecord(
+                        context=context,
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        failureCode=diagnostic.code,
+                        exceptionType="FailureDiagnostic",
+                        elapsedMs=0,
+                        messageCount=0,
+                        toolCount=0,
+                        requestedMaxOutputTokens=0,
+                        failureDiagnostics=[diagnostic],
+                        diagnosticOnly=True,
+                        providerResponseId=provider_response_id,
+                        billingRequestId=billing_request_id,
+                    )
+                )
+
+            except Exception as exc:
+                # 人工日志 sink 故障只交给服务日志，避免递归写入同一个坏设备。
+                with suppress(Exception):
+                    log_failure_diagnostic(
+                        logger,
+                        capture_failure_diagnostic(
+                            stage="log_sink", code="MODEL_FAILURE_LOG_WRITE_FAILED", error=exc
+                        ),
+                        task_id=context.taskId,
+                        run_id=context.runId,
+                        agent_id=context.agentId,
+                    )
+
+    def _record_stage_failure(
+        self,
+        stage: str,
+        code: str,
+        error: Exception,
+        context: ModelCallContext | None,
+        *,
+        payload: object = None,
+        secrets: tuple[str, ...] = (),
+    ) -> None:
+        with suppress(Exception):
+            self.record_failure_diagnostic(
+                capture_failure_diagnostic(
+                    stage=stage, code=code, error=error, payload=payload, secrets=secrets
+                ),
+                context,
+            )
+
+    def _record_result_diagnostics(
+        self,
+        result: ModelTurnResult,
+        context: ModelCallContext | None,
+        *,
+        billing_request_id: str | None = None,
+    ) -> None:
+        for diagnostic in getattr(result, "failureDiagnostics", []):
+            self.record_failure_diagnostic(
+                diagnostic,
+                context,
+                provider_response_id=result.providerResponseId,
+                billing_request_id=billing_request_id,
+            )
 
     async def run_execution_turn(
         self,
@@ -407,6 +504,7 @@ class ModelRuntime:
     ) -> ModelTurnResult:
         if not self._provider.billable or self._billing is None:
             result = await self._complete_provider(request, context=context)
+            self._record_result_diagnostics(result, context)
             self._record(context, request, result, billing_request_id=None)
             return result
         if context is None:
@@ -442,6 +540,7 @@ class ModelRuntime:
                 request_id,
             )
         except Exception as exc:
+            self._record_stage_failure("authorization", "MODEL_AUTHORIZATION_FAILED", exc, context)
             raise ModelRuntimeStageError(
                 "MODEL_AUTHORIZATION_FAILED",
                 "模型授权失败",
@@ -455,11 +554,38 @@ class ModelRuntime:
             or granted_max <= 0
             or granted_max > request.maxOutputTokens
         ):
-            raise RuntimeError("模型授权输出上限无效")
+            error = RuntimeError("模型授权输出上限无效")
+            self._record_stage_failure(
+                "grant_validation",
+                "MODEL_AUTHORIZATION_INVALID",
+                error,
+                context,
+                payload=authorization,
+                secrets=(grant_token,) if isinstance(grant_token, str) and grant_token else (),
+            )
+            raise error
         if not isinstance(grant_token, str) or not grant_token:
-            raise RuntimeError("模型授权缺少 grantToken")
+            error = RuntimeError("模型授权缺少 grantToken")
+            self._record_stage_failure(
+                "grant_validation",
+                "MODEL_AUTHORIZATION_INVALID",
+                error,
+                context,
+                payload=authorization,
+                secrets=(grant_token,) if isinstance(grant_token, str) and grant_token else (),
+            )
+            raise error
         if not isinstance(grant_request_id, str) or not grant_request_id:
-            raise RuntimeError("模型授权缺少 requestId")
+            error = RuntimeError("模型授权缺少 requestId")
+            self._record_stage_failure(
+                "grant_validation",
+                "MODEL_AUTHORIZATION_INVALID",
+                error,
+                context,
+                payload=authorization,
+                secrets=(grant_token,) if isinstance(grant_token, str) and grant_token else (),
+            )
+            raise error
 
         provider_request = (
             request
@@ -467,6 +593,7 @@ class ModelRuntime:
             else request.model_copy(update={"maxOutputTokens": granted_max})
         )
         result = await self._complete_provider(provider_request, context=context)
+        self._record_result_diagnostics(result, context, billing_request_id=grant_request_id)
         try:
             await self._billing.report(
                 context,
@@ -486,6 +613,17 @@ class ModelRuntime:
                 grant_request_id,
             )
         except Exception as exc:
+            self._record_stage_failure(
+                "usage_report",
+                "MODEL_USAGE_REPORT_FAILED",
+                exc,
+                context,
+                payload={
+                    "requestId": grant_request_id,
+                    "usage": result.usage,
+                },
+                secrets=(grant_token,),
+            )
             raise ModelRuntimeStageError(
                 "MODEL_USAGE_REPORT_FAILED",
                 "模型用量回报失败",
@@ -509,6 +647,8 @@ class ModelRuntime:
         try:
             return await self._provider.complete_turn(request)
         except Exception as exc:
+            for diagnostic in getattr(exc, "failureDiagnostics", []):
+                self.record_failure_diagnostic(diagnostic, context)
             record = None
             # 诊断序列化或日志设备故障不能改变原始错误及其重试决定。
             with suppress(Exception):
@@ -542,6 +682,22 @@ class ModelRuntime:
             ) from exc
 
     def _record(
+        self,
+        context: ModelCallContext | None,
+        request: ModelTurnRequest,
+        result: ModelTurnResult,
+        *,
+        billing_request_id: str | None,
+    ) -> None:
+        try:
+            self._record_unprotected(
+                context, request, result, billing_request_id=billing_request_id
+            )
+        except Exception as exc:
+            # 正常模型结果及已经成功的计费不能被人工日志设备故障改写。
+            self._record_stage_failure("log_sink", "MODEL_LOG_WRITE_FAILED", exc, context)
+
+    def _record_unprotected(
         self,
         context: ModelCallContext | None,
         request: ModelTurnRequest,

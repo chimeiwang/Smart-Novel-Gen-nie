@@ -2,6 +2,9 @@
 
 状态：日志补丁已提交发布，生产重试已捕获完整 HTTP 400 原因；见[发布与复现审计](../audits/2026-10-07-provider-error-details-release.md)。
 
+后续扩展：[完整失败诊断](2026-10-07-complete-failure-diagnostics.md)补齐 HTTP 成功但参数／响应无效、
+Embedding、Responses 与运行时失败。本规格关于不保存失败工具参数及不覆盖专用适配器的限制由该规格取代。
+
 ## 背景与授权
 
 2026-10-07 生产章节写作两次收到 DeepSeek HTTP 400。现有错误边界仅保存状态码、分类与请求 ID，

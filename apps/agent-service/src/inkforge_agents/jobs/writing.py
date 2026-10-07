@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
+from contextlib import suppress
 from typing import Any, Protocol, cast
 
 from inkforge_contracts.long_serial import (
@@ -17,10 +19,13 @@ from ..graph.snapshots import deserialize_snapshot, serialize_snapshot, to_types
 from ..graph.state import GraphState, create_initial_state
 from ..operations.contracts import CreativeOperation, CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
+from ..providers.error_details import capture_failure_diagnostic, log_failure_diagnostic
 from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
 from .workflow_log import WorkflowLogPort
+
+logger = logging.getLogger(__name__)
 
 
 class CoreClientPort(Protocol):
@@ -172,8 +177,14 @@ class WritingJobHandler:
             self._finish_log(job.runId, "已取消")
             raise
         except Exception as exc:
-            self._record_state(job.runId, "运行异常", {"错误": str(exc) or "智能体运行失败"})
-            self._finish_log(job.runId, "错误")
+            with suppress(Exception):
+                log_failure_diagnostic(logger, capture_failure_diagnostic(
+                    stage="writing_graph", code="WRITING_GRAPH_FAILED", error=exc,
+                ), task_id=job.taskId, run_id=job.runId, job_id=job.jobId)
+            with suppress(Exception):
+                self._record_state(job.runId, "运行异常", {"错误": str(exc) or "智能体运行失败"})
+            with suppress(Exception):
+                self._finish_log(job.runId, "错误")
             await self._ensure_active(resource)
             await self._core.fail(
                 resource,

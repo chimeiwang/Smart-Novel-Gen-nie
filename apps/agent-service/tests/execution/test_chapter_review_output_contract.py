@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 
+import fakeredis.aioredis
 import httpx
 import pytest
 from inkforge_agents.config import Settings
@@ -11,7 +12,9 @@ from inkforge_agents.execution.executor import (
     ExecutionCapabilityError,
     StatelessExecutionStepExecutor,
 )
+from inkforge_agents.execution.journal import RedisExecutionJournal
 from inkforge_agents.execution.registry import load_execution_registry
+from inkforge_agents.providers.base import ModelMessage
 from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_contracts.execution import ModelProfileRef, PromptProfileRef
@@ -52,9 +55,10 @@ def test_历史正文复审首次派发与恢复继续使用原v1提示词(role,
     outgoing = executor.build_model_request(request, resolved)
     assert resolved.profile.key == old_profile.key
     assert outgoing.messages[0].content == old_profile.prompt_profile.system_prompt
-    assert outgoing.messages[0].content != registry.prompt_profiles[
-        f"prompt.reviewer.chapter_draft_{role}.v2"
-    ].system_prompt
+    assert (
+        outgoing.messages[0].content
+        != registry.prompt_profiles[f"prompt.reviewer.chapter_draft_{role}.v2"].system_prompt
+    )
     assert model.requests == []
 
 
@@ -150,9 +154,19 @@ async def test_正文复审保持严格校验并记录实际失败路径(case, c
                 max_output_tokens=100_000,
             )
             resolved = executor.resolve(request, registry)
+            outgoing = executor.build_model_request(request, resolved)
+            prompt_marker = "原请求提示词不新增日志副本-83c7f9"
+            outgoing = outgoing.model_copy(
+                update={
+                    "messages": [
+                        *outgoing.messages,
+                        ModelMessage(role="user", content=prompt_marker),
+                    ],
+                }
+            )
             outcome = await executor.call_provider(
                 request,
-                executor.build_model_request(request, resolved),
+                outgoing,
                 begin_attempt=_one_attempt,
                 cancel_event=asyncio.Event(),
             )
@@ -176,5 +190,30 @@ async def test_正文复审保持严格校验并记录实际失败路径(case, c
         assert f"pointer={pointer} keyword={keyword}" in caplog.text
         assert outcome.result.content == ""
         assert outcome.result.structuredOutput is None
-    for secret in ("private-", finding["claim"], finding["suggestion"]):
-        assert secret not in caplog.text
+    # 完整失败内容按新授权进入服务诊断，成功内容仍不新增副本。
+    assert "private-api-secret" not in caplog.text
+    assert prompt_marker not in caplog.text
+    if case == "valid_issues":
+        assert finding["claim"] not in caplog.text
+        assert finding["suggestion"] not in caplog.text
+    else:
+        assert finding["claim"] in caplog.text
+        assert finding["suggestion"] in caplog.text
+        assert "完整失败诊断" in caplog.text
+        public = terminal.model_dump_json()
+        assert finding["claim"] not in public
+        assert finding["suggestion"] not in public
+        assert "failureDiagnostics" not in public
+        assert "responseBody" not in public
+        # 使用真实 journal 编码链验证：失败载荷没有混入持久终态。
+        redis = fakeredis.aioredis.FakeRedis()
+        journal = RedisExecutionJournal(redis, prefix="test:chapter-review-diagnostic")
+        await journal.accept(request, {"provider": "deepseek_v4"})
+        await journal.record_terminal(request, terminal)
+        stored = await redis.hgetall("test:chapter-review-diagnostic:" + request.stepId)
+        assert json.loads(stored[b"terminal_payload"]) == json.loads(public)
+        persisted = b"\n".join(stored.values()).decode()
+        assert finding["claim"] not in persisted
+        assert finding["suggestion"] not in persisted
+        assert "private-api-secret" not in persisted
+        assert "failureDiagnostics" not in persisted

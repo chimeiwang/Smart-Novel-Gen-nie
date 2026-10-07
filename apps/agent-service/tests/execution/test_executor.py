@@ -122,60 +122,105 @@ def _executor(model: RecordingModel) -> StatelessExecutionStepExecutor:
     ),
     [
         (
-            "empty_output", "content", "/private-field-secret/原小说正文",
-            "empty_output", "content", "",
+            "empty_output",
+            "content",
+            "/private-field-secret/原小说正文",
+            "empty_output",
+            "content",
+            "",
         ),
         (
-            "json_decode_error", "json", "/private-field-secret/原小说正文",
-            "json_decode_error", "json", "",
+            "json_decode_error",
+            "json",
+            "/private-field-secret/原小说正文",
+            "json_decode_error",
+            "json",
+            "",
         ),
         (
-            "json_decode_error", "json_control_character", "/private-field-secret/原小说正文",
-            "json_decode_error", "json_control_character", "",
+            "json_decode_error",
+            "json_control_character",
+            "/private-field-secret/原小说正文",
+            "json_decode_error",
+            "json_control_character",
+            "",
         ),
         (
-            "json_decode_error", "json_syntax", "/private-field-secret/原小说正文",
-            "json_decode_error", "json_syntax", "",
+            "json_decode_error",
+            "json_syntax",
+            "/private-field-secret/原小说正文",
+            "json_decode_error",
+            "json_syntax",
+            "",
         ),
         (
-            "json_decode_error", "json_duplicate_key", "/private-field-secret/原小说正文",
-            "json_decode_error", "json_duplicate_key", "",
+            "json_decode_error",
+            "json_duplicate_key",
+            "/private-field-secret/原小说正文",
+            "json_decode_error",
+            "json_duplicate_key",
+            "",
         ),
         (
-            "json_decode_error", "json_constant", "/private-field-secret/原小说正文",
-            "json_decode_error", "json_constant", "",
+            "json_decode_error",
+            "json_constant",
+            "/private-field-secret/原小说正文",
+            "json_decode_error",
+            "json_constant",
+            "",
         ),
         ("not_object", "type", "/private-field-secret/原小说正文", "not_object", "type", ""),
         (
-            "schema_violation", "additionalProperties", "/private-field-secret/原小说正文",
-            "schema_violation", "additionalProperties", "",
+            "schema_violation",
+            "additionalProperties",
+            "/private-field-secret/原小说正文",
+            "schema_violation",
+            "additionalProperties",
+            "",
         ),
         (
-            "schema_violation", "pattern", "/private-field-secret/原小说正文",
-            "schema_violation", "pattern", "",
+            "schema_violation",
+            "pattern",
+            "/private-field-secret/原小说正文",
+            "schema_violation",
+            "pattern",
+            "",
         ),
         ("schema_violation", "type", "/answer", "schema_violation", "type", "/answer"),
         (
-            "unexpected_output", "toolCalls", "/private-field-secret/原小说正文",
-            "unexpected_output", "toolCalls", "",
+            "unexpected_output",
+            "toolCalls",
+            "/private-field-secret/原小说正文",
+            "unexpected_output",
+            "toolCalls",
+            "",
         ),
         (
-            "schema_violation", "secret-provider-key", "/private-field-secret/原小说正文",
-            "schema_violation", "unknown", "",
+            "schema_violation",
+            "secret-provider-key",
+            "/private-field-secret/原小说正文",
+            "schema_violation",
+            "unknown",
+            "",
         ),
         (None, None, "", "missing_output", "content", ""),
     ],
 )
-async def test_结构化失败仅记录具名固定诊断且不改变终态或模型调用(
+async def test_结构化失败保留完整诊断且不改变终态或模型调用(
     code, keyword, json_pointer, expected_code, expected_keyword, expected_pointer, caplog
 ) -> None:
     registry = load_execution_registry(environment="test")
-    request = rehash_request(answer_question_request(registry).model_copy(update={
-        "input": {"userInstruction": "原小说正文 secret-input，请完整审阅"},
-    }))
+    request = rehash_request(
+        answer_question_request(registry).model_copy(
+            update={
+                "input": {"userInstruction": "原小说正文 secret-input，请完整审阅"},
+            }
+        )
+    )
     diagnostic = (
-        None if code is None else ModelStructuredOutputDiagnostic(
-            code=code, jsonPointer=json_pointer, keyword=keyword)
+        None
+        if code is None
+        else ModelStructuredOutputDiagnostic(code=code, jsonPointer=json_pointer, keyword=keyword)
     )
     result = ModelTurnResult(
         content="" if diagnostic is not None else "供应商私密正文 secret-provider-response",
@@ -208,18 +253,24 @@ async def test_结构化失败仅记录具名固定诊断且不改变终态或�
     assert terminal.usage.inputTokens == 100
     assert terminal.usage.completionTokens == 20
     assert len(model.requests) == 1
-    assert terminal.resultHash == canonical_execution_sha256({
-        "errorCategory": "protocol",
-        "errorCode": "MODEL_STRUCTURED_OUTPUT_INVALID",
-        "outcomeUnknown": False,
-        "retryable": False,
-        "resolvedModel": resolved.resolved_model.model_dump(mode="json", exclude_none=True),
-        "usage": terminal.usage.model_dump(mode="json", exclude_none=True),
-    })
-    records = [record for record in caplog.records
-               if record.name == "inkforge_agents.execution.executor"]
-    assert len(records) == 1
-    record = records[0]
+    assert terminal.resultHash == canonical_execution_sha256(
+        {
+            "errorCategory": "protocol",
+            "errorCode": "MODEL_STRUCTURED_OUTPUT_INVALID",
+            "outcomeUnknown": False,
+            "retryable": False,
+            "resolvedModel": resolved.resolved_model.model_dump(mode="json", exclude_none=True),
+            "usage": terminal.usage.model_dump(mode="json", exclude_none=True),
+        }
+    )
+    records = [
+        record for record in caplog.records if record.name == "inkforge_agents.execution.executor"
+    ]
+    record = next(
+        record
+        for record in records
+        if record.getMessage().startswith("V2 结构化输出未通过本地验收")
+    )
     assert record.levelno == logging.WARNING
     assert record.getMessage() == (
         "V2 结构化输出未通过本地验收 "
@@ -228,9 +279,14 @@ async def test_结构化失败仅记录具名固定诊断且不改变终态或�
         f"pointer={expected_pointer} keyword={expected_keyword}"
     )
     assert record.exc_info is None
-    for secret in ("secret", "原小说正文", "供应商私密正文", "private-field", "jsonPointer"):
-        assert secret not in caplog.text
-        assert secret not in repr(record.__dict__)
+    # 新授权允许失败输出字段与原始路径进服务日志，公共终态仍只有稳定分类。
+    assert "完整失败诊断" in caplog.text
+    assert "secret-input" not in caplog.text
+    if diagnostic is not None:
+        assert "jsonPointer" in caplog.text
+    else:
+        assert "供应商私密正文 secret-provider-response" in caplog.text
+    assert "secret-provider-response" not in terminal.model_dump_json()
 
 
 def test_结构化诊断路径只允许当前_schema字段和数组下标() -> None:
@@ -240,9 +296,10 @@ def test_结构化诊断路径只允许当前_schema字段和数组下标() -> N
     assert _safe_structured_output_pointer("/findings/0/candidatePatch", schema) == (
         "/findings/0/candidatePatch"
     )
-    assert _safe_structured_output_pointer(
-        "/findings/0/private-field-secret/原小说正文", schema
-    ) == "/findings/0"
+    assert (
+        _safe_structured_output_pointer("/findings/0/private-field-secret/原小说正文", schema)
+        == "/findings/0"
+    )
     assert _safe_structured_output_pointer("/private-field-secret/原小说正文", schema) == ""
 
 
@@ -262,30 +319,44 @@ async def test_真实DeepSeek适配到V2审阅恢复原字符且只记一次HTTP
         payload = json.loads(http_request.content)
         assert payload["response_format"] == {"type": "json_object"}
         assert payload["thinking"] == {"type": "disabled"}
-        return httpx.Response(200, json={
-            "id": "private-response-id",
-            "choices": [{"message": {"content": raw}, "finish_reason": "stop"}],
-            "usage": {
-                "prompt_tokens": 100, "prompt_cache_hit_tokens": 0,
-                "prompt_cache_miss_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
-                "completion_tokens_details": {"reasoning_tokens": 0},
+        return httpx.Response(
+            200,
+            json={
+                "id": "private-response-id",
+                "choices": [{"message": {"content": raw}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "prompt_cache_hit_tokens": 0,
+                    "prompt_cache_miss_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                    "completion_tokens_details": {"reasoning_tokens": 0},
+                },
             },
-        })
+        )
 
-    settings = Settings.model_validate({
-        "environment": "test", "model_provider": "openai_compatible",
-        "openai_compatibility_profile": "deepseek_v4", "openai_api_key": "private-api-secret",
-        "openai_base_url": "https://api.deepseek.com", "openai_model": "deepseek-v4-flash",
-    })
+    settings = Settings.model_validate(
+        {
+            "environment": "test",
+            "model_provider": "openai_compatible",
+            "openai_compatibility_profile": "deepseek_v4",
+            "openai_api_key": "private-api-secret",
+            "openai_base_url": "https://api.deepseek.com",
+            "openai_model": "deepseek-v4-flash",
+        }
+    )
     with caplog.at_level(logging.WARNING):
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
             provider = DeepSeekV4Provider(settings, client=http)
             executor = StatelessExecutionStepExecutor(
-                ModelRuntime(provider), max_output_tokens=20_000)
+                ModelRuntime(provider), max_output_tokens=20_000
+            )
             resolved = executor.resolve(request, registry)
             outcome = await executor.call_provider(
-                request, executor.build_model_request(request, resolved),
-                begin_attempt=_one_attempt, cancel_event=asyncio.Event(),
+                request,
+                executor.build_model_request(request, resolved),
+                begin_attempt=_one_attempt,
+                cancel_event=asyncio.Event(),
             )
             terminal = executor.terminal_from_outcome(request, resolved, outcome)
     assert request.budget.maxProtocolCorrections == 1
@@ -328,9 +399,9 @@ async def test_generation_uses_one_strict_call_and_passes_provider_idempotency_k
     assert terminal.resultKind == "output"
     assert terminal.output is not None
     assert terminal.output["replacement"] == "模拟选区替换文本"
-    assert terminal.output["contentSha256"] == hashlib.sha256(
-        "模拟选区替换文本".encode()
-    ).hexdigest()
+    assert (
+        terminal.output["contentSha256"] == hashlib.sha256("模拟选区替换文本".encode()).hexdigest()
+    )
     assert attempts == 1
     assert len(model.requests) == 1
     assert model.requests[0].requestIdempotencyKey == request.idempotencyKey
@@ -390,9 +461,7 @@ def test_answer_question_rejects_non_catalog_input_and_execution_identity() -> N
         executor.resolve(extra_input, registry)
 
     artifact_bound = rehash_request(
-        request.model_copy(
-            update={"artifactId": "artifact-1", "artifactRevision": 1}
-        )
+        request.model_copy(update={"artifactId": "artifact-1", "artifactRevision": 1})
     )
     with pytest.raises(ExecutionCapabilityError, match="不能绑定"):
         executor.resolve(artifact_bound, registry)
@@ -470,9 +539,13 @@ def test_unknown_operation_and_budget_drift_fail_before_provider() -> None:
         executor.resolve(drifted, registry)
 
     prompt = request.modelProfile.promptProfile.model_copy(update={"sha256": "0" * 64})
-    prompt_drift = rehash_request(request.model_copy(update={
-        "modelProfile": request.modelProfile.model_copy(update={"promptProfile": prompt})
-    }))
+    prompt_drift = rehash_request(
+        request.model_copy(
+            update={
+                "modelProfile": request.modelProfile.model_copy(update={"promptProfile": prompt})
+            }
+        )
+    )
     with pytest.raises(ExecutionCapabilityError, match="Prompt Profile"):
         executor.resolve(prompt_drift, registry)
 
@@ -1121,6 +1194,7 @@ async def test_provider_400_details_logged_without_changing_v2_terminal(
     resolved = executor.resolve(request, load_execution_registry(environment="test"))
     execution_logger = logging.getLogger("inkforge_agents.execution.executor")
     if sink_fails:
+
         def fail_log_sink(*args: object, **kwargs: object) -> None:
             del args, kwargs
             raise RuntimeError("测试日志写入失败")
@@ -1146,9 +1220,79 @@ async def test_provider_400_details_logged_without_changing_v2_terminal(
     assert api_key not in public_payload
     if not sink_fails:
         assert message in caplog.text
-        assert f"run_id={request.runId}" in caplog.text
-        assert f"step_id={request.stepId}" in caplog.text
-        assert "attempt=1" in caplog.text
-        assert "status_code=400" in caplog.text
-        assert "provider_request_id=req_v2_400" in caplog.text
+        assert request.runId in caplog.text
+        assert request.stepId in caplog.text
+        assert "attempt" in caplog.text
+        assert "statusCode" in caplog.text
+        assert "req_v2_400" in caplog.text
         assert api_key not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sink_fails", [False, True])
+async def test_V2未知异常完整诊断不进入终态或改变重试(caplog, monkeypatch, sink_fails):
+    reason = "未知执行异常完整原因" * 10000
+
+    class BrokenModel(RecordingModel):
+        async def run_execution_turn(self, model_request, *, before_provider, **kwargs):
+            await before_provider()
+            self.requests.append(model_request)
+            raise ValueError(reason)
+
+    model = BrokenModel(supports_idempotency=False)
+    executor = _executor(model)
+    request = execution_request()
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    if sink_fails:
+
+        def broken_sink(*args, **kwargs):
+            raise OSError("诊断设备故障")
+
+        monkeypatch.setattr(
+            logging.getLogger("inkforge_agents.execution.executor"), "warning", broken_sink
+        )
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_incrementing_attempts(),
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+    assert terminal.errorCode == "MODEL_OUTCOME_UNKNOWN"
+    assert terminal.outcomeUnknown is True
+    assert len(model.requests) == 1
+    assert reason not in terminal.model_dump_json()
+    if not sink_fails:
+        assert reason in caplog.text
+        assert request.runId in caplog.text
+        assert request.stepId in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_V2诊断采集函数故障不会覆盖原未知异常终态(monkeypatch):
+    import inkforge_agents.execution.executor as executor_module
+
+    def broken_capture(*args, **kwargs):
+        raise ValueError("诊断采集设备失败")
+
+    monkeypatch.setattr(executor_module, "capture_failure_diagnostic", broken_capture)
+
+    class BrokenModel(RecordingModel):
+        async def run_execution_turn(self, model_request, *, before_provider, **kwargs):
+            await before_provider()
+            self.requests.append(model_request)
+            raise ValueError("原供应商未知异常")
+
+    model = BrokenModel(supports_idempotency=False)
+    executor = _executor(model)
+    request = execution_request()
+    resolved = executor.resolve(request, load_execution_registry(environment="test"))
+    outcome = await executor.call_provider(
+        request,
+        executor.build_model_request(request, resolved),
+        begin_attempt=_incrementing_attempts(),
+        cancel_event=asyncio.Event(),
+    )
+    terminal = executor.terminal_from_outcome(request, resolved, outcome)
+    assert terminal.errorCode == "MODEL_OUTCOME_UNKNOWN"
+    assert len(model.requests) == 1

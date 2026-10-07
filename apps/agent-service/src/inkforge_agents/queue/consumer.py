@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from redis.exceptions import (
@@ -16,6 +17,7 @@ from redis.exceptions import (
     TimeoutError as RedisTimeoutError,
 )
 
+from ..providers.error_details import capture_failure_diagnostic, log_failure_diagnostic
 from .cancellation import JobCancelledError
 from .repository import JobKind, QueueClaim, QueueJob, RedisRunQueue
 
@@ -143,6 +145,10 @@ class QueueConsumer:
                 processed = await self.run_once(cycle_stop=cycle_stop)
                 infrastructure_failures = 0
             except Exception as exc:
+                with suppress(Exception):
+                    log_failure_diagnostic(logger, capture_failure_diagnostic(
+                        stage="queue_infrastructure", code="QUEUE_INFRASTRUCTURE_FAILED", error=exc,
+                    ))
                 if not _is_transient_infrastructure_error(exc):
                     self._mark_cycle_failed(cycle_stop)
                     raise
@@ -268,12 +274,21 @@ class QueueConsumer:
                 )
                 return True
             except _QueueHeartbeatInfrastructureError as exc:
+                with suppress(Exception):
+                    log_failure_diagnostic(logger, capture_failure_diagnostic(
+                        stage="queue_heartbeat", code="QUEUE_HEARTBEAT_FAILED", error=exc,
+                    ), task_id=claim.job.taskId, run_id=claim.job.runId, job_id=claim.job.jobId)
                 await self._queue.retry(claim, delay=self._retry_delay)
                 cause = exc.__cause__
                 if isinstance(cause, Exception):
                     raise cause from exc
                 raise
             except Exception as exc:
+                with suppress(Exception):
+                    log_failure_diagnostic(logger, capture_failure_diagnostic(
+                        stage="queue_job", code="QUEUE_JOB_FAILED", error=exc,
+                        payload={"attempts": claim.attempts, "jobKind": claim.job.kind},
+                    ), task_id=claim.job.taskId, run_id=claim.job.runId, job_id=claim.job.jobId)
                 retryable = _job_retry_decision(exc)
                 if retryable is None:
                     await self._queue.acknowledge(claim, status="failed")

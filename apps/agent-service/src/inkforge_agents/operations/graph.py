@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, Self, cast
 
@@ -20,6 +22,7 @@ from ..clients.core import CoreServiceError
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
+from ..providers.error_details import capture_failure_diagnostic, log_failure_diagnostic
 from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..runtime.execution import AgentExecutionMode
 from .artifact_contract import (
@@ -42,6 +45,19 @@ _PATCH_FAILURE_CODES = frozenset(
         "ARTIFACT_REVISION_CONFLICT",
     }
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _record_operation_failure(
+    state: GraphState, stage: str, error: Exception | None = None, payload: Any = None,
+) -> None:
+    """保留图层降级为待审核结果之前的错误，不改变草案或复审结论。"""
+    with suppress(Exception):
+        resource = state.get("runtimeContext", {}).get("runResource", {})
+        log_failure_diagnostic(logger, capture_failure_diagnostic(
+            stage=stage, code="OPERATION_DIAGNOSTIC", error=error, payload=payload,
+        ), task_id=state.get("taskId"), run_id=resource.get("runId"), job_id=resource.get("jobId"))
 
 
 class AgentExecutorPort(Protocol):
@@ -412,7 +428,8 @@ def build_operation_graph(
             )
         except JobCancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            _record_operation_failure(state, "review_worker", exc, {"reviewer": reviewer_id})
             review = ReviewResult(
                 reviewer=reviewer_id,
                 verdict="block",
@@ -423,6 +440,7 @@ def build_operation_graph(
             return {"reviewResults": [review.model_dump()]}
         event = _evaluation_event(result.get("controlEvents", []))
         if event is None:
+            _record_operation_failure(state, "review_missing_evaluation", payload=result)
             review = ReviewResult(
                 reviewer=reviewer_id,
                 verdict="block",
@@ -443,7 +461,8 @@ def build_operation_graph(
                         "iteration": state.get("artifactIteration", 0),
                     }
                 )
-            except (ValidationError, ValueError):
+            except (ValidationError, ValueError) as exc:
+                _record_operation_failure(state, "review_result_validation", exc, event)
                 review = ReviewResult(
                     reviewer=reviewer_id,
                     verdict="block",
@@ -500,16 +519,19 @@ def build_operation_graph(
                     raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
                 await dependencies.artifacts.patch(dict(state), artifact_id, patches)
             except PatchApplicationError as exc:
+                _record_operation_failure(state, "artifact_patch", exc, pending)
                 failure_code = (
                     exc.code
                     if exc.code in _PATCH_FAILURE_CODES
                     else "PATCH_ARTIFACT_UNSUPPORTED"
                 )
             except CoreServiceError as exc:
+                _record_operation_failure(state, "artifact_patch_core", exc, pending)
                 if exc.code != "ARTIFACT_REVISION_CONFLICT":
                     raise
                 failure_code = "ARTIFACT_REVISION_CONFLICT"
-            except (ValidationError, ValueError):
+            except (ValidationError, ValueError) as exc:
+                _record_operation_failure(state, "artifact_patch_validation", exc, pending)
                 failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
         if failure_code is not None:
             return {

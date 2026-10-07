@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Literal, Protocol, Self, cast
@@ -21,6 +22,11 @@ from .base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
+from .error_details import (
+    capture_failure_diagnostic,
+    capture_provider_error_details,
+    log_failure_diagnostic,
+)
 from .openai_compatible import (
     StructuredOutputRecoveryCode,
     _compile_responses_wire_schema,
@@ -30,6 +36,7 @@ from .openai_compatible import (
     _reject_duplicate_json_keys,
     _reject_nonstandard_json_constant,
     _schema_sha256,
+    _structured_failure_diagnostic,
 )
 
 _ENDPOINT = "https://api.deepseek.com/responses"
@@ -163,6 +170,9 @@ class ResponsesExecutionPort(Protocol):
     ) -> tuple[int, VideoResponsesResult]: ...
 
 
+logger = logging.getLogger(__name__)
+
+
 class DeepSeekVideoResponsesProvider:
     def __init__(self, settings: Settings, *, http: httpx.AsyncClient | None = None) -> None:
         if (
@@ -174,6 +184,7 @@ class DeepSeekVideoResponsesProvider:
             raise ValueError("视频 V2 Responses 只支持已配置密钥的官方 deepseek-v4-flash")
         self.identity = VideoResponsesIdentity()
         self._authorization = "Bearer " + settings.openai_api_key.get_secret_value()
+        self._error_secrets = (settings.openai_api_key.get_secret_value(),)
         self._owns_http = http is None
         # HTTPX 默认 transport 无重试；不使用 SDK、代理环境或重定向回退。
         self._http = (
@@ -185,6 +196,20 @@ class DeepSeekVideoResponsesProvider:
                 trust_env=False,
                 follow_redirects=False,
             )
+        )
+
+    def _log_provider_error(self, error: ProviderTransportError | ProviderProtocolError) -> None:
+        """独立 HTTP 路由记录完整失败详情，不依赖业务终态结果带回诊断。"""
+        log_failure_diagnostic(
+            logger,
+            capture_failure_diagnostic(
+                stage="transport" if isinstance(error, ProviderTransportError) else "response_json",
+                code=error.code,
+                details=error.details,
+                secrets=self._error_secrets,
+            ),
+            provider=self.identity.provider,
+            model=self.identity.model,
         )
 
     async def aclose(self) -> None:
@@ -219,39 +244,78 @@ class DeepSeekVideoResponsesProvider:
                 headers={"Authorization": self._authorization},
                 follow_redirects=False,
             )
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as exc:
             transport_error = ProviderTransportError(
-                code="timeout_error", statusCode=None, requestId=None
+                code="timeout_error",
+                statusCode=None,
+                requestId=None,
+                details=capture_provider_error_details(error=exc, secrets=self._error_secrets),
             )
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             transport_error = ProviderTransportError(
-                code="connection_error", statusCode=None, requestId=None
+                code="connection_error",
+                statusCode=None,
+                requestId=None,
+                details=capture_provider_error_details(error=exc, secrets=self._error_secrets),
             )
         # 离开 except 后再抛出，不挂载包含 URL、正文或密钥的底层异常上下文。
         if transport_error is not None:
+            self._log_provider_error(transport_error)
             raise transport_error
         if response is None:
             raise RuntimeError("视频 Responses 未返回响应")
         if not response.is_success:
-            raise ProviderTransportError(
-                code="http_error", statusCode=response.status_code, requestId=None
+            http_error = ProviderTransportError(
+                code="http_error",
+                statusCode=response.status_code,
+                requestId=None,
+                details=capture_provider_error_details(
+                    response=response, secrets=self._error_secrets
+                ),
             )
+            self._log_provider_error(http_error)
+            raise http_error
         invalid_json = False
+        json_error_details = None
         try:
             payload = json.loads(
                 response.content,
                 parse_constant=_reject_nonstandard_json_constant,
                 object_pairs_hook=_reject_duplicate_json_keys,
             )
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError) as exc:
+            json_error_details = capture_provider_error_details(
+                response=response,
+                error=exc,
+                secrets=self._error_secrets,
+                include_success_body=True,
+            )
             invalid_json = True
             payload = None
         if invalid_json:
-            raise ProviderProtocolError(
-                code="invalid_response_json", statusCode=response.status_code, requestId=None
+            json_error = ProviderProtocolError(
+                code="invalid_response_json",
+                statusCode=response.status_code,
+                requestId=None,
+                details=json_error_details,
             )
+            self._log_provider_error(json_error)
+            raise json_error
         envelope = payload if isinstance(payload, dict) else {}
         usage = _usage(envelope)
+        usage_errors = _usage_failure_reasons(envelope)
+        if usage_errors:
+            log_failure_diagnostic(
+                logger,
+                capture_failure_diagnostic(
+                    stage="responses_usage",
+                    code="invalid_usage",
+                    payload={"usage": envelope.get("usage"), "validationErrors": usage_errors},
+                    secrets=self._error_secrets,
+                ),
+                provider=self.identity.provider,
+                model=self.identity.model,
+            )
         response_id = envelope.get("id")
         provider_response_id = response_id if isinstance(response_id, str) and response_id else None
         local_schema_hash = _schema_sha256(request.structuredOutput.jsonSchema)
@@ -263,6 +327,22 @@ class DeepSeekVideoResponsesProvider:
             finish: ModelFinishReason = "unknown",
             raw: str = "response.completed",
         ) -> VideoResponsesResult:
+            log_failure_diagnostic(
+                logger,
+                capture_failure_diagnostic(
+                    stage="responses_output",
+                    code=code,
+                    payload={
+                        "providerResponse": payload,
+                        "schema": request.structuredOutput.jsonSchema,
+                        "wireSchema": wire_schema,
+                    },
+                    secrets=self._error_secrets,
+                ),
+                provider=self.identity.provider,
+                model=self.identity.model,
+                response_id=provider_response_id,
+            )
             return VideoResponsesResult(
                 structuredOutput=None,
                 diagnostic=ModelStructuredOutputDiagnostic(
@@ -330,6 +410,21 @@ class DeepSeekVideoResponsesProvider:
             structured_output=request.structuredOutput,
             validator=validator,
         )
+        if diagnostic is not None or recovery is not None:
+            log_failure_diagnostic(
+                logger,
+                _structured_failure_diagnostic(
+                    payload=payload,
+                    structured_request=request.structuredOutput,
+                    diagnostic=diagnostic,
+                    recovery_code=recovery,
+                    recovered_output=parsed,
+                    secrets=self._error_secrets,
+                ),
+                provider=self.identity.provider,
+                model=self.identity.model,
+                response_id=provider_response_id,
+            )
         return VideoResponsesResult(
             structuredOutput=cast(dict[str, JsonValue] | None, parsed),
             diagnostic=diagnostic,
@@ -401,3 +496,52 @@ def _usage(payload: Mapping[str, object]) -> VideoResponsesUsage:
         visibleOutputTokens=visible,
         totalTokens=total,
     )
+
+
+def _usage_failure_reasons(payload: Mapping[str, object]) -> list[str]:
+    """诊断仅说明被丢弃的用量事实，不补造 token 或改变原计费投影。"""
+    raw = payload.get("usage")
+    if not isinstance(raw, dict):
+        return ["usage 必须是对象，当前用量无法确认"]
+    errors = []
+    for name in ("input_tokens", "output_tokens", "total_tokens"):
+        if name not in raw:
+            errors.append(f"usage.{name} 缺失")
+        elif _counter(raw[name]) is None:
+            errors.append(f"usage.{name} 必须是非负整数且不能是布尔值")
+    input_tokens = _counter(raw.get("input_tokens"))
+    output_tokens = _counter(raw.get("output_tokens"))
+    total = _counter(raw.get("total_tokens"))
+    if input_tokens is not None and output_tokens is not None and total is not None:
+        if total != input_tokens + output_tokens:
+            errors.append("usage.total_tokens 与输入输出 token 不闭合")
+    cache_values = []
+    for section, names in (
+        ("input_tokens_details", ("cached_tokens", "cache_read")),
+        ("output_tokens_details", ("reasoning_tokens",)),
+    ):
+        details = raw.get(section)
+        if details is not None and not isinstance(details, dict):
+            errors.append(f"usage.{section} 必须是对象")
+        if isinstance(details, dict):
+            for name in names:
+                if name not in details:
+                    continue
+                value = _counter(details[name])
+                if value is None:
+                    errors.append(f"usage.{section}.{name} 必须是非负整数")
+                elif section == "input_tokens_details":
+                    cache_values.append(value)
+                elif output_tokens is not None and value > output_tokens:
+                    errors.append("usage.reasoning_tokens 超过 output_tokens")
+    if "prompt_cache_hit_tokens" in raw:
+        value = _counter(raw["prompt_cache_hit_tokens"])
+        if value is None:
+            errors.append("usage.prompt_cache_hit_tokens 必须是非负整数")
+        else:
+            cache_values.append(value)
+    if len(set(cache_values)) > 1:
+        errors.append("usage 的缓存命中字段互相冲突")
+    if input_tokens is not None and any(value > input_tokens for value in cache_values):
+        errors.append("usage 缓存命中 token 超过 input_tokens")
+    return errors

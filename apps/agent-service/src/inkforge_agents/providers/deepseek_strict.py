@@ -9,6 +9,7 @@ from typing import Any
 import jsonschema_rs
 
 from .base import ModelTool, ModelTurnRequest, ModelTurnResult
+from .error_details import capture_failure_diagnostic
 
 _MISSING = object()
 _EMPTY_MARKER = {"_inkforgeEmpty": "empty"}
@@ -311,27 +312,54 @@ class DeepSeekToolRequest:
     request: ModelTurnRequest
     originals: dict[str, ModelTool]
     codecs: dict[str, _WireCodec]
+    secrets: tuple[str, ...] = ()
 
     def decode_result(self, result: ModelTurnResult) -> ModelTurnResult:
         calls = []
         names = list(result.invalidToolCallNames)
+        diagnostics = list(result.failureDiagnostics)
         for call in result.toolCalls:
             codec = self.codecs.get(call.name)
             if codec is None:
                 calls.append(call)
                 continue
+            stage = "tool.wire_schema"
+            schema = codec.schema
+            value = call.arguments
             try:
                 jsonschema_rs.validate(codec.schema, call.arguments)
+                stage = "tool.codec_decode"
                 arguments = codec.decode(call.arguments)
+                stage = "tool.business_schema"
+                schema = self.originals[call.name].parameters
+                value = arguments
                 jsonschema_rs.validate(self.originals[call.name].parameters, arguments)
-            except (ValueError, TypeError, KeyError, IndexError, RecursionError):
+            except (ValueError, TypeError, KeyError, IndexError, RecursionError) as exc:
                 names.append(call.name)
+                diagnostics.append(
+                    capture_failure_diagnostic(
+                        stage=stage,
+                        code="provider_strict_schema_violation",
+                        error=exc,
+                        payload={
+                            "toolName": call.name,
+                            "callId": call.id,
+                            "arguments": call.arguments,
+                            "decodedArguments": value,
+                            "wireSchema": codec.schema,
+                            "businessSchema": self.originals[call.name].parameters,
+                            "validationErrors": schema_validation_errors(schema, value),
+                        },
+                        secrets=self.secrets,
+                    )
+                )
                 continue
             calls.append(call.model_copy(update={"arguments": arguments}))
         extra = len(names) - len(result.invalidToolCallNames)
         return result.model_copy(
             update={
                 "toolCalls": calls,
+                "failureDiagnostics": diagnostics,
                 "invalidToolCallCount": result.invalidToolCallCount + extra,
                 "invalidToolCallNames": names,
                 "invalidToolCallCodes": [
@@ -346,7 +374,11 @@ class DeepSeekToolRequest:
         )
 
 
-def prepare_deepseek_tools(request: ModelTurnRequest) -> DeepSeekToolRequest:
+def prepare_deepseek_tools(
+    request: ModelTurnRequest,
+    *,
+    secrets: tuple[str, ...] = (),
+) -> DeepSeekToolRequest:
     """统一解析默认值并构建可逆 wire；不修改业务请求或持久历史。"""
     enabled = [tool.strict is not False for tool in request.tools]
     if any(enabled) and not all(enabled):
@@ -359,13 +391,25 @@ def prepare_deepseek_tools(request: ModelTurnRequest) -> DeepSeekToolRequest:
             tools.append(tool)
             continue
         schema: dict[str, Any] = tool.parameters
-        jsonschema_rs.validator_for(schema)
-        if tool.name == _QUALITY_TOOL_NAME and "rewriteBrief" in schema.get("properties", {}):
-            codec = _WireCodec(_project_deepseek_quality_schema(schema), "quality")
-        else:
-            codec = _compile_wire(schema, schema.get("$defs", {}))
-            if codec.schema.get("type") != "object":
-                codec = _wrapped(codec)
+        try:
+            jsonschema_rs.validator_for(schema)
+            if tool.name == _QUALITY_TOOL_NAME and "rewriteBrief" in schema.get("properties", {}):
+                codec = _WireCodec(_project_deepseek_quality_schema(schema), "quality")
+            else:
+                codec = _compile_wire(schema, schema.get("$defs", {}))
+                if codec.schema.get("type") != "object":
+                    codec = _wrapped(codec)
+        except Exception as exc:
+            exc.failureDiagnostics = [  # type: ignore[attr-defined]
+                capture_failure_diagnostic(
+                    stage="tool.schema_prepare",
+                    code="schema_prepare_failed",
+                    error=exc,
+                    payload={"toolName": tool.name, "businessSchema": schema},
+                    secrets=secrets,
+                )
+            ]
+            raise
         codecs[tool.name] = codec
         tools.append(tool.model_copy(update={"parameters": codec.schema, "strict": True}))
     messages = []
@@ -374,13 +418,58 @@ def prepare_deepseek_tools(request: ModelTurnRequest) -> DeepSeekToolRequest:
         for call in message.tool_calls:
             history_codec = codecs.get(call.name)
             if history_codec is not None:
-                jsonschema_rs.validate(originals[call.name].parameters, call.arguments)
-                call = call.model_copy(update={"arguments": history_codec.encode(call.arguments)})
+                stage = "tool.history_business_schema"
+                try:
+                    jsonschema_rs.validate(originals[call.name].parameters, call.arguments)
+                    stage = "tool.history_encode"
+                    call = call.model_copy(
+                        update={"arguments": history_codec.encode(call.arguments)}
+                    )
+                except Exception as exc:
+                    exc.failureDiagnostics = [  # type: ignore[attr-defined]
+                        capture_failure_diagnostic(
+                            stage=stage,
+                            code="history_encode_failed",
+                            error=exc,
+                            payload={
+                                "toolName": call.name,
+                                "callId": call.id,
+                                "arguments": call.arguments,
+                                "wireSchema": history_codec.schema,
+                                "businessSchema": originals[call.name].parameters,
+                                "validationErrors": schema_validation_errors(
+                                    originals[call.name].parameters, call.arguments
+                                ),
+                            },
+                            secrets=secrets,
+                        )
+                    ]
+                    raise
             calls.append(call)
         messages.append(message.model_copy(update={"tool_calls": calls}))
     return DeepSeekToolRequest(
-        request.model_copy(update={"tools": tools, "messages": messages}), originals, codecs
+        request.model_copy(update={"tools": tools, "messages": messages}),
+        originals,
+        codecs,
+        secrets,
     )
+
+
+def schema_validation_errors(schema: dict[str, Any], value: Any) -> list[dict[str, Any]]:
+    """仅失败后枚举全部校验发现，不改变已有第一处异常及业务拒绝行为。"""
+    try:
+        return [
+            {
+                "message": error.message,
+                "verboseMessage": error.verbose_message,
+                "instancePath": list(error.instance_path),
+                "schemaPath": list(error.schema_path),
+                "kind": str(error.kind),
+            }
+            for error in jsonschema_rs.validator_for(schema).iter_errors(value)
+        ]
+    except Exception as exc:
+        return [{"captureFailure": type(exc).__name__}]
 
 
 _DEEPSEEK_STRICT_SCHEMA_KEYS = (

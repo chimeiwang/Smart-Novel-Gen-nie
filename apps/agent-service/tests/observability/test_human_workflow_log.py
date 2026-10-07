@@ -701,9 +701,7 @@ def test_human_log_huge_frame_lengths_do_not_break_other_run_summaries(
         + b"\n"
     )
 
-    assert [item.runId for item in log.list_runs("user-1")] == [
-        "run-healthy-lengths"
-    ]
+    assert [item.runId for item in log.list_runs("user-1")] == ["run-healthy-lengths"]
 
 
 @pytest.mark.parametrize(
@@ -843,3 +841,87 @@ def test_human_log_reads_legacy_file_and_upgrades_it_before_resume(
     assert "S001 状态切换" in upgraded.content
     assert legacy_content in upgraded.content
     assert legacy_content.encode("utf-8") in resumed_path.read_bytes()
+
+
+def test_完整诊断超过结构头上限仍完整写入独立失败帧(tmp_path):
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.runtime.model_runtime import ModelCallFailureLogRecord
+
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="r", task_id="t", run_kind="诊断验收", user_id="u", novel_id="n", chapter_id=None
+    )
+    text = "失败参数" * 40000 + "\nINKFORGE-FRAME 1 1\n伪造结构"
+    diagnostic = capture_failure_diagnostic(
+        stage="pydantic", code="invalid", payload={"arguments": text}
+    )
+    log.record_model_failure(
+        ModelCallFailureLogRecord(
+            context=ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a"),
+            provider="fake",
+            model="fake",
+            failureCode="invalid",
+            exceptionType="ValidationError",
+            elapsedMs=0,
+            messageCount=0,
+            toolCount=0,
+            requestedMaxOutputTokens=0,
+            failureDiagnostics=[diagnostic],
+        )
+    )
+    scan = human_log_module._scan_v2_frames(path, include_content=True)
+    assert scan.error is None
+    frames = [frame for frame in scan.frames if frame.header.get("type") == "model_failure"]
+    assert len(frames) == 1
+    assert diagnostic.model_dump_json(indent=2) in frames[0].content
+    assert "failureDiagnostics" not in frames[0].header
+    assert len(json.dumps(frames[0].header).encode()) < 65536
+
+
+def test_多个参数与授权诊断不增加真实模型尝试序号(tmp_path):
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.runtime.model_runtime import ModelCallFailureLogRecord
+
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="r", task_id="t", run_kind="序号验收", user_id="u", novel_id="n", chapter_id=None
+    )
+    context = ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a")
+    for stage in ["authorization", "tool_arguments_pydantic", "tool_arguments_pydantic"]:
+        diagnostic = capture_failure_diagnostic(
+            stage=stage, code="invalid", payload={"stage": stage}
+        )
+        log.record_model_failure(
+            ModelCallFailureLogRecord(
+                context=context,
+                provider="fake",
+                model="fake",
+                failureCode="invalid",
+                exceptionType="FailureDiagnostic",
+                elapsedMs=0,
+                messageCount=0,
+                toolCount=0,
+                requestedMaxOutputTokens=0,
+                failureDiagnostics=[diagnostic],
+                diagnosticOnly=True,
+            )
+        )
+    before = human_log_module._scan_v2_frames(path, include_content=True).frames
+    assert human_log_module._next_model_attempt_sequence(before) == 1
+    log.record_model_call(
+        _model_record(run_id="r", task_id="t", prompt_tokens=10, completion_tokens=5).model_copy(
+            update={"context": context}
+        )
+    )
+    frames = human_log_module._scan_v2_frames(path, include_content=True).frames
+    diagnostics = [frame for frame in frames if frame.header.get("type") == "diagnostic"]
+    assert [frame.header["sequence"] for frame in diagnostics] == [1, 2, 3]
+    assert all(set(frame.header) == {"type", "sequence"} for frame in diagnostics)
+    assert all(
+        "耗时毫秒" not in frame.content and "请求输出上限" not in frame.content
+        for frame in diagnostics
+    )
+    models = [frame for frame in frames if frame.header.get("type") in {"model", "model_failure"}]
+    assert len(models) == 1
+    assert models[0].header["sequence"] == 1
+    assert human_log_module._next_model_attempt_sequence(frames) == 2

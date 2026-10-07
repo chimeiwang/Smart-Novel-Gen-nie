@@ -479,3 +479,67 @@ def test_invalid_local_schema_is_rejected_before_provider_construction():
     value["structuredOutput"]["jsonSchema"] = {"type": "not-a-real-json-type"}
     with pytest.raises(ValueError):
         VideoResponsesRequest.model_validate(value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "incomplete", "completed"])
+async def test视频响应失败完整详情脱敏排除推理且维持用量(status, caplog):
+    import logging
+
+    text = '{"value":"失败类型test-only-key"}'
+    body = payload(status=status,
+        error={"message": "完整供应商错误" * 10000 + "test-only-key"},
+        incomplete_details={"reason": "max_output_tokens"})
+    body["output"][0]["content"][0]["text"] = text
+    body["output"].append({"type": "reasoning", "summary": "私密模型推理"})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, json=body))) as http:
+        with caplog.at_level(logging.WARNING):
+            result = await DeepSeekVideoResponsesProvider(settings(), http=http).complete_responses(
+                request())
+    assert result.diagnostic is not None
+    assert result.usage.inputTokens == 100
+    assert result.usage.totalTokens == 120
+    assert "完整供应商错误" * 10000 in caplog.text
+    assert "test-only-key" not in caplog.text
+    assert "私密模型推理" not in caplog.text
+    assert "schema" in caplog.text
+    assert not hasattr(result, "failureDiagnostics")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("usage_changes", [
+    {"total_tokens": 999},
+    {"input_tokens_details": {"cached_tokens": 200}},
+    {"output_tokens_details": {"reasoning_tokens": 99}},
+])
+async def test视频用量冲突保存原字段和具体原因不改变用量投影(usage_changes, caplog):
+    import logging
+
+    body = payload()
+    body["usage"].update(usage_changes)
+    expected = provider_module._usage(body)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200,
+        json=body))) as http:
+        with caplog.at_level(logging.WARNING):
+            result = await DeepSeekVideoResponsesProvider(settings(), http=http).complete_responses(
+                request())
+    assert result.usage == expected
+    assert result.structuredOutput == {"value": 2}
+    assert "responses_usage" in caplog.text
+    assert "validationErrors" in caplog.text
+    assert "正文" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test视频诊断sink故障不改变结构化失败和计费(monkeypatch):
+    def reject_sink(*args, **kwargs):
+        raise RuntimeError("日志sink失败")
+
+    monkeypatch.setattr(provider_module.logger, "warning", reject_sink)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200,
+        json=payload(status="failed", error={"message": "完整拒绝原因"})))) as http:
+        result = await DeepSeekVideoResponsesProvider(settings(), http=http).complete_responses(
+            request())
+    assert result.diagnostic.code == "response_failed"
+    assert result.usage.totalTokens == 120

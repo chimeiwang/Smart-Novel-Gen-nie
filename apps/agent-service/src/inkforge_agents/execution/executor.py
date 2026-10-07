@@ -75,6 +75,7 @@ from ..providers.base import (
     ProviderTransportError,
 )
 from ..providers.embeddings import EmbeddingExecutionPort, EmbeddingRequest, EmbeddingResult
+from ..providers.error_details import capture_failure_diagnostic, log_failure_diagnostic
 from ..providers.video_responses import (
     ResponsesExecutionPort,
     VideoResponsesRequest,
@@ -238,6 +239,7 @@ def _safe_structured_output_pointer(
         current = next_nodes
 
     return "".join(f"/{escape_segment(segment)}" for segment in safe_segments)
+
 
 ExecutionPurpose = Literal["generation", "review", "resolve_intent", "protocol_correction"]
 FailureCategory = Literal[
@@ -709,6 +711,17 @@ class StatelessExecutionStepExecutor:
                 supports_request_idempotency=resolved.supportsRequestIdempotency,
             )
         except (ValueError, KeyError, StopIteration, ExecutionRegistryError) as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_resolve_video",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=exc,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             raise ExecutionCapabilityError(
                 "视频 Step 未被精确冻结阶段或 Responses 部署授权"
             ) from exc
@@ -777,6 +790,17 @@ class StatelessExecutionStepExecutor:
                 supports_request_idempotency=False,
             )
         except (ValueError, KeyError, ExecutionRegistryError) as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_resolve_embedding",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=exc,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             raise ExecutionCapabilityError("索引 Step 未被精确冻结契约或配置授权") from exc
         return ResolvedExecutionStep(
             "generation",
@@ -820,6 +844,17 @@ class StatelessExecutionStepExecutor:
                 _validate_output_schema_ref(request, schema)
                 _validate_step_budget(request, budget)
         except (ValueError, ExecutionRegistryError) as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_resolve_quality",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=exc,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             raise ExecutionCapabilityError("质量 Step 未被精确冻结契约授权") from exc
         return self._resolve_retained_request(request, registry)
 
@@ -1257,7 +1292,18 @@ class StatelessExecutionStepExecutor:
                         failure_category="protocol",
                         failure_code="MODEL_PROVIDER_PROTOCOL_INVALID",
                     )
-                except TimeoutError:
+                except TimeoutError as _diagnostic_error:
+                    with suppress(Exception):
+                        _log_execution_failure(
+                            request,
+                            stage="call_provider",
+                            code="EXECUTION_VALIDATION_FAILED",
+                            error=_diagnostic_error,
+                            payload={
+                                "input": request.input,
+                                "outputSchema": request.outputSchema.jsonSchema,
+                            },
+                        )
                     if (
                         supports_idempotency
                         and attempts > 0
@@ -1280,7 +1326,18 @@ class StatelessExecutionStepExecutor:
                         failure_code="MODEL_OUTCOME_UNKNOWN",
                         outcome_unknown=True,
                     )
-                except Exception:
+                except Exception as _diagnostic_error:
+                    with suppress(Exception):
+                        _log_execution_failure(
+                            request,
+                            stage="call_provider",
+                            code="EXECUTION_VALIDATION_FAILED",
+                            error=_diagnostic_error,
+                            payload={
+                                "input": request.input,
+                                "outputSchema": request.outputSchema.jsonSchema,
+                            },
+                        )
                     if attempts > 0:
                         return ProviderCallOutcome(
                             result=None,
@@ -1302,7 +1359,18 @@ class StatelessExecutionStepExecutor:
                     provider_attempts=attempts,
                     elapsed_millis=elapsed_millis(),
                 )
-        except TimeoutError:
+        except TimeoutError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="call_provider",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return ProviderCallOutcome(
                 result=None,
                 provider_attempts=attempts,
@@ -1321,7 +1389,43 @@ class StatelessExecutionStepExecutor:
         cancel_request_id: str | None = None,
         completed_at: datetime | None = None,
     ) -> ExecutionStepResult | ExecutionStepFailure:
+        try:
+            return self._terminal_from_outcome(
+                request,
+                resolved,
+                outcome,
+                cancel_request_id=cancel_request_id,
+                completed_at=completed_at,
+            )
+        except Exception as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="terminal_materialization",
+                    code="EXECUTION_INTERNAL_ERROR",
+                    error=exc,
+                    payload={
+                        "result": outcome.result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
+            raise
+
+    def _terminal_from_outcome(
+        self,
+        request: ExecutionStepRequest,
+        resolved: ResolvedExecutionStep,
+        outcome: ProviderCallOutcome,
+        *,
+        cancel_request_id: str | None = None,
+        completed_at: datetime | None = None,
+    ) -> ExecutionStepResult | ExecutionStepFailure:
         now = completed_at or datetime.now(UTC)
+        for diagnostic in getattr(outcome.result, "failureDiagnostics", []):
+            with suppress(Exception):
+                log_failure_diagnostic(
+                    _LOGGER, diagnostic, run_id=request.runId, step_id=request.stepId
+                )
         if cancel_request_id is not None or outcome.failure_category == "cancelled":
             usage = _usage(
                 outcome.result,
@@ -1390,6 +1494,16 @@ class StatelessExecutionStepExecutor:
         if request.workflow == "quality":
             failure = _validate_quality_provider_result(request, result, usage)
             if failure is not None:
+                with suppress(Exception):
+                    _log_execution_failure(
+                        request,
+                        stage="output_validation",
+                        code=failure[1],
+                        payload={
+                            "result": result,
+                            "outputSchema": request.outputSchema.jsonSchema,
+                        },
+                    )
                 return _failure(
                     request,
                     resolved.resolved_model,
@@ -1409,8 +1523,18 @@ class StatelessExecutionStepExecutor:
                 }
             )
         if request.workflow == "style":
-            failure = _validate_portrait_provider_result(result)
+            failure = _validate_portrait_provider_result(result, request=request)
             if failure is not None:
+                with suppress(Exception):
+                    _log_execution_failure(
+                        request,
+                        stage="output_validation",
+                        code=failure[1],
+                        payload={
+                            "result": result,
+                            "outputSchema": request.outputSchema.jsonSchema,
+                        },
+                    )
                 if _step_budget_exceeded(request, usage):
                     failure = ("validation", "STEP_BUDGET_EXCEEDED")
                 return _failure(
@@ -1425,6 +1549,16 @@ class StatelessExecutionStepExecutor:
             result = result.model_copy(update={"structuredOutput": {"content": result.content}})
         failure = _validate_provider_result(request, result, usage)
         if failure is not None:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="output_validation",
+                    code=failure[1],
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             if failure[1] == "MODEL_STRUCTURED_OUTPUT_INVALID":
                 diagnostic = result.structuredOutputDiagnostic
                 keyword = diagnostic.keyword if diagnostic is not None else "content"
@@ -1432,16 +1566,17 @@ class StatelessExecutionStepExecutor:
                     diagnostic.jsonPointer if diagnostic is not None else "",
                     request.outputSchema.jsonSchema,
                 )
-                _LOGGER.warning(
-                    "V2 结构化输出未通过本地验收 "
-                    "run_id=%s step_id=%s output_schema=%s code=%s pointer=%s keyword=%s",
-                    request.runId,
-                    request.stepId,
-                    request.outputSchema.name,
-                    diagnostic.code if diagnostic is not None else "missing_output",
-                    pointer,
-                    keyword if keyword in _STRUCTURED_DIAGNOSTIC_KEYWORDS else "unknown",
-                )
+                with suppress(Exception):
+                    _LOGGER.warning(
+                        "V2 结构化输出未通过本地验收 "
+                        "run_id=%s step_id=%s output_schema=%s code=%s pointer=%s keyword=%s",
+                        request.runId,
+                        request.stepId,
+                        request.outputSchema.name,
+                        diagnostic.code if diagnostic is not None else "missing_output",
+                        pointer,
+                        keyword if keyword in _STRUCTURED_DIAGNOSTIC_KEYWORDS else "unknown",
+                    )
             return _failure(
                 request,
                 resolved.resolved_model,
@@ -1488,7 +1623,18 @@ class StatelessExecutionStepExecutor:
         else:
             try:
                 evaluation = _evaluation(request, resolved, structured_output)
-            except (TypeError, ValueError, ValidationError):
+            except (TypeError, ValueError, ValidationError) as _diagnostic_error:
+                with suppress(Exception):
+                    _log_execution_failure(
+                        request,
+                        stage="terminal_from_outcome",
+                        code="EXECUTION_VALIDATION_FAILED",
+                        error=_diagnostic_error,
+                        payload={
+                            "input": request.input,
+                            "outputSchema": request.outputSchema.jsonSchema,
+                        },
+                    )
                 return _failure(
                     request,
                     resolved.resolved_model,
@@ -1627,9 +1773,7 @@ class StatelessExecutionStepExecutor:
             }.get(result.finishReason, "MODEL_FINISH_REASON_INVALID")
         elif result.diagnostic is not None or result.structuredOutput is None:
             category = "protocol"
-            code = (
-                "VIDEO_EPISODE_OUTPUT_INVALID"
-            )
+            code = "VIDEO_EPISODE_OUTPUT_INVALID"
         else:
             try:
                 if episode_script:
@@ -1643,9 +1787,34 @@ class StatelessExecutionStepExecutor:
                     category, code = "protocol", "MODEL_USAGE_INVALID"
                 else:
                     jsonschema_rs.validator_for(request.outputSchema.jsonSchema).validate(output)
-            except (ValueError, ValidationError, jsonschema_rs.ValidationError):
+            except (
+                ValueError,
+                ValidationError,
+                jsonschema_rs.ValidationError,
+            ) as _diagnostic_error:
+                with suppress(Exception):
+                    _log_execution_failure(
+                        request,
+                        stage="_video_terminal",
+                        code="EXECUTION_VALIDATION_FAILED",
+                        error=_diagnostic_error,
+                        payload={
+                            "result": result,
+                            "outputSchema": request.outputSchema.jsonSchema,
+                        },
+                    )
                 code = "VIDEO_EPISODE_OUTPUT_INVALID"
         if code is not None:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="output_validation",
+                    code=code,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return _failure(
                 request,
                 resolved.resolved_model,
@@ -1703,9 +1872,30 @@ class StatelessExecutionStepExecutor:
                 if len(value.embeddings) != len(expected):
                     raise ValueError("索引向量数量与本批完整分块不一致")
                 output = value.model_dump(mode="json")
-            except (ValueError, ValidationError):
+            except (ValueError, ValidationError) as _diagnostic_error:
+                with suppress(Exception):
+                    _log_execution_failure(
+                        request,
+                        stage="_embedding_terminal",
+                        code="EXECUTION_VALIDATION_FAILED",
+                        error=_diagnostic_error,
+                        payload={
+                            "result": result,
+                            "outputSchema": request.outputSchema.jsonSchema,
+                        },
+                    )
                 code = "EMBEDDING_OUTPUT_INVALID"
         if code is not None:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="output_validation",
+                    code=code,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return _failure(
                 request,
                 resolved.resolved_model,
@@ -2169,6 +2359,14 @@ def _validate_intent_input(request: ExecutionStepRequest) -> IntentContext | Int
             raise ValueError("意图上下文身份或允许操作不一致")
         return context
     except (TypeError, ValueError, ValidationError) as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_intent_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("意图解析输入或 Evidence 不符合冻结契约") from exc
 
 
@@ -2189,18 +2387,51 @@ def _validate_operation_input(request: ExecutionStepRequest) -> None:
         try:
             portrait_context(request)
         except (ValueError, ValidationError) as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_operation_input",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=exc,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             raise ExecutionCapabilityError("画像输入与冻结来源不一致") from exc
         return
     if request.workflow == "quality":
         try:
             validate_quality_request(request)
         except (ValueError, ValidationError) as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_operation_input",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=exc,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             raise ExecutionCapabilityError("质量输入与冻结来源不一致") from exc
         return
     if request.workflow == "short_medium":
         try:
             validate_short_medium_request(request)
         except (ValueError, ValidationError) as exc:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_operation_input",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=exc,
+                    payload={
+                        "input": request.input,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             raise ExecutionCapabilityError("中短篇单 Step 冻结来源无效") from exc
         return
     if request.workflow == "long_serial" and request.operation in _AGENT_UPDATES_OPERATIONS:
@@ -2249,6 +2480,14 @@ def _validate_operation_input(request: ExecutionStepRequest) -> None:
     try:
         ChatAnswerInput.model_validate(request.input)
     except ValidationError as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_operation_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("长篇问答 input 必须只含完整 userInstruction") from exc
     chapter_items = tuple(
         item for item in request.evidenceBundle.items if item.resourceType == "chapter_content"
@@ -2382,6 +2621,14 @@ def _validate_agent_updates_input(request: ExecutionStepRequest) -> None:
         ):
             raise ValueError("结构化资料返工与精确上一候选身份不一致")
     except (TypeError, ValueError, ValidationError) as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_agent_updates_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("结构化资料输入或完整候选不符合冻结契约") from exc
 
 
@@ -2488,6 +2735,14 @@ def _validate_chapter_plan_input(request: ExecutionStepRequest) -> None:
         ):
             raise ValueError("规划返工与精确上一候选身份不一致")
     except (TypeError, ValueError, ValidationError) as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_chapter_plan_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("章节规划输入或候选不符合冻结契约") from exc
 
 
@@ -2554,6 +2809,14 @@ def _validate_chapter_draft_input(request: ExecutionStepRequest) -> None:
         ):
             raise ValueError("正文返工与精确上一候选身份不一致")
     except (TypeError, ValueError, ValidationError) as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_chapter_draft_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("正文输入或完整候选不符合冻结契约") from exc
 
 
@@ -2588,6 +2851,14 @@ def _validate_chapter_review_input(request: ExecutionStepRequest) -> None:
     try:
         ChapterReviewInput.model_validate(request.input)
     except ValidationError as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_chapter_review_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("整章审阅 input 必须只含完整 userInstruction") from exc
 
 
@@ -2660,6 +2931,14 @@ def _validate_outline_selection_input(request: ExecutionStepRequest) -> None:
         ):
             raise ValueError("大纲返工与精确上一候选不一致")
     except (TypeError, ValueError, ValidationError) as exc:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_outline_selection_input",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=exc,
+                payload={"input": request.input, "outputSchema": request.outputSchema.jsonSchema},
+            )
         raise ExecutionCapabilityError("大纲选区输入或 Evidence 不符合冻结契约") from exc
 
 
@@ -2673,28 +2952,44 @@ def _retry_delay_seconds(base_seconds: float, attempt: int, request_hash: str) -
     return base_seconds * exponential * jitter_factor
 
 
+def _log_execution_failure(
+    request: ExecutionStepRequest,
+    *,
+    stage: str,
+    code: str,
+    error: Exception | None = None,
+    payload: object = None,
+) -> None:
+    """V2 完整诊断只写服务日志，不加入终态或 journal 的哈希载荷。"""
+    with suppress(Exception):
+        if isinstance(error, ValidationError):
+            payload = {"evidence": payload, "validationErrors": error.errors(include_url=False)}
+        diagnostic = capture_failure_diagnostic(
+            stage=stage, code=code, error=error, payload=payload
+        )
+        log_failure_diagnostic(_LOGGER, diagnostic, run_id=request.runId, step_id=request.stepId)
+
+
 def _log_provider_failure_details(
     request: ExecutionStepRequest,
     error: ProviderTransportError | ProviderProtocolError,
     attempts: int,
 ) -> None:
-    """V2 不经过人工日志 observer，直接按 Run/Step 记录已脱敏的完整供应商错误。"""
-
-    if error.details is None:
-        return
-    # 日志故障不能把已知拒绝变成结果未知，更不能额外触发供应商重试。
     with suppress(Exception):
-        _LOGGER.warning(
-            "V2 模型供应商调用失败 run_id=%s step_id=%s attempt=%s "
-            "failure_code=%s status_code=%s provider_request_id=%s provider_error_details=%s",
-            request.runId,
-            request.stepId,
-            attempts,
-            error.code,
-            error.statusCode,
-            error.requestId,
-            error.details.model_dump_json(),
+        diagnostic = capture_failure_diagnostic(
+            stage="provider",
+            code=error.code,
+            error=error,
+            details=error.details,
+            payload={
+                "attempt": attempts,
+                "statusCode": error.statusCode,
+                "providerRequestId": error.requestId,
+            },
         )
+        log_failure_diagnostic(_LOGGER, diagnostic, run_id=request.runId, step_id=request.stepId)
+        for item in getattr(error, "failureDiagnostics", []):
+            log_failure_diagnostic(_LOGGER, item, run_id=request.runId, step_id=request.stepId)
 
 
 def _safe_to_retry(
@@ -2849,42 +3144,130 @@ def _validate_provider_result(
         jsonschema_rs.validator_for(request.outputSchema.jsonSchema).validate(
             result.structuredOutput
         )
-    except Exception:
+    except Exception as _diagnostic_error:
+        with suppress(Exception):
+            _log_execution_failure(
+                request,
+                stage="_validate_provider_result",
+                code="EXECUTION_VALIDATION_FAILED",
+                error=_diagnostic_error,
+                payload={
+                    "result": result,
+                    "outputSchema": request.outputSchema.jsonSchema,
+                },
+            )
         return "validation", "MODEL_OUTPUT_SCHEMA_INVALID"
     if request.purpose == "generation" and request.operation == "answer_question":
         try:
             ChatAnswerOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+        except ValidationError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.workflow == "short_medium":
         try:
             materialize_short_medium_output(request.operation or "", result.structuredOutput)
-        except (ValueError, ValidationError):
+        except (ValueError, ValidationError) as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation == "plan_chapter":
         try:
             ChapterPlanOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+        except ValidationError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation == "write_chapter":
         try:
             ChapterDraftOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+        except ValidationError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation == "rewrite_scene":
         try:
             ChapterDraftOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+        except ValidationError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation == "review_chapter":
         try:
             ChapterReviewOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+        except ValidationError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation == "rewrite_outline_selection":
         try:
             OutlineSelectionOutput.model_validate(result.structuredOutput)
-        except ValidationError:
+        except ValidationError as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "generation" and request.operation in _AGENT_UPDATES_OPERATIONS:
         try:
@@ -2895,18 +3278,42 @@ def _validate_provider_result(
                 _agent_updates_evidence_request(request, result.structuredOutput)
             else:
                 AgentUpdatesOutput.model_validate(result.structuredOutput)
-        except (TypeError, ValueError, ValidationError):
+        except (TypeError, ValueError, ValidationError) as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     if request.purpose == "resolve_intent":
         try:
             _intent_command(request, result.structuredOutput)
-        except (ValueError, ValidationError, ExecutionCapabilityError):
+        except (ValueError, ValidationError, ExecutionCapabilityError) as _diagnostic_error:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="_validate_provider_result",
+                    code="EXECUTION_VALIDATION_FAILED",
+                    error=_diagnostic_error,
+                    payload={
+                        "result": result,
+                        "outputSchema": request.outputSchema.jsonSchema,
+                    },
+                )
             return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
 
 def _validate_portrait_provider_result(
     result: ModelTurnResult,
+    *,
+    request: ExecutionStepRequest | None = None,
 ) -> tuple[Literal["provider_terminal", "protocol", "validation"], str] | None:
     if result.finishReason == "length":
         return "provider_terminal", "MODEL_OUTPUT_TRUNCATED"
@@ -2924,7 +3331,16 @@ def _validate_portrait_provider_result(
         return "protocol", "MODEL_OUTPUT_PROTOCOL_INVALID"
     try:
         StylePortraitSectionOutput(content=result.content)
-    except ValidationError:
+    except ValidationError as exc:
+        if request is not None:
+            with suppress(Exception):
+                _log_execution_failure(
+                    request,
+                    stage="portrait_output",
+                    code="MODEL_OUTPUT_PROTOCOL_INVALID",
+                    error=exc,
+                    payload={"result": result},
+                )
         return "validation", "MODEL_OUTPUT_PROTOCOL_INVALID"
     return None
 
@@ -3087,6 +3503,17 @@ def _failure(
     failed_at: datetime,
     cancel_request_id: str | None = None,
 ) -> ExecutionStepFailure:
+    with suppress(Exception):
+        _log_execution_failure(
+            request,
+            stage="terminal",
+            code=code,
+            payload={
+                "category": category,
+                "outcomeUnknown": outcome_unknown,
+                "usage": usage.model_dump(mode="json"),
+            },
+        )
     retryable = False
     hash_payload: dict[str, object] = {
         "errorCategory": category,

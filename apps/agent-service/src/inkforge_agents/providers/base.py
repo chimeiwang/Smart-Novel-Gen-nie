@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from .error_details import ProviderErrorDetails
+from .error_details import FailureDiagnostic, ProviderErrorDetails
 
 ModelFinishReason = Literal[
     "stop",
@@ -243,12 +243,15 @@ class ModelTurnResult(BaseModel):
 
     content: str
     toolCalls: list[ModelToolCall]
-    # 不保存无效 arguments/error 正文，只暴露安全派生信息供稳定诊断。
+    # 完整失败证据仅供日志使用；默认序列化和 repr 不得流入 Core、快照或纠正提示。
+    failureDiagnostics: list[FailureDiagnostic] = Field(
+        default_factory=list, exclude=True, repr=False
+    )
     invalidToolCallCount: NonNegativeInt = 0
     invalidToolCallNames: list[str] = Field(default_factory=list)
     invalidToolCallCodes: list[ModelInvalidToolCallCode] = Field(default_factory=list)
     invalidToolCallArgumentCharacterCounts: list[NonNegativeInt] = Field(default_factory=list)
-    # 恢复审计只保存方法与追加容器数，绝不保存模型的原始 arguments。
+    # 公共恢复审计只保留方法与追加容器数，完整证据由排除字段单独送日志。
     recoveredToolCallCount: NonNegativeInt = 0
     recoveredToolCallCodes: list[ModelToolRecoveryCode] = Field(default_factory=list)
     recoveredToolCallAppendedContainerCounts: list[NonNegativeInt] = Field(default_factory=list)

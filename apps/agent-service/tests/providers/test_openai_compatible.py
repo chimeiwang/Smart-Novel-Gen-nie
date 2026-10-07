@@ -3055,3 +3055,153 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
     assert result.toolCalls[0].arguments == expected
     assert "_inkforgeEmpty" not in result.model_dump_json()
     assert result.usage.totalTokens == 15
+
+
+@pytest.mark.asyncio
+async def test结构化失败保留完整响应Schema且诊断不进入正常序列化(monkeypatch):
+    text = json.dumps({"value": "错误类型test-key" + "完整细节" * 20000}, ensure_ascii=False)
+    result, _ = await complete_responses_text(monkeypatch, text=text)
+    assert result.structuredOutputDiagnostic.code == "schema_violation"
+    assert len(result.failureDiagnostics) == 1
+    diagnostic = result.failureDiagnostics[0]
+    assert "完整细节" * 20000 in diagnostic.payloadJson
+    assert "test-key" not in diagnostic.payloadJson
+    details = json.loads(diagnostic.payloadJson)
+    assert details["schema"]["properties"]["value"] == {"type": "integer"}
+    assert details["validationErrors"]
+    assert "failureDiagnostics" not in result.model_dump_json()
+    assert "完整细节" not in repr(result)
+    assert result.usage.totalTokens == 24
+
+
+@pytest.mark.asyncio
+async def test普通工具无效原参数和Schema保留且成功调用不复制():
+    invalid = {"name": "lookup", "args": '{"value": "错误参数"', "id": "invalid-1",
+        "error": "供应商参数解析失败"}
+    provider = provider_with_response(AIMessage(content="", invalid_tool_calls=[invalid]))
+    result = await provider.complete_turn(ModelTurnRequest(
+        messages=[{"role": "user", "content": "调用"}],
+        tools=[ModelTool(name="lookup", description="测试", strict=False,
+            parameters={"type": "object", "properties": {"value": {"type": "integer"}}})],
+        maxOutputTokens=128,
+    ))
+    assert result.invalidToolCallCount == 1
+    assert "错误参数" in result.failureDiagnostics[0].payloadJson
+    assert "供应商参数解析失败" in result.failureDiagnostics[0].payloadJson
+    assert "schema" in result.failureDiagnostics[0].payloadJson
+    success = await provider_with_response(AIMessage(content="正常回复")).complete_turn(
+        ModelTurnRequest(messages=[{"role": "user", "content": "问答"}], tools=[],
+            maxOutputTokens=128))
+    assert success.failureDiagnostics == []
+
+
+@pytest.mark.asyncio
+async def testSDK成功HTTP解析异常保留详情排除思考且日志故障不改原异常(monkeypatch, caplog):
+    from types import SimpleNamespace
+
+    response = httpx.Response(200, request=httpx.Request("POST", "https://example.test/chat"),
+        json={"error": "HTTP200解析失败test-key", "reasoning_content": "私密思考"})
+    failure = ValueError("SDK响应解析失败")
+    failure.response = response
+
+    class FailedModel(StubModel):
+        async def ainvoke(self, messages, **kwargs):
+            raise failure
+
+    provider = provider_with_response(AIMessage(content="不会返回"))
+    provider._model = FailedModel(AIMessage(content="不会返回"))
+    provider._model.root_async_client = SimpleNamespace(api_key="test-key")
+    request = ModelTurnRequest(messages=[{"role": "user", "content": "问答"}], tools=[],
+        maxOutputTokens=128)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError) as caught:
+            await provider.complete_turn(request)
+    assert caught.value is failure
+    assert "HTTP200解析失败" in caplog.text
+    assert "test-key" not in caplog.text
+    assert "私密思考" not in caplog.text
+
+    def reject_sink(*args, **kwargs):
+        raise RuntimeError("日志写入失败")
+
+    monkeypatch.setattr(provider_module.logger, "warning", reject_sink)
+    with pytest.raises(ValueError) as caught:
+        await provider.complete_turn(request)
+    assert caught.value is failure
+
+
+@pytest.mark.asyncio
+async def test结构化诊断sink故障仍返回原失败及完整内部诊断(monkeypatch):
+    def reject_sink(*args, **kwargs):
+        raise RuntimeError("日志sink失败")
+
+    monkeypatch.setattr(provider_module.logger, "warning", reject_sink)
+    monkeypatch.setattr(provider_module.logger, "info", reject_sink)
+    result, _ = await complete_responses_text(monkeypatch, text='{"value":"错误值"}')
+    assert result.structuredOutputDiagnostic.code == "schema_violation"
+    assert result.usage.totalTokens == 24
+    assert "错误值" in result.failureDiagnostics[0].payloadJson
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["sdk", "usage", "history"])
+async def test实际模型裸key首次脱敏且Runtime和上层异常复采不泄露(failure_kind, caplog):
+    from types import SimpleNamespace
+
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.runtime.model_runtime import (
+        ModelCallContext,
+        ModelRuntime,
+        ModelRuntimeStageError,
+    )
+
+    actual_key = "actual-bare-runtime-sdk-key"
+    configured_key = "configured-bare-runtime-sdk-key"
+    sdk_error = ValueError("SDK解析失败 " + actual_key + " " + configured_key)
+    response = AIMessage(content="不会返回")
+    if failure_kind == "usage":
+        response.usage_metadata = {"input_tokens": actual_key, "output_tokens": 1,
+            "total_tokens": 1}
+
+    class FailedModel(StubModel):
+        async def ainvoke(self, messages, **kwargs):
+            if failure_kind == "sdk":
+                raise sdk_error
+            return response
+
+    provider = provider_with_response(response)
+    provider._error_secrets = (configured_key,)
+    model = FailedModel(response)
+    model.root_async_client = SimpleNamespace(api_key=actual_key)
+    provider._model = model
+    provider._strict_model = model
+    messages = [{"role": "user", "content": "调用"}]
+    tools = []
+    if failure_kind == "history":
+        tools = [ModelTool(name="lookup", description="测试", parameters={
+            "type": "object", "properties": {"value": {"type": "integer"}},
+            "required": ["value"], "additionalProperties": False,
+        })]
+        messages.append({"role": "assistant", "content": "", "toolCalls": [{
+            "id": "previous", "name": "lookup", "arguments": {"value": actual_key},
+        }]})
+    request = ModelTurnRequest(messages=messages, tools=tools, maxOutputTokens=128)
+    runtime = ModelRuntime(provider)
+    context = ModelCallContext(userId="user", novelId="novel", taskId="task",
+        runId="run", agentId="写作")
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ModelRuntimeStageError) as caught:
+            await runtime.run_turn(request, context=context)
+    if failure_kind == "sdk":
+        assert caught.value.__cause__ is sdk_error
+    assert actual_key not in caplog.text
+    assert configured_key not in caplog.text
+    assert "provider_error_details" in caplog.text
+    if failure_kind == "history":
+        assert "lookup" in caplog.text
+    outer = RuntimeError("队列外层失败")
+    outer.__cause__ = caught.value
+    repeated = capture_failure_diagnostic(stage="queue_job", code="QUEUE_JOB_FAILED", error=outer)
+    assert actual_key not in repeated.model_dump_json()
+    assert configured_key not in repeated.model_dump_json()
+    assert len(repeated.errorDetails.exceptionChain) >= 2

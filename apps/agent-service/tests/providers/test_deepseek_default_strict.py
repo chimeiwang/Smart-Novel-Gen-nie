@@ -245,6 +245,36 @@ async def test默认_strict解码后仍校验原业务约束(kind):
     assert result.toolCalls == []
     assert result.invalidToolCallCodes == ["provider_strict_schema_violation"]
     assert result.usage.totalTokens == 15
+    diagnostic = result.failureDiagnostics[0]
+    assert diagnostic.stage == "tool.business_schema"
+    assert json.loads(diagnostic.payloadJson)["arguments"] == {"text": "短"}
+    assert json.loads(diagnostic.payloadJson)["validationErrors"]
+    assert "failureDiagnostics" not in result.model_dump()
+
+
+def test历史参数校验错误附完整日志诊断且不改变异常():
+    tool = build_default_registry().require("get_recent_chapters").as_model_tool()
+    request = _request([tool])
+    request.messages.append(
+        ModelMessage(
+            role="assistant",
+            content="",
+            toolCalls=[
+                ModelToolCall(id="history-bad", name=tool.name, arguments={"count": 0}),
+            ],
+        )
+    )
+    before = request.model_dump()
+    with pytest.raises(ValueError) as caught:
+        prepare_deepseek_tools(request)
+    diagnostic = caught.value.failureDiagnostics[0]
+    assert diagnostic.stage == "tool.history_business_schema"
+    payload = json.loads(diagnostic.payloadJson)
+    assert payload["arguments"] == {"count": 0}
+    assert payload["callId"] == "history-bad"
+    assert payload["businessSchema"] == tool.parameters
+    assert payload["validationErrors"]
+    assert request.model_dump() == before
 
 
 def test所有注册工具的默认_schema符合_deepseek子集():

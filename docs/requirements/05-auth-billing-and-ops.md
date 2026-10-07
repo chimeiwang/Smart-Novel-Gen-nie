@@ -199,25 +199,27 @@ readiness 阻断抽帧、导出和需要本地媒体工具的模拟生成，不�
 - Agent 日志写入 `/data/agent-logs` 命名卷。
 - 生产部署在版本切换前通过无网络、只挂载日志卷且仅保留 `CHOWN` capability 的一次性初始化容器，把卷根目录所有权设为 `10001:10001`；初始化失败时不得执行 `compose up`。
 - 同一任务恢复运行追加到同一文件。
-- DeepSeek 与通用 OpenAI-compatible 调用失败时，保留完整 HTTP 错误正文（含非 JSON）、响应头、
+- DeepSeek、通用 OpenAI-compatible、Embedding 与 Responses 调用失败时，保留完整 HTTP 错误正文（含非 JSON）、响应头、
   状态、方法/脱敏地址及异常消息、因果链和调用栈；凭据在采集时替换，不截断其他错误信息。
   V1 将详情写入 `model_failure` 帧正文及服务日志，V2 写入带 run/step 的服务日志；不放入受限结构头、
   公共状态或业务回调。日志故障不能覆盖供应商错误，详见[完整错误诊断规格](../specs/2026-10-07-provider-error-details.md)。
 - 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
   中出现日志标记或 JSON 不得污染结构解析。
 - 每个模型调用区块记录 `taskId`、`runId`、Core 计费 `requestId`、provider/model 和四项实际 token；
-- 工具协议异常只额外记录无效调用数量、允许列表内工具名、稳定分类和 arguments 字符数；确定性恢复只记录
-  `append_container_closers` 与追加容器数。显式协议纠正必须形成独立模型区块和计费 `requestId`，日志不得保存
-  或重建原始 arguments；
-- Agent 服务运行日志在每次工具预检失败时记录 runId、脱敏工具分类与 loc/type、已用纠正次数及下一步动作，
-  包括可恢复的首次失败；正文缺失、空正文和选区冲突使用稳定分类，禁止记录原始参数值。
+- 工具协议失败或确定性恢复时保留完整脱敏原参数、恢复前后证据、对应 Schema、全部校验错误和异常链，
+  按 JSON/wire/解码/业务/Pydantic 等阶段区分；完整详情只进入服务日志和适用的 V1 帧正文，不进入结构头。
+  HTTP 200 的无效响应、授权/grant/计费回报、工具执行、完成原因拒绝及未知异常同样记录详情。
+  V1 模型失败证据在计费回报之前独立保存，正常成功模型区块仍在回报后写入；所有诊断和 sink 故障不得
+  改变原结果或重试。具体见[完整失败诊断规格](../specs/2026-10-07-complete-failure-diagnostics.md)。
+- Agent 每次预检失败仍记录纠正次数及下一步动作。完整诊断从业务序列化与 repr 排除，不进入公共状态、
+  Core/SSE、journal、checkpoint 或纠正提示；公共摘要保持原白名单及数量上限，日志正文不截断。
 - 可选 `promptCacheMissTokens`、`reasoningTokens` 仅作为诊断结构头记录；DeepSeek 原始 `reasoning_content`
   只在进程内工具轮次回放，绝不持久化或写入日志正文；
   非计费调用显示无计费请求标识，Provider 无可靠 usage 的失败不伪造 token，任何区块都不记录
   `grantToken`。
 - 旧版日志原文进入 `trust=unverified` 的只读 legacy 边界；残缺尾部只在可信运行元数据完整时隔离为
   带 SHA-256 和字节数的恢复文件，并从最后完整帧恢复追加。
-- 不记录 tools schema、tool_calls、工具参数或工具结果。
+- 正常成功的 tools schema、tool_calls、工具参数或工具结果不另行复制；仅失败诊断按上述边界保留。
 - Core 后台监督器的控制台日志须实际显示任务名、错误分类、连续失败数与退避时间，并记录稳定恢复。
   异常诊断仅保留白名单异常类型、因果关系与栈帧，不写异常消息、原始 SQL、参数、URL 或凭据；
   正常提前返回须与异常退出区分。日志改进不改变既有重启／readiness 语义，不能代替未知故障的根因验证。

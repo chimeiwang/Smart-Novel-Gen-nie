@@ -787,3 +787,155 @@ async def test_core_client_rejects_mismatched_video_progress_identity() -> None:
     assert exc_info.value.code == "VIDEO_PLAN_PROGRESS_RESOURCE_MISMATCH"
     assert exc_info.value.recoverable is False
     await http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["http400", "http500", "network", "json", "schema",
+    "rejected", "missing", "envelope"])
+async def test核心失败保存完整详情服务令牌脱敏且分类不变(failure_kind, caplog):
+    import logging
+
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+
+    calls = []
+    long_message = "完整核心失败原因" * 10000
+    resource = RunResource(userId="user-1", novelId="novel-1", taskId="task-1",
+        runId="run-1", jobId="job-1")
+    def handle(incoming):
+        calls.append(incoming)
+        assert incoming.headers["authorization"] == "Bearer signed"
+        if failure_kind == "network":
+            raise httpx.ConnectError("核心连接失败裸凭据 signed", request=incoming)
+        if failure_kind in ("http400", "http500"):
+            return httpx.Response(int(failure_kind[-3:]), json={"code": "CORE_DENIED",
+                "message": "原公共错误", "details": {"message": long_message + " signed",
+                    "reasoning_content": "核心推理不能入日志"}})
+        if failure_kind == "json":
+            return httpx.Response(200, text="完整坏JSON signed")
+        if failure_kind == "schema":
+            return httpx.Response(200, json={"disposition": "signed", "extra": long_message})
+        if failure_kind == "missing":
+            return httpx.Response(204)
+        if failure_kind == "envelope":
+            return httpx.Response(200, json=[long_message + " signed"])
+        return httpx.Response(200, json=_callback_receipt(disposition="rejected",
+            reason_code="CALLBACK_IDENTITY_REJECTED", recoverable=False))
+
+    async with httpx.AsyncClient(base_url="https://core.example",
+        transport=httpx.MockTransport(handle)) as http:
+        client = CoreServiceClient(http, Signer())
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(CoreServiceError) as caught:
+                if failure_kind == "envelope":
+                    await client.authorize_model(resource, {"输入": "正常请求正文不得保存"},
+                        request_id="authorize-1")
+                else:
+                    await client.complete(resource, sequence=1,
+                        result={"正文": "正常请求正文不得保存"})
+    error = caught.value
+    expected_codes = {"http400": "CORE_DENIED", "http500": "CORE_DENIED",
+        "network": None, "json": "CALLBACK_RECEIPT_INVALID",
+        "schema": "CALLBACK_RECEIPT_INVALID", "rejected": "CALLBACK_IDENTITY_REJECTED",
+        "missing": "CALLBACK_RECEIPT_MISSING", "envelope": None}
+    assert error.code == expected_codes[failure_kind]
+    assert error.recoverable is (
+        failure_kind in ("http500", "network", "json", "schema", "missing")
+    )
+    assert len(calls) == 1
+    assert len(error.failureDiagnostics) == 1
+    detail = error.failureDiagnostics[0].model_dump_json()
+    assert "signed" not in detail
+    assert "核心推理不能入日志" not in detail
+    assert "正常请求正文不得保存" not in detail
+    assert "run-1" in caplog.text
+    if failure_kind in ("http400", "http500", "schema", "envelope"):
+        assert long_message in detail
+    if failure_kind == "schema":
+        assert "validationErrors" in detail and "schema" in detail
+    outer = RuntimeError("队列失败")
+    outer.__cause__ = error
+    assert "signed" not in capture_failure_diagnostic(stage="queue", code="failed",
+        error=outer).model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test核心诊断sink故障保持原公开错误及恢复语义(monkeypatch):
+    from inkforge_agents.clients import core as module
+
+    def reject_sink(*args, **kwargs):
+        raise RuntimeError("日志sink失败")
+
+    monkeypatch.setattr(module.logger, "warning", reject_sink)
+    async with httpx.AsyncClient(base_url="https://core.example",
+        transport=httpx.MockTransport(lambda _: httpx.Response(503,
+            json={"code": "CORE_TEMPORARY", "message": "公开暂时故障", "details": "signed"}
+        ))) as http:
+        client = CoreServiceClient(http, Signer())
+        with pytest.raises(CoreServiceError) as caught:
+            await client.authorize_model(RunResource(userId="u", novelId="n", taskId="t",
+                runId="r"), {"正常授权": True}, request_id="request")
+    assert str(caught.value) == "核心服务拒绝智能体回调（HTTP 503，CORE_TEMPORARY）：公开暂时故障"
+    assert caught.value.recoverable is True
+    assert caught.value.code == "CORE_TEMPORARY"
+    assert isinstance(caught.value.__cause__, httpx.HTTPStatusError)
+    assert "signed" not in caught.value.failureDiagnostics[0].model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test核心工具无效result在当前签发身份作用域脱敏并保持一次调用(caplog):
+    import logging
+
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+
+    calls = []
+    long_error = "完整工具失败返回" * 10000 + " signed"
+    def handle(incoming):
+        calls.append(incoming)
+        return httpx.Response(200, json={"result": long_error})
+
+    async with httpx.AsyncClient(base_url="https://core.example",
+        transport=httpx.MockTransport(handle)) as http:
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(CoreServiceError) as caught:
+                await CoreServiceClient(http, Signer()).call_tool(
+                    RunResource(userId="u", novelId="n", taskId="t", runId="r"),
+                    "写作", "get_recent_chapters", {"正文": "正常请求不额外保存"})
+    assert len(calls) == 1
+    assert str(caught.value) == "核心工具返回格式无效"
+    assert caught.value.code is None
+    assert caught.value.recoverable is False
+    assert len(caught.value.failureDiagnostics) == 1
+    diagnostic = caught.value.failureDiagnostics[0]
+    assert diagnostic.stage == "core.tool_result"
+    assert "完整工具失败返回" * 10000 in diagnostic.payloadJson
+    assert "signed" not in diagnostic.model_dump_json()
+    assert "正常请求不额外保存" not in caplog.text
+    assert "signed" not in capture_failure_diagnostic(stage="tool_execution", code="failed",
+        error=caught.value).model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [204, 200])
+async def test核心工具空响应仍保存失败元信息且原异常不变(status_code):
+    calls = []
+    def handle(incoming):
+        calls.append(incoming)
+        return httpx.Response(status_code, headers={"x-request-id": "empty-core-response"})
+
+    async with httpx.AsyncClient(base_url="https://core.example",
+        transport=httpx.MockTransport(handle)) as http:
+        with pytest.raises(CoreServiceError) as caught:
+            await CoreServiceClient(http, Signer()).call_tool(
+                RunResource(userId="u", novelId="n", taskId="t", runId="r"),
+                "写作", "get_recent_chapters", {})
+    assert len(calls) == 1
+    assert str(caught.value) == "核心工具返回格式无效"
+    assert caught.value.code is None
+    assert caught.value.recoverable is False
+    diagnostic = caught.value.failureDiagnostics[0]
+    assert diagnostic.stage == "core.tool_result"
+    assert diagnostic.errorDetails.statusCode == status_code
+    assert diagnostic.errorDetails.requestMethod == "POST"
+    assert diagnostic.errorDetails.requestUrl.endswith("/internal/v1/tools/get_recent_chapters")
+    assert ("x-request-id", "empty-core-response") in diagnostic.errorDetails.responseHeaders
+    assert "signed" not in diagnostic.model_dump_json()

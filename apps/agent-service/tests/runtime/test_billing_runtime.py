@@ -257,9 +257,7 @@ async def test_reviewer_lane_cap_is_minimum_of_two_and_global_capacity(
         policy=LEGACY_PROVIDER_DEFAULT,
     )
     tasks = [
-        asyncio.create_task(
-            runtime.run_turn(request, lane="interactive", reviewer=True)
-        )
+        asyncio.create_task(runtime.run_turn(request, lane="interactive", reviewer=True))
         for _ in range(3)
     ]
     await asyncio.wait_for(provider.enough_started.wait(), timeout=1)
@@ -1101,3 +1099,189 @@ async def test_结构化输出人工日志只记录安全诊断() -> None:
     assert "code=schema_violation" in serialized
     assert "pointer=/assets/0/duty" in serialized
     assert "keyword=enum" in serialized
+
+
+@pytest.mark.asyncio
+async def test_失败诊断先于用量回报且日志故障不覆盖原错(caplog) -> None:
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.runtime.model_runtime import ModelRuntimeStageError
+
+    diagnostic = capture_failure_diagnostic(
+        stage="tool_json",
+        code="invalid_json",
+        payload={"arguments": "完整坏参数" * 20000, "grantToken": "诊断凭据秘密"},
+    )
+    observer = ModelObserver()
+
+    class InvalidToolProvider(Provider):
+        async def complete_turn(self, request):
+            result = await super().complete_turn(request)
+            return result.model_copy(update={"failureDiagnostics": [diagnostic]})
+
+    class ReportFailure(Billing):
+        async def report(self, context, payload, request_id):
+            assert len(observer.failures) == 1
+            assert observer.failures[0].failureDiagnostics == [diagnostic]
+            assert observer.failures[0].diagnosticOnly is True
+            raise ValueError("用量回报的完整失败原因")
+
+    runtime = ModelRuntime(InvalidToolProvider(), billing=ReportFailure(), observer=observer)
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "请求"}],
+        tools=[],
+        maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
+    )
+    context = ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a")
+    with pytest.raises(ModelRuntimeStageError, match="MODEL_USAGE_REPORT_FAILED") as failure:
+        await runtime.run_turn(request, context=context)
+    assert isinstance(failure.value.__cause__, ValueError)
+    assert "完整坏参数" * 20000 in caplog.text
+    assert "用量回报的完整失败原因" in caplog.text
+    assert "诊断凭据秘密" not in caplog.text
+    assert observer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_正常模型日志设备故障不会改变成功结果(caplog) -> None:
+    class BrokenObserver(ModelObserver):
+        def record_model_call(self, record):
+            raise OSError("模型日志磁盘异常完整原因")
+
+        def record_model_failure(self, record):
+            raise OSError("失败日志设备也不可用")
+
+    provider = Provider()
+    runtime = ModelRuntime(provider, billing=Billing(), observer=BrokenObserver())
+    result = await runtime.run_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "请求"}],
+            tools=[],
+            maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
+        ),
+        context=ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a"),
+    )
+    assert result.content == "完成"
+    assert len(provider.requests) == 1
+    assert "模型日志磁盘异常完整原因" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_用量回报裸回显grant凭据在后续因果链采集中仍脱敏(caplog):
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.runtime.model_runtime import ModelRuntimeStageError
+
+    token = "bare-private-billing-grant-8fa203"  # noqa: S105 - 脱敏回归使用的合成凭据
+
+    class EchoBilling(Billing):
+        async def authorize(self, context, payload, request_id):
+            grant = await super().authorize(context, payload, request_id)
+            grant["grantToken"] = token
+            return grant
+
+        async def report(self, context, payload, request_id):
+            raise ValueError("报告失败 " + payload["grantToken"])
+
+    observer = ModelObserver()
+    runtime = ModelRuntime(Provider(), billing=EchoBilling(), observer=observer)
+    with pytest.raises(ModelRuntimeStageError) as failure:
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "请求"}],
+                tools=[],
+                maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
+            ),
+            context=ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a"),
+        )
+    later = capture_failure_diagnostic(stage="outer", code="WRITING_FAILED", error=failure.value)
+    assert token not in caplog.text
+    assert token not in later.model_dump_json()
+    assert token not in observer.failures[0].model_dump_json()
+    assert "报告失败" in later.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_授权拒绝仅写诊断帧并保持零模型尝试(tmp_path):
+    from inkforge_agents.observability import human_workflow_log as human_log_module
+    from inkforge_agents.observability.human_workflow_log import HumanWorkflowLog
+    from inkforge_agents.runtime.model_runtime import ModelRuntimeStageError
+
+    class AuthorizationFailure(Billing):
+        async def authorize(self, context, payload, request_id):
+            raise ValueError("模型授权被拒绝")
+
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="r", task_id="t", run_kind="授权拒绝", user_id="u", novel_id="n", chapter_id=None
+    )
+    provider = Provider()
+    runtime = ModelRuntime(provider, billing=AuthorizationFailure(), observer=log)
+    with pytest.raises(ModelRuntimeStageError, match="MODEL_AUTHORIZATION_FAILED"):
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "请求"}],
+                tools=[],
+                maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
+            ),
+            context=ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a"),
+        )
+    assert provider.requests == []
+    frames = human_log_module._scan_v2_frames(path, include_content=True).frames
+    assert [
+        frame.header["type"]
+        for frame in frames
+        if frame.header["type"] in {"model", "model_failure", "diagnostic"}
+    ] == ["diagnostic"]
+    assert human_log_module._next_model_attempt_sequence(frames) == 1
+
+
+@pytest.mark.asyncio
+async def test_计费回报失败前诊断帧仍保留供应商与计费关联标识(tmp_path, caplog):
+    from inkforge_agents.observability import human_workflow_log as human_log_module
+    from inkforge_agents.observability.human_workflow_log import HumanWorkflowLog
+    from inkforge_agents.providers.error_details import capture_failure_diagnostic
+    from inkforge_agents.runtime.model_runtime import ModelRuntimeStageError
+
+    diagnostic = capture_failure_diagnostic(
+        stage="tool_json", code="invalid", payload={"arguments": "坏参数"}
+    )
+
+    class InvalidToolProvider(Provider):
+        async def complete_turn(self, request):
+            return (await super().complete_turn(request)).model_copy(
+                update={
+                    "providerResponseId": "response-associated-1",
+                    "failureDiagnostics": [diagnostic],
+                }
+            )
+
+    class ReportFailure(Billing):
+        async def report(self, context, payload, request_id):
+            raise ValueError("回报失败")
+
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="r", task_id="t", run_kind="关联验收", user_id="u", novel_id="n", chapter_id=None
+    )
+    runtime = ModelRuntime(InvalidToolProvider(), billing=ReportFailure(), observer=log)
+    with pytest.raises(ModelRuntimeStageError, match="MODEL_USAGE_REPORT_FAILED"):
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "请求"}],
+                tools=[],
+                maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
+            ),
+            context=ModelCallContext(userId="u", novelId="n", taskId="t", runId="r", agentId="a"),
+        )
+    frames = human_log_module._scan_v2_frames(path, include_content=True).frames
+    tool_frame = next(frame for frame in frames if "tool_json" in frame.content)
+    assert tool_frame.header["type"] == "diagnostic"
+    assert "供应商响应标识：response-associated-1" in tool_frame.content
+    assert "计费请求标识：grant-request-1" in tool_frame.content
+    assert "response-associated-1" in caplog.text
+    assert "grant-request-1" in caplog.text
+    assert not any(frame.header.get("type") == "model" for frame in frames)

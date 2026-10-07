@@ -150,15 +150,18 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 普通工具通过可逆 wire 契约适配 DeepSeek：所有对象闭合、至少一个属性且字段全必填；可省略字段和 nullable 联合使用显式包装，开放字典与任意/递归 JSON 使用完整 JSON 字符串。无参工具、业务空对象、缺省和 null 通过固定标记字段传输，解码后分别恢复原值，标记不进入业务参数或持久历史；见[空对象兼容规格](../../docs/specs/2026-10-07-deepseek-strict-empty-object.md)。进程内历史按相同契约编码，响应解码后仍完整复验原 JSON Schema/Pydantic；不能丢字段、截断或把空值当缺失。质量工具保留专用无引用、无 null wire，`location` 与 `rewriteBrief` 仍只在精确路径把空字符串归一化为 `None`。具体范围见 [默认 strict 规格](../../docs/specs/2026-10-01-deepseek-default-strict.md)。
 - DeepSeek arguments 无法解析时必须先保留可靠 usage，再返回无原文的无效工具诊断；只允许在末尾追加缺失对象/数组闭合符，且补齐后必须通过本轮原始 JSON Schema。AgentRuntime 把一轮工具响应作为原子包，存在任一无效调用就不得接受正文或执行任何调用；无效 JSON 或 Pydantic 参数在整个运行中最多触发一次不回放坏参数的显式协议纠正，纠正调用必须独立授权、结算 usage 和记录。`length`、`content_filter`、资源不足、无暴露工具或纠正仍失败时不得继续纠正，最终以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。
 - 上述一次预算仅在普通章节 `write_chapter` / `rewrite_scene` 的 primary/reviser 有一个例外：首次纠正用于纯读取工具包且已经成功，后续 `begin_artifact_output` 的 Pydantic 参数失败可以再纠正一次。每次 AgentRuntime 执行最多两次纠正，同一纠正响应再次失败立即结束；选区、reviewer、quality 和 V2 单 Step 不扩充预算。正文提示只要求 kind、summary 和完整 content，返工身份由原有权威草案校验器继承；见 [临时修补规格](../../docs/specs/2026-09-28-chapter-artifact-protocol-hotfix.md)。
-- 质量协议错误日志可以保留原始完成原因字符串、安全的大写 `failure_code` 和必要分类元数据；Pydantic 参数失败最多额外记录 10 条经过白名单约束的 `loc/type`，Provider 无效调用只保留允许列表内工具名、稳定分类和 arguments 字符数，确定性恢复只保留方法和追加容器数。不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`；显式协议纠正不等于 SDK 隐式重发、同一坏参数盲重试或队列盲重试。
+- 公共错误和模型纠正提示只携带安全分类、工具名、字符数及最多 10 条白名单 `loc/type`。完整失败诊断另行保留脱敏后的原始参数、wire/业务 Schema、全部校验错误、异常链与确定性恢复前后证据，按具体阶段写入服务日志和适用的 V1 帧正文，不进入纠正提示、Core 或持久业务状态；见[完整失败诊断规格](../../docs/specs/2026-10-07-complete-failure-diagnostics.md)。显式协议纠正不改变 SDK、队列重试或现有调用预算。
 
 ## 数据与信任边界
 
-- DeepSeek 与通用 OpenAI-compatible 请求失败时，完整保存经过凭据脱敏的 HTTP 错误正文、响应头、
+- DeepSeek、通用 OpenAI-compatible、Embedding 与 Responses 请求失败时，完整保存经过凭据脱敏的 HTTP 错误正文、响应头、
   方法/地址及异常消息、因果链、调用栈，不按长度截断，不采集调用栈局部变量。详情只进入服务诊断
-  和 V1 人工日志的 `model_failure` 帧正文，不进入异常 str/repr、Core 回调、SSE 或聊天回复；
-  V2 由 Executor 记录 run/step 关联详情。禁止把成功模型正文、推理或正常请求另行复制到错误诊断。
-  该失败诊断例外见[规格](../../docs/specs/2026-10-07-provider-error-details.md)，不放宽工具参数协议日志规则。
+  和 V1 人工日志的 `model_failure`／`diagnostic` 帧正文，不进入异常 str/repr、Core 回调、SSE 或聊天回复；
+  V2 由 Executor 记录 run/step 关联详情。HTTP 200 但 JSON、usage、工具参数或结构化输出无效时，
+  同样保存失败内容和完整校验原因；正常成功内容、推理与请求不另行复制。授权、计费回报、工具执行、
+  图层降级、队列及未知异常记录完整脱敏因果链。详情采集或日志 sink 故障不能替代原结果。
+  日志专用字段必须从普通 model_dump/repr 排除，结果重建时显式保留给日志层；具体见
+  [完整失败诊断规格](../../docs/specs/2026-10-07-complete-failure-diagnostics.md)。
 
 - 所有业务读取和草案提交都通过 Core `/internal/v1/**`。
 - `semantic_search_references` 的查询向量由 Agent Service 复用现有 embedding 客户端生成，Core 只接收内部查询向量并在当前用户和小说范围内执行 pgvector 检索；未配置 embedding 时必须明确返回未启用。

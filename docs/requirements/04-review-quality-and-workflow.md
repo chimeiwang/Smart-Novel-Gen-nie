@@ -349,7 +349,9 @@ sequenceDiagram
   WorkflowRun/jobId 重试。明确不可重试错误在失败回调成功后收敛单条任务，不得因此重启整个消费者；未知
   程序异常仍由消费者监督器暴露为不健康。
 - 模型返回长度截断、内容过滤、矛盾完成原因或无合法工具调用的 unknown 响应时，Agent Service 在接受报告或执行回调前失败；日志可以保留原始完成原因字符串。
-- 质量协议错误日志可以保留安全大写 `failure_code` 和必要分类元数据，但不得保留供应商响应正文、异常正文或工具参数。
+- 质量协议的公共错误与模型纠正提示只保留原安全分类。失败原参数、Schema、全部校验错误和异常链按
+  [完整失败诊断规格](../specs/2026-10-07-complete-failure-diagnostics.md)脱敏后保存在诊断日志，
+  不进入候选、Core 回调、SSE、journal 或正常结果序列化，也不改变复审结论与纠正预算。
 - 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。
 - 正文变化后，检查项重置为 pending，仍在 pending/running 的旧 WorkflowRun 标记 cancelled，错误码为 `QUALITY_SOURCE_CHANGED`。
 - 浏览器在运行受理后轮询检查项到终态；pending/running 期间禁用重复运行、跳过和章节完成操作。

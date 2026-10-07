@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -332,7 +333,7 @@ async def test_chapter_submission_can_recover_after_read_correction(
     class BillableProvider(ScriptedProvider):
         billable = True
 
-    raw_value = "不得出现在纠正提示或诊断中的坏参数"
+    raw_value = "仅可保留在失败诊断中的坏参数"
     full_content = "完整章节正文。" * 3000
     provider = BillableProvider([
         invalid_tool_turn() if read_error == "json" else turn(
@@ -380,7 +381,7 @@ async def test_chapter_submission_can_recover_after_read_correction(
     assert "artifact_content_required" in caplog.text
     assert "corrections_used=1" in caplog.text
     assert "action=correct_chapter_artifact" in caplog.text
-    assert raw_value not in caplog.text
+    assert raw_value in caplog.text
 
 
 @pytest.mark.asyncio
@@ -446,7 +447,7 @@ async def test_chapter_reserve_does_not_expand_other_recovery_paths(first_failur
 async def test_artifact_first_correction_has_specific_safe_feedback(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    raw_value = "不得暴露的草案内容"
+    raw_value = "只保留在失败日志的草案内容"
     provider = ScriptedProvider([
         turn("", ("bad", "begin_artifact_output", {
             "kind": "chapter_draft", "summary": raw_value, "content": raw_value,
@@ -466,7 +467,7 @@ async def test_artifact_first_correction_has_specific_safe_feedback(
     assert "其余字段省略" in correction
     assert raw_value not in correction
     assert "artifact_selection_incomplete" in caplog.text
-    assert raw_value not in caplog.text
+    assert raw_value in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1490,3 +1491,192 @@ async def test_runtime_rejects_insufficient_system_resource_before_visible_conte
             exposed_tools=[],
             context=context(),
         )
+
+
+def _完整诊断(caplog: pytest.LogCaptureFixture, stage: str) -> list[dict[str, Any]]:
+    records = []
+    for record in caplog.records:
+        if record.msg == "完整失败诊断 identity=%s diagnostic=%s":
+            diagnostic = json.loads(record.args[1])
+            if diagnostic["stage"] == stage:
+                records.append(diagnostic)
+    return records
+
+
+@pytest.mark.asyncio
+async def test_参数失败保存完整输入及全部校验原因但不进入纠正提示(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    long_value = "完整错误参数" * 15000
+    secret = "校验失败不得回显的口令-260107"  # noqa: S105 - 脱敏回归使用虚构凭据。
+    arguments = {f"unexpected_{index}": index for index in range(15)}
+    arguments.update({"long_error_value": long_value, "password": secret})
+    provider = ScriptedProvider([
+        turn("", ("坏参数", "get_character_detail", arguments)),
+        turn("", ("纠正参数", "get_character_detail", {"character_name": "甲"})),
+        turn("完成"),
+    ])
+    registry = build_default_registry(RecordingGateway())
+    result = await make_agent_runtime(ModelRuntime(provider), registry).run(
+        policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "读取人物"}],
+        exposed_tools=[registry.require("get_character_detail")], context=context(),
+    )
+    diagnostic = _完整诊断(caplog, "tool_arguments_pydantic")[0]
+    payload = json.loads(diagnostic["payloadJson"])
+    assert payload["arguments"]["long_error_value"] == long_value
+    assert len(payload["validationErrors"]) == 18
+    assert "character_name" in payload["businessSchema"]["properties"]
+    assert diagnostic["errorDetails"]["exceptionChain"][0]["type"] == "ValidationError"
+    assert secret not in caplog.text
+    assert long_value not in provider.requests[1].model_dump_json()
+    assert secret not in provider.requests[1].model_dump_json()
+    assert result.visibleContent == "完成"
+    assert len(provider.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_完成原因失败保存响应详情但不保存推理(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    response = turn("被截断的可见输出", finish_reason="length").model_copy(
+        update={"reasoningContent": "不得记录的推理原文"},
+    )
+    registry = build_default_registry()
+    with pytest.raises(RuntimeError, match="MODEL_OUTPUT_TRUNCATED"):
+        await make_agent_runtime(ModelRuntime(ScriptedProvider([response])), registry).run(
+            policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "写作"}],
+            exposed_tools=[], context=context(),
+        )
+    diagnostic = _完整诊断(caplog, "model_finish_reason")[0]
+    assert json.loads(diagnostic["payloadJson"])["content"] == "被截断的可见输出"
+    assert "不得记录的推理原文" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_工具执行异常保存因果链且保留原工具错误语义(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FailingGateway(RecordingGateway):
+        async def execute(self, tool_name, context, arguments):
+            try:
+                raise ValueError("底层响应无法解析")
+            except ValueError as exc:
+                raise RuntimeError("工具远端返回失败") from exc
+
+    provider = ScriptedProvider([
+        turn("", ("读取", "get_character_detail", {"character_name": "甲"})),
+        turn("已获知工具失败"),
+    ])
+    registry = build_default_registry(FailingGateway())
+    result = await make_agent_runtime(ModelRuntime(provider), registry).run(
+        policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "读取人物"}],
+        exposed_tools=[registry.require("get_character_detail")], context=context(),
+    )
+    diagnostic = _完整诊断(caplog, "tool_execution")[0]
+    assert [e["type"] for e in diagnostic["errorDetails"]["exceptionChain"]] == [
+        "RuntimeError", "ValueError",
+    ]
+    assert json.loads(diagnostic["payloadJson"])["arguments"] == {"character_name": "甲"}
+    assert result.toolResults[0].result == {"error": "工具远端返回失败"}
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_诊断sink失败不替换原始运行错误(monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = ModelRuntime(ScriptedProvider([turn("失败响应", finish_reason="length")]))
+
+    def broken_sink(*args, **kwargs):
+        raise RuntimeError("日志后端失败")
+
+    monkeypatch.setattr(runtime, "record_failure_diagnostic", broken_sink)
+    with pytest.raises(RuntimeError, match="MODEL_OUTPUT_TRUNCATED"):
+        await make_agent_runtime(runtime, build_default_registry()).run(
+            policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "写作"}],
+            exposed_tools=[], context=context(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_错误Schema采集失败仍保留参数纠正路径(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    original = ToolDefinition.as_model_tool
+    calls = 0
+
+    def failing_diagnostic_schema(self, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("失败诊断的Schema构造故障")
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(ToolDefinition, "as_model_tool", failing_diagnostic_schema)
+    provider = ScriptedProvider([
+        turn("", ("坏参数", "get_character_detail", {"unexpected": "完整错误字段"})),
+        turn("", ("纠正参数", "get_character_detail", {"character_name": "甲"})),
+        turn("完成"),
+    ])
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    result = await make_agent_runtime(ModelRuntime(provider), registry).run(
+        policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "读取人物"}],
+        exposed_tools=[registry.require("get_character_detail")], context=context(),
+    )
+    assert result.visibleContent == "完成"
+    assert len(provider.requests) == 3
+    assert gateway.calls == ["get_character_detail"]
+    diagnostic = _完整诊断(caplog, "tool_arguments_pydantic")[0]
+    assert diagnostic["captureFailure"] == "RuntimeError"
+    assert json.loads(diagnostic["payloadJson"])["arguments"] == {"unexpected": "完整错误字段"}
+
+
+@pytest.mark.asyncio
+async def test_诊断响应序列化故障不替换完成原因错误(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = ModelTurnResult.model_dump
+
+    def failing_dump(self, **kwargs):
+        if self.finishReason == "length":
+            raise RuntimeError("诊断序列化故障")
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(ModelTurnResult, "model_dump", failing_dump)
+    provider = ScriptedProvider([turn("截断响应", finish_reason="length")])
+    with pytest.raises(RuntimeError, match="MODEL_OUTPUT_TRUNCATED"):
+        await make_agent_runtime(ModelRuntime(provider), build_default_registry()).run(
+            policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "写作"}],
+            exposed_tools=[], context=context(),
+        )
+    assert len(provider.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_并发工具部分失败且诊断后端故障不改变工具结果(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PartialGateway(RecordingGateway):
+        async def execute(self, tool_name, context, arguments):
+            if tool_name == "get_character_list":
+                raise RuntimeError("人物读取失败")
+            return {"ok": True}
+
+    provider = ScriptedProvider([
+        turn("", ("作品", "get_novel_info", {}), ("人物", "get_character_list", {})),
+        turn("继续处理"),
+    ])
+    runtime = ModelRuntime(provider)
+
+    def broken_sink(*args, **kwargs):
+        raise RuntimeError("诊断后端故障")
+
+    monkeypatch.setattr(runtime, "record_failure_diagnostic", broken_sink)
+    registry = build_default_registry(PartialGateway())
+    result = await make_agent_runtime(runtime, registry).run(
+        policy=LEGACY_PROVIDER_DEFAULT, messages=[{"role": "user", "content": "读取资料"}],
+        exposed_tools=[registry.require("get_novel_info"), registry.require("get_character_list")],
+        context=context(),
+    )
+    assert [item.result for item in result.toolResults] == [
+        {"ok": True}, {"error": "人物读取失败"},
+    ]
+    assert result.visibleContent == "继续处理"
+    assert len(provider.requests) == 2

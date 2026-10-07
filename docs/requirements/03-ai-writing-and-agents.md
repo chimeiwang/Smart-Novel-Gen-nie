@@ -516,10 +516,13 @@ DeepSeek 原始 `reasoning_content` 只用于进程内工具轮次回放，绝�
 observer，但只有 observer 与运行 context 都存在时才写区块，并明确显示没有计费请求标识。
 任何日志都不得记录 `grantToken`；Provider 在返回可靠 usage 前失败时不伪造 token。
 
-供应商请求失败时，DeepSeek 与通用 OpenAI-compatible 适配器完整保存脱敏的 HTTP 错误响应及异常
+供应商请求失败时，DeepSeek、通用 OpenAI-compatible、Embedding 与 Responses 适配器完整保存脱敏的 HTTP 错误响应及异常
 因果链。V1 在原任务的 `model_failure` 帧正文与服务日志中记录，V2 只按 run/step 记录服务日志。
 该详情不进入公共任务状态、业务回调或用户聊天，也不改变模型调用次数、计费及重试决定；正常请求、
-成功模型回复和推理不另行复制。具体保存字段与边界见[完整错误诊断规格](../specs/2026-10-07-provider-error-details.md)。
+成功模型回复和推理不另行复制。HTTP 200 中的无效 JSON、usage、工具参数和结构化输出也保存完整失败内容、
+预期 Schema、全部校验原因和异常链；V1 在计费回报之前先写独立失败帧，授权、grant、回报及工具执行失败
+分别记录。日志专用字段从业务序列化和 repr 排除，完整诊断不进入模型纠正提示。具体边界见
+[完整失败诊断规格](../specs/2026-10-07-complete-failure-diagnostics.md)。
 
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
@@ -527,7 +530,7 @@ DeepSeek 的 Function Calling 默认开启 Beta strict，同时覆盖原始 `dee
 
 普通工具使用可逆 wire Schema：闭合、至少一个属性且全必填对象，可省略字段与 null 使用显式包装，开放字典及任意/递归 JSON 使用完整 JSON 字符串；历史工具参数仅在进程内按相同方式编码。无参工具、业务空对象、省略和 null 通过固定标记字段表示，解码后恢复各自原值，标记不进入业务输入；见[空对象兼容规格](../specs/2026-10-07-deepseek-strict-empty-object.md)。解码后完整复验原 Schema/Pydantic，不丢字段、不截断、不把空字符串或零等业务值当缺失。质量报告保持专用 wire：内联 `$defs`，不发送引用或 `type:null`，只有 `location` 与 `rewriteBrief` 将空字符串归一化为 `None`。纯文本无 Function Calling strict，既有 JSON Output 与视频 Responses 的冻结路由不迁移；详见 [默认 strict 规格](../specs/2026-10-01-deepseek-default-strict.md)。
 
-DeepSeek 工具 arguments 解析失败时，Provider 必须在可靠 usage 已校验的前提下返回不含原文的无效调用诊断，不得让原始 `ValueError` 穿透；只允许对末尾缺失对象或数组闭合符、补齐后可由标准 JSON 解析且通过本轮原始 JSON Schema 的参数做确定性恢复。AgentRuntime 把单次模型工具响应视为原子协议包，只要包含无效调用就不得接受其中正文或执行任何工具。无效 JSON 或本地 Pydantic 参数在整个 Agent 运行中最多触发一次显式协议纠正：纠正请求不回放坏 assistant 响应或 arguments，保持原工具和策略，并作为新的 `ModelRuntime` 调用独立授权、回报 usage 和记录日志；纠正后仍无合法工具调用时固定以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 失败。成功 HTTP 响应的 JSON、envelope 或 usage 不可信时不可自动再调用模型。质量协议错误日志可以保留原始完成原因、安全大写 `failure_code`、允许列表内工具名、错误分类、参数字符数和确定性恢复计数；Pydantic 失败最多额外记录 10 条脱敏 `loc/type`，不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`。视频既有路由与能力门禁不变。
+DeepSeek 工具 arguments 解析失败时，Provider 必须在可靠 usage 已校验的前提下返回安全分类及仅供日志的完整失败诊断，不得让原始 `ValueError` 穿透；只允许对末尾缺失对象或数组闭合符、补齐后可由标准 JSON 解析且通过本轮原始 JSON Schema 的参数做确定性恢复。AgentRuntime 把单次模型工具响应视为原子协议包，只要包含无效调用就不得接受其中正文或执行任何工具。无效 JSON 或本地 Pydantic 参数在整个 Agent 运行中最多触发一次显式协议纠正：纠正请求不回放坏 assistant 响应或 arguments，保持原工具和策略，并作为新的 `ModelRuntime` 调用独立授权、回报 usage 和记录日志；纠正后仍无合法工具调用时固定以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 失败。成功 HTTP 响应的 JSON、envelope 或 usage 不可信时不可自动再调用模型。公共错误与纠正提示仍只携带原安全分类和最多 10 条白名单 `loc/type`；完整失败原参数、wire/业务 Schema、所有校验错误、异常链和确定性恢复前后证据仅写脱敏诊断日志，不截断。视频既有路由与能力门禁不变。
 
 普通章节存在一个局部例外：`write_chapter` / `rewrite_scene` 的 primary/reviser 若已经成功纠正过纯读取工具包，
 后续 `begin_artifact_output` 的 Pydantic 参数失败可再纠正一次，每次 AgentRuntime 执行最多两次。

@@ -24,8 +24,12 @@ from .base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
-from .deepseek_strict import prepare_deepseek_tools
-from .error_details import capture_provider_error_details
+from .deepseek_strict import prepare_deepseek_tools, schema_validation_errors
+from .error_details import (
+    FailureDiagnostic,
+    capture_failure_diagnostic,
+    capture_provider_error_details,
+)
 from .openai_compatible import (
     StructuredOutputRecoveryCode,
     _append_missing_container_closers,
@@ -96,7 +100,7 @@ class DeepSeekV4Provider:
         return self.endpoint_profile, self.capability_version
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
-        prepared = prepare_deepseek_tools(request)
+        prepared = prepare_deepseek_tools(request, secrets=(self._api_key,))
         request = prepared.request
         structured_output = request.structuredOutput
         structured_validator: jsonschema_rs.Validator | None = None
@@ -183,7 +187,10 @@ class DeepSeekV4Provider:
                 statusCode=response.status_code,
                 requestId=_response_request_id(response),
                 details=capture_provider_error_details(
-                    response=response, error=exc, secrets=(self._api_key,)
+                    response=response,
+                    error=exc,
+                    secrets=(self._api_key,),
+                    include_success_body=True,
                 ),
             )
             body = None
@@ -198,12 +205,16 @@ class DeepSeekV4Provider:
                 status_code=response.status_code,
                 request_id=_response_request_id(response),
                 secrets=(self._api_key,),
+                business_schemas={
+                    name: tool.parameters for name, tool in prepared.originals.items()
+                },
             )
         except ProviderProtocolError as exc:
             details = capture_provider_error_details(
                 response=response,
                 error=exc,
                 secrets=(self._api_key,),
+                include_success_body=True,
             )
             if exc.details is not None:
                 details.exceptionChain.extend(exc.details.exceptionChain)
@@ -212,6 +223,7 @@ class DeepSeekV4Provider:
         if parsed_error is not None:
             raise parsed_error
         if structured_output is not None:
+            raw_structured_content = result.content
             if structured_validator is None:
                 raise RuntimeError("DeepSeek V4 结构化输出校验器缺失")
             unexpected_tool_output = bool(
@@ -244,6 +256,7 @@ class DeepSeekV4Provider:
             result = ModelTurnResult.model_validate(
                 result.model_dump(mode="python")
                 | {
+                    "failureDiagnostics": result.failureDiagnostics,
                     "content": "",
                     "reasoningContent": None,
                     "toolCalls": [],
@@ -259,6 +272,31 @@ class DeepSeekV4Provider:
                     "structuredOutputCorrectionCount": (1 if recovery_code is not None else 0),
                 }
             )
+            if diagnostic is not None:
+                structured_error: Exception | None = None
+                validation_errors: list[dict[str, Any]] = []
+                try:
+                    structured_value = _load_strict_json(raw_structured_content)
+                    validation_errors = schema_validation_errors(
+                        structured_output.jsonSchema,
+                        structured_value,
+                    )
+                except (ValueError, RecursionError) as exc:
+                    structured_error = exc
+                result.failureDiagnostics.append(
+                    capture_failure_diagnostic(
+                        stage="provider.structured_output",
+                        code=diagnostic.code,
+                        payload={
+                            "output": body,
+                            "expectedSchema": structured_output.jsonSchema,
+                            "diagnostic": diagnostic.model_dump(),
+                            "validationErrors": validation_errors,
+                        },
+                        error=structured_error,
+                        secrets=(self._api_key,),
+                    )
+                )
         return prepared.decode_result(result)
 
 
@@ -356,6 +394,9 @@ class _ParsedToolCalls:
         self.invalid_argument_character_counts: list[int] = []
         self.recovered_codes: list[ModelToolRecoveryCode] = []
         self.recovered_appended_container_counts: list[int] = []
+        self.diagnostics: list[FailureDiagnostic] = []
+        self.payload: dict[str, Any] = {}
+        self.secrets: tuple[str, ...] = ()
 
     def add_invalid(
         self,
@@ -363,10 +404,21 @@ class _ParsedToolCalls:
         name: str,
         code: ModelInvalidToolCallCode,
         argument_character_count: int,
+        stage: str = "tool.envelope",
+        error: BaseException | None = None,
     ) -> None:
         self.invalid_names.append(name)
         self.invalid_codes.append(code)
         self.invalid_argument_character_counts.append(argument_character_count)
+        self.diagnostics.append(
+            capture_failure_diagnostic(
+                stage=stage,
+                code=code,
+                payload=self.payload,
+                error=error,
+                secrets=self.secrets,
+            )
+        )
 
 
 def _parse_response(
@@ -376,6 +428,7 @@ def _parse_response(
     status_code: int,
     request_id: str | None,
     secrets: tuple[str, ...] = (),
+    business_schemas: dict[str, dict[str, Any]] | None = None,
 ) -> ModelTurnResult:
     if not isinstance(body, Mapping):
         raise ProviderProtocolError(
@@ -421,7 +474,9 @@ def _parse_response(
     if usage_protocol_error is not None:
         raise usage_protocol_error
     usage = cast(tuple[ModelUsage, ModelUsageDiagnostics], usage)
-    parsed_tool_calls = _parse_tool_calls(message.get("tool_calls", []), request)
+    parsed_tool_calls = _parse_tool_calls(
+        message.get("tool_calls", []), request, secrets=secrets, business_schemas=business_schemas
+    )
     raw_reason = choice.get("finish_reason")
     normalized: ModelFinishReason = normalize_finish_reason(raw_reason)
     envelope_protocol_error: ProviderProtocolError | None = None
@@ -443,6 +498,7 @@ def _parse_response(
         content=content,
         reasoningContent=reasoning_content,
         toolCalls=parsed_tool_calls.calls,
+        failureDiagnostics=parsed_tool_calls.diagnostics,
         invalidToolCallCount=len(parsed_tool_calls.invalid_codes),
         invalidToolCallNames=parsed_tool_calls.invalid_names,
         invalidToolCallCodes=parsed_tool_calls.invalid_codes,
@@ -466,8 +522,13 @@ def _parse_response(
 def _parse_tool_calls(
     raw: object,
     request: ModelTurnRequest,
+    *,
+    secrets: tuple[str, ...] = (),
+    business_schemas: dict[str, dict[str, Any]] | None = None,
 ) -> _ParsedToolCalls:
     result = _ParsedToolCalls()
+    result.secrets = secrets
+    result.payload = {"toolCalls": raw}
     if raw is None:
         return result
     if not isinstance(raw, list):
@@ -479,6 +540,7 @@ def _parse_tool_calls(
         return result
     requested_by_name = {tool.name: tool for tool in request.tools}
     for item in raw:
+        result.payload = {"toolCall": item}
         if not isinstance(item, Mapping):
             result.add_invalid(
                 name="未知工具",
@@ -497,6 +559,15 @@ def _parse_tool_calls(
             continue
         name = function.get("name")
         raw_arguments = function.get("arguments")
+        result.payload = {
+            "toolName": name,
+            "callId": call_id,
+            "rawArguments": raw_arguments,
+            "wireSchema": requested_by_name[name].parameters
+            if isinstance(name, str) and name in requested_by_name
+            else None,
+            "businessSchema": (business_schemas or {}).get(name) if isinstance(name, str) else None,
+        }
         argument_character_count = len(raw_arguments) if isinstance(raw_arguments, str) else 0
         safe_name = name if isinstance(name, str) and name in requested_by_name else "未知工具"
         if not isinstance(name, str) or not name.strip():
@@ -522,7 +593,7 @@ def _parse_tool_calls(
             continue
         try:
             arguments = _load_strict_json(raw_arguments)
-        except (ValueError, RecursionError):
+        except (ValueError, RecursionError) as exc:
             recovery = (
                 _recover_deepseek_tool_call(
                     call_id=call_id,
@@ -538,11 +609,27 @@ def _parse_tool_calls(
                 result.calls.append(recovered_call)
                 result.recovered_codes.append("append_container_closers")
                 result.recovered_appended_container_counts.append(appended_container_count)
+                repaired = _append_missing_container_closers(raw_arguments)
+                result.diagnostics.append(
+                    capture_failure_diagnostic(
+                        stage="tool.json_recovery",
+                        code="append_container_closers",
+                        error=exc,
+                        payload={
+                            **result.payload,
+                            "repairedArguments": repaired[0] if repaired else None,
+                            "appendedContainerCount": appended_container_count,
+                        },
+                        secrets=secrets,
+                    )
+                )
                 continue
             result.add_invalid(
                 name=safe_name,
                 code="json_decode_error",
                 argument_character_count=argument_character_count,
+                stage="tool.json_parse",
+                error=exc,
             )
             continue
         if not isinstance(arguments, dict):
@@ -563,11 +650,17 @@ def _parse_tool_calls(
         if requested_tool.strict:
             try:
                 jsonschema_rs.validate(requested_tool.parameters, arguments)
-            except ValueError:
+            except ValueError as exc:
+                result.payload["validationErrors"] = schema_validation_errors(
+                    requested_tool.parameters,
+                    arguments,
+                )
                 result.add_invalid(
                     name=safe_name,
                     code="provider_strict_schema_violation",
                     argument_character_count=argument_character_count,
+                    stage="tool.wire_schema",
+                    error=exc,
                 )
                 continue
         result.calls.append(ModelToolCall(id=call_id, name=name, arguments=arguments))

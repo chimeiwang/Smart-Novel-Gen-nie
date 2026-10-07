@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import re
-from collections.abc import Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
+from contextlib import suppress
+from functools import partial
 from typing import Any
 
 from pydantic import ValidationError
@@ -15,6 +17,11 @@ from ..providers.base import (
     ModelToolCall,
     ModelTurnRequest,
     ModelTurnResult,
+)
+from ..providers.error_details import (
+    FailureDiagnostic,
+    capture_failure_diagnostic,
+    log_failure_diagnostic,
 )
 from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
@@ -83,7 +90,7 @@ _TOOL_CORRECTION_HINTS = {
 
 
 class ModelToolArgumentsInvalidError(RuntimeError):
-    """只携带字段路径和错误类型，不携带模型参数值。"""
+    """公共文本只含安全摘要，完整失败参数通过独立属性送入日志。"""
 
     code = "MODEL_TOOL_ARGUMENTS_INVALID"
     retryable = False
@@ -97,6 +104,7 @@ class ModelToolArgumentsInvalidError(RuntimeError):
             for issue in validation_issues[:_MAX_VALIDATION_ISSUES]
             if _SAFE_VALIDATION_ISSUE_PATTERN.fullmatch(issue)
         )
+        self.failureDiagnostics: list[FailureDiagnostic] = []
         summary = "|".join(self.validation_issues) or "none"
         super().__init__(
             f"{self.code}：工具 {self.tool_name} 参数校验失败（{summary}）"
@@ -107,6 +115,10 @@ class ModelToolArgumentsInvalidError(RuntimeError):
         cls,
         tool_name: str,
         error: ValidationError,
+        *,
+        arguments: dict[str, Any] | None = None,
+        schema_supplier: Callable[[], dict[str, Any]] | None = None,
+        call_id: str | None = None,
     ) -> ModelToolArgumentsInvalidError:
         issues: list[str] = []
         for detail in error.errors(
@@ -123,7 +135,27 @@ class ModelToolArgumentsInvalidError(RuntimeError):
                 else "unknown"
             )
             issues.append(f"loc={location} type={safe_type}")
-        return cls(tool_name, issues)
+        result = cls(tool_name, issues)
+        with suppress(Exception):
+            payload = {
+                "toolName": tool_name, "toolCallId": call_id,
+                "arguments": arguments,
+                "validationErrors": error.errors(include_url=False),
+            }
+            schema_failure: str | None = None
+            if schema_supplier is not None:
+                try:
+                    payload.update(schema_supplier())
+                except Exception as schema_error:
+                    schema_failure = type(schema_error).__name__
+            diagnostic = capture_failure_diagnostic(
+                stage="tool_arguments_pydantic", code=result.code, error=error,
+                payload=payload,
+            )
+            if schema_failure is not None:
+                diagnostic.captureFailure = schema_failure
+            result.failureDiagnostics.append(diagnostic)
+        return result
 
 
 class ModelToolProtocolRecoveryFailedError(RuntimeError):
@@ -210,6 +242,16 @@ def _safe_validation_location(value: object) -> str:
     return ".".join(parts)
 
 
+def _tool_failure_schemas(
+    tool: ToolDefinition, parameters: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """参数预检使用业务契约；供应商转换前的操作契约单独命名，避免混淆。"""
+    return {
+        "businessSchema": tool.argumentsModel.model_json_schema(),
+        "modelSchema": tool.as_model_tool(parameters=parameters).parameters,
+    }
+
+
 def _with_tool_protocol_correction(
     conversation: Sequence[ModelMessage],
     error: ModelToolProtocolRecoveryFailedError,
@@ -273,6 +315,70 @@ class AgentRuntime:
         allow_chapter_artifact_correction: bool = False,
         model_tool_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> AgentTurnResult:
+        """日志只观察失败；原异常、取消、工具权限和纠正次数保持原语义。"""
+        try:
+            return await self._run_impl(
+                messages=messages, exposed_tools=exposed_tools, context=context,
+                max_iterations=max_iterations, terminal_control_tools=terminal_control_tools,
+                policy=policy, model_context=model_context, model_lane=model_lane,
+                reviewer=reviewer,
+                allow_chapter_artifact_correction=allow_chapter_artifact_correction,
+                model_tool_schemas=model_tool_schemas,
+            )
+        except JobCancelledError:
+            raise
+        except Exception as exc:
+            self._record_failure(
+                stage="agent_runtime", code="AGENT_RUNTIME_FAILED", error=exc,
+                context=context, model_context=model_context,
+                payload_factory=lambda: {"exposedTools": [tool.name for tool in exposed_tools]},
+            )
+            raise
+
+    def _record_failure(
+        self, *, stage: str, code: str, context: ToolContext,
+        model_context: ModelCallContext | None = None, error: BaseException | None = None,
+        payload_factory: Callable[[], Any] | None = None,
+    ) -> None:
+        """将载荷构造也置于保护内，序列化失败不能覆盖原业务错误。"""
+        with suppress(Exception):
+            diagnostic = capture_failure_diagnostic(
+                stage=stage, code=code, error=error,
+                payload=payload_factory() if payload_factory is not None else None,
+            )
+            self._record_diagnostic(diagnostic, context, model_context)
+
+    def _record_diagnostic(
+        self, diagnostic: FailureDiagnostic, context: ToolContext,
+        model_context: ModelCallContext | None = None,
+    ) -> None:
+        """兼容旧运行时替身，日志写入失败不能变成业务失败。"""
+        with suppress(Exception):
+            callback = getattr(self._model_runtime, "record_failure_diagnostic", None)
+            if callable(callback):
+                callback(diagnostic, context=model_context or ModelCallContext(
+                    userId=context.userId, novelId=context.novelId, taskId=context.taskId,
+                    runId=context.runId, agentId=context.agentId,
+                ))
+            else:
+                log_failure_diagnostic(logger, diagnostic, task_id=context.taskId,
+                                       run_id=context.runId, agent_id=context.agentId)
+
+    async def _run_impl(
+        self,
+        *,
+        messages: Sequence[dict[str, object] | ModelMessage],
+        exposed_tools: list[ToolDefinition],
+        context: ToolContext,
+        max_iterations: int = 10,
+        terminal_control_tools: set[str] | frozenset[str] = frozenset(),
+        policy: ModelExecutionPolicy,
+        model_context: ModelCallContext | None = None,
+        model_lane: ModelLane = "interactive",
+        reviewer: bool = False,
+        allow_chapter_artifact_correction: bool = False,
+        model_tool_schemas: dict[str, dict[str, Any]] | None = None,
+    ) -> AgentTurnResult:
         conversation = [
             message if isinstance(message, ModelMessage) else ModelMessage.model_validate(message)
             for message in messages
@@ -314,7 +420,15 @@ class AgentRuntime:
                 )
                 await self._ensure_active(context)
                 usage = add_usage(usage, response.usage)
-                self._raise_incomplete_response(response)
+                try:
+                    self._raise_incomplete_response(response)
+                except Exception as exc:
+                    self._record_failure(
+                        stage="model_finish_reason", code="MODEL_COMPLETION_REJECTED", error=exc,
+                        context=context, model_context=model_context,
+                        payload_factory=partial(response.model_dump, exclude={"reasoningContent"}),
+                    )
+                    raise
 
                 protocol_error: ModelToolProtocolRecoveryFailedError | None = None
                 artifact_arguments_invalid = False
@@ -340,10 +454,21 @@ class AgentRuntime:
                             model_tool_schemas=model_tool_schemas,
                         )
                     except ModelToolArgumentsInvalidError as error:
+                        for diagnostic in error.failureDiagnostics:
+                            self._record_diagnostic(diagnostic, context, model_context)
                         protocol_error = (
                             ModelToolProtocolRecoveryFailedError.from_arguments_error(error)
                         )
                         artifact_arguments_invalid = error.tool_name == "begin_artifact_output"
+                    except Exception as exc:
+                        self._record_failure(
+                            stage="tool_preflight", code="TOOL_PREFLIGHT_FAILED", error=exc,
+                            context=context, model_context=model_context,
+                            payload_factory=partial(
+                                response.model_dump, exclude={"reasoningContent"},
+                            ),
+                        )
+                        raise
                     else:
                         if correction_in_progress and not validated_calls:
                             protocol_error = (
@@ -368,11 +493,22 @@ class AgentRuntime:
                     "correct_chapter_artifact" if use_chapter_reserve
                     else "correct" if can_correct else "fail"
                 )
-                logger.warning(
-                    "工具协议校验未通过 run_id=%s corrections_used=%s action=%s "
-                    "protocol=%s validation=%s",
-                    context.runId, protocol_corrections_used, action,
-                    protocol_error.protocol_issues, protocol_error.validation_issues,
+                with suppress(Exception):
+                    logger.warning(
+                        "工具协议校验未通过 run_id=%s corrections_used=%s action=%s "
+                        "protocol=%s validation=%s",
+                        context.runId, protocol_corrections_used, action,
+                        protocol_error.protocol_issues, protocol_error.validation_issues,
+                    )
+                self._record_failure(
+                    stage="tool_protocol_correction", code=protocol_error.code,
+                    context=context, model_context=model_context,
+                    payload_factory=partial(
+                        dict, correctionsUsed=protocol_corrections_used, action=action,
+                        providerResponseId=response.providerResponseId,
+                        protocolIssues=protocol_error.protocol_issues,
+                        validationIssues=protocol_error.validation_issues,
+                    ),
                 )
                 if not can_correct:
                     raise protocol_error from None
@@ -446,6 +582,9 @@ class AgentRuntime:
                     for (call_item, tool_item, arguments), result in zip(
                         safe_batch, results, strict=True
                     ):
+                        self._record_tool_failure(
+                            call_item, arguments, result, context, model_context,
+                        )
                         normalized = self._normalize_result(result)
                         self._record_tool(
                             call_item.id,
@@ -526,8 +665,15 @@ class AgentRuntime:
                     except JobCancelledError:
                         raise
                     except Exception as exc:
+                        self._record_tool_failure(call, arguments, exc, context, model_context)
                         normalized = {"error": str(exc)}
+                    else:
+                        self._record_tool_failure(
+                            call, arguments, normalized, context, model_context,
+                        )
                     await self._ensure_active(context)
+                if tool.toolKind == "control" and normalized.get("acknowledged") is False:
+                    self._record_tool_failure(call, arguments, normalized, context, model_context)
                 self._record_tool(
                     call.id,
                     tool,
@@ -616,6 +762,11 @@ class AgentRuntime:
                 raise ModelToolArgumentsInvalidError.from_validation_error(
                     call.name,
                     exc,
+                    arguments=call.arguments,
+                    schema_supplier=partial(
+                        _tool_failure_schemas, tool, (model_tool_schemas or {}).get(tool.name),
+                    ),
+                    call_id=call.id,
                 ) from None
             validated_calls.append((call, tool, arguments))
 
@@ -658,6 +809,27 @@ class AgentRuntime:
         if not isinstance(result, dict):
             return {"error": "工具返回值不是对象"}
         return result
+
+    def _record_tool_failure(
+        self, call: ModelToolCall, arguments: dict[str, Any], result: object,
+        context: ToolContext, model_context: ModelCallContext | None,
+    ) -> None:
+        """并发与串行工具保留各自失败证据，正常工具结果不重复写入诊断。"""
+        failed = not isinstance(result, dict) or (
+            "error" in result or result.get("acknowledged") is False
+        )
+        if not failed or isinstance(result, JobCancelledError):
+            return
+        self._record_failure(
+            stage="tool_execution", code="TOOL_EXECUTION_FAILED",
+            error=result if isinstance(result, BaseException) else None,
+            context=context, model_context=model_context,
+            payload_factory=lambda: {
+                "toolName": call.name, "toolCallId": call.id,
+                "arguments": arguments,
+                "result": None if isinstance(result, BaseException) else result,
+            },
+        )
 
     @staticmethod
     def _record_tool(

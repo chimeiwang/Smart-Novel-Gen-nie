@@ -285,17 +285,21 @@ async def test_explicit_long_serial_job_bypasses_parent_with_trusted_operation()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("operation_kind", "scope"), [
-    ("create_lore", {"kind": "novel"}),
-    ("revise_lore", {"kind": "novel"}),
-    ("create_outline", {"kind": "novel"}),
-    ("revise_outline", {"kind": "novel"}),
-    ("revise_outline", {"kind": "outline_node", "outlineNodeId": "node-1"}),
-    ("manage_foreshadowing", {"kind": "novel"}),
-    ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-1"}),
-])
+@pytest.mark.parametrize(
+    ("operation_kind", "scope"),
+    [
+        ("create_lore", {"kind": "novel"}),
+        ("revise_lore", {"kind": "novel"}),
+        ("create_outline", {"kind": "novel"}),
+        ("revise_outline", {"kind": "novel"}),
+        ("revise_outline", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+        ("manage_foreshadowing", {"kind": "novel"}),
+        ("manage_foreshadowing", {"kind": "chapter", "chapterId": "chapter-1"}),
+    ],
+)
 async def test_structured_explicit_job_passes_actual_operation_graph_validation(
-    operation_kind, scope,
+    operation_kind,
+    scope,
 ):
     class ValidatingGraph(Graph):
         async def ainvoke(self, value):
@@ -309,8 +313,9 @@ async def test_structured_explicit_job_passes_actual_operation_graph_validation(
     parent = Graph({"phase": "error", "errorMessage": "不应进入自然分类"})
     operation = ValidatingGraph({"phase": "completed", "finalResponse": "已处理"})
     core = CoreClient({"workspace": {}, "planning": {"graphState": None}})
-    handler = WritingJobHandler(core, parent_graph=parent, operation_graph=operation,
-                                artifacts=ArtifactHydration())
+    handler = WritingJobHandler(
+        core, parent_graph=parent, operation_graph=operation, artifacts=ArtifactHydration()
+    )
     await handler(_explicit_job(payload_updates={"operation": operation_kind, "scope": scope}))
     assert not parent.inputs
     assert len(operation.inputs) == 1
@@ -576,8 +581,7 @@ async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> No
         {"role": "agent", "content": "更早的回答"},
     ]
     assert all(
-        item.get("content") != "续写本章"
-        for item in parent.inputs[0]["conversationHistory"]
+        item.get("content") != "续写本章" for item in parent.inputs[0]["conversationHistory"]
     )
     assert parent.inputs[0]["runtimeContext"] == {
         "coreContext": core.context,
@@ -824,9 +828,7 @@ async def test_writing_job_preserves_blocked_cas_failure_at_waiting_boundary() -
                 "patchFailureCode": "ARTIFACT_REVISION_CONFLICT",
                 "patchFailureMessage": "草案已被其他操作修改，请重新审核当前草案。",
                 "activeArtifactId": "artifact-1",
-                "__interrupt__": [
-                    {"type": "artifact_review", "artifactId": "artifact-1"}
-                ],
+                "__interrupt__": [{"type": "artifact_review", "artifactId": "artifact-1"}],
             }
         ),
         operation_graph=Graph({}),
@@ -1148,9 +1150,7 @@ async def test_initial_job_retry_replays_its_terminal_checkpoint_without_rerunni
     assert parent.inputs == []
     assert operation.inputs == []
     assert core.events == []
-    assert core.completions == [
-        (3, {"finalResponse": "首次执行已经完成的正文"})
-    ]
+    assert core.completions == [(3, {"finalResponse": "首次执行已经完成的正文"})]
 
 
 @pytest.mark.asyncio
@@ -1260,3 +1260,54 @@ async def test_current_job_terminal_snapshot_is_attached_before_settlement() -> 
     assert handler.seen_state["runtimeContext"]["runResource"]["jobId"] == "job-1"
     assert artifacts.hydrated[0][2]["id"] == "artifact-1"
     assert [item[0] for item in artifacts.released] == ["artifact-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_sink", ["record_state", "finish_run", "both"])
+async def test_图执行原错且人工日志故障仍上报Core失败(monkeypatch, failed_sink):
+    original = RuntimeError("MODEL_PROVIDER_FAILED：原始图失败原因")
+
+    class RaisingGraph(Graph):
+        async def ainvoke(self, value):
+            self.inputs.append(value)
+            raise original
+
+    class BrokenWorkflowLog(WorkflowLog):
+        def record_state(self, run_id, node, changes):
+            if node == "运行异常" and failed_sink in {"record_state", "both"}:
+                raise OSError("人工状态日志故障")
+            super().record_state(run_id, node, changes)
+
+        def finish_run(self, run_id, status):
+            if status == "错误" and failed_sink in {"finish_run", "both"}:
+                raise OSError("人工结束日志故障")
+            super().finish_run(run_id, status)
+
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "继续写作",
+                "graphState": None,
+            },
+        }
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=RaisingGraph({}),
+        operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
+        workflow_log=BrokenWorkflowLog(),
+    )
+    with pytest.raises(NonRetryableJobError) as failure:
+        await handler(_job())
+    assert failure.value.__cause__ is original
+    assert len(core.failures) == 1
+    assert core.failures[0]["code"] == "MODEL_PROVIDER_FAILED"
+    assert core.failures[0]["message"] == str(original)
+    assert core.completions == []

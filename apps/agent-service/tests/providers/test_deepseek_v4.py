@@ -28,8 +28,85 @@ from inkforge_agents.runtime.model_policy import (
     REVIEWER_NO_THINKING,
 )
 from inkforge_agents.tools.control import QualityReportArgs
+from inkforge_agents.tools.registry import build_default_registry
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "deepseek_v4"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name,arguments",
+    [
+        ("get_recent_chapters", '{"count": 3}'),
+        ("list_outline_summary", '{"scope":"tree_index","include_full_summary":false}'),
+    ],
+)
+async def test工具wire失败保留完整参数Schema及校验但不进入公共结果(name, arguments):
+    tool = build_default_registry().require(name).as_model_tool()
+    body = _response_with_usage(
+        {
+            "prompt_tokens": 1,
+            "prompt_cache_hit_tokens": 0,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        }
+    )
+    body["choices"][0]["message"]["tool_calls"] = [
+        {
+            "id": "failed-call",
+            "type": "function",
+            "function": {"name": name, "arguments": arguments},
+        }
+    ]
+    provider, _, client = _provider(response=body)
+    try:
+        result = await provider.complete_turn(_request(tools=[tool.model_dump()]))
+    finally:
+        await client.aclose()
+    assert result.invalidToolCallCount == 1
+    assert result.toolCalls == []
+    diagnostic = result.failureDiagnostics[0]
+    assert diagnostic.stage == "tool.wire_schema"
+    payload = json.loads(diagnostic.payloadJson)
+    assert payload["rawArguments"] == arguments
+    assert payload["callId"] == "failed-call"
+    assert payload["wireSchema"]["properties"]
+    assert payload["businessSchema"] == tool.parameters
+    assert payload["validationErrors"]
+    assert diagnostic.errorDetails.exceptionChain
+    assert "failureDiagnostics" not in result.model_dump()
+    assert "failed-call" not in repr(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments,stage",
+    [('{"count":3', "tool.json_parse"), ('{"count":3,"count":4}', "tool.wire_schema")],
+)
+async def test坏JSON完整诊断保留原参数(arguments, stage):
+    tool = build_default_registry().require("get_recent_chapters").as_model_tool()
+    body = _response_with_usage(
+        {
+            "prompt_tokens": 1,
+            "prompt_cache_hit_tokens": 0,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        }
+    )
+    body["choices"][0]["message"]["tool_calls"] = [
+        {
+            "id": "bad-json",
+            "type": "function",
+            "function": {"name": tool.name, "arguments": arguments},
+        }
+    ]
+    provider, _, client = _provider(response=body)
+    try:
+        result = await provider.complete_turn(_request(tools=[tool.model_dump()]))
+    finally:
+        await client.aclose()
+    assert result.failureDiagnostics[0].stage == stage
+    assert json.loads(result.failureDiagnostics[0].payloadJson)["rawArguments"] == arguments
 
 
 def _response_with_usage(usage: object) -> dict[str, Any]:
@@ -234,8 +311,9 @@ async def test_structured_report_recovers_string_controls_losslessly_with_one_ht
 
 
 @pytest.mark.asyncio
-async def test_structured_report_control_recovery_preserves_escapes_and_outside_whitespace(
-) -> None:
+async def test_structured_report_control_recovery_preserves_escapes_and_outside_whitespace() -> (
+    None
+):
     report = '完整前文\\路径和"引号"，字面\\n，转义退格\b，换行\n回车\r制表\t完整末尾'
     raw = json.dumps({"report": report}, ensure_ascii=False)
     # 只在已编码的字符串内加入真实控制符，保留已有反斜杠和引号转义。
@@ -624,10 +702,15 @@ async def test_quality_strict_response_is_revalidated_against_original_schema() 
 @pytest.mark.asyncio
 async def test非质量工具默认使用_strict() -> None:
     provider, requests, client = _provider()
-    request = _request(tools=[{
-        "name": "submit_evaluation", "description": "提交复审",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-    }])
+    request = _request(
+        tools=[
+            {
+                "name": "submit_evaluation",
+                "description": "提交复审",
+                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+            }
+        ]
+    )
     try:
         await provider.complete_turn(request)
     finally:
@@ -1040,7 +1123,8 @@ async def test_deepseek_requires_prompt_cache_hit_tokens() -> None:
         await client.aclose()
     assert caught.value.code == "invalid_usage"
     assert caught.value.details is not None
-    assert caught.value.details.responseBody is None
+    assert caught.value.details.responseBody is not None
+    assert json.loads(caught.value.details.responseBody)["usage"]["prompt_tokens"] == 1
     assert any(
         entry.type == "ValueError" and "prompt_cache_hit_tokens" in entry.message
         for entry in caught.value.details.exceptionChain
@@ -1507,20 +1591,35 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
         registry.require(name).as_model_tool(
             parameters=(
                 artifact_model_schema_for_operation("write_chapter")
-                if name == "begin_artifact_output" else None
+                if name == "begin_artifact_output"
+                else None
             )
         )
         for name in sorted(OPERATION_DEFINITIONS["write_chapter"].allowedToolNames)
     ]
     assert len(tools) == 24
     marker = {"_inkforgeEmpty": "empty"}
-    wire = marker if returned_tool == "get_character_list" else {
-        "kind": "chapter_draft", "summary": "本章草案", "content": "完整章节正文",
-        "artifactKey": marker, "reviewerAgent": marker, "submitForReview": marker,
-    }
-    expected = {} if returned_tool == "get_character_list" else {
-        "kind": "chapter_draft", "summary": "本章草案", "content": "完整章节正文",
-    }
+    wire = (
+        marker
+        if returned_tool == "get_character_list"
+        else {
+            "kind": "chapter_draft",
+            "summary": "本章草案",
+            "content": "完整章节正文",
+            "artifactKey": marker,
+            "reviewerAgent": marker,
+            "submitForReview": marker,
+        }
+    )
+    expected = (
+        {}
+        if returned_tool == "get_character_list"
+        else {
+            "kind": "chapter_draft",
+            "summary": "本章草案",
+            "content": "完整章节正文",
+        }
+    )
     requests: list[httpx.Request] = []
 
     def has_empty_object(node: object) -> bool:
@@ -1536,32 +1635,57 @@ async def test章节写作完整24工具请求拒绝空Schema且标记恢复业�
         requests.append(request)
         payload = json.loads(request.content)
         if any(has_empty_object(tool["function"]["parameters"]) for tool in payload["tools"]):
-            return httpx.Response(400, json={"error": {
-                "message": "An object with no properties is not allowed.",
-            }})
-        return httpx.Response(200, json={
-            "id": "strict-empty-regression", "object": "chat.completion", "created": 1,
-            "model": "deepseek-v4-flash", "choices": [{
-                "index": 0, "finish_reason": "tool_calls", "message": {
-                    "role": "assistant", "content": "", "tool_calls": [{
-                        "id": "call-1", "type": "function", "function": {
-                            "name": returned_tool,
-                            "arguments": json.dumps(wire, ensure_ascii=False),
-                        },
-                    }],
+            return httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": "An object with no properties is not allowed.",
+                    }
                 },
-            }],
-            "usage": {
-                "prompt_tokens": 10, "prompt_cache_hit_tokens": 0,
-                "completion_tokens": 5, "total_tokens": 15,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": "strict-empty-regression",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "deepseek-v4-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": returned_tool,
+                                        "arguments": json.dumps(wire, ensure_ascii=False),
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "prompt_cache_hit_tokens": 0,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
             },
-        })
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = DeepSeekV4Provider(_settings(), client=client)
         request = ModelTurnRequest(
             messages=[{"role": "user", "content": "请写第54章"}],
-            tools=tools, maxOutputTokens=256, policy=CREATIVE_HIGH,
+            tools=tools,
+            maxOutputTokens=256,
+            policy=CREATIVE_HIGH,
         )
         original_request = request.model_dump()
         result = await provider.complete_turn(request)

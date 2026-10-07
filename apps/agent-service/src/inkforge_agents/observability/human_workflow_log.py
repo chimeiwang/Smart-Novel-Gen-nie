@@ -244,6 +244,34 @@ class HumanWorkflowLog:
                     novel_id=record.context.novelId,
                 ),
             )
+            if record.diagnosticOnly:
+                # 参数、授权和回报诊断不代表一次模型调用，不参与 A/M 尝试序号。
+                sequence = _next_sequence(frames, "diagnostic")
+                _append_frame(
+                    path,
+                    _LogFrame(
+                        header={"type": "diagnostic", "sequence": sequence},
+                        content="\n".join(
+                            (
+                                f"\nD{sequence:02d} 执行诊断",
+                                f"智能体：{record.context.agentId}",
+                                f"任务标识：{record.context.taskId}",
+                                f"运行标识：{record.context.runId}",
+                                f"模型：{record.provider}/{record.model}",
+                                f"错误分类：{record.failureCode}",
+                                "供应商响应标识：" + (record.providerResponseId or "未提供"),
+                                "计费请求标识：" + (record.billingRequestId or "无"),
+                                "完整失败诊断（凭据已脱敏）：",
+                                "\n".join(
+                                    item.model_dump_json(indent=2)
+                                    for item in record.failureDiagnostics
+                                ),
+                                "",
+                            )
+                        ),
+                    ),
+                )
+                return
             sequence = _next_model_attempt_sequence(frames)
             status_code = str(record.statusCode) if record.statusCode is not None else "未提供"
             provider_request_id = record.providerRequestId or "未提供"
@@ -285,6 +313,10 @@ class HumanWorkflowLog:
                                 record.providerErrorDetails.model_dump_json(indent=2)
                                 if record.providerErrorDetails is not None
                                 else "本次错误未提供详细诊断"
+                            ),
+                            "完整失败诊断（凭据已脱敏）：",
+                            "\n".join(
+                                item.model_dump_json(indent=2) for item in record.failureDiagnostics
                             ),
                             "",
                         )
@@ -841,13 +873,10 @@ def _invalid_tool_call_summary(record: ModelCallLogRecord) -> str:
         record.invalidToolCallArgumentCharacterCounts,
         strict=True,
     ):
-        safe_name = (
-            name if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) else "未知工具"
-        )
+        safe_name = name if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) else "未知工具"
         details.append(f"{safe_name}/{code}/{character_count}字符")
-    return (
-        f"无效工具调用：{record.invalidToolCallCount}；"
-        + (" | ".join(details) if details else "诊断缺失")
+    return f"无效工具调用：{record.invalidToolCallCount}；" + (
+        " | ".join(details) if details else "诊断缺失"
     )
 
 
@@ -862,9 +891,8 @@ def _recovered_tool_call_summary(record: ModelCallLogRecord) -> str:
             strict=True,
         )
     ]
-    return (
-        f"工具调用确定性恢复：{record.recoveredToolCallCount}；"
-        + (" | ".join(details) if details else "审计缺失")
+    return f"工具调用确定性恢复：{record.recoveredToolCallCount}；" + (
+        " | ".join(details) if details else "审计缺失"
     )
 
 

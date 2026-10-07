@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+import logging
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -34,7 +36,15 @@ from inkforge_contracts.video_adaptation import (
 from inkforge_service_auth import SignedServiceRequest, canonical_json_body
 from pydantic import BaseModel, ConfigDict, JsonValue
 
+from ..providers.error_details import (
+    FailureDiagnostic,
+    capture_failure_diagnostic,
+    capture_provider_error_details,
+    log_failure_diagnostic,
+)
 from ..runtime.model_runtime import ModelCallContext
+
+logger = logging.getLogger(__name__)
 
 
 class RequestSigner(Protocol):
@@ -74,6 +84,7 @@ class CoreServiceError(RuntimeError):
         super().__init__(message)
         self.recoverable = recoverable
         self.code = code
+        self.failureDiagnostics: list[FailureDiagnostic] = []
 
 
 _FORWARDED_CORE_ERROR_CODES = frozenset({"ARTIFACT_REVISION_CONFLICT"})
@@ -91,6 +102,10 @@ class CoreServiceClient:
         tool_name: str,
         arguments: dict[str, JsonValue],
     ) -> dict[str, Any]:
+        def validate_result(value: dict[str, Any]) -> None:
+            if not isinstance(value.get("result"), dict):
+                raise CoreServiceError("核心工具返回格式无效", recoverable=False)
+
         value = await self._request(
             "POST",
             f"/internal/v1/tools/{tool_name}",
@@ -106,6 +121,7 @@ class CoreServiceClient:
             scope=ServiceScope.TOOL_READ,
             resource=resource,
             idempotency_key=_idempotency(resource.runId, "tool", tool_name, arguments),
+            response_validator=validate_result,
         )
         result = value.get("result")
         if not isinstance(result, dict):
@@ -285,6 +301,7 @@ class CoreServiceClient:
                 code="ARTIFACT_QUARANTINE_RESPONSE_INVALID",
             )
         return value
+
     async def complete_video_plan(
         self,
         resource: RunResource,
@@ -786,6 +803,46 @@ class CoreServiceClient:
             idempotency_key=_idempotency(resource.runId, "quality-failure", check_id),
         )
 
+    def _record_request_failure(
+        self,
+        error: CoreServiceError,
+        *,
+        resource: RunResource,
+        path: str,
+        secrets: tuple[str, ...],
+        response: httpx.Response | None = None,
+        cause: Exception | None = None,
+        payload: object = None,
+        stage: str,
+    ) -> CoreServiceError:
+        """本次签发身份只用于脱敏失败，不复制正常请求和业务上下文。"""
+        if cause is not None:
+            error.__cause__ = cause
+        with suppress(Exception):
+            details = capture_provider_error_details(
+                response=response,
+                error=error,
+                secrets=secrets,
+                include_success_body=True,
+            )
+            diagnostic = capture_failure_diagnostic(
+                stage=stage,
+                code=error.code or "CORE_SERVICE_FAILED",
+                payload=payload,
+                details=details,
+                secrets=secrets,
+            )
+            error.failureDiagnostics.append(diagnostic)
+            log_failure_diagnostic(
+                logger,
+                diagnostic,
+                task_id=resource.taskId,
+                run_id=resource.runId,
+                job_id=resource.jobId,
+                path=path,
+            )
+        return error
+
     async def _request(
         self,
         method: str,
@@ -796,6 +853,7 @@ class CoreServiceClient:
         resource: RunResource,
         idempotency_key: str,
         require_callback_receipt: bool = False,
+        response_validator: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         body = canonical_json_body(payload)
         signed = self._signer.sign_request(
@@ -808,6 +866,12 @@ class CoreServiceClient:
             task_id=resource.taskId,
             run_id=resource.runId,
             novel_id=resource.novelId,
+        )
+        authorization = signed.headers.get("Authorization", "")
+        secrets = tuple(
+            value
+            for value in (signed.token, authorization, authorization.removeprefix("Bearer "))
+            if value
         )
         try:
             response = await self._http.request(
@@ -826,49 +890,153 @@ class CoreServiceClient:
             summary += "）"
             if public_message is not None:
                 summary += f"：{public_message}"
-            raise CoreServiceError(
-                summary,
-                recoverable=recoverable,
-                code=error_code,
+            raise self._record_request_failure(
+                CoreServiceError(
+                    summary,
+                    recoverable=recoverable,
+                    code=error_code,
+                ),
+                response=exc.response,
+                cause=exc,
+                resource=resource,
+                path=path,
+                secrets=secrets,
+                stage="core.http",
             ) from exc
         except httpx.HTTPError as exc:
-            raise CoreServiceError("核心服务暂时不可用", recoverable=True) from exc
+            raise self._record_request_failure(
+                CoreServiceError(
+                    "核心服务暂时不可用",
+                    recoverable=True,
+                ),
+                cause=exc,
+                resource=resource,
+                path=path,
+                secrets=secrets,
+                stage="core.transport",
+            ) from exc
 
         if response.status_code == 204 or not response.content:
             if require_callback_receipt:
-                raise CoreServiceError(
-                    "核心服务未返回写作回调接收凭证",
-                    recoverable=True,
-                    code="CALLBACK_RECEIPT_MISSING",
+                raise self._record_request_failure(
+                    CoreServiceError(
+                        "核心服务未返回写作回调接收凭证",
+                        recoverable=True,
+                        code="CALLBACK_RECEIPT_MISSING",
+                    ),
+                    response=response,
+                    resource=resource,
+                    path=path,
+                    secrets=secrets,
+                    stage="core.callback_receipt",
                 )
+            if response_validator is not None:
+                try:
+                    response_validator({})
+                except CoreServiceError as exc:
+                    self._record_request_failure(
+                        exc,
+                        response=response,
+                        resource=resource,
+                        path=path,
+                        secrets=secrets,
+                        stage="core.tool_result",
+                        payload={"response": {}, "expectedResultType": "object"},
+                    )
+                    raise
             return {}
         try:
             value = response.json()
         except ValueError as exc:
             if require_callback_receipt:
-                raise CoreServiceError(
-                    "核心服务返回的写作回调接收凭证不是有效 JSON",
-                    recoverable=True,
-                    code="CALLBACK_RECEIPT_INVALID",
+                raise self._record_request_failure(
+                    CoreServiceError(
+                        "核心服务返回的写作回调接收凭证不是有效 JSON",
+                        recoverable=True,
+                        code="CALLBACK_RECEIPT_INVALID",
+                    ),
+                    response=response,
+                    cause=exc,
+                    resource=resource,
+                    path=path,
+                    secrets=secrets,
+                    stage="core.json",
                 ) from exc
-            raise CoreServiceError("核心服务暂时不可用", recoverable=True) from exc
+            raise self._record_request_failure(
+                CoreServiceError(
+                    "核心服务暂时不可用",
+                    recoverable=True,
+                ),
+                response=response,
+                cause=exc,
+                resource=resource,
+                path=path,
+                secrets=secrets,
+                stage="core.json",
+            ) from exc
         if require_callback_receipt:
             try:
                 receipt = CallbackReceipt.model_validate(value)
             except ValueError as exc:
-                raise CoreServiceError(
-                    "核心服务返回的写作回调接收凭证不符合契约",
-                    recoverable=True,
-                    code="CALLBACK_RECEIPT_INVALID",
+                raise self._record_request_failure(
+                    CoreServiceError(
+                        "核心服务返回的写作回调接收凭证不符合契约",
+                        recoverable=True,
+                        code="CALLBACK_RECEIPT_INVALID",
+                    ),
+                    response=response,
+                    cause=exc,
+                    resource=resource,
+                    path=path,
+                    secrets=secrets,
+                    stage="core.callback_schema",
+                    payload={
+                        "response": value,
+                        "schema": CallbackReceipt.model_json_schema(),
+                        "validationErrors": getattr(exc, "errors", lambda: [])(),
+                    },
                 ) from exc
             if receipt.disposition == "rejected":
-                raise CoreServiceError(
-                    f"{receipt.reasonCode}：核心服务拒绝写作回调",
-                    recoverable=receipt.recoverable,
-                    code=receipt.reasonCode,
+                raise self._record_request_failure(
+                    CoreServiceError(
+                        f"{receipt.reasonCode}：核心服务拒绝写作回调",
+                        recoverable=receipt.recoverable,
+                        code=receipt.reasonCode,
+                    ),
+                    response=response,
+                    resource=resource,
+                    path=path,
+                    secrets=secrets,
+                    stage="core.callback_rejected",
+                    payload={"response": value},
                 )
         if not isinstance(value, dict):
-            raise CoreServiceError("核心服务响应格式无效", recoverable=False)
+            raise self._record_request_failure(
+                CoreServiceError(
+                    "核心服务响应格式无效",
+                    recoverable=False,
+                ),
+                response=response,
+                resource=resource,
+                path=path,
+                secrets=secrets,
+                stage="core.envelope",
+                payload={"response": value},
+            )
+        if response_validator is not None:
+            try:
+                response_validator(value)
+            except CoreServiceError as exc:
+                self._record_request_failure(
+                    exc,
+                    response=response,
+                    resource=resource,
+                    path=path,
+                    secrets=secrets,
+                    stage="core.tool_result",
+                    payload={"response": value, "expectedResultType": "object"},
+                )
+                raise
         return value
 
 

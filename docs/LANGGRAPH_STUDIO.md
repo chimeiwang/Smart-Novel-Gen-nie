@@ -25,6 +25,7 @@ START -> initSession -> operationWorkflow 或 statusReport -> END
 
 真实运行可能产生草案和计费，应只在独立测试数据库副本上执行。正式内容仍必须经过 `ReviewArtifact -> 用户确认 -> Core API 应用`。
 
-生产供应商请求错误应按 task/run 查询 Agent 服务日志与人工日志的 `model_failure` 区块，V2 使用
-run/step 服务诊断。完整 HTTP 错误正文和异常链按[错误诊断规格](specs/2026-10-07-provider-error-details.md)
-脱敏保留；Studio 图状态和公共失败消息不携带详情，不能替代实际日志。
+生产模型与工具错误应按 task/run 查询 Agent 服务日志与人工日志的 `model_failure`／`diagnostic` 区块，V2 使用
+run/step 服务诊断。HTTP 错误及 HTTP 200 的无效参数/响应、授权和计费失败均按
+[完整失败诊断规格](specs/2026-10-07-complete-failure-diagnostics.md)保留脱敏载荷、预期 Schema、
+全部校验原因与异常链；Studio 图状态和公共失败消息不携带详情，不能替代实际日志。

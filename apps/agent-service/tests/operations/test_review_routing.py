@@ -101,3 +101,43 @@ def test_review_results_require_exact_declared_reviewer_set_and_count() -> None:
         ]
     )
     assert rewrite.revisionMode == "rewrite"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken_helper", ["capture_failure_diagnostic", "log_failure_diagnostic"])
+async def test_复审原始执行失败且诊断故障仍降级为block(monkeypatch, broken_helper):
+    import inkforge_agents.operations.graph as graph_module
+    from inkforge_agents.operations.contracts import create_default_operation_for_agent
+    from inkforge_agents.operations.graph import OperationDependencies, build_operation_graph
+
+    def broken_log(*args, **kwargs):
+        raise OSError("复审诊断日志设备失败")
+
+    monkeypatch.setattr(graph_module, broken_helper, broken_log)
+
+    class BrokenReviewer:
+        async def run(self, agent_id, state, **kwargs):
+            raise ValueError("原复审模型不可用")
+
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=BrokenReviewer(), artifacts=object())
+    )
+    operation = create_default_operation_for_agent("写作", "继续写作")
+    state = {
+        "currentOperation": operation.model_dump(),
+        "reviewWorkerAgent": "校验",
+        "artifactIteration": 2,
+        "runtimeContext": {"runResource": {"runId": "r"}},
+    }
+    result = await graph.builder.nodes["reviewArtifactWorker"].runnable.ainvoke(state)
+    assert result["reviewResults"] == [
+        {
+            "reviewer": "校验",
+            "verdict": "block",
+            "summary": "复审智能体暂时不可用",
+            "requiredChanges": "请由用户审核当前草案，或稍后重新发起复审。",
+            "revisionMode": None,
+            "patches": None,
+            "iteration": 2,
+        }
+    ]
