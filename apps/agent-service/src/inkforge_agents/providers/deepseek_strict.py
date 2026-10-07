@@ -11,9 +11,12 @@ import jsonschema_rs
 from .base import ModelTool, ModelTurnRequest, ModelTurnResult
 
 _MISSING = object()
+_EMPTY_MARKER = {"_inkforgeEmpty": "empty"}
 
 
 def _closed_object(properties: dict[str, Any]) -> dict[str, Any]:
+    if not properties:
+        raise ValueError("DeepSeek strict 对象必须至少声明一个属性")
     return {
         "type": "object",
         "properties": properties,
@@ -43,9 +46,13 @@ class _WireCodec:
                     issue["location"] = ""
             return result
         if self.kind == "optional":
-            return {} if value is _MISSING else {"value": self.children["value"].encode(value)}
-        if self.kind == "null":
-            return {}
+            return (
+                dict(_EMPTY_MARKER)
+                if value is _MISSING
+                else {"value": self.children["value"].encode(value)}
+            )
+        if self.kind in {"null", "empty_object", "missing"}:
+            return dict(_EMPTY_MARKER)
         if self.kind == "wrapped":
             return {"value": self.children["value"].encode(value)}
         if self.kind == "object":
@@ -65,10 +72,14 @@ class _WireCodec:
             )
         if self.kind == "quality":
             return _normalize_deepseek_quality_arguments(value)
-        if self.kind == "null":
-            return None
+        if self.kind in {"null", "empty_object", "missing"}:
+            if value != _EMPTY_MARKER:
+                raise ValueError("DeepSeek 空值标记不符合约定")
+            return {"null": None, "empty_object": {}, "missing": _MISSING}[self.kind]
         if self.kind == "optional":
-            return _MISSING if not value else self.children["value"].decode(value["value"])
+            if "value" not in value:
+                return _empty_codec("missing").decode(value)
+            return self.children["value"].decode(value["value"])
         if self.kind == "wrapped":
             return self.children["value"].decode(value["value"])
         if self.kind == "object":
@@ -98,10 +109,25 @@ def _reject_constant(value: str) -> Any:
 
 def _wrapped(child: _WireCodec, *, optional: bool = False) -> _WireCodec:
     present = _closed_object({"value": child.schema})
-    schema: dict[str, Any] = {"anyOf": [_closed_object({}), present]} if optional else present
+    schema: dict[str, Any] = (
+        {"anyOf": [_empty_codec("missing").schema, present]} if optional else present
+    )
     if optional:
-        schema["description"] = '省略字段时返回 {}；提供字段时返回 {"value": 字段值}。'
+        schema["description"] = (
+            '省略字段时返回 {"_inkforgeEmpty":"empty"}；提供字段时返回 {"value": 字段值}。'
+        )
     return _WireCodec(schema, "optional" if optional else "wrapped", {"value": child})
+
+
+def _empty_codec(kind: str) -> _WireCodec:
+    """固定标记仅属于供应商表示层，按原类型恢复空对象、null 或字段省略。"""
+    return _WireCodec(
+        {
+            **_closed_object({"_inkforgeEmpty": {"type": "string", "enum": ["empty"]}}),
+            "description": "固定空值标记，业务层会按原类型恢复。",
+        },
+        kind,
+    )
 
 
 def _object_alternative(schema: Mapping[str, Any], branch: Mapping[str, Any]) -> dict[str, Any]:
@@ -181,7 +207,7 @@ def _compile_wire(
             if kind is not None:
                 schema = {**schema, "type": kind}
     if kind == "null":
-        return _WireCodec({**_closed_object({}), "description": "空对象表示 null。"}, "null")
+        return _empty_codec("null")
     branches = schema.get("anyOf", schema.get("oneOf"))
     if (kind == "object" or "properties" in schema) and "anyOf" in schema:
         branches = [_object_alternative(schema, branch) for branch in schema["anyOf"]]
@@ -192,6 +218,8 @@ def _compile_wire(
         # 开放字典不能被 additionalProperties=false 吞掉键；用 JSON 字符串保留全部数据。
         if schema.get("additionalProperties", True) is not False:
             return _json_codec(schema)
+        if not properties:
+            return _empty_codec("empty_object")
         children = {}
         required = schema.get("required", [])
         for key, value in properties.items():
@@ -205,7 +233,7 @@ def _compile_wire(
         compiled: list[tuple[dict[str, Any], _WireCodec]] = []
         for branch in branches:
             child = _compile_wire(branch, definitions, stack=stack)
-            # null 的 {} 不能与合法空对象混淆，联合的每个分支使用独立标签。
+            # null 与业务空对象使用相同 wire 标记，必须通过独立分支标签保持类型可逆。
             tag = str(len(compiled))
             child = _WireCodec(
                 _closed_object(

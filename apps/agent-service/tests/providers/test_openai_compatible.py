@@ -2962,3 +2962,96 @@ async def test_replaced_chat_model_key_is_redacted_in_error_details(key_owner: s
     assert "请求拒绝" in (details.responseBody or "")
     assert actual_key not in details.model_dump_json()
     assert configured_key not in details.model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("returned_tool", ["get_character_list", "begin_artifact_output"])
+async def test章节写作完整24工具请求拒绝空Schema且标记恢复业务参数(returned_tool: str) -> None:
+    """替身按供应商规则拒绝任何空对象，覆盖真实操作收窄的完整写作工具集。"""
+
+    from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
+    from inkforge_agents.tools.control import artifact_model_schema_for_operation
+    from inkforge_agents.tools.registry import build_default_registry
+
+    registry = build_default_registry()
+    tools = [
+        registry.require(name).as_model_tool(
+            parameters=(
+                artifact_model_schema_for_operation("write_chapter")
+                if name == "begin_artifact_output" else None
+            )
+        )
+        for name in sorted(OPERATION_DEFINITIONS["write_chapter"].allowedToolNames)
+    ]
+    assert len(tools) == 24
+    marker = {"_inkforgeEmpty": "empty"}
+    wire = marker if returned_tool == "get_character_list" else {
+        "kind": "chapter_draft", "summary": "本章草案", "content": "完整章节正文",
+        "artifactKey": marker, "reviewerAgent": marker, "submitForReview": marker,
+    }
+    expected = {} if returned_tool == "get_character_list" else {
+        "kind": "chapter_draft", "summary": "本章草案", "content": "完整章节正文",
+    }
+    requests: list[httpx.Request] = []
+
+    def has_empty_object(node: object) -> bool:
+        if isinstance(node, dict):
+            if node.get("type") == "object" and not node.get("properties"):
+                return True
+            return any(has_empty_object(value) for value in node.values())
+        if isinstance(node, list):
+            return any(has_empty_object(value) for value in node)
+        return False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        payload = json.loads(request.content)
+        if any(has_empty_object(tool["function"]["parameters"]) for tool in payload["tools"]):
+            return httpx.Response(400, json={"error": {
+                "message": "An object with no properties is not allowed.",
+            }})
+        return httpx.Response(200, json={
+            "id": "strict-empty-regression", "object": "chat.completion", "created": 1,
+            "model": "deepseek-v4-flash", "choices": [{
+                "index": 0, "finish_reason": "tool_calls", "message": {
+                    "role": "assistant", "content": "", "tool_calls": [{
+                        "id": "call-1", "type": "function", "function": {
+                            "name": returned_tool,
+                            "arguments": json.dumps(wire, ensure_ascii=False),
+                        },
+                    }],
+                },
+            }],
+            "usage": {
+                "prompt_tokens": 10, "prompt_cache_hit_tokens": 0,
+                "completion_tokens": 5, "total_tokens": 15,
+            },
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(Settings.model_validate({
+            "openai_api_key": "test-key", "openai_base_url": "https://api.deepseek.com",
+            "openai_model": "deepseek-v4-flash",
+        }))
+        provider._strict_model = ChatOpenAI(
+            api_key="test-key", base_url="https://api.deepseek.com/beta",
+            model="deepseek-v4-flash", http_async_client=client, max_retries=0,
+        )
+        request = ModelTurnRequest(
+            messages=[{"role": "user", "content": "请写第54章"}],
+            tools=tools, maxOutputTokens=256, policy=LEGACY_PROVIDER_DEFAULT,
+        )
+        original_request = request.model_dump()
+        result = await provider.complete_turn(request)
+
+    assert request.model_dump() == original_request
+    assert len(requests) == 1
+    assert str(requests[0].url) == "https://api.deepseek.com/beta/chat/completions"
+    payload = json.loads(requests[0].content)
+    assert len(payload["tools"]) == 24
+    assert all(tool["function"]["strict"] is True for tool in payload["tools"])
+    assert result.invalidToolCallCount == 0
+    assert len(result.toolCalls) == 1
+    assert result.toolCalls[0].arguments == expected
+    assert "_inkforgeEmpty" not in result.model_dump_json()
+    assert result.usage.totalTokens == 15

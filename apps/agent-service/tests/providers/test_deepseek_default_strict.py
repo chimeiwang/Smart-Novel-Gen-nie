@@ -9,13 +9,115 @@ import jsonschema_rs
 import pytest
 from inkforge_agents.config import Settings
 from inkforge_agents.providers.base import ModelMessage, ModelTool, ModelToolCall, ModelTurnRequest
-from inkforge_agents.providers.deepseek_strict import prepare_deepseek_tools
+from inkforge_agents.providers.deepseek_strict import _closed_object, prepare_deepseek_tools
 from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
 from inkforge_agents.providers.openai_compatible import OpenAICompatibleProvider
 from inkforge_agents.runtime.model_policy import CREATIVE_HIGH
 from inkforge_agents.tools.control import artifact_model_schema_for_operation
 from inkforge_agents.tools.registry import build_default_registry
 from langchain_openai import ChatOpenAI
+
+_EMPTY = {"_inkforgeEmpty": "empty"}
+
+
+def test闭合对象构造拒绝无属性回归():
+    with pytest.raises(ValueError, match="至少声明一个属性"):
+        _closed_object({})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, 0, False, "", [], {}, {"_inkforgeEmpty": "业务值"}, _EMPTY, {"nested": {}}, [{}, None]],
+)
+def test标记保持全部业务空值和同名字段且历史往返不修改(value):
+    empty_object = {"type": "object", "properties": {}, "additionalProperties": False}
+    tool = ModelTool(
+        name="submit",
+        description="测试",
+        parameters={
+            "type": "object",
+            "properties": {
+                "option": {
+                    "anyOf": [
+                        {"type": "null"},
+                        {"type": "integer"},
+                        {"type": "boolean"},
+                        {"type": "string"},
+                        {"type": "array", "items": {"anyOf": [empty_object, {"type": "null"}]}},
+                        empty_object,
+                        {
+                            "type": "object",
+                            "properties": {"_inkforgeEmpty": {"type": "string"}},
+                            "required": ["_inkforgeEmpty"],
+                            "additionalProperties": False,
+                        },
+                        {
+                            "type": "object",
+                            "properties": {"nested": empty_object},
+                            "required": ["nested"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                }
+            },
+            "additionalProperties": False,
+        },
+    )
+    arguments = {"option": deepcopy(value)}
+    request = _request([tool])
+    request.messages.append(
+        ModelMessage(
+            role="assistant",
+            content="",
+            toolCalls=[
+                ModelToolCall(id="history", name=tool.name, arguments=deepcopy(arguments)),
+            ],
+        )
+    )
+    before = request.model_dump()
+    prepared = prepare_deepseek_tools(request)
+    codec = prepared.codecs[tool.name]
+    wire = codec.encode(arguments)
+    jsonschema_rs.validate(codec.schema, wire)
+    assert codec.decode(wire) == arguments
+    assert prepared.request.messages[-1].tool_calls[0].arguments == wire
+    assert request.model_dump() == before
+
+
+@pytest.mark.parametrize("kind", ["raw", "generic"])
+@pytest.mark.parametrize(
+    "wire", [{}, {"_inkforgeEmpty": "wrong"}, {"_inkforgeEmpty": "empty", "extra": True}]
+)
+async def test无参工具拒绝非法标记且不能进入业务结果(kind, wire):
+    tool = build_default_registry().require("list_available_data").as_model_tool()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=_response(tool.name, wire)),
+        )
+    ) as client:
+        result = await _provider(kind, client).complete_turn(_request([tool]))
+    assert result.toolCalls == []
+    assert result.invalidToolCallCodes == ["provider_strict_schema_violation"]
+
+
+def test无参根对象历史恢复为空业务对象():
+    tool = build_default_registry().require("list_available_data").as_model_tool()
+    request = _request([tool])
+    request.messages.append(
+        ModelMessage(
+            role="assistant",
+            content="",
+            toolCalls=[
+                ModelToolCall(id="history", name=tool.name, arguments={}),
+            ],
+        )
+    )
+    prepared = prepare_deepseek_tools(request)
+    codec = prepared.codecs[tool.name]
+    assert codec.encode({}) == _EMPTY
+    assert codec.decode(_EMPTY) == {}
+    assert prepared.request.messages[-1].tool_calls[0].arguments == _EMPTY
+    assert request.messages[-1].tool_calls[0].arguments == {}
 
 
 def _request(tools: list[ModelTool]) -> ModelTurnRequest:
@@ -95,7 +197,7 @@ def _provider(kind: str, client: httpx.AsyncClient) -> Any:
 
 @pytest.mark.parametrize("kind", ["raw", "generic"])
 @pytest.mark.parametrize(
-    "count_wire,expected", [({}, {}), ({"value": {"variant": "0", "value": 3}}, {"count": 3})]
+    "count_wire,expected", [(_EMPTY, {}), ({"value": {"variant": "0", "value": 3}}, {"count": 3})]
 )
 async def test默认读取工具经_beta且无损保留省略与值(kind, count_wire, expected):
     requests = []
@@ -171,6 +273,7 @@ def test所有注册工具的默认_schema符合_deepseek子集():
         )
         assert node.get("type") != "null"
         if node.get("type") == "object":
+            assert node["properties"]
             assert node["additionalProperties"] is False
             assert set(node["required"]) == set(node["properties"])
             for child in node["properties"].values():
@@ -190,8 +293,8 @@ def test所有注册工具的默认_schema符合_deepseek子集():
 @pytest.mark.parametrize(
     "value,wire",
     [
-        ({}, {"option": {}}),
-        ({"option": None}, {"option": {"value": {"variant": "1", "value": {}}}}),
+        ({}, {"option": _EMPTY}),
+        ({"option": None}, {"option": {"value": {"variant": "1", "value": _EMPTY}}}),
         ({"option": ""}, {"option": {"value": {"variant": "0", "value": ""}}}),
         ({"option": "正文"}, {"option": {"value": {"variant": "0", "value": "正文"}}}),
     ],
@@ -237,7 +340,11 @@ def test动态JSON保留全部键与空值并拒绝坏JSON():
     tool = build_default_registry().require("append_update_batch").as_model_tool()
     codec = prepare_deepseek_tools(_request([tool])).codecs[tool.name]
     value = {"artifactKey": "a", "updates": {"自定义": [None, False, 0, "", {}, []]}}
-    expected = {"artifactKey": "a", "updates": '{"自定义":[null,false,0,"",{},[]]}', "summary": {}}
+    expected = {
+        "artifactKey": "a",
+        "updates": '{"自定义":[null,false,0,"",{},[]]}',
+        "summary": _EMPTY,
+    }
     assert codec.encode(value) == expected
     assert codec.decode(expected) == value
     for invalid in ('{"x":1,"x":2}', '{"x":NaN}', '{"x":'):
@@ -260,9 +367,9 @@ async def test正文提交保留操作收窄与完整内容(operation, kind):
         "kind": "chapter_draft",
         "summary": "本章草案",
         "content": content,
-        "artifactKey": {},
-        "reviewerAgent": {},
-        "submitForReview": {},
+        "artifactKey": _EMPTY,
+        "reviewerAgent": _EMPTY,
+        "submitForReview": _EMPTY,
     }
     requests = []
 
@@ -350,13 +457,13 @@ async def test复审默认_strict且拒绝不完整返工组合(kind, verdict, a
         "value": {
             "variant": "0",
             "value": {
-                "artifactKey": {},
-                "artifactId": {},
-                "requiredChanges": {},
+                "artifactKey": _EMPTY,
+                "artifactId": _EMPTY,
+                "requiredChanges": _EMPTY,
                 "verdict": verdict,
                 "summary": "完整复审报告",
-                "revisionMode": {},
-                "patches": {},
+                "revisionMode": _EMPTY,
+                "patches": _EMPTY,
             },
         }
     }
@@ -381,21 +488,21 @@ async def test节拍计划嵌套默认字段可省略且不请求派生计数(ki
         "title": "进城",
         "summary": "找到线索",
         "chapterGoal": "抵达城门",
-        "artifactKey": {},
-        "reviewerAgent": {},
-        "submitForReview": {},
-        "mainPlotConnection": {},
-        "chapterAcceptanceCriteria": {},
-        "totalEstimatedWords": {},
+        "artifactKey": _EMPTY,
+        "reviewerAgent": _EMPTY,
+        "submitForReview": _EMPTY,
+        "mainPlotConnection": _EMPTY,
+        "chapterAcceptanceCriteria": _EMPTY,
+        "totalEstimatedWords": _EMPTY,
         "sceneBeats": [
             {
                 "goal": "进入城门",
-                "order": {},
-                "conflict": {},
-                "characters": {},
-                "foreshadowingRefs": {},
-                "estimatedWords": {},
-                "acceptanceCriteria": {},
+                "order": _EMPTY,
+                "conflict": _EMPTY,
+                "characters": _EMPTY,
+                "foreshadowingRefs": _EMPTY,
+                "estimatedWords": _EMPTY,
+                "acceptanceCriteria": _EMPTY,
             }
         ],
     }
