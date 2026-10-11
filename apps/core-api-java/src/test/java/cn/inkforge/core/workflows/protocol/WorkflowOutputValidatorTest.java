@@ -3,7 +3,7 @@ package cn.inkforge.core.workflows.protocol;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,8 +13,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class WorkflowOutputValidatorTest {
 
-    private static final ExecutionRegistry REGISTRY =
-            ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+    private static final HistoricalRegistryFixture REGISTRY =
+            HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
 
     @Test
     void 真实意图Schema接受无资源身份且参数为空的命令() {

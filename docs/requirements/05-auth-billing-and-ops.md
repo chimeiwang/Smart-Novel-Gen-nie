@@ -4,14 +4,12 @@
 
 提供账号认证、资源归属校验、模型计费、服务间互信、可恢复运行和适合 2 核 2 GB 单机的生产部署。
 
-## LangGraph 兼容回退运维边界
+## 单引擎发布边界
 
-2026-09-13 用户允许生产恢复旧 LangGraph 写作，并要求正文和大纲不受影响。执行
-[兼容回退规格](../specs/2026-09-13-langgraph-aug29-compatible-rollback.md)时保留当前数据库和 V2-aware
-Java/Agent，禁止 DDL rollback。先备份、关闭全部新建并联合排空，再部署兼容应用，最后开放 V1 fresh；
-不把 `route=off` 误解成已有 V2 可以丢弃。旧对话允许删除不等于删除关联 Task、候选、账务或正式内容。
-本次配置授权取代此前“全量后 V1 fresh 始终关闭”的运行选择，但不改变结构和来源保护。
-实际开关、备份、内容摘要与验证结果记录在[执行审计](../audits/2026-09-13-langgraph-compatible-rollback.md)。
+新任务统一使用 V1；依赖原执行器的 Episode 剧本与分镜使用普通队列。旧引擎执行器、单 Step 回调、
+调度器和专属 Redis 依赖已从应用移除，历史候选、来源与账务仍可查询和按既有确认契约处理。
+部署前要求旧 Run、Step 与日志回调排空，保留备份和原编排恢复点；不通过删除状态来满足排空。
+发布步骤及限制见[退役手册](../ENGINE_RETIREMENT_ROLLOUT.md)，实际线上状态以本次审计为准。
 
 ## Java Core 替换状态
 
@@ -22,7 +20,7 @@ Java/Agent，禁止 DDL rollback。先备份、关闭全部新建并联合排空
 Java Core 已于 2026-08-26 替换同名生产容器，生产始终只允许一个 `core-api`，不双 Core、不双写。
 现正式库已有 V2 Run，Core 接口由 `contracts/core/openapi.json` 维护，Python Core／CLI 源码退出当前工程。
 Python Core 历史镜像不具有该库的回滚资格；禁止 DDL rollback，
-应用回滚必须保留 V2 查询和收敛能力，具体适用条件见 [V2 运维手册](../DURABLE_AGENT_V2_ROLLOUT.md)。
+应用回滚必须保留历史来源与账务，并恢复镜像对应的编排，见[退役手册](../ENGINE_RETIREMENT_ROLLOUT.md)。
 
 Java 等价迁移本身没有增加手机号、短信、邮箱、支付、订单、订阅或新表。手机号认证于 2026-08-27 另立
 独立规格并实现代码；同日分阶段批准开发及正式迁移与生产手机号、真实短信开放，原有“仅获开发授权”说明已被取代。
@@ -31,8 +29,7 @@ Java 等价迁移本身没有增加手机号、短信、邮箱、支付、订单
 schema guard 继续只读，并在手机号双开关关闭时只精确投影掉手机号身份表。
 
 本地开发、镜像和部署统一使用 Java Core；结构导出通过 `inkforge-schema-export`，结构验证通过
-`inkforge-schema-guard`。恢复演练入口使用现有 V2 隔离 Compose 测试，覆盖 Agent／Core 重启和 execution Redis AOF；
-它自行创建测试 Run，不接受生产 `TASK_ID`。具体变更见 [清理规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
+`inkforge-schema-guard`。恢复演练入口使用隔离 V1 队列与检查点测试；不接受生产 `TASK_ID`。具体变更见 [清理规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
 
 ## 浏览器认证
 
@@ -201,7 +198,7 @@ readiness 阻断抽帧、导出和需要本地媒体工具的模拟生成，不�
 - 同一任务恢复运行追加到同一文件。
 - DeepSeek、通用 OpenAI-compatible、Embedding 与 Responses 调用失败时，保留完整 HTTP 错误正文（含非 JSON）、响应头、
   状态、方法/脱敏地址及异常消息、因果链和调用栈；凭据在采集时替换，不截断其他错误信息。
-  V1 将详情写入 `model_failure` 帧正文及服务日志，V2 写入带 run/step 的服务日志；不放入受限结构头、
+  模型详情写入 `model_failure` 帧正文及服务日志；不放入受限结构头、
   公共状态或业务回调。日志故障不能覆盖供应商错误，详见[完整错误诊断规格](../specs/2026-10-07-provider-error-details.md)。
 - 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
   中出现日志标记或 JSON 不得污染结构解析。
@@ -231,7 +228,7 @@ Compose Nginx 的 Web 路由拒绝带非空 `Next-Action` 头的请求并返回 
 Server Action。更优先的 `/api/v1/` 与 `/api/v1/video/` Core 路由不应用此规则，普通页面、API POST、
 SSE 和上传限制保持原行为；将来新增 Server Action 必须同时重新评估该边界。
 
-`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service、普通 Redis 和独立 execution journal Redis。
+`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service和普通 Redis。
 生产 PostgreSQL 14 继续作为宿主机服务运行，只有 Compose Nginx 发布容器端口，并且只能绑定
 `127.0.0.1:${INKFORGE_PORT:-43120}`。
 
@@ -296,11 +293,9 @@ linux/amd64 镜像，推送至固定 GHCR 仓库并保存与提交 SHA、来源�
 
 新版本 `compose up --no-build -d --wait`、只读 schema 指纹检查或生产 smoke 任一失败时，脚本自动用上一标签恢复三个服务，并再次执行 Compose 状态、schema 指纹和 smoke 检查。生产 smoke 必须以正式 Agent 身份在人工日志目录实际创建并删除探针目录；只检查 HTTP readiness 不足以证明写作任务可运行。日志出现“新版本部署失败，旧版本已恢复”表示服务已恢复但本次发布仍失败，CI 必须保持非零；出现“自动回滚也失败”表示新旧版本均未通过验收，必须立即人工处理。回滚不得执行 `down -v`、删除卷或镜像、重写 `.env`、现场构建或数据库迁移。
 
-耐久 Agent route-off 只阻止新建，不构成跨 manifest 的自动兼容保证。目标与回滚 Agent 的 execution manifest
-fingerprint 不同时，生产部署必须先从当前运行 Core 容器的实际进程环境只读证明 route 已经为 off，再在任何版本
-切换和 `compose up` 前从权威 PostgreSQL 精确证明所有
-`engineVersion=2` `WorkflowRun` 均为终态、非终态数量为 0；查询失败、结果非法或仍有任一非终态 Run 都必须停止。
-allowlist 仍要求目标、回滚与发布预期三方 fingerprint 完全相同。
+退役发布在切换前只读核对当前 Core 旧路由为 off、历史非终态 Run/Step 和日志待投递回调为零。
+查询失败或排空证据不完整时保持现有容器。未知用量仍保留挂账，不能清零。数据库、旧日志及旧编排
+分别建立恢复点；新栈健康检查成功后停止旧日志容器，但不删除该容器或数据卷。后续应用仅依赖普通 Redis。
 
 Java 实时结构检查通过 `scripts/verify-running-core-schema.sh` 使用运行中 Core 的完整容器 ID、不可变
 镜像与最小数据库配置，在独立受限的一次性容器中执行；检查前后必须确认业务 Core 未换实例或重启。
@@ -312,7 +307,6 @@ Java 实时结构检查通过 `scripts/verify-running-core-schema.sh` 使用运�
 - `public_net`：Nginx、Web、Core、Agent；Agent 不发布宿主机端口，仅使用该网络访问模型供应商；
 - `agent_net`：Core、Agent、Redis；
 - `data_net`：Core、Redis；Core 通过 Docker host gateway 访问宿主机 PostgreSQL；
-- `execution_net`：只包含 Agent 与 execution journal Redis；Core、Web 和普通 Redis 不加入；
 - Agent 不得加入 `data_net`。
 - Core 与 Agent 的内部服务 URL 必须使用 `agent_net` 专用别名，不能使用会解析到 `public_net` 的通用服务名。
 
@@ -331,24 +325,15 @@ Java 实时结构检查通过 `scripts/verify-running-core-schema.sh` 使用运�
 - Agent 单进程内最多同时处理三个不同项目的独立队列 job，同一 `novelId` 同时只执行一个 job，并全局最多执行三个模型调用；`AGENT_MAX_CONCURRENCY` 只允许 1、2 或 3，配置 1 用于资源压力下的串行回退；
 - Agent 与 Core 的 Redis 客户端连接池各为 8；Agent 到 Core HTTP 仍最多 4 个连接、Embedding HTTP 最多 2 个连接，数据库池不因 Agent 并行而扩大；
 - Redis `maxmemory` 为 64 MB，关闭 AOF，并使用 `maxmemory-policy noeviction`；内存耗尽时必须明确拒绝新写入，不能淘汰队列、事件或防重放键；
-- execution journal Redis 使用独立持久卷、32 MB `maxmemory`、128 MiB 容器上限、`appendonly yes`、`appendfsync always`、
-  `aof-load-truncated no` 和 `noeviction`。它只保存 V2 执行边界与未送达终态，不能承载普通队列、认证或业务状态；
-  其连接、AOF 写状态、callback pending/rejected backlog 和后台 replayer 必须分别进入 Agent readiness。
-- 已获 Core 回执的 execution 终态删除完整模型输出，只保留请求/结果哈希、fence 和解析模型等幂等 tombstone；
-  tombstone 使用独立 `EXECUTION_TERMINAL_RETENTION_HOURS`，默认且最少 24 小时、最多 168 小时。普通
-  `QUEUE_TERMINAL_RETENTION_DAYS` 不得延长其 Redis 生命周期。pending/rejected
-  继续不过期。readiness 还必须报告 `used_memory/maxmemory/evicted_keys`，达到 90% 前停止新 provider 调用，
-  `evicted_keys` 非零必须告警，不能切换成淘汰策略掩盖容量不足。
-- 任何 Core PostgreSQL 时间点恢复也必须在恢复前先把 execution Redis 置为持久 quarantine，并在 Core、终态哈希、
-  账单和供应商请求 ID 具名联合对账前拒绝所有 provider 调用；24 小时 delivered tombstone 过期或 journal 缺 key
-  都不能证明非幂等供应商未调用。数据库备份必须携带并校验该恢复边界元数据。
+- 历史执行日志仅作为退役备份和首次发布回滚资料保留；不能把缺少日志当作“供应商未调用”的证明。
+- PostgreSQL 时间点恢复后必须核对已发模型请求、账务和任务检查点，未知已开始调用不得自动重发。
 - Agent 队列完成、失败或取消的 job 只在 Redis 保留默认 7 天、最少 24 小时的终态 tombstone；终态时间 ZSET 驱动有界清理，过期后删除 status 和索引，PostgreSQL 继续作为长期幂等事实来源。
 - 升级前缺少终态 ZSET 的旧 status 使用 HSCAN 游标分批回填 tombstone，并清除 ready、processing、payload、lease、attempt 和 score 残留；过期租约缺少 payload 或 score 时原子收敛为 failed，不能留下 running 孤儿。
 - ready ZSET 按优先级分别查询已经到期的成员，未来才可重试的高优先级 job 不得阻塞当前已到期的低优先级 job；同优先级仍按 readyAt 排序。
 - 所有常驻容器使用非 root 用户、只读根文件系统、健康检查和资源上限。唯一 root 例外是部署期间分别处理
-  `uploads`、`agent_logs` 与 `execution_redis_data` 卷根目录的一次性初始化容器；它不得加入网络、不得接收密钥或业务环境变量，
+  `uploads` 与 `agent_logs` 卷根目录的一次性初始化容器；它不得加入网络、不得接收密钥或业务环境变量，
   每次只挂载一个目标卷，删除全部 capability 后仅加回 `CHOWN`，且只能对卷根目录做非递归
-  `chown`：前两者为 `10001:10001`，execution Redis 为 `999:999`；成功退出后才能切换版本。已有数据不得
+  `chown` 为 `10001:10001`；成功退出后才能切换版本。已有数据不得
   递归改属。Core 与 Agent 镜像还必须预建归属该用户的挂载点，保证
   首次创建空卷时无需额外手工修权。
 
@@ -366,9 +351,8 @@ Java 实时结构检查通过 `scripts/verify-running-core-schema.sh` 使用运�
 | `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` | Core | 阿里云服务端最小权限程序身份，禁止进入 Web 或 Agent |
 | `ALIYUN_PNVS_*` | Core | 号码认证签名、模板和可选方案名称 |
 | `ALIYUN_CAPTCHA_PREFIX` / `ALIYUN_CAPTCHA_SCENE_ID` | Core、Web | 验证码 2.0 服务端场景与公开客户端初始化参数 |
+| `HISTORICAL_WORKFLOW_SCHEMA_READY` | Core | 已迁移历史结构的只读兼容及来源／账务能力，不启用任何旧引擎；首次退役兼容旧配置名 |
 | `REDIS_URL` | Core、Agent | 队列、事件和防重放 |
-| `EXECUTION_REDIS_URL` | Agent | V2 execution journal 与终态 callback replay；生产必须与 `REDIS_URL` 分离 |
-| `EXECUTION_TERMINAL_RETENTION_HOURS` | Agent | 已送达 V2 幂等 tombstone 保留小时数，默认/最少 24、最多 168；不影响含完整终态的 pending/rejected |
 | `QUEUE_TERMINAL_RETENTION_DAYS` | Agent | Redis 队列终态 tombstone 保留天数，默认 7、最少 1；Compose 显式透传 |
 | `AGENT_MAX_CONCURRENCY` | Agent | 单进程不同项目队列 job 与全局模型调用上限，只允许 1、2 或 3，2 核 2 GB 默认 3；同一 `novelId` 始终串行 |
 | `RAG_INDEX_ENABLED` | Core、Agent | 同时启用资料索引投递和 embedding 就绪校验；两端必须使用相同值 |

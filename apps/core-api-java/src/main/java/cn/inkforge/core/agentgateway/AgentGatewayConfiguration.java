@@ -4,9 +4,6 @@ import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.quality.application.QualityRunSubmitter;
 import cn.inkforge.core.video.application.VideoRenderGateway;
 import cn.inkforge.core.writing.application.WritingCommandSubmitter;
-import cn.inkforge.core.workflows.application.WorkflowExecutionCanceller;
-import cn.inkforge.core.workflows.application.WorkflowExecutionSubmitter;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.serviceauth.ServiceScope;
 import cn.inkforge.serviceauth.ServiceTokenSigner;
 import java.net.http.HttpClient;
@@ -37,16 +34,12 @@ class AgentGatewayConfiguration {
     AgentServiceReadiness agentServiceReadiness(
             HttpClient agentHttpClient,
             CoreSettings settings,
-            ObjectMapper objectMapper,
-            ExecutionRegistry executionRegistry) {
+            ObjectMapper objectMapper) {
         return new AgentServiceReadiness(
                 agentHttpClient,
                 settings.agentServiceUrl(),
                 objectMapper,
-                Duration.ofSeconds(1),
-                settings.durableAgentExecutionSchemaReady()
-                        ? executionRegistry.manifestFingerprint()
-                        : null);
+                Duration.ofSeconds(1));
     }
 
     @Bean
@@ -63,8 +56,6 @@ class AgentGatewayConfiguration {
                         ServiceScope.AGENT_RUN,
                         ServiceScope.AGENT_CANCEL,
                         ServiceScope.AGENT_DEBUG_READ,
-                        ServiceScope.EXECUTION_SUBMIT,
-                        ServiceScope.EXECUTION_CANCEL,
                         ServiceScope.VIDEO_RENDER));
     }
 
@@ -107,26 +98,6 @@ class AgentGatewayConfiguration {
     WritingCommandSubmitter writingCommandSubmitter(
             AgentServiceClient agentServiceClient) {
         return new WritingCommandAgentSubmitter(agentServiceClient);
-    }
-
-    @Bean
-    @ConditionalOnBean(AgentServiceClient.class)
-    @ConditionalOnProperty(
-            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
-            havingValue = "true")
-    WorkflowExecutionSubmitter workflowExecutionSubmitter(
-            AgentServiceClient agentServiceClient) {
-        return new WorkflowAgentExecutionSubmitter(agentServiceClient);
-    }
-
-    @Bean
-    @ConditionalOnBean(AgentServiceClient.class)
-    @ConditionalOnProperty(
-            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
-            havingValue = "true")
-    WorkflowExecutionCanceller workflowExecutionCanceller(
-            AgentServiceClient agentServiceClient) {
-        return new WorkflowAgentExecutionCanceller(agentServiceClient);
     }
 
     @Bean

@@ -24,8 +24,8 @@ class ExecutionPlanSnapshotTest {
 
     @Test
     void 冻结完整计划并绑定ManifestProfilePromptSchemaBudget与审核策略() {
-        ExecutionRegistry registry =
-                ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        HistoricalRegistryFixture registry =
+                HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         ExecutionPlanSnapshot snapshot = registry.freezePlan(
                 "long_serial.rewrite_chapter_selection", false);
 
@@ -71,8 +71,8 @@ class ExecutionPlanSnapshotTest {
 
     @Test
     void 快照形状或Canonical内容被篡改时拒绝解析() {
-        ExecutionRegistry registry =
-                ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        HistoricalRegistryFixture registry =
+                HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         ExecutionPlanSnapshot snapshot = registry.freezePlan(
                 "long_serial.rewrite_chapter_selection", false);
         Map<String, Object> changed = read(json.writeValueAsString(snapshot.stored()));
@@ -93,15 +93,15 @@ class ExecutionPlanSnapshotTest {
 
     @Test
     void 既有十六项计划继续使用空系统步骤且旧重载哈希不变() {
-        ExecutionRegistry registry =
-                ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        HistoricalRegistryFixture registry =
+                HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         List<String> operations = java.util.stream.Stream.of("long_serial", "short_medium")
                 .flatMap(workflow -> registry.enabledOperationKeys(workflow, false).stream())
                 .sorted()
                 .toList();
         assertThat(operations).hasSize(16);
         for (String key : operations) {
-            ExecutionRegistry.ResolvedOperation operation = registry.resolve(key, false);
+            HistoricalRegistryFixture.ResolvedOperation operation = registry.resolve(key, false);
             ExecutionPlanSnapshot original = ExecutionPlanSnapshot.freeze(
                     registry.catalogVersion(), registry.manifestFingerprint(), operation);
             ExecutionPlanSnapshot explicitEmpty = ExecutionPlanSnapshot.freeze(
@@ -118,9 +118,9 @@ class ExecutionPlanSnapshotTest {
 
     @Test
     void 系统步骤按原计划版本冻结并可脱离当前目录完整恢复() {
-        ExecutionRegistry registry =
-                ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
-        ExecutionRegistry.ResolvedOperation operation =
+        HistoricalRegistryFixture registry =
+                HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
+        HistoricalRegistryFixture.ResolvedOperation operation =
                 registry.resolve("long_serial.rewrite_chapter_selection", false);
         ExecutionPlanSnapshot.Step correction = systemStep(
                 "protocol_correction", "system.test_protocol_corrector.v1");
@@ -234,8 +234,8 @@ class ExecutionPlanSnapshotTest {
     }
 
     private ExecutionPlanSnapshot.Step systemStep(String purpose, String profile) {
-        ExecutionPlanSnapshot.Step reviewer = ExecutionRegistry
-                .loadClasspath(ExecutionRegistry.Environment.TEST)
+        ExecutionPlanSnapshot.Step reviewer = HistoricalRegistryFixture
+                .loadClasspath(HistoricalRegistryFixture.Environment.TEST)
                 .freezePlan("long_serial.rewrite_chapter_selection", false)
                 .reviewers().getFirst();
         return new ExecutionPlanSnapshot.Step(
@@ -248,8 +248,8 @@ class ExecutionPlanSnapshotTest {
     }
 
     private Map<String, Object> withSystems(List<ExecutionPlanSnapshot.Step> systems) {
-        ExecutionPlanSnapshot original = ExecutionRegistry
-                .loadClasspath(ExecutionRegistry.Environment.TEST)
+        ExecutionPlanSnapshot original = HistoricalRegistryFixture
+                .loadClasspath(HistoricalRegistryFixture.Environment.TEST)
                 .freezePlan("long_serial.rewrite_chapter_selection", false);
         Map<String, Object> stored = read(json.writeValueAsString(original.stored()));
         object(stored.get("plan")).put("systemSteps", systems.stream()

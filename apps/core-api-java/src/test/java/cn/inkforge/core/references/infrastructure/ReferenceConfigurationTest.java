@@ -13,7 +13,7 @@ import cn.inkforge.core.references.application.RagIndexSubmitter;
 import cn.inkforge.core.references.application.ReferenceService;
 import cn.inkforge.core.references.application.RagIndexDispatcher;
 import cn.inkforge.core.references.domain.RagDispatchStatus;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
 import java.time.Clock;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -58,6 +58,6 @@ class ReferenceConfigurationTest {
         @Bean Clock coreClock() { return Clock.systemUTC(); }
         @Bean CuidV1Generator ids(Clock clock) { return new CuidV1Generator(clock); }
         @Bean ObjectMapper json() { return new ObjectMapper(); }
-        @Bean ExecutionRegistry registry() { return mock(ExecutionRegistry.class); }
+        @Bean HistoricalRegistryFixture registry() { return mock(HistoricalRegistryFixture.class); }
     }
 }

@@ -30,7 +30,7 @@ class ShortMediumConfiguration {
                 ids,
                 coreClock,
                 objectMapper,
-                settings.durableAgentExecutionSchemaReady());
+                settings.historicalWorkflowSchemaReady());
     }
 
     @Bean

@@ -44,7 +44,7 @@ public final class ExecutionPlanSnapshot {
     private final List<StageStep> stageSteps;
     private final String videoStagePolicy;
     private final ReviewPolicy reviewPolicy;
-    private final ExecutionRegistry.RunBudget runBudget;
+    private final HistoricalExecutionTypes.RunBudget runBudget;
     private final Map<String, Object> plan;
     private final String sha256;
     private final Map<String, Object> stored;
@@ -59,7 +59,7 @@ public final class ExecutionPlanSnapshot {
             List<StageStep> stageSteps,
             String videoStagePolicy,
             ReviewPolicy reviewPolicy,
-            ExecutionRegistry.RunBudget runBudget,
+            HistoricalExecutionTypes.RunBudget runBudget,
             String expectedSha256) {
         this.operationCatalogVersion = nonBlank(
                 operationCatalogVersion, "Operation Catalog 版本");
@@ -94,17 +94,17 @@ public final class ExecutionPlanSnapshot {
     public static ExecutionPlanSnapshot freeze(
             String operationCatalogVersion,
             String executionManifestFingerprint,
-            ExecutionRegistry.ResolvedOperation resolved) {
+            HistoricalExecutionTypes.ResolvedOperation resolved) {
         return freeze(operationCatalogVersion, executionManifestFingerprint, resolved, List.of());
     }
 
     public static ExecutionPlanSnapshot freeze(
             String operationCatalogVersion,
             String executionManifestFingerprint,
-            ExecutionRegistry.ResolvedOperation resolved,
+            HistoricalExecutionTypes.ResolvedOperation resolved,
             List<Step> systemSteps) {
         Objects.requireNonNull(resolved, "解析 Operation 不能为空");
-        ExecutionRegistry.Operation source = resolved.operation();
+        HistoricalExecutionTypes.Operation source = resolved.operation();
         Operation operation = new Operation(
                 source.key(),
                 source.workflow(),
@@ -122,7 +122,7 @@ public final class ExecutionPlanSnapshot {
                 resolved.outputSchema(),
                 resolved.generatorStepBudget());
         List<Step> reviewers = new ArrayList<>();
-        for (ExecutionRegistry.ResolvedReviewer reviewer : resolved.reviewers()) {
+        for (HistoricalExecutionTypes.ResolvedReviewer reviewer : resolved.reviewers()) {
             reviewers.add(step(
                     "review",
                     source.reviewPolicy().lane(),
@@ -131,7 +131,7 @@ public final class ExecutionPlanSnapshot {
                     resolved.reviewerOutputSchema(),
                     reviewer.stepBudget()));
         }
-        ExecutionRegistry.ReviewPolicy review = source.reviewPolicy();
+        HistoricalExecutionTypes.ReviewPolicy review = source.reviewPolicy();
         return new ExecutionPlanSnapshot(
                 operationCatalogVersion,
                 executionManifestFingerprint,
@@ -175,7 +175,7 @@ public final class ExecutionPlanSnapshot {
         List<Step> reviewers = parseSteps(plan.get("reviewers"), "Reviewer Steps");
         List<Step> systemSteps = parseSteps(plan.get("systemSteps"), "System Steps");
         ReviewPolicy reviewPolicy = parseReviewPolicy(plan.get("reviewPolicy"));
-        ExecutionRegistry.RunBudget runBudget = parseRunBudget(plan.get("runBudget"));
+        HistoricalExecutionTypes.RunBudget runBudget = parseRunBudget(plan.get("runBudget"));
         return new ExecutionPlanSnapshot(
                 string(plan, "operationCatalogVersion"),
                 sha256(plan, "executionManifestFingerprint"),
@@ -191,7 +191,7 @@ public final class ExecutionPlanSnapshot {
     }
 
     /** 独立系统用途复用完全相同的 Step 快照形状，不创建占位业务 Operation。 */
-    public static Step freezeSystemPurpose(ExecutionRegistry.ResolvedSystemPurpose resolved) {
+    public static Step freezeSystemPurpose(HistoricalExecutionTypes.ResolvedSystemPurpose resolved) {
         Objects.requireNonNull(resolved, "解析 System Purpose 不能为空");
         return step(
                 resolved.purpose().purpose(),
@@ -247,7 +247,7 @@ public final class ExecutionPlanSnapshot {
         return reviewPolicy;
     }
 
-    public ExecutionRegistry.RunBudget runBudget() {
+    public HistoricalExecutionTypes.RunBudget runBudget() {
         return runBudget;
     }
 
@@ -462,9 +462,9 @@ public final class ExecutionPlanSnapshot {
             String purpose,
             String lane,
             String evidencePolicy,
-            ExecutionRegistry.Profile profile,
-            ExecutionRegistry.OutputSchema output,
-            ExecutionRegistry.StepBudgetProfile budget) {
+            HistoricalExecutionTypes.Profile profile,
+            HistoricalExecutionTypes.OutputSchema output,
+            HistoricalExecutionTypes.StepBudgetProfile budget) {
         return new Step(
                 purpose,
                 lane,
@@ -623,7 +623,7 @@ public final class ExecutionPlanSnapshot {
                 nonNegativeInt(value, "maxAutomaticRevisions"));
     }
 
-    static ExecutionRegistry.RunBudget parseRunBudget(Object raw) {
+    static HistoricalExecutionTypes.RunBudget parseRunBudget(Object raw) {
         Map<String, Object> value = exactObject(
                 raw,
                 "执行计划 Run Budget",
@@ -639,7 +639,7 @@ public final class ExecutionPlanSnapshot {
                         "maxWallClockSeconds",
                         "maxProviderRetriesPerStep",
                         "maxProtocolCorrectionSteps"));
-        return new ExecutionRegistry.RunBudget(
+        return new HistoricalExecutionTypes.RunBudget(
                 string(value, "profile"),
                 positiveInt(value, "maxModelCalls"),
                 positiveLong(value, "maxInputTokens"),
@@ -681,7 +681,7 @@ public final class ExecutionPlanSnapshot {
                 nonNegativeInt(value, "maxProtocolCorrections"));
     }
 
-    static Map<String, Object> runBudgetMap(ExecutionRegistry.RunBudget budget) {
+    static Map<String, Object> runBudgetMap(HistoricalExecutionTypes.RunBudget budget) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("profile", budget.profile());
         value.put("maxModelCalls", budget.maxModelCalls());

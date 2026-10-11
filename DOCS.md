@@ -56,7 +56,7 @@
 - [Agent 指导](apps/agent-service/AGENTS.md)、[日志格式](docs/WORKFLOW_EVENT_LOG_FORMAT.md)、[Studio](docs/LANGGRAPH_STUDIO.md)
 - [Java Core 替换规格](docs/specs/2026-08-24-core-java-replacement.md)、[架构决策目录](docs/architecture-decisions/)、[Java 切换手册](docs/JAVA_CORE_CUTOVER.md)
 - [Java-only Core 与 Python 退役规格](docs/specs/2026-09-12-java-only-core-contract-and-python-retirement.md)、[唯一契约决策](docs/architecture-decisions/004-java-only-core-contract.md)
-- [耐久执行规格](docs/specs/2026-08-31-core-owned-durable-agent-execution.md)、[V2 运维手册](docs/DURABLE_AGENT_V2_ROLLOUT.md)
+- [V1 作家能力与引擎退役规格](docs/specs/2026-10-11-v1-writer-and-execution-retirement.md)、[退役发布手册](docs/ENGINE_RETIREMENT_ROLLOUT.md)
 - [Java CLI 文档](tools/inkforge-cli-java/README.md)、[Operator 更新契约](docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md)
 - [数据变更授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)、[运维需求](docs/requirements/05-auth-billing-and-ops.md)、[发布审计目录](docs/audits/)
 - [生产编排](infra/compose.yaml)、[构建流程](.github/workflows/build.yml)、[生产发布脚本](scripts/deploy-production.sh)

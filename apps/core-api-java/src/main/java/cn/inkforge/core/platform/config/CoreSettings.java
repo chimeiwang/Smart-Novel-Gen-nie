@@ -4,7 +4,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -17,19 +16,11 @@ public final class CoreSettings {
     public static final String OLD_DEFAULT_JWT_SECRET = "inkforge-default-secret-change-me";
     private static final Pattern VIDEO_NAMESPACE =
             Pattern.compile("[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?");
-    private static final Pattern EXECUTION_RESOURCE_ID =
-            Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
 
     public enum EnvironmentName {
         DEV,
         TEST,
         PRODUCTION
-    }
-
-    public enum DurableAgentRouteMode {
-        OFF,
-        ALLOWLIST,
-        ALL
     }
 
     private final EnvironmentName environment;
@@ -61,11 +52,8 @@ public final class CoreSettings {
     private final String ragEmbeddingModel;
     private final String ragEmbeddingBaseUrl;
     private final boolean workflowEventDebugEnabled;
-    private final boolean durableAgentExecutionSchemaReady;
-    private final DurableAgentRouteMode durableAgentRouteMode;
+    private final boolean historicalWorkflowSchemaReady;
     private final boolean v1FreshAgentStartsEnabled;
-    private final Set<String> durableAgentUserAllowlist;
-    private final Set<String> durableAgentNovelAllowlist;
     private final Path uploadsRoot;
     private final boolean videoPreviewEnabled;
     private final boolean videoDispatchEnabled;
@@ -115,18 +103,12 @@ public final class CoreSettings {
         this.ragEmbeddingBaseUrl = value.apply("RAG_EMBEDDING_BASE_URL");
         this.workflowEventDebugEnabled = bool(
                 value, "WORKFLOW_EVENT_DEBUG_ENABLED", false);
-        this.durableAgentExecutionSchemaReady = bool(
-                value, "DURABLE_AGENT_EXECUTION_SCHEMA_READY", false);
-        this.durableAgentRouteMode = durableAgentRouteMode(
-                value.apply("DURABLE_AGENT_EXECUTION_ROUTE_MODE"));
+        // 新名称只控制历史数据读取；旧环境变量仅作部署迁移兼容，新名称优先。
+        this.historicalWorkflowSchemaReady = bool(value,
+                optional(value.apply("HISTORICAL_WORKFLOW_SCHEMA_READY")) == null
+                        ? "DURABLE_AGENT_EXECUTION_SCHEMA_READY" : "HISTORICAL_WORKFLOW_SCHEMA_READY", false);
         this.v1FreshAgentStartsEnabled = bool(
                 value, "V1_FRESH_AGENT_STARTS_ENABLED", true);
-        this.durableAgentUserAllowlist = idAllowlist(
-                value.apply("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST"),
-                "耐久 Agent 用户 allowlist");
-        this.durableAgentNovelAllowlist = idAllowlist(
-                value.apply("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST"),
-                "耐久 Agent 小说 allowlist");
         this.uploadsRoot = absolutePath(nonBlankOrDefault(value.apply("UPLOADS_ROOT"), "/data/uploads"));
         this.videoPreviewEnabled = bool(value, "VIDEO_PREVIEW_ENABLED", false);
         this.videoDispatchEnabled = bool(value, "VIDEO_DISPATCH_ENABLED", false);
@@ -264,47 +246,13 @@ public final class CoreSettings {
     }
 
     /** 只有具名迁移已经精确命中迁移后契约时，才允许装配 V2 数据库能力。 */
-    public boolean durableAgentExecutionSchemaReady() {
-        return durableAgentExecutionSchemaReady;
-    }
-
-    public DurableAgentRouteMode durableAgentRouteMode() {
-        return durableAgentRouteMode;
+    public boolean historicalWorkflowSchemaReady() {
+        return historicalWorkflowSchemaReady;
     }
 
     /** 只控制没有既有幂等身份、且最终会创建 V1 Task 的 fresh start。 */
     public boolean v1FreshAgentStartsEnabled() {
         return v1FreshAgentStartsEnabled;
-    }
-
-    public Set<String> durableAgentUserAllowlist() {
-        return durableAgentUserAllowlist;
-    }
-
-    public Set<String> durableAgentNovelAllowlist() {
-        return durableAgentNovelAllowlist;
-    }
-
-    /** 开关只决定新 Run 的路由；既有 V2 Run 必须继续由 V2 引擎收敛。 */
-    public boolean routesNewDurableAgentRun(String userId, String novelId) {
-        if (!durableAgentExecutionSchemaReady || userId == null || userId.isBlank()
-                || novelId == null || novelId.isBlank()) return false;
-        return switch (durableAgentRouteMode) {
-            case OFF -> false;
-            case ALLOWLIST -> durableAgentUserAllowlist.contains(userId)
-                    && durableAgentNovelAllowlist.contains(novelId);
-            case ALL -> true;
-        };
-    }
-
-    /** 用户私有资产没有小说归属；只用于显式用户级入口，不放宽既有小说级双 allowlist。 */
-    public boolean routesNewUserScopedDurableAgentRun(String userId) {
-        if (!durableAgentExecutionSchemaReady || userId == null || userId.isBlank()) return false;
-        return switch (durableAgentRouteMode) {
-            case OFF -> false;
-            case ALLOWLIST -> durableAgentUserAllowlist.contains(userId);
-            case ALL -> true;
-        };
     }
 
     public Path uploadsRoot() {
@@ -420,20 +368,6 @@ public final class CoreSettings {
                 && utf8Length(videoProviderMediaTokenSecret.reveal()) < 32) {
             throw new IllegalArgumentException("供应商素材短时令牌密钥至少需要 32 个 UTF-8 字节");
         }
-        if (durableAgentRouteMode == DurableAgentRouteMode.ALLOWLIST
-                && (durableAgentUserAllowlist.isEmpty()
-                        || durableAgentNovelAllowlist.isEmpty())) {
-            throw new IllegalArgumentException(
-                    "耐久 Agent allowlist 路由必须同时配置用户和小说 ID");
-        }
-        if (!durableAgentExecutionSchemaReady
-                && durableAgentRouteMode != DurableAgentRouteMode.OFF) {
-            throw new IllegalArgumentException(
-                    "耐久 Agent 数据库结构未就绪时，新建路由必须保持 off");
-        }
-        if (durableAgentRouteMode == DurableAgentRouteMode.ALL && v1FreshAgentStartsEnabled) {
-            throw new IllegalArgumentException("耐久 Agent 全量路由必须关闭 V1 新建入口");
-        }
         // 以下限制只针对生产；开发仍可在具名迁移和功能门禁下验收视频能力。
         if (environment != EnvironmentName.PRODUCTION) {
             return;
@@ -475,34 +409,6 @@ public final class CoreSettings {
             case "production" -> EnvironmentName.PRODUCTION;
             default -> throw new IllegalArgumentException("environment 必须是 dev、test 或 production");
         };
-    }
-
-    private static DurableAgentRouteMode durableAgentRouteMode(String value) {
-        String normalized = nonBlankOrDefault(value, "off").toLowerCase();
-        return switch (normalized) {
-            case "off" -> DurableAgentRouteMode.OFF;
-            case "allowlist" -> DurableAgentRouteMode.ALLOWLIST;
-            case "all" -> DurableAgentRouteMode.ALL;
-            default -> throw new IllegalArgumentException(
-                    "DURABLE_AGENT_EXECUTION_ROUTE_MODE 必须是 off、allowlist 或 all");
-        };
-    }
-
-    private static Set<String> idAllowlist(String value, String label) {
-        String normalized = optional(value);
-        if (normalized == null) return Set.of();
-        LinkedHashSet<String> result = new LinkedHashSet<>();
-        for (String item : normalized.split(",", -1)) {
-            String id = item.strip();
-            if (id.isEmpty() || !EXECUTION_RESOURCE_ID.matcher(id).matches()) {
-                throw new IllegalArgumentException(label + "包含无效 ID");
-            }
-            result.add(id);
-            if (result.size() > 1_000) {
-                throw new IllegalArgumentException(label + "不能超过 1000 项");
-            }
-        }
-        return Set.copyOf(result);
     }
 
     private static List<CidrBlock> cidrs(String value, String label) {

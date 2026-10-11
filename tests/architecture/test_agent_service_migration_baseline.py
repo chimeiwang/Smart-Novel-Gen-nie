@@ -22,24 +22,16 @@ def test_agent_service_openapi_covers_core_outbound_calls() -> None:
     source = json.loads((CONTRACT_ROOT / "openapi-python-baseline.json").read_text())
     java = json.loads((CONTRACT_ROOT / "openapi-java-baseline.json").read_text())
 
-    assert len(source["paths"]) == 10
-    assert _operation_count(source) == 10
-    assert len(source["components"]["schemas"]) == 27
+    assert len(source["paths"]) == 8
+    assert _operation_count(source) == 8
+    assert len(source["components"]["schemas"]) == 13
     assert source["paths"].keys() == java["paths"].keys()
+    assert not any("execution" in path for path in source["paths"])
     assert java["openapi"] == "3.0.3"
     assert {
         "AgentJobRequest",
         "AgentJobAccepted",
         "AgentJobCancelRequest",
-        "ExecutionStepRequest",
-        "ExecutionStepAccepted",
-        "ExecutionCancelRequest",
-        "ExecutionCancelAccepted",
-        "ResolvedModelRef",
-        "EvidenceBundle",
-        "OutputSchemaRef",
-        "PromptProfileRef",
-        "StepBudget",
         "SeedanceRenderSubmitRequest",
         "SeedanceRenderQueryResponse",
     } <= source["components"]["schemas"].keys()

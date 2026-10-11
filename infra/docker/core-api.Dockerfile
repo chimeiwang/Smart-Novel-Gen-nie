@@ -43,8 +43,8 @@ COPY --chown=10001:10001 infra/docker/inkforge-schema-export \
 RUN chmod 0555 /usr/local/bin/inkforge-schema-guard /usr/local/bin/inkforge-schema-export
 
 LABEL cn.inkforge.core.runtime="java"
-# 与 CoreSettings 的 all 配置回归一同维护，部署用它拒绝不支持全量配置的回滚镜像。
-LABEL cn.inkforge.durable-route-all="true"
+# 引擎已退役；历史结构与来源读取继续由运行探针验证。
+LABEL cn.inkforge.execution-engine="v1"
 
 USER 10001:10001
 EXPOSE 8000

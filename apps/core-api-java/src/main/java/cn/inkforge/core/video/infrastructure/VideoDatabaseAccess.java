@@ -19,7 +19,7 @@ final class VideoDatabaseAccess {
     static VideoprojectRecord ownedProject(
             DSLContext context, String userId, String projectId, boolean lock) {
         if (lock) {
-            // 与 V2 计费后的候选投影采用同一 Novel→Project 顺序；仍只锁原查询已有的行。
+            // 与视频计费后的候选投影采用同一 Novel→Project 顺序；仍只锁原查询已有的行。
             context.select(NOVEL.ID).from(NOVEL)
                     .where(NOVEL.USERID.eq(userId), NOVEL.ID.in(context.select(VIDEOPROJECT.NOVELID)
                             .from(VIDEOPROJECT).where(VIDEOPROJECT.ID.eq(projectId))))

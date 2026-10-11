@@ -10,98 +10,34 @@ Agent Service 负责：
 - CreativeOperation 的 LangGraph 编排；
 - 模型供应商适配和唯一多轮工具循环；
 - 运行队列消费、检查点恢复和事件回调；
-- V2 单 Step 执行、独立 execution journal 与未送达终态重放；
 - 人工工作流日志。
 
 Agent Service 不负责浏览器认证、数据库查询、正式业务写入、草案最终应用或计费落账。它不得接收 `DATABASE_URL`，不得导入 SQLAlchemy、asyncpg 或其他数据库客户端。
 
 ### 中短篇运行
 
-- `short_medium` 只执行 `generate_outline`、`generate_manuscript`、`replace_selection` 和
-  `full_check` 四种专用操作，不复用长篇多 Agent 自动评审链。
-- V1 运行只信任 Core 随 QueueJob 提供的不可变来源、基础版本、当前蓝图和正文快照；V2 只消费 Core
-  冻结的完整 `short_medium_context` Evidence 和已完成段，不得用可变 `coreContext` 或工作区覆盖它们。
-- 6000 到 15000 字正文单次生成，超过 15000 字时按蓝图顺序串行分段。V1 保存检查点；V2 每段为一个
-  独立模型 Step，下一段携带全部已完成正文前缀，最多六段，重启不得重调已经完成的段。
-- 选区操作只能返回 replacement；Agent Service 不负责拼接选区全文。V1 文档运行回传一个最终候选结果，
-  V2 逐 Step 回传完整段，由 Core 汇总成唯一候选；全文检查只回传报告。
-- 四项 V2 已完成仓内接线和本地真实 Core/Agent 独立进程、受控 Fake Provider 验收，中短篇验收时 Catalog 为
-  16/21。V2 原始段结果、计费与最终唯一候选/报告由 Core 持久化，零模型汇总 Step 固定结果引用；不创建
-  V1 影子任务或命令，不新增 Reviewer。生成 Run 为 `completed`、候选独立为 `awaiting_user`；全文检查
-  只生成完整文本报告。真实供应商、固定 CLI 包、活动 Skills 与生产未随本批更新，详见
-  `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
+- `short_medium` 执行 `generate_outline`、`generate_manuscript`、`replace_selection`、`full_check` 四种专用操作，不复用长篇多 Agent 自动评审链。
+- 只信任 Core 随 QueueJob 提供的不可变来源、基础版本、蓝图和正文快照；长文串行分段并保存完整检查点，恢复不能重复已经完成的段。
+- 选区只返回 replacement，全文由 Core 拼接；生成回传最终完整候选，全文检查只回传完整报告。
 
-### 历史长篇视频导演规划收敛
+### Episode 剧本与分镜
 
-- 旧 `VideoScene` 公共创建、查询、重试、返工、批准和提示词预览入口已经退役，不能再创建新的旧任务。
-  Agent handler、内部回调和耐久 dispatcher 只用于已存在历史任务的恢复与终态收敛；不得把它们重新注册为
-  浏览器或 CLI 产品入口。
-- 历史视频规划任务只服务 `long_serial`；Agent 只消费 Core 冻结的原文、设定快照、时长、画幅、
-  规划路由和模型身份，不得回读 PostgreSQL 或当前可变资料。
-- 视频规划按任务冻结的 `planningRoute` 和 Provider capability gate 选择结构化输出，分三阶段生成轻量创意草案：
-  场景素材、故事节拍、摄影灯光。草案不得携带数据库 ID、正式素材 ID、节拍时间、调用账本
-  或 ReviewArtifact 状态。
-- 故事阶段由服务器从冻结原文生成连续 `E01..ENN` 事件短别名，并在调用前把它们
-  固定到闭合 `beatsByAlias` 的主/次动作槽；模型不得提交或移动 E 归属，只填写槽内动作、拍级
-  表演、调度与声音。服务器把唯一归属写入 story canonical checkpoint，并复核动作是否真实落地；
-  不得再用整段自然语言关键词首次位置推断事件顺序。E 归属不进入摄影草案或最终 Provider 提示词。
-- 摄影阶段的焦距、T 值、数值机位、构图规则、运镜、景深和拉焦时长可以从返工基线继承；
-  `focus.startTarget/endTarget`、构图前后景、摄影动机和灯光文字属于故事语义。焦点起止目标必须
-  同时属于当前 B 拍的 E 事件对象或当前拍人物表演，不能沿用上一拍对象；旧故事不兼容或焦点
-  错拍时只省略不可信语义，保留机械设计供模型重填，审计快照本身不得改写。
-- 模型草案不是正式事实。短别名映射、连续 ID、时间轴、素材引用和兼容字段必须由共享契约的
-  纯函数确定性物化，再经过完整导演语义门禁与提示词编译，最后才能回调 Core 形成待审候选。
-- 每次模型调用前必须先取得 Core 原子 reservation；正常三次、全任务最多五次。阶段 canonical
-  checkpoint 是唯一恢复事实，原始模型草案不持久化，也不得进入人工日志或用户界面。
-- Redis 视频 job 只是可重建执行索引；Core 必须从 `VideoGenerationTask` 的到期状态使用稳定 jobId 补投。
-  Agent 不得把重复投递解释成新的模型任务，必须先读取 Core 耐久进度再决定是否继续。
-- `responses_json_schema_v1`、`chat_json_output_v1` 和历史 `legacy_strict_tool_v1` 不能在同一
-  taskId 中切换。历史 legacy 活动任务应零模型稳定失败，由用户显式创建新的 retry/revise 任务。
+活动视频主链以独立 `VideoEpisode` 为身份，章节只作为一个或多个不可变来源快照。旧章节改编、逐镜提示词与 VideoScene 任务不重新开放。
 
-### 长篇章节影视化
+四项业务为 `episode_script_generate`、`episode_script_revise`、`episode_storyboard_generate`、`episode_storyboard_revise`。Core 冻结完整来源、基础版本、revision、修改范围、视觉依据与内容哈希，形成普通业务任务；`WorkflowRun(engineVersion=1)` 仅保存业务状态，实际来源中首个现存章节作为归属锚点，Episode 仍是模型目标。不可变 Evidence 是来源记录，不创建模型 Step 或依赖执行 Catalog、execution journal。
 
-- 两项现有视频模型业务的 V2 已接入 Core 冻结阶段计划并完成仓内与隔离跨进程验收，具体状态见
-  `docs/specs/2026-09-06-durable-video-model-workflows.md`。一次真实 Responses HTTP 对应一个 Step，
-  Agent 不自行接续阶段；原 Task 保留业务来源与作者候选关联，只由 Core 投影状态。已完成分析、设计或
-  提示词结果从 journal/Step 恢复，不投回旧队列；历史无 V2 绑定任务仍走下述 V1 StateGraph。
-  真实视频仍仅开发环境，保留原调度命名空间；CLI 使用原公开 Task/watch/确认入口，不直连 Agent。
-- `chapter_cinematic_adaptation_v2` 属于独立章节改编域，不创建或更新旧 `VideoScene`。Core 冻结完整章节并
-  通过 `VideoAdaptationTask` 投递；Agent 不回读 PostgreSQL。
-- 工作流使用 StateGraph 按“场景/戏剧节拍/观众覆盖目标分析 → Core dramatic checkpoint → 目标驱动镜头设计
-  → 严格结构校验与非阻断审镜发现 → Cinematic Reviewer → 最多一次完整返工”执行。Reviewer 不做局部 patch；
-  第二轮仍有语义问题时把完整候选和 warning 交给作者，不以电影经验规则直接判任务失败。
-- 句末和换行生成的 `U` 编号只用于来源锚定，不是场景、节拍或镜头边界。对白换人、句子结束和原文换行
-  不能成为切镜理由；每镜必须有本镜作用、观众获得、目标绑定、可见动作、分层对白/声音和具体剪辑动机。
-- 新场景首镜、景别变化、平均镜头时长、慢镜比例和补充镜头用途只能形成有证据的建议，Agent/纯代码不得
-  强行改写 `narrativePurpose`、景别或切镜理由。来源关系、镜头用途、对白位置和声音设计是独立维度。
-- 正式方案修订必须由 Core 冻结当前 `baseShotPlanVersionId + baseShotPlan`；Agent 可参考基线完整重写候选，
-  但不能修改旧正式版本或声称完成了跨服务局部 patch。
-- Shot Designer 使用闭合 `beatsByKey`。若模型沿用基线旧 Beat Key，Agent 只按 checkpoint 中精确 U 集合把草案
-  归位到正确 Beat；仍缺失的槽位只补全缺失 Beat，不重写已完成镜头。错误 G 绑定属于软元数据，剔除后形成
-  finding；跨 Beat U 不得进入候选，无合法来源的直呈/推导草案降为补充并提示核对。
-- Core checkpoint 是跨重试耐久事实；已有 dramatic checkpoint 时禁止重新调用分析阶段。候选只通过签名回调
-  进入 `ReviewArtifact(video_adaptation_plan)`，Agent 不写正式 Scene、Beat、Shot 或 PromptVersion。
-- `chapter_shot_prompt_v2` 只为当前正式镜头生成结构化 `ShotPromptSpec`；最终即梦文本由确定性编译顺序产生，
-  不得改变已确认镜头边界或新增剧情结果。模型只读取目标镜头自己的正式事实和冻结设定，不读取完整章节或
-  前后镜完整事件。Core 还会按目标镜头冻结已经批准的 `visualReferenceBundles`；Agent 只能读取视觉版本、设定职责、
-  包含/排除特征和参考强度元数据，不读取图片路径或数据库。身份、服装、场景或道具已有正式参考时，冻结图片负责
-  稳定对应静态造型，文字设定投影不得再复制完整外观；当前主体、临时状态、可见动作和摄影要求仍必须完整表达。
-  首次响应不是合法结构化对象，或没有通过时长、景别、重复和编译门禁时，同一任务只允许
-  追加一次带具体原因的 JSON Schema 纠正调用；第二次仍有 Schema、目标顺序、空字段、编译或预算硬错误时必须失败，
-  仅剩动作密度、重复、邻镜语言、不可见解释或未确认状态变化时必须返回带 `qualityWarnings` 的可编辑候选，不得猜 JSON、
-  无限重试、静默截断或保存半截提示词。新模型按镜头内容选择性提交 `expressionAndGaze`；历史 `performance/continuity` 仅兼容读取，
-  新 Schema 不再请求。纠正前允许确定性移除编译器元数据、历史字段、不可见表情与动作冲突的负面约束，并把唯一
-  冲突的显式景别词替换为正式中文标签；正式标签与一个冲突标签并存但没有景别变化语义时可删除冲突词，主体与
-  摄影机重复景别时只在摄影机保留。真正涉及运镜或景别变化时不得自动替换，也不得
-  截断文本、改写动作或补造事件。批量任务按 `shotKey` 分别构建设定投影，人物外观按景别与本镜明确锚点裁剪；
-  当前镜头事实覆盖具体设定，具体设定覆盖全局风格；动态道具状态必须由本镜事实
-  确认，负面约束不得禁止完成正式动作所需的手部或正式主体，但可排除其他/额外人物。主动作可包含直接结果，但不得脱离本镜来源追加再次、继续、
-  反向操作或失败重试；转动、旋转等物理变化必须在本镜正式事实或来源中有依据。2500ms 及以下正式镜头若自身有
-  四个以上可读信息单元，只附加延长/拆镜提醒，不要求模型越权改镜。上下文同时提供正式景别代码和产品中文标签，候选显式景别不得与标签冲突，例如
-  `close=近景` 不能写成“特写”。完成回调前必须按正式画幅和时长实际编译全部候选。
-- `negativeConstraints` 只能表达禁止或避免，不能借“只保留”等正向白名单加入新画面。火花、火焰、爆炸、
-  闪电/电弧、粒子、光束、浓烟、雨雪和血迹等高成本视觉效果若未出现在正式镜头、来源、本镜相关设定投影或
-  视觉参考包含特征中，首次响应进入现有一次纠正；第二次仍存在时只作为可编辑 `qualityWarnings`，不得自动删除或硬失败。
+任务通过普通 `kind=video` 队列执行现有 LangGraph 生成、审阅与最多一次返工。完整检查点由 Core 保存，已完成结果恢复时不重调模型；已开始但结果未知的供应商调用明确失败并保留诊断，不能自动重复请求。Agent 每次模型调用使用既有 Core 授权与用量回报。
+
+Core 重新校验来源哈希、工作稿版本与局部修订范围，只生成完整待审候选。候选采用、正式剧本／分镜确认和制作基线是独立作者决定；局部修订保留范围外内容。回调使用 Ed25519 服务身份绑定任务、小说、路径和正文。取消使用稳定命令标识及当前 revision，迟到成功不能覆盖取消。
+
+生产保持 `VIDEO_PREVIEW_ENABLED=false`，不得调度视频或真实 Seedance。
+
+现有结构要求普通任务绑定真实章节归属。若冻结来源集合中的章节全部已删除，新任务明确要求重新选择有效来源；不随机绑定无关章节，已有不可变快照和候选仍保留。
+
+## 作家编辑原则
+
+作家 Agent 在初稿和返工中同时遵守六项编辑原则：对白符合人物已知信息和当下目的；旁白不重复解释已由动作或对白表达的意思；每场戏带来新的变化；动作服务具体场面；解决办法有依据和铺垫；识别并保留有效对白、细节、人物特点及作品文风。
+提交前把必要调整落实到最终正文，不输出自检过程。该要求只增强现有提示词，不新增 Agent、复审循环或模型调用；不把短句、方言、词语或外部 AI 检测分数作为硬门禁。跨章判断需要实际读取相关章节，不能根据未读取内容推测。
 
 ## 关键入口
 
@@ -150,7 +86,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 普通工具通过可逆 wire 契约适配 DeepSeek：所有对象闭合、至少一个属性且字段全必填；正常字段直接传业务值，省略使用 `{"_inkforgeState":"omitted"}`，null 使用 `{"_inkforgeState":"null"}`。可证明交集解码一致的联合直接表达；业务值与标记同形或分支解码不等价时保留必要的判别包装。条件根联合保留完整 anyOf 约束，不能只合并属性。开放字典与任意/递归 JSON 继续使用完整 JSON 字符串，无参/真实空对象保留非空标记；见[平铺规格](../../docs/specs/2026-10-07-deepseek-flat-wire-study.md)。进程内历史从原业务参数按新契约编码，响应仍完整复验 wire、解码结果和原 JSON Schema/Pydantic；不能丢字段、静默覆盖重复 JSON 键或把空值当缺失。质量工具保留专用投影，`location` 与 `rewriteBrief` 仍只在精确路径把空字符串归一化为 `None`。
 - DeepSeek wire 中相邻的纯 anyOf 联合必须等价展开，使 anyOf 的每个直接分支有具体 type，并在发出 HTTP 前预检。字段联合容器可以没有 type；带 type/properties 的条件对象必须保留全部约束，不能随意添加 object 类型或删除条件。通用 JSON Schema 校验不能代替供应商方言检查及真实验收。
 - DeepSeek arguments 无法解析时必须先保留可靠 usage，再返回无原文的无效工具诊断；只允许在末尾追加缺失对象/数组闭合符，且补齐后必须通过本轮原始 JSON Schema。AgentRuntime 把一轮工具响应作为原子包，存在任一无效调用就不得接受正文或执行任何调用；无效 JSON 或 Pydantic 参数在整个运行中最多触发一次不回放坏参数的显式协议纠正，纠正调用必须独立授权、结算 usage 和记录。`length`、`content_filter`、资源不足、无暴露工具或纠正仍失败时不得继续纠正，最终以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。
-- 上述一次预算仅在普通章节 `write_chapter` / `rewrite_scene` 的 primary/reviser 有一个例外：首次纠正用于纯读取工具包且已经成功，后续 `begin_artifact_output` 的 Pydantic 参数失败可以再纠正一次。每次 AgentRuntime 执行最多两次纠正，同一纠正响应再次失败立即结束；选区、reviewer、quality 和 V2 单 Step 不扩充预算。正文提示只要求 kind、summary 和完整 content，返工身份由原有权威草案校验器继承；见 [临时修补规格](../../docs/specs/2026-09-28-chapter-artifact-protocol-hotfix.md)。
+- 上述一次预算仅在普通章节 `write_chapter` / `rewrite_scene` 的 primary/reviser 有一个例外：首次纠正用于纯读取工具包且已经成功，后续 `begin_artifact_output` 的 Pydantic 参数失败可以再纠正一次。每次 AgentRuntime 执行最多两次纠正，同一纠正响应再次失败立即结束；选区、reviewer 和 quality 不扩充预算。正文提示只要求 kind、summary 和完整 content，返工身份由原有权威草案校验器继承；见 [临时修补规格](../../docs/specs/2026-09-28-chapter-artifact-protocol-hotfix.md)。
 - 公共错误只携带安全分类、工具名、字符数及最多 10 条白名单 `loc/type`。纠正提示可额外使用本地从已下发 wire Schema 生成的字段类型、状态说明和合法字段格式示例；不从失败参数提取示例。`toolSchemaHints` 只在进程内使用，从普通 model_dump/repr 排除，不进入公共错误或业务状态。完整失败诊断另行保留脱敏后的原始参数、wire/业务 Schema、全部校验错误、异常链与确定性恢复前后证据，按具体阶段写入服务日志和适用的 V1 帧正文，不进入纠正提示、Core 或持久业务状态；见[完整失败诊断规格](../../docs/specs/2026-10-07-complete-failure-diagnostics.md)。显式协议纠正不改变 SDK、队列重试或现有调用预算。
 
 ## 数据与信任边界
@@ -158,7 +94,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - DeepSeek、通用 OpenAI-compatible、Embedding 与 Responses 请求失败时，完整保存经过凭据脱敏的 HTTP 错误正文、响应头、
   方法/地址及异常消息、因果链、调用栈，不按长度截断，不采集调用栈局部变量。详情只进入服务诊断
   和 V1 人工日志的 `model_failure`／`diagnostic` 帧正文，不进入异常 str/repr、Core 回调、SSE 或聊天回复；
-  V2 由 Executor 记录 run/step 关联详情。HTTP 200 但 JSON、usage、工具参数或结构化输出无效时，
+  HTTP 200 但 JSON、usage、工具参数或结构化输出无效时，
   同样保存失败内容和完整校验原因；正常成功内容、推理与请求不另行复制。授权、计费回报、工具执行、
   图层降级、队列及未知异常记录完整脱敏因果链。详情采集或日志 sink 故障不能替代原结果。
   日志专用字段必须从普通 model_dump/repr 排除，结果重建时显式保留给日志层；具体见
@@ -184,100 +120,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 普通 V1 队列必须在既有状态迁移 Lua 内原子维护版本为 `1` 的 drain `queued/running` 最小 ZSET；索引只保存
   `jobId` 与原始 `createdAt`，不得复制或解析正文 payload。缺 marker、旧 marker、集合双向不一致或 active 超过
   256 项时联合 drain 必须封闭失败；具名空索引初始化也不得扫描超过 256 个历史 status。
-- V2 execution journal 只使用独立 `EXECUTION_REDIS_URL`，生产必须与普通 `REDIS_URL` 分离。该 Redis 固定
-  `appendonly yes + appendfsync always + aof-load-truncated no + noeviction`；普通队列 Redis 继续关闭 AOF。
-  `accepted`、供应商尝试和未送达终态在 Core 回执前不设 TTL。独立 callback replayer 使用 Redis 原子
-  claim/lease 和到期时间重放同一 `resultHash`；合法 `accepted/duplicate/superseded` 回执才进入保留期，
-  `stale` 继续保留终态等待新 fence 重绑。确定性 4xx 隔离为 rejected 并阻断 readiness，网络、5xx 和损坏回执按稳定抖动退避。
-  每轮回放前只从既有有界 active 索引恢复已持久取消、无本机活跃执行、providerAttempts=0且无provider开始时间的
-  accepted/started记录；使用原取消身份与终态CAS，不调用模型、不清空用量、不覆盖已有结果，继续尊重quarantine。
-- V2 journal 的每个 accept/start/provider-attempt/terminal/refence/cancel/callback claim/reschedule/reject/deliver
-  Lua 必须同时校验版本为 `1` 的 drain marker，并原子维护包含全部 accepted/started 与未送达 terminal 的 active
-  ZSET。生产缺 marker 时禁止开始 provider；只有 PostgreSQL 全部 V2 Run 为零且独立 Redis 无任何 key 时才允许
-  具名初始化空 marker，已有数据不得猜测重建，必须 quarantine 后审计。
-- 已送达终态删除完整模型输出，只按独立 `EXECUTION_TERMINAL_RETENTION_HOURS` 保留幂等 tombstone，默认/最少
-  24 小时；pending/rejected 的完整终态永不过期。
-  `used_memory` 达到 `maxmemory` 90%、出现历史 eviction 或 callback backlog 越界时，不得继续开始新 provider 调用；
-  终态 replay 和精确取消仍保持可用。
-- V2 `long_serial.answer_question` 只接受 Catalog 已启用的 `chapter` scope：通用 `ExecutionStepRequest.input`
-  必须只含完整非空白 `userInstruction`，Evidence bundle 必须有且只有一个完整、无 range 的
-  `chapter_content` text 快照。执行器使用 `editor.answer.v1`、`output.chat_answer.v1` 和精确单 Step 预算，
-  只返回严格 `{"answer": string}`；不创建 Reviewer、Artifact、工具循环或 LangGraph 状态。问答仍完整经过
-  deployment 授权、`preparing` 预留、累计 usage、journal、fence、取消和终态回放；会话消息 ID 与持久化只由
-  Core 负责。
-- V2 `resolve_intent` 是独立系统 Step，不是业务 Operation；operation 必须为 null，不绑定 Artifact。
-  执行器只消费完整指令、有序澄清回答和唯一 intent_context，使用 disabled reasoning、interactive lane 和
-  专用有限预算，输出严格 ProposedCommand，不生成正文或调用工具。资源身份、有效命令和同 Run 后续
-  编排仍由 Core 决定；当前分支已接自然请求及澄清的 Core/Web/CLI，但执行器支持和代码接线均不代表真实
-  环境已经切换，完整验收状态见自然入口与结构化资料规格。新请求使用 `system.intent_resolver.v3`，其提示词以
-  冻结的 availableOperations、description 和 scopeKind 为唯一授权：当前支持十项无选区操作，设定两项和
-  大纲两项固定 novel scope，伏笔及原五项固定当前 chapter scope。节点等不匹配范围须澄清或走显式入口，
-  模型不得输出目标 ID、scope 或参数；历史 v1/v2 首次派发及恢复仍使用原完整依赖与当前章授权。
-  首次派发仍由当前系统用途约束 workflow、lane 和 Evidence；恢复按完整保留依赖复验，不因当前用途退役
-  或切换引用而覆盖历史事实。不得以任意版本前缀放开未授权的 Profile/Prompt/Deployment 组合；缺 execution journal 的 running recovery
-  仍以 MODEL_OUTCOME_UNKNOWN 收敛，不重复调用模型。
-- V2 `long_serial.plan_chapter` 的生成使用 `plot.chapter_plan.v1`，编辑复审使用
-  `reviewer.chapter_plan_editorial.v1`。Agent 只消费 Core 冻结的 `chapter_plan_context` JSON Evidence 和严格
-  PlanInput；返工使用同一 Evidence、上一候选/revision 与明确意见，不读工作区、不调用工具或 LangGraph。
-  Provider 只生成 title/summary/chapterGoal/sceneBeats 等语义字段，连续 order、beatCount、contentSha256
-  由程序派生并由 Core 复验。Core 持有候选、复审、最多一次自动完整返工和用户决定的编排及计费。
-  该 Operation 的本分支接入不表示其余 Catalog 占位项已实现，也不表示生产已经开放。
-- V2 `long_serial.write_chapter` 使用 `writer.chapter_draft.v1` 与专用正文一致性/编辑双 Reviewer。
-  三者只消费同一 `chapter_writing_context`，不回读工作区。Provider 仅生成完整 summary/content；
-  程序派生原始 UTF-8 哈希及统一 Unicode 字数，超预算或不完整结束必须明确失败，不得裁切正文。
-  Reviewer 的结构化 candidatePatch 与 suggestion 解释文字严格区分；Core 独占局部修改、全篇返工、
-  不可变 revision 和正式采用。零模型 candidate_patch 是 Core 的 persistence/control Step，不调用 Agent，
-  不伪造模型用量或积分预留；最多一次自动修改后必须再次双复审，剩余问题交作者。
-  正文和场景改写新计划的双 Reviewer 使用 v2 提示词，明确 verdict/findings、必需范围 null 与证据引用
-  的既有协议，旧 v1 冻结依赖保留。Schema 失败日志只补充白名单字段路径，不新增纠正模型调用。
-- V2 `long_serial.review_chapter` 使用独立 `editor.chapter_review_text.v1`，消费完整
-  `chapter_writing_context`，只输出非空白完整 report；Core 负责只读完成和可选会话消息，不产生 Artifact。
-  它不是输出 contentVerdict/findings 的候选 Reviewer，也不更新质量终检。`rewrite_scene` 使用场景专用
-  生成提示、完整 ChapterDraft 结果与正文双 Reviewer；真实 operation 始终保留，不生成程序场景范围。
-  `rewrite_outline_selection` 只消费总纲/节点的完整 text Evidence 和精确 range，返回 replacement 与
-  程序派生哈希，单独大纲编辑 Reviewer 复审。Core 独占拼接、返工和最终采用。
-  上述审阅/改写阶段建立的三项及五项历史自然快照仍按原授权集合和解析器版本恢复；当前自然十项按下节接线。
-  具体本地验收状态见
-  `docs/specs/2026-09-05-durable-review-and-rewrites.md`，代码支持不表示服务器已开放。
-- V2 设定、大纲与伏笔五项的单 Step 执行复用 StatelessExecutionStepExecutor，生成仅接收
-  AgentUpdatesInput 和唯一绑定小说的 agent_updates_index；其余资料全部来自同一冻结 bundle，不读取
-  工作区或工具。正常候选输出 summary/updates，程序按字段存在性派生 updatesSha256，保留原数组、
-  空串和 null。新 v3 生成器也可单独请求冻结名录内的必要来源，不能夹带候选；程序绑定本次 Step、bundle、
-  有序需求与固定字节额度，使用原 evidence_expansion 终态及用量回调。Core 在同 Run 新建 bundle/Step，
-  保留旧来源；没有新增来源、来源冲突或额度不足时明确终止，不无限调用。旧 v2 仅按原依赖恢复，仍只接受
-  summary/updates。返工绑定精确上一候选及原指令；专用一致性/编辑 Reviewer 关闭 thinking，校验原候选哈希，
-  不支持正文 candidateRange 或 candidatePatch。现有调用预留、用量、取消和 journal 路径不变。
-  Core 已接显式与自然入口、最多一次自动完整返工和作者采用；中短篇四项及一致性终检阶段达到 17/21，
-  文风画像阶段仓内 Catalog 为 18/21，加入 RAG 索引接线后为 19/21；开发视频两项完成后，仓内迁移验收为 21/21，
-  RAG 最终门禁以独立规格为准，不能据此声称全部 Agent 或生产已完成。新复审策略只对全部高置信 agent_updates.local findings 自动完整返工，
-  其余问题或额度不足交作者，旧冻结策略不扩大。来源补齐计模型额度但不冒充候选 revision，结构化业务最多四次调用。
-  显式 scope：设定两项/创建大纲为 novel，修改大纲为 novel 或 outline_node，伏笔为 novel 或当前 chapter；
-  公共 target 始终是章节锚点，不限制既有跨分区候选。详细隔离验收及最终仓内门禁见
-  `docs/specs/2026-09-05-durable-structured-agent-updates.md`；本批未更新固定 CLI JAR、活动 Skills 或服务器。
-- V2 `quality.consistency` 使用 `quality.consistency.v2` 与完整 `quality_context`，保留原五维报告、
-  `submit_quality_report` 和 DeepSeek Beta strict 传输；明确路由为 `quality_strict_tool_v1`，不能记成普通 JSON。
-  每 Step 只调用一次模型。可靠用量下的首个 JSON/参数失败用稳定 Failure 交给 Core，Core 结算后才可按冻结
-  计划新建唯一 `protocol_correction` Step，使用 `system.quality_protocol_corrector.v2`；不保存或回放坏参数。
-  两 Step 共用原完整来源，独立授权、计费与 journal；未知用量、不完整输出、超预算或再次失败不得继续纠正。
-  Core 只投影原质量检查项，不创建草案或 Reviewer，`revise` 也是完成。旧正文失效通过原 durable cancel 收敛，
-  迟到报告不得覆盖新的检查项。实现和验收状态见 `docs/specs/2026-09-05-durable-consistency-quality.md`，
-  仓内启用数不是生产开放数；本批不更新固定 CLI、活动 Skills 或服务器。
-- V2 `style.portrait` 使用 `style.portrait.v2`，整套五节固定串行、单节重做只执行目标节；每节消费同一完整
-  `style_portrait_context`，来源文件在 Core 受理时冻结，不向 Agent 传路径，参考变化不重读或作废已受理来源。
-  用户级 Run 显式 `novelId=null`；模型走 `plain_text_v1`、关闭 thinking、无工具或结构化输出，不新增纠正或
-  Reviewer。Step 保留完整原始回复，Core 按原 Python 去空白语义在五节全部完成后一次物化 WritingStyle，
-  单节只更新目标；不引入 ReviewArtifact。新 V2 不创建 StylePortraitTask 影子行，原 V1 任务及恢复继续保留，
-  原查询双读。Agent/Core、全仓门禁与隔离独立进程验证均通过，结果见
-  `docs/specs/2026-09-05-durable-style-portrait.md` 最终记录为准；不代表生产或固定安装已更新。
-- V2 `rag.embedding` 通过独立 `embeddings_v1` 适配执行，每个 generation Step 只提交一批最多 10 块的
-  完整文本，逻辑用途为 embedding，不伪装聊天请求或工具循环。最多 7 批共用原 execution journal 和
-  ModelRuntime 全局并发门。Core 在新代次事务内冻结原文，全部批次成功才发布索引；旧 pending 不换引擎。
-  实际模型和端点配置指纹必须与 Core 非秘密配置精确匹配，同一 Run 批间不能换模型。用户积分不扣费，
-  缺失用量保持未知或部分已知的零金额待对账。查询 embedding 原路径不变，CLI 无 Agent 直连入口；
-  验收状态见 `docs/specs/2026-09-05-durable-rag-embedding.md`。
-- execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
-  已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
-  提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。
+- 耐久执行引擎已退役；新业务全部使用普通队列和 Core 业务检查点，Agent 不装配单 Step 执行器或 execution Redis。旧运行、候选来源与账务由 Core 提供必要的历史读取和决定兼容，不改写历史引擎身份。
 - 队列消费者必须由生命周期任务监督器托管；基础设施异常按退避策略重试，消费者协程意外结束必须使就绪检查失败并触发重启，不能只凭消费者对象存在判断健康。
 - 2 核 2 GB 生产环境保持一个 Uvicorn worker，消费者默认在同一事件循环内运行三个独立 job 槽；同一 `novelId` 同时只允许一个 job 执行，同项目冲突的 claim 必须通过租约校验原子回队，成功回队时撤销本次 claim 增加的 attempts。回填、清理、租约恢复和 claim 串行进入维护临界区，每个已领取 job 独立续租和收敛。`AGENT_MAX_CONCURRENCY` 只允许 1、2 或 3，配置 1 可回退原串行行为。
 - 所有普通 Agent、中短篇、质量检查和文风画像模型请求共用 `ModelRuntime` 的全局并发门；默认最多三个模型调用，Reviewer `Send` 扇出也必须受该门限制，不能因三个 job 重叠放大供应商请求。

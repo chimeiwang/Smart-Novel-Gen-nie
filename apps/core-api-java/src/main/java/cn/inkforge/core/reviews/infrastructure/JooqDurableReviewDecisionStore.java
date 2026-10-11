@@ -28,11 +28,6 @@ import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
 import cn.inkforge.core.workflows.domain.DurableOutlineSelectionArtifact;
 import cn.inkforge.core.reviews.application.AgentUpdatesMaterializer;
-import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
-import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
-import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
-import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
-import cn.inkforge.core.workflows.domain.WorkflowUsageStatus;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -40,7 +35,6 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -149,6 +143,11 @@ final class JooqDurableReviewDecisionStore {
             throw reused(request.getClientRequestId());
         }
 
+        if (request.getDecision() == ReviewArtifactDecisionRequest.DecisionEnum.REVISE) {
+            throw new ApiException(409, "EXECUTION_ENGINE_RETIRED",
+                    "历史候选仍可采用或丢弃；返工请基于该候选通过 V1 写作入口创建新任务");
+        }
+
         Locked locked = lockScope(
                 transaction, userId, artifactId, request.getExpectedRevision());
         requireActionable(locked, request.getExpectedRevision());
@@ -249,22 +248,7 @@ final class JooqDurableReviewDecisionStore {
             return response;
         }
 
-        transitionArtifact(transaction, artifactId, "awaiting_user", "draft", now, false);
-        insertRevisionGenerationStep(
-                transaction, locked, executionContext, revision, request, now);
-        transaction.execute(
-                """
-                UPDATE public."WorkflowRun"
-                SET status = CAST('running' AS "WorkflowRunStatus"),
-                    revision = revision + 1, "updatedAt" = ?, "errorCode" = NULL,
-                    "completedAt" = NULL
-                WHERE id = ?
-                """,
-                now,
-                locked.runId());
-        WritingRunV2Response response = snapshot(transaction, locked.runId());
-        saveDecisionReceipt(transaction, decisionStepId, response);
-        return response;
+        throw validation("不支持的历史候选决定");
     }
 
     /** 统一锁顺序：Run → Artifact → 精确 Revision；来源 Chapter 在随后单独锁定。 */
@@ -901,231 +885,11 @@ final class JooqDurableReviewDecisionStore {
         return stepId;
     }
 
-    private void insertRevisionGenerationStep(
-            DSLContext transaction,
-            Locked locked,
-            WorkflowExecutionContext context,
-            Revision revision,
-            ReviewArtifactDecisionRequest request,
-            LocalDateTime now) {
-        ExecutionPlanSnapshot executionPlan = context.requireBusinessPlan();
-        long existingModelSteps = transaction.fetchOne(
-                """
-                SELECT count(*) FROM public."WorkflowStep"
-                WHERE "runId" = ? AND "stepType" = CAST('agent' AS "WorkflowStepType")
-                  AND purpose <> 'resolve_intent'
-                """,
-                locked.runId()).get(0, Long.class);
-        long generationSteps = transaction.fetchOne(
-                """
-                SELECT count(*) FROM public."WorkflowStep"
-                WHERE "runId" = ? AND purpose IN ('generation', 'candidate_patch')
-                """,
-                locked.runId()).get(0, Long.class);
-        int requiredCalls = 1 + executionPlan.reviewers().size();
-        if (generationSteps - 1 >= executionPlan.reviewPolicy().maxAutomaticRevisions()
-                || existingModelSteps + requiredCalls
-                        > executionPlan.runBudget().maxModelCalls()) {
-            throw new ApiException(
-                    409,
-                    "WORKFLOW_REVISION_BUDGET_EXCEEDED",
-                    "当前工作流已用完候选返工预算");
-        }
-        requireRevisionRoundBudget(transaction, locked, context);
-        Record original = transaction.fetchOne(
-                """
-                SELECT input FROM public."WorkflowStep"
-                WHERE "runId" = ? AND purpose = 'generation'
-                ORDER BY ordinal ASC LIMIT 1
-                """,
-                locked.runId());
-        if (original == null) throw new IllegalStateException("V2 Run 缺少原始 generation Step");
-        Map<String, Object> input = new LinkedHashMap<>(
-                readObject(original.get("input", String.class)));
-        String originalInstruction = input.get("userInstruction") instanceof String value
-                ? value
-                : null;
-        input.put("originalUserInstruction", originalInstruction);
-        input.put("userInstruction", nullable(request.getUserMessage()));
-        if (Set.of("write_chapter", "rewrite_scene")
-                .contains(context.effectiveOperation())) {
-            input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
-                    "artifactRevision", revision.number(), "payload", DurableChapterDraftArtifact.output(revision.storedPayload())));
-        } else if ("beat_plan".equals(locked.kind())) {
-            input.put("previousArtifact", Map.of("artifactId", locked.artifactId(),
-                    "artifactRevision", revision.number(), "payload", DurableBeatPlanArtifact.output(revision.storedPayload())));
-        } else if ("agent_updates".equals(locked.kind())) {
-            input.put("previousCandidate", Map.of("artifactId", locked.artifactId(), "artifactRevision", revision.number(),
-                    "summary", revision.storedPayload().get("summary"), "updates", revision.storedPayload().get("updates")));
-        } else {
-            input.put("previousCandidate", Map.of(
-                    "artifactId", locked.artifactId(),
-                    "artifactRevision", revision.number(),
-                    "replacement", string(revision.payload(), "replacement")));
-        }
-        String inputHash = ExecutionCanonicalJson.sha256(input);
-        String stepId = ids.next();
-        String idempotencyKey = locked.runId() + "." + stepId;
-        Record bundle = transaction.fetchOne(
-                """
-                SELECT id, version, "manifestSha256"
-                FROM public."WorkflowEvidenceBundle"
-                WHERE id = ? AND "runId" = ?
-                """,
-                sourceBundleId(locked),
-                locked.runId());
-        if (bundle == null) throw new IllegalStateException("V2 Run 缺少 Evidence bundle");
-        ExecutionPlanSnapshot.Step generator = executionPlan.generator();
-        Map<String, Object> profile = generator.modelProfile().toMap();
-        Map<String, Object> outputSchema = generator.outputSchema().toMap();
-        Map<String, Object> budget = generator.stepBudget().budgetMap();
-        String requestHash = ExecutionCanonicalJson.sha256(stepRequestMaterial(
-                locked,
-                context.effectiveOperation(),
-                stepId,
-                idempotencyKey,
-                inputHash,
-                bundle,
-                generator.evidencePolicy(),
-                generator.lane(),
-                profile,
-                outputSchema,
-                budget,
-                revision));
-        Map<String, Object> storedBudget = generator.stepBudget().stored();
-        transaction.execute(
-                """
-                INSERT INTO public."WorkflowStep" (
-                  id, "runId", "agentId", "stepType", status, input, "createdAt",
-                  ordinal, purpose, lane, "attemptCount", "nextAttemptAt", "fencingToken",
-                  "idempotencyKey", "requestHash", "inputHash", "evidenceBundleId",
-                  "artifactId", "artifactRevision", "modelProfile", "modelProfileVersion",
-                  "outputSchema", "outputSchemaVersion", "budgetJson", "submittedAt", "updatedAt"
-                ) VALUES (
-                  ?, ?, ?, CAST('agent' AS "WorkflowStepType"),
-                  CAST('pending' AS "WorkflowStepStatus"), ?, ?, ?, 'generation', ?, 0, ?, 0,
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-                """,
-                stepId,
-                locked.runId(),
-                generator.modelProfile().profile(),
-                canonicalJson(input),
-                now,
-                nextOrdinal(transaction, locked.runId()),
-                generator.lane(),
-                now,
-                idempotencyKey,
-                requestHash,
-                inputHash,
-                sourceBundleId(locked),
-                locked.artifactId(),
-                revision.number(),
-                generator.modelProfile().profile(),
-                Integer.toString(generator.modelProfile().version()),
-                generator.outputSchema().name(),
-                Integer.toString(generator.outputSchema().version()),
-                json.writeValueAsString(storedBudget),
-                now,
-                now);
-    }
-
-    /** Run 已在决定入口锁定；受理前同时为完整生成与全部 Reviewer 核验冻结额度。 */
-    private void requireRevisionRoundBudget(DSLContext tx, Locked locked, WorkflowExecutionContext context) {
-        ExecutionPlanSnapshot plan = context.requireBusinessPlan();
-        List<WorkflowRunBudgetCharge> charges = new ArrayList<>();
-        charges.add(WorkflowRunBudgetCharge.active(plan.generator().stepBudget().budget()));
-        for (var reviewer : plan.reviewers()) {
-            charges.add(WorkflowRunBudgetCharge.active(reviewer.stepBudget().budget()));
-        }
-        List<WorkflowRunBudgetCharge> businessCharges = new ArrayList<>(charges);
-        for (Record step : tx.fetch("""
-                SELECT step.status::text AS status, step.purpose, step."budgetJson", step."usageJson",
-                       reservation.status AS reservation_status
-                FROM public."WorkflowStep" step
-                LEFT JOIN public."WorkflowBillingReservation" reservation ON reservation."stepId" = step.id
-                WHERE step."runId" = ? AND step."budgetJson" IS NOT NULL
-                ORDER BY step.ordinal, step.id
-                """, locked.runId())) {
-            WorkflowStepBudget budget = json.convertValue(
-                    readObject(step.get("budgetJson", String.class)).get("budget"), WorkflowStepBudget.class);
-            boolean correction = "protocol_correction".equals(step.get("purpose", String.class));
-            boolean resolver = "resolve_intent".equals(step.get("purpose", String.class));
-            if (List.of("pending", "running").contains(step.get("status", String.class))
-                    || "reconciliation_required".equals(step.get("reservation_status", String.class))) {
-                WorkflowRunBudgetCharge charge = WorkflowRunBudgetCharge.active(budget, correction);
-                charges.add(charge);
-                if (!resolver) businessCharges.add(charge);
-                continue;
-            }
-            String usageJson = step.get("usageJson", String.class);
-            if (usageJson == null) continue;
-            Map<String, Object> value = readObject(usageJson);
-            WorkflowStepUsage usage = new WorkflowStepUsage(
-                    WorkflowUsageStatus.fromWireValue(string(value, "usageStatus")),
-                    nullableLong(value, "inputTokens"), nullableLong(value, "cachedTokens"),
-                    nullableLong(value, "promptCacheMissTokens"), nullableLong(value, "completionTokens"),
-                    nullableLong(value, "reasoningTokens"), nullableLong(value, "visibleOutputTokens"),
-                    nullableLong(value, "costMicros"), integer(value, "providerAttempts"),
-                    integer(value, "protocolCorrections"), nullableLong(value, "wallTimeMillis"));
-            // 与调用前计费核验同口径：零尝试仅计墙钟；未知维度按该 Step 授权上限占用。
-            WorkflowRunBudgetCharge charge = usage.providerAttempts() == 0
-                    ? new WorkflowRunBudgetCharge(0, 0, 0, 0, 0, 0, 0, usage.wallTimeMillis(), correction ? 1 : 0)
-                    : WorkflowRunBudgetCharge.terminal(budget, usage, correction);
-            charges.add(charge);
-            if (!resolver) businessCharges.add(charge);
-        }
-        try {
-            context.outerRunBudget().toDomain().requireWithin(charges);
-            plan.runBudget().toDomain().requireWithin(businessCharges);
-        } catch (WorkflowBudgetExceededException | ArithmeticException exception) {
-            throw new ApiException(409, "WORKFLOW_REVISION_BUDGET_EXCEEDED",
-                    "当前工作流剩余预算不足以完成整轮生成与复审");
-        }
-    }
-
     private static Long nullableLong(Map<String, Object> value, String field) {
         Object number = value.get(field);
         if (number == null) return null;
         if (number instanceof Number result) return result.longValue();
         throw invalidArtifact();
-    }
-
-    private static Map<String, Object> stepRequestMaterial(
-            Locked locked,
-            String effectiveOperation,
-            String stepId,
-            String idempotencyKey,
-            String inputHash,
-            Record bundle,
-            String policyVersion,
-            String lane,
-            Map<String, Object> modelProfile,
-            Map<String, Object> outputSchema,
-            Map<String, Object> budget,
-            Revision revision) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("runId", locked.runId());
-        result.put("novelId", locked.novelId());
-        result.put("stepId", stepId);
-        result.put("idempotencyKey", idempotencyKey);
-        result.put("inputHash", inputHash);
-        result.put("workflow", locked.run().get("workflow", String.class));
-        result.put("operation", effectiveOperation);
-        result.put("purpose", "generation");
-        result.put("lane", lane);
-        result.put("evidenceManifest", Map.of(
-                "bundleId", bundle.get("id", String.class),
-                "bundleVersion", bundle.get("version", Integer.class),
-                "policyVersion", policyVersion,
-                "manifestSha256", bundle.get("manifestSha256", String.class)));
-        result.put("modelProfile", modelProfile);
-        result.put("outputSchema", outputSchema);
-        result.put("budget", budget);
-        result.put("artifact", Map.of(
-                "artifactId", locked.artifactId(),
-                "artifactRevision", revision.number()));
-        return Collections.unmodifiableMap(result);
     }
 
     private WritingRunV2Response snapshot(DSLContext transaction, String runId) {

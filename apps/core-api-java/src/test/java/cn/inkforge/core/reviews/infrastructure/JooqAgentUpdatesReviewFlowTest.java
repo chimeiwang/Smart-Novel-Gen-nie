@@ -19,7 +19,7 @@ import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
 import cn.inkforge.core.workflows.domain.DurableAgentUpdatesArtifact;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
@@ -54,8 +54,8 @@ class JooqAgentUpdatesReviewFlowTest {
     private static CoreDatabase database;
     private static JooqReviewRepository reviews;
     private static JooqWorkflowStartRepository starts;
-    private static ExecutionRegistry registry;
-    private static ExecutionRegistry.OutputSchema outputSchema;
+    private static HistoricalRegistryFixture registry;
+    private static HistoricalRegistryFixture.OutputSchema outputSchema;
 
     @BeforeAll
     static void schema() throws Exception {
@@ -66,12 +66,12 @@ class JooqAgentUpdatesReviewFlowTest {
         }
         database = CoreDatabase.connect(PostgresConnectionSettings.parse("postgresql://" + POSTGRES.getUsername() + ":" + POSTGRES.getPassword()
                 + "@" + POSTGRES.getHost() + ":" + POSTGRES.getMappedPort(5432) + "/" + POSTGRES.getDatabaseName()));
-        registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        registry = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         try (var stream = JooqAgentUpdatesReviewFlowTest.class.getResourceAsStream("/agent-execution/output-schema-registry.v1.json")) {
             Map<String, Object> document = JSON.readValue(stream, new TypeReference<>() {});
             for (Object raw : (List<?>) document.get("schemas")) {
                 Map<?, ?> item = (Map<?, ?>) raw;
-                if ("output.agent_updates.v2".equals(item.get("key"))) outputSchema = JSON.convertValue(item, ExecutionRegistry.OutputSchema.class);
+                if ("output.agent_updates.v2".equals(item.get("key"))) outputSchema = JSON.convertValue(item, HistoricalRegistryFixture.OutputSchema.class);
             }
         }
         assertThat(outputSchema).isNotNull();
@@ -128,20 +128,15 @@ class JooqAgentUpdatesReviewFlowTest {
     }
 
     @Test
-    void 返工传递原始结构化候选且保留同Run不允许夹带采用选择() {
-        Fixture invalid = fixture("revise_lore", false);
-        assertThatThrownBy(() -> reviews.decide(invalid.novel(), invalid.artifact(), decision(invalid, ReviewArtifactDecisionRequest.DecisionEnum.REVISE)
-                .userMessage("请修改动机").selectedUpdateRefs(List.of(new ArtifactSelectionRef("characters")))))
-                .isInstanceOf(ApiException.class);
+    void 历史结构化返工明确拒绝且保留候选与正式资料() {
         Fixture f = fixture("revise_lore", false);
-        var result = reviews.decide(f.novel(), f.artifact(), decision(f, ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("请修改动机"));
-        assertThat(JSON.valueToTree(result).path("runId").asText()).isEqualTo(f.run());
-        var input = JSON.readTree(database.dsl().fetchOne("SELECT input FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1", f.run()).get(0, String.class));
-        assertThat(input.path("originalUserInstruction").asText()).isEqualTo("调整资料");
-        assertThat(input.path("userInstruction").asText()).isEqualTo("请修改动机");
-        assertThat(input.at("/previousCandidate/summary").asText()).isEqualTo("原始说明");
-        assertThat(input.at("/previousCandidate/updates/characters/0/name").asText()).isEqualTo("甲");
+        assertThatThrownBy(() -> reviews.decide(f.novel(), f.artifact(),
+                decision(f, ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("请修改动机")))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.code()).isEqualTo("EXECUTION_ENGINE_RETIRED"));
+        assertThat(database.dsl().fetchValue("SELECT status::text FROM public.\"ReviewArtifact\" WHERE id = ?", f.artifact())).isEqualTo("awaiting_user");
+        assertThat(database.dsl().fetchValue("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'user_decision'", f.run())).isEqualTo(0L);
         assertThat(content(f.novel() + "-a")).isEqualTo("旧人物原文");
+        assertThat(reviews.getDetail(f.novel(), f.artifact(), 1, null).response().getPayload()).containsEntry("summary", "原始说明");
     }
 
     private static Fixture fixture(String name, boolean changedSummary) {
@@ -158,10 +153,10 @@ class JooqAgentUpdatesReviewFlowTest {
         // 仅为基础接线构造冻结计划，沿用已验证模型/预算夹具；不修改仓库 Catalog 或启用真实 Provider。
         var base = registry.resolve("long_serial.plan_chapter", false);
         var old = base.operation();
-        var operation = new ExecutionRegistry.Operation("long_serial." + name, "long_serial", name, List.of("novel"), List.of("novel"),
+        var operation = new HistoricalRegistryFixture.Operation("long_serial." + name, "long_serial", name, List.of("novel"), List.of("novel"),
                 true, false, true, old.lane(), old.evidencePolicy(), old.generatorProfile(), old.generatorStepBudgetProfile(), outputSchema.key(),
                 old.deterministicValidators(), old.reviewPolicy(), "apply.agent_updates.v1", old.runBudget());
-        var resolved = new ExecutionRegistry.ResolvedOperation(operation, base.generatorProfile(), base.generatorStepBudget(), outputSchema, base.reviewers(), base.reviewerOutputSchema());
+        var resolved = new HistoricalRegistryFixture.ResolvedOperation(operation, base.generatorProfile(), base.generatorStepBudget(), outputSchema, base.reviewers(), base.reviewerOutputSchema());
         var plan = ExecutionPlanSnapshot.freeze("1", registry.manifestFingerprint(), resolved);
         Map<String, Object> input = Map.of("userInstruction", "调整资料");
         var started = starts.start(new WorkflowStartPlan(n, n + "-request", ExecutionCanonicalJson.sha256(n), "long_serial", name, "1",

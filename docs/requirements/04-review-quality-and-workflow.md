@@ -2,12 +2,13 @@
 
 ## LangGraph 兼容回退的审核边界
 
-[2026-09-13 回退](../specs/2026-09-13-langgraph-aug29-compatible-rollback.md)恢复 V1 写作审核交互，
-仍携带确切 `engineVersion=1`、Artifact revision 和请求标识，不直接写正文或大纲。旧页面遇到 V2 任务或
-候选必须明确拒绝按 V1 续跑；用户不要求恢复旧对话，但这不授权物理删除作品来源或绕过 Core 审核与 CAS。
-现有 V2 后台查询和收尾能力继续保留，生产状态以对应审计为准。
+新草案走 V1 LangGraph、双复审、用户确认和 Core 应用。决定绑定确切 engineVersion、Artifact revision 与稳定请求标识；旧引擎记录只保留查询、来源校验、采用／丢弃和账务保全，旧返工、澄清和取消明确拒绝。参见[退役规格](../specs/2026-10-11-v1-writer-and-execution-retirement.md)。
 
 ## Episode 视频候选、正式确认与制作决定
+
+剧本与分镜生成迁为普通视频队列，业务状态由 WorkflowRun(engineVersion=1) 保存，实际来源中首个现存章节作为归属锚点；完整上下文和哈希仍保存在不可变 Evidence。生成、审阅和最多一次返工使用 Core 检查点恢复，不创建执行 Step。候选采用和正式确认仍是独立作者决定。生产视频关闭，未知模型结果不自动重调。
+
+现有结构要求普通任务绑定真实章节归属。若冻结来源集合中的章节全部已删除，新任务明确要求重新选择有效来源；不随机绑定无关章节，已有不可变快照和候选仍保留。
 
 Episode 剧本和分镜都遵循 `proposal -> ReviewArtifact -> 作者编辑／采用到工作稿 -> 独立正式确认 -> Core 创建不可变版本`。
 活动 Artifact 使用 `video_episode_script` 或 `video_episode_storyboard`，以 `videoEpisodeId` 绑定确切 Episode，
@@ -43,14 +44,9 @@ watcher 和任务 handler 已退出活动路径；服务器物理退役前只保
 
 ## 长篇选区 ReviewArtifact 应用
 
-选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（CLI 可使用既有 `editedReplacementFile`）；V2 选区的公共请求只允许 `editedReplacement`，不得提交 `editedContent`、`selectedUpdateRefs` 或改写 source/prefix/suffix。V1 全文章节/大纲继续使用 `editedContent`；本分支 V2 `write_chapter` 与 `rewrite_scene` 也使用完整 `editedContent`，不能因此向选区或规划开放该字段。V2 章节选区只接受 `long_serial/rewrite_chapter_selection/chapter_draft`；2026-09-05 新增独立 `rewrite_outline_selection/outline_draft` 总纲和节点选区物化，必须与冻结资源类型、Run 和 Evidence 一致，不得把其他 kind 当作 replacement。章节规划使用下文独立的结构化 Beat Plan 应用链。
+选区改写保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用`。选区批准只提交 `editedReplacement`，不能提交全篇 `editedContent` 或改写来源、前后缀。Core 从冻结来源拼接全文并校验来源版本、哈希及 revision CAS。
 
-`review_chapter` 的 V2 迁移只生成编辑完整报告，完成后以 Run.reviewReport 回读；有会话时另保存编辑消息。
-它不创建 RevisionBrief、ReviewArtifact 或 ChapterQualityCheck，不改变章节状态。场景改写沿用正文双审，
-大纲选区采用专用单编辑复审；一次自动返工后的剩余语义问题交作者，不能替代作者确认。
-这三项的本地验收进度见 `docs/specs/2026-09-05-durable-review-and-rewrites.md`，服务器状态另行验收。
-
-操作者在 approve 前必须先 GET Artifact，读取完整 diff（包括选区前后正文、replacement 和来源绑定），对该 diff 做一次独立确认，再使用稳定 `clientRequestId`、当前 `expectedRevision` 提交决定；V2 中该 wire 字段规范解释为 `expectedArtifactRevision`。Core 仍执行 sourceBinding preflight、幂等 fingerprint 与 revision/source CAS 校验。V1 返回受理后再次 GET Artifact/任务状态核对最终结果；V2 决定响应直接返回 PostgreSQL 权威 `WritingRunV2Response`，断流或结果不确定时仍按 `runId` 回读，不得从 HTTP 状态或前端乐观状态伪造完成。
+批准前重新 GET Artifact，读取完整候选和 Diff，使用稳定 clientRequestId 和当前 expectedRevision 提交；202 仅表示受理，必须回读任务、命令和 Artifact 权威结果。审阅报告不创建正式内容，场景改写沿用现有正文复审。
 
 ## 目标
 
@@ -74,15 +70,6 @@ V1 Agent 完成回调必须在同一 Core 事务中创建候选或保存检查�
 任一步失败都整体回滚，不能出现“任务完成但候选不存在”或“候选存在但任务仍运行”的状态。
 终态稳定 checkpoint 只保存可重放的图快照，不得提前把数据库任务写成 completed/error；否则在完成回调到达前会形成任务终态、命令仍 processing 的伪冲突。
 终态重复回调只有在 Agent 原始 result 与首次应用完全一致时才可视为已应用过；Core 后续补充的候选、报告或展示字段不能反过来放宽该幂等判定。没有命令指纹的历史终态遇到无法从任务字段证明一致的额外 result 必须拒绝。SSE 中的旧边界事件只用于展示，审核动作的成功、失败和释放必须由 PostgreSQL `run_outcome` 决定；旧草案载荷不能直接恢复操作入口，非 waiting_user 终态必须清理所属任务的临时草案界面并使先前在途读取失效；同一成功 outcome 的外部完成副作用只能执行一次。
-
-2026-09-05 中短篇四项 V2 已通过仓内与本地独立 Core/Agent、受控 Fake Provider 验收。V2 每段原始结果
-独立持久化，最后由 Core 在同一事务创建唯一候选或报告、保存零模型汇总结果引用并完成 Run 与 WorkflowEvent；
-不创建 V1 影子任务、命令或 Outbox。候选以 workflowRunId 绑定 Run，生成 `completed` 不表示采用完成。
-采用仍使用原 short.version.preview/adopt、完整 Diff、confirmationHash 和稳定 clientRequestId，V2 回执保存在
-零模型 WorkflowStep；Run 保持 completed，不转成 waiting_user，也不借用 long.artifact.approve。
-全文检查不创建 Artifact；GET 同一 Run 才是 candidateVersionId 或完整 checkReport.text 的权威来源。
-正文分段恢复、三类候选幂等采用与检查零候选已有隔离验证，真实模型、固定包/Skills 和生产未随本批更新；
-证据见 `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
 
 ### 状态
 
@@ -132,30 +119,6 @@ handler。P4 retirement 要求目标库零旧 Artifact／Run 引用后才能物�
 授权；不能为了兼容重新开放旧批准命令。当前 Episode 类型只允许与 `videoEpisodeId` 同时存在，不能混用旧
 chapter／scene／adaptation 目标列。
 
-### V2 结构化资料候选接线状态
-
-2026-09-05 工作分支已实现 agent_updates 的 Core 审核读取与决定适配。原始 summary/updates 保存到精确
-Artifact revision；展示的完整 Diff 和采用 payload 由 Core 从冻结来源派生，不信任模型自报旧值，也不从当前
-作品状态补回历史来源。五项业务的显式/自然入口和作者采用已在仓内接通；中短篇与一致性终检阶段 Catalog 为 17/21，
-文风画像达到 18/21，加入 RAG 接线后为 19/21；2026-09-06 的旧章节视频两项曾使当时 Catalog 达到 21/21，
-历史证据见 `docs/specs/2026-09-06-durable-video-model-workflows.md`。当前已删除那两项活动定义，并加入四项 Episode
-剧本／分镜操作，Catalog 为 23 项。Episode 候选采用到工作稿和正式确认分开，领域审镜不冒充通用 Artifact
-Reviewer。RAG 验收状态以独立规格为准；结构化五项的隔离公共 HTTP 接线已验证，实际 Agent／供应商、全量门禁和
-生产状态分别以当前规格与验收记录为准。
-
-新冻结复审策略只在完整 issues_found、全部 findings 为 agent_updates.local 且 confidence 至少 0.8 时，
-允许最多一次完整自动返工；返工绑定原指令、上一精确 summary/updates 和同一冻结来源，再次专用复审。
-不支持正文 patch，不从建议散文修改字典；二轮剩余问题、结构性问题、复审不可用或额度不足保留候选交作者。
-来源补齐仍消耗原业务四次模型额度，但不计为一次候选返工；旧冻结复审策略保持原来的交作者语义。
-
-approve 保留 selectedUpdateRefs 的原分区/数组下标：省略或 null 全选，空数组不等于全选；不自动补选
-依赖项。Core 只复验实际采用目标及必要依赖，同一事务完成正式写入、Artifact 与 Run 状态；无关未选资料的
-变化不构成整作品冲突。结构化候选不接受正文编辑或 text_replace patch，revise 保留完整上一候选与原指令。
-Java CLI 和 Python 对照 CLI 源码已接部分采用，固定安装包和活动 Skills 不随源码构建自动更新。
-Web 对详情已加载、来源 verified 的 V2 agent_updates 也按原下标提交选择，不再丢弃为全选；界面仍保留
-全不选时禁止采用的原交互，参数处理也不会把空数组转换为全选。未验证完整身份的部分选择明确拒绝。
-差异展示保留空串及纯空白，整树替换提示只使用所选节点且不自动补选父项。
-
 ## 草案审核主流程
 
 ~~~mermaid
@@ -171,9 +134,9 @@ flowchart TD
     I --> E
     G -->|"block"| D
     D --> J{"用户提交单一决定请求"}
-    J -->|"approve"| K["V1 创建命令；V2 事务内应用并完成 Run"]
-    J -->|"revise"| L["V1 创建命令；V2 记录决定并创建 generation Step"]
-    J -->|"discard"| M["V1 物理删除；V2 保留审计并完成 Run"]
+    J -->|"approve"| K["Core 应用并记录持久命令"]
+    J -->|"revise"| L["创建 V1 返工命令"]
+    J -->|"discard"| M["按对应来源规则丢弃候选"]
     K --> N["按 engineVersion 收敛权威终态"]
     L --> N
     M --> N
@@ -189,11 +152,9 @@ flowchart TD
 - revise：继续修改；
 - discard：丢弃。
 
-公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`。请求必须携带稳定 `clientRequestId`；省略 `engineVersion` 只按 V1 兼容解释，V2 必须显式提交 `engineVersion=2`。Core 使用 `clientRequestId + requestHash` 做幂等：同标识同请求重放原响应，同标识不同请求稳定冲突。
+公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`，必须携带稳定 clientRequestId 与当前 revision。同标识同请求幂等重放，不同请求冲突。
 
-- V1 保留既有 wire 和行为：事务内完成正式写入或草案变化、创建 `artifact_decision` 命令并返回 202 `ArtifactDecisionAcceptedResponse`，前端随后观察既有任务 SSE。
-- V2 以 Artifact 上的 `workflowRunId` 为唯一持久身份，不伪造 WritingTask、WritingRunCommand 或 commandId；响应是权威 `WritingRunV2Response`。approve 在单事务内按 Unicode code point 精确替换选区并完成 Run；discard 不删除 Artifact、Revision 或 Evaluation，而把 Artifact head 移出 `awaiting_user`、保留为非 actionable `draft` 后完成 Run；revise 记录用户决定、使旧 revision 不再 actionable、保持 Run `running`，并创建绑定同一 EvidenceBundle 与旧 revision 的新 generation Step 供异步派发。
-- V2 决定锁顺序固定为 Run → Artifact → 精确 Artifact Revision → source target。锁住 Chapter 后必须重算正文哈希、更新时间与 selectedTextHash；任一 revision/source CAS 不匹配都整体回滚。终态一旦提交不得被另一决定翻转。
+V1 决定事务保存正式应用或草案变化及持久命令，返回受理后通过 SSE 与权威回读观察完成。历史旧引擎候选保留原身份和冻结来源，可以采用或丢弃；返工不再创建执行任务。任何来源或 revision CAS 变化都使决定整体回滚，不能沿用旧审核结论。
 
 前端需求：
 
@@ -304,20 +265,14 @@ Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到
 
 ## 一致性终检运行流程
 
-Core API 负责浏览器认证、检查项归属和原可选 `taskId` 校验；来源可以是旧 WritingTask 或 V2 写作 Run，必须
+Core API 负责浏览器认证、检查项归属和原可选 `taskId` 校验；来源可以是当前 WritingTask 或只读历史写作记录，必须
 与检查项属于同一用户、小说和章节，否则返回 403。只有 review 章节允许创建质量运行，drafting/completed
 返回 409。Core 在受理时冻结完整正文、SHA-256、章节更新时间、检查项与原指令，并将检查项置为 running。
 同一检查项有仍有效的活动运行时返回 409；正文修改或重新送审使旧检查失效后，取消尾项不阻止新的检查。
 
-V1 继续用原质量队列与签名回调。V2 使用 `quality.consistency`，创建时固定 `sourceType=quality_check_v2`、
-`sourceId=checkId` 与章节 target，首个 Step 消费唯一完整 `quality_context`。合法报告直接完成；首个 JSON/参数
-错误只有在真实用量可结算时才由 Core 追加一次独立 `protocol_correction` Step，不能在同一 Step 内重调模型。
-两次调用各自计费与 journal 重放，不产生草案或 Reviewer；`qualityGate=revise` 仍表示检查执行完成。
+一致性终检使用原质量队列与签名回调，完整正文及来源在受理时冻结。合法报告完成业务检查；协议失败只按现有一次显式纠正规则处理，每次调用独立授权与结算，不创建草案或 Reviewer。
 
-成功、失败、提交拒绝和取消都在 Core 事务中投影检查项。回调同时复验正文、当前检查状态与最新运行，旧报告
-不能覆盖新的 pending、skipped 或较新结果。正文事务只重置检查项，不反向锁定 V2 Run；原取消协调器有界发现
-已持久失效来源并复用原取消/账务收敛。CLI 仍使用原 `long.quality.*`，不改用写作 watcher 或直接访问 Agent。
-仓内接线与验收状态见 `docs/specs/2026-09-05-durable-consistency-quality.md`，不代表生产已经切换。
+成功、失败和取消在 Core 事务中投影检查项。回调复验正文、当前检查状态和最新运行；旧报告不能覆盖新的检查结果。正文变更使旧检查失效，CLI 继续使用原 long.quality.*，不得直接访问 Agent。
 
 ~~~mermaid
 sequenceDiagram
@@ -343,7 +298,7 @@ sequenceDiagram
 - 未登录返回 401。
 - 越权返回 403。
 - 检查项不存在返回 404。
-- Agent 无合法报告时，检查项标记 failed；V1 队列任务标记 error，V2 Run 标记 failed。
+- Agent 无合法报告时，检查项标记 failed，普通队列任务按既有失败状态收敛。
   临时保存错误仍重放同一终态，不能误报完成。
 - V1 模型授权、供应商传输或用量回报明确声明可重试时，不得提前把检查项标记 failed；队列必须使用同一
   WorkflowRun/jobId 重试。明确不可重试错误在失败回调成功后收敛单条任务，不得因此重启整个消费者；未知
@@ -364,7 +319,7 @@ sequenceDiagram
 Beat Plan 是章节写前规划的一等数据。
 
 V1 模型输入的 `beatCount` 由已校验的场景数组长度生成，最终控制事件、ReviewArtifact 和 Core 接收
-仍使用原有计数字段。该输入简化不改变历史计划读取、复审、用户确认或正式应用，也不修改 V2 冻结计划协议。
+仍使用原有计数字段。该输入简化不改变历史计划读取、复审、用户确认或正式应用。
 
 Beat Plan 只承担正文前的剧情骨架职责。每个节拍说明目标、阻力或变化、参与角色、伏笔引用、预估字数和落点；验收标准如填写，只写一句可观察结果。全局设定、禁令、文风要求和专业规程不得复制进每个节拍，转折、代价、结果与余波应融入实际发生的节拍。
 
@@ -391,34 +346,10 @@ SceneBeat 字段：
 - 用户确认后写入 ChapterBeatPlan 和 SceneBeat。
 - 正文写作可读取已批准 Beat Plan。
 
-2026-09-04 工作分支已实现 V2 `long_serial.plan_chapter` 并通过本地隔离 Fake 验收，尚未部署生产。其 `beat_plan` 候选每次返工保留
-独立 revision，生成和复审期间不写正式计划。approve 必须核对当前 revision 与创建时冻结的来源；批准时复用
-正式计划应用器，在同一 Core 事务中替代旧批准 head、创建新 ChapterBeatPlan/SceneBeat 并完成 Run，正文保持不变。
-该类型不接受全文或选区编辑字段，修改须通过带非空 `userMessage` 的 revise；discard 保留 V2 审计记录。
-最多一次自动完整返工后仍有问题，或 Reviewer 不可用时，保留候选交给作者，不把基础设施故障解释为内容不通过。
-输入、返回与实际阶段验证见 `docs/specs/2026-09-04-durable-chapter-planning.md`。
-
-V2 正文写作的完整候选每个 revision 只规范保存一份正文；详情从冻结 Evidence 和候选重建完整差异。
-approve 必须复验同一来源和当前 revision，编辑批准先形成新的用户编辑 revision，再在同一事务应用全文。
-其 `editedContent` 与选区的 `editedReplacement` 互斥，revise/discard 均不得携带编辑字段；规划不开放两类编辑。
-采用正文会使章节回到 drafting、清空完成时间并失效旧一致性终检及活动质量运行，但不改其他创作数据层。
-双角色复审、零模型局部 patch、一次自动完整返工和逐 Step 计费遵循
-`docs/specs/2026-09-04-durable-chapter-writing.md`；本分支实现不表示生产已启用。
-
 ## WorkflowRun 与调试
 
 正文候选复审的 contentVerdict/findings 必须一致：任何 info/warning/error 问题都对应 issues_found，
 pass 和 cannot_assess 对应空列表。格式错误仍按执行失败处理，不删除问题或改写结论放行。
-Java-only 发布保留已上线 Reviewer v2 提示词及旧 v1 冻结依赖；安全字段路径诊断只用于定位，
-不增加模型格式纠正调用。兼容范围见 [Java-only 发布规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
-
-2026-09-04 共享 V2 快照已增加可选 clarification（问题原文、代码、decisionStepId），只能在未取消的
-waiting_user 中出现且与 Artifact 互斥，缺省时不改变旧快照。当前分支已实现具名 clarification 回答入口、
-同 Run 解析与业务续接，完整本地回归和隔离五场景验收已通过，真实环境尚未验收，不能宣称生产开放。
-澄清回答和 Artifact revise 是不同决定：前者只追加完整回答与下一解析 Step，后者绑定候选 revision；
-不能把所有 waiting_user 都解释成草案已就绪。澄清后生成的规划和正文仍经过既有复审及作者决定；正式采用时
-复验的是业务生成器冻结的完整指令和来源，不能用尚未澄清的初始 Run 指令替换它们。
-
 WorkflowRun 记录工作流运行。
 
 字段：

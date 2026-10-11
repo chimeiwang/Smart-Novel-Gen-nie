@@ -4,6 +4,7 @@ import static cn.inkforge.core.db.generated.Tables.CHAPTER;
 import static cn.inkforge.core.db.generated.Tables.CHAPTERQUALITYCHECK;
 import static cn.inkforge.core.db.generated.Tables.CREDITLEDGER;
 import static cn.inkforge.core.db.generated.Tables.NOVEL;
+import static cn.inkforge.core.db.generated.Tables.VIDEOEPISODE;
 import static cn.inkforge.core.db.generated.Tables.STYLEPORTRAITTASK;
 import static cn.inkforge.core.db.generated.Tables.TOKENUSAGE;
 import static cn.inkforge.core.db.generated.Tables.USER;
@@ -102,6 +103,8 @@ class JooqBillingRepositoryTest {
     @AfterEach
     void cleanup() {
         if (!users.isEmpty()) {
+            database.dsl().deleteFrom(VIDEOEPISODE).where(VIDEOEPISODE.NOVELID.in(
+                    database.dsl().select(NOVEL.ID).from(NOVEL).where(NOVEL.USERID.in(users)))).execute();
             database.dsl().deleteFrom(NOVEL).where(NOVEL.USERID.in(users)).execute();
             database.dsl().deleteFrom(USER).where(USER.ID.in(users)).execute();
             users.clear();
@@ -111,6 +114,40 @@ class JooqBillingRepositoryTest {
     @AfterAll
     static void closeDatabase() {
         if (database != null) database.close();
+    }
+
+    @Test
+    void 普通剧集任务计费必须核对完整归属且拒绝取消与终态() {
+        String owner = user("episode-billing-owner", 1_000_000L);
+        String stranger = user("episode-billing-stranger", 2_000_000L);
+        Project project = project("episode-billing-novel", owner);
+        database.dsl().execute("""
+                INSERT INTO public."VideoProject" (id,"novelId",title,mode,"updatedAt")
+                VALUES ('episode-billing-project', ?, '计费项目', 'episode', ?)
+                """, project.novelId(), INITIAL);
+        database.dsl().execute("""
+                INSERT INTO public."VideoEpisode" (id,"projectId","novelId",title,ordinal,"updatedAt")
+                VALUES ('episode-billing-episode','episode-billing-project',?,'计费剧集',1,?)
+                """, project.novelId(), INITIAL);
+        database.dsl().execute("""
+                INSERT INTO public."WorkflowRun" (id,"novelId","chapterId","userId",kind,status,
+                    "sourceType","sourceId","targetType","targetId","engineVersion",workflow,operation,"createdAt","updatedAt")
+                VALUES ('episode-billing-run', ?, ?, ?, 'chat', 'running',
+                    'video_episode_script','episode-billing-episode','video_episode_script','episode-billing-episode',
+                    1,'video','episode_script_generate',TIMESTAMP '2026-08-24 10:00:00',?)
+                """, project.novelId(), project.chapterId(), owner, INITIAL);
+        assertThat(repository.authorizationContext(owner, "episode-billing-run", project.novelId()))
+                .extracting(value -> value.balanceMicros(), value -> value.resourceKind()).containsExactly(1_000_000L, "video");
+        assertThat(repository.authorizationContext(stranger, "episode-billing-run", project.novelId())).isNull();
+        database.dsl().execute("""
+                UPDATE public."WorkflowRun" SET "cancelRequestId"='episode-cancel', "cancelRequestedAt"=?
+                WHERE id='episode-billing-run'
+                """, INITIAL);
+        assertThat(repository.authorizationContext(owner, "episode-billing-run", project.novelId())).isNull();
+        database.dsl().execute("""
+                UPDATE public."WorkflowRun" SET status='completed', "completedAt"=TIMESTAMP '2026-08-24 10:00:00' WHERE id='episode-billing-run'
+                """);
+        assertThat(repository.authorizationContext(owner, "episode-billing-run", project.novelId())).isNull();
     }
 
     @Test

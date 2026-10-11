@@ -1,11 +1,8 @@
-"""Core 权威耐久执行器的 V2 服务间协议。"""
+"""已退役执行引擎的只读历史协议，保留来源和账务解析。"""
 
 from __future__ import annotations
 
 import hashlib
-import json
-import math
-from decimal import Decimal
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -20,6 +17,23 @@ from pydantic import (
     model_validator,
 )
 
+from .content import (
+    ResourceId as ExecutionId,
+)
+from .content import (
+    Sha256,
+    StrictPositiveInt,
+    _sha256,
+)
+from .content import (
+    canonical_content_sha256 as canonical_execution_sha256,
+)
+from .content import (
+    canonical_json_bytes as canonical_execution_json_bytes,
+)
+from .content import (
+    count_chapter_text_length as count_chapter_text_length,
+)
 from .long_serial import SelectionTarget
 
 EXECUTION_PROTOCOL_VERSION = "2.0"
@@ -30,14 +44,6 @@ EXECUTION_CALLBACK_STOP_RETRY_STATUSES = frozenset(
     {"accepted", "duplicate", "superseded"}
 )
 
-ExecutionId = Annotated[
-    str,
-    StringConstraints(
-        min_length=1,
-        max_length=128,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-    ),
-]
 ProtocolCode = Annotated[
     str,
     StringConstraints(
@@ -58,8 +64,6 @@ NonBlankText = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000),
 ]
-Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-StrictPositiveInt = Annotated[int, Field(strict=True, gt=0)]
 StrictNonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 StrictNonNegativeLong = Annotated[
     int,
@@ -84,61 +88,18 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
-def _canonical_number(value: int | float | Decimal) -> str:
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float) and not math.isfinite(value):
-        raise ValueError("执行哈希不允许 NaN 或 Infinity")
-    decimal = value if isinstance(value, Decimal) else Decimal(str(value))
-    if not decimal.is_finite():
-        raise ValueError("执行哈希不允许 NaN 或 Infinity")
-    if decimal.is_zero():
-        return "0"
-    return format(decimal.normalize(), "f")
 
 
-def _canonical_json_text(value: object) -> str:
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, (int, float, Decimal)):
-        return _canonical_number(value)
-    if isinstance(value, str):
-        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
-            raise ValueError("执行哈希不允许未配对的 Unicode 代理字符")
-        return json.dumps(value, ensure_ascii=False, allow_nan=False)
-    if isinstance(value, list):
-        return "[" + ",".join(_canonical_json_text(item) for item in value) + "]"
-    if isinstance(value, dict):
-        if not all(isinstance(key, str) for key in value):
-            raise TypeError("执行哈希 JSON 对象 key 必须是字符串")
-        entries = (
-            f"{_canonical_json_text(key)}:{_canonical_json_text(value[key])}"
-            for key in sorted(value)
-        )
-        return "{" + ",".join(entries) + "}"
-    raise TypeError(f"执行哈希不支持类型：{type(value).__name__}")
 
 
-def canonical_execution_json_bytes(value: object) -> bytes:
-    """按 `inkforge-canonical-json/1` 生成跨语言稳定字节。"""
-
-    return _canonical_json_text(value).encode("utf-8")
 
 
-def canonical_execution_sha256(value: object) -> str:
-    return _sha256(canonical_execution_json_bytes(value))
 
 
 def _canonical_model_value(value: BaseModel) -> dict[str, object]:
     return value.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-def _sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
 
 
 def _contains_forbidden_diagnostic(value: JsonValue) -> bool:
@@ -525,29 +486,8 @@ _CHAPTER_TEXT_PATTERN = (
     r"[^\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a"
     r"\u2028\u2029\u202f\u205f\u3000\ufeff]"
 )
-_IGNORED_CHAPTER_CHARACTERS = frozenset(
-    chr(codepoint)
-    for codepoint in (
-        *range(0x0009, 0x000E),
-        0x0020,
-        0x0085,
-        0x00A0,
-        0x1680,
-        *range(0x2000, 0x200B),
-        0x2028,
-        0x2029,
-        0x202F,
-        0x205F,
-        0x3000,
-        0xFEFF,
-    )
-)
 
 
-def count_chapter_text_length(content: str) -> int:
-    """严格对齐 Web countTextLength/Core TextLength，不使用更宽泛的 Python 空白集。"""
-
-    return sum(character not in _IGNORED_CHAPTER_CHARACTERS for character in content)
 
 
 class IntentClarificationAnswer(_StrictModel):

@@ -192,6 +192,29 @@ final class JooqBillingRepository implements BillingRepository {
                 resourceKind = "video";
             }
         }
+        // 生产未开放的剧集表可能尚不存在；拒绝未知任务时也不能触发未授权结构查询。
+        if (balance == null && Boolean.TRUE.equals(context.fetchValue(
+                "SELECT to_regclass('public.\"VideoEpisode\"') IS NOT NULL", Boolean.class))) {
+            Record episodeTask = context.fetchOne("""
+                    SELECT u."creditBalanceMicros" AS balance
+                    FROM public."User" u
+                    JOIN public."Novel" n ON n."userId" = u.id
+                    JOIN public."VideoProject" p ON p."novelId" = n.id
+                    JOIN public."VideoEpisode" e ON e."projectId" = p.id
+                    JOIN public."WorkflowRun" r ON r."novelId" = n.id AND r."userId" = u.id
+                       AND r."sourceId" = e.id AND r."targetId" = e.id
+                    JOIN public."Chapter" c ON c.id = r."chapterId" AND c."novelId" = n.id
+                    WHERE u.id = ? AND n.id = ? AND r.id = ? AND r."engineVersion" = 1
+                      AND r.workflow = 'video' AND r.status IN ('pending', 'running')
+                      AND r."cancelRequestedAt" IS NULL AND p."deletedAt" IS NULL AND e."archivedAt" IS NULL
+                      AND ((r."sourceType" = 'video_episode_script' AND r."targetType" = 'video_episode_script'
+                            AND r.operation IN ('episode_script_generate', 'episode_script_revise'))
+                        OR (r."sourceType" = 'video_episode_storyboard' AND r."targetType" = 'video_episode_storyboard'
+                            AND r.operation IN ('episode_storyboard_generate', 'episode_storyboard_revise')))
+                    """, userId, novelId, taskId);
+            balance = episodeTask == null ? null : episodeTask.get("balance", Long.class);
+            if (balance != null) resourceKind = "video";
+        }
         return balance == null
                 ? null
                 : new AuthorizationContext(

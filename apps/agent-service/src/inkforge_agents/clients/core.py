@@ -302,6 +302,55 @@ class CoreServiceClient:
             )
         return value
 
+    async def get_episode_progress(self, resource: RunResource) -> dict[str, Any]:
+        return await self._request(
+            "GET",
+            self._episode_task_path(resource) + "/progress",
+            {},
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "episode-progress"),
+        )
+
+    async def save_episode_checkpoint(
+        self, resource: RunResource, checkpoint: dict[str, Any]
+    ) -> None:
+        await self._request(
+            "POST",
+            self._episode_task_path(resource) + "/checkpoint",
+            {"checkpoint": checkpoint},
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "episode-checkpoint", checkpoint),
+        )
+
+    async def complete_episode(self, resource: RunResource, result: dict[str, Any]) -> None:
+        await self._request(
+            "POST",
+            self._episode_task_path(resource) + "/complete",
+            {"result": result},
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "episode-complete", result),
+        )
+
+    async def fail_episode(self, resource: RunResource, code: str, message: str) -> None:
+        await self._request(
+            "POST",
+            self._episode_task_path(resource) + "/fail",
+            {"errorCode": code, "errorMessage": message, "cancelled": False},
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "episode-fail", code),
+        )
+
+    @staticmethod
+    def _episode_task_path(resource: RunResource) -> str:
+        return (
+            f"/internal/v1/users/{resource.userId}/novels/{resource.novelId}"
+            f"/video/episode-tasks/{resource.taskId}"
+        )
+
     async def complete_video_plan(
         self,
         resource: RunResource,

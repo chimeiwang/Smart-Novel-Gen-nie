@@ -19,7 +19,7 @@ import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import java.nio.charset.StandardCharsets;
 import java.lang.reflect.Constructor;
@@ -68,8 +68,8 @@ class JooqWorkflowBillingReconciliationRepositoryTest {
 
     private static CoreDatabase database;
     private static ObjectMapper json;
-    private static ExecutionRegistry registry;
-    private static ExecutionRegistry.ResolvedOperation operation;
+    private static HistoricalRegistryFixture registry;
+    private static HistoricalRegistryFixture.ResolvedOperation operation;
     private static JooqWorkflowStartRepository starts;
     private static WorkflowBillingReconciliationService reconciliations;
 
@@ -86,13 +86,13 @@ class JooqWorkflowBillingReconciliationRepositoryTest {
         executeSql("/tmp/20260831_durable_agent_execution.sql");
         database = CoreDatabase.connect(PostgresConnectionSettings.parse(databaseUrl()));
         json = new ObjectMapper();
-        registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        registry = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         operation = registry.resolve("long_serial.rewrite_chapter_selection", false);
         CuidV1Generator ids = new CuidV1Generator(CLOCK);
         starts = new JooqWorkflowStartRepository(database, ids, CLOCK, json);
         reconciliations = new WorkflowBillingReconciliationService(
                 new JooqWorkflowBillingReconciliationRepository(
-                        database, ids, CLOCK, json, registry));
+                        database, ids, CLOCK, json));
     }
 
     @AfterAll

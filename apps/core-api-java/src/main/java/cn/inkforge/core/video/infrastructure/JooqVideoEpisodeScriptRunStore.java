@@ -7,11 +7,6 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.video.application.VideoEpisodeScriptRunStore;
-import cn.inkforge.core.workflows.application.DurableWorkflowService;
-import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
-import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
-import cn.inkforge.core.workflows.application.WorkflowStartPlan;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -26,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Supplier;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import tools.jackson.core.type.TypeReference;
@@ -35,7 +29,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-/** 以 Episode 草稿及选定来源为唯一输入创建 V2 Run，不建立旧 VideoAdaptationTask。 */
+/** 以 Episode 草稿及选定来源为唯一输入创建 业务任务，不建立旧 VideoAdaptationTask。 */
 final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore {
 
     private static final Set<String> OPERATIONS =
@@ -46,22 +40,19 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
     private final CoreDatabase database;
     private final CuidV1Generator ids;
     private final CoreSettings settings;
-    private final ExecutionRegistry registry;
-    private final Supplier<DurableWorkflowService> workflows;
+    private final VideoEpisodeTaskCoordinator tasks;
     private final ObjectMapper json;
 
     JooqVideoEpisodeScriptRunStore(
             CoreDatabase database,
             CuidV1Generator ids,
             CoreSettings settings,
-            ExecutionRegistry registry,
-            Supplier<DurableWorkflowService> workflows,
+            VideoEpisodeTaskCoordinator tasks,
             ObjectMapper json) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.settings = Objects.requireNonNull(settings);
-        this.registry = Objects.requireNonNull(registry);
-        this.workflows = Objects.requireNonNull(workflows);
+        this.tasks = Objects.requireNonNull(tasks);
         this.json = Objects.requireNonNull(json);
     }
 
@@ -73,12 +64,9 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
             throw invalid("VIDEO_SCRIPT_RUN_INPUT_INVALID", "剧本任务请求必须是对象");
         }
         NormalizedRequest normalized = normalize(episodeId, request);
-        if (!settings.durableAgentExecutionSchemaReady()) {
-            throw unavailable("耐久 Agent 结构尚未就绪，不能创建剧本任务");
-        }
         requireNewRunEnabled();
         return database.transactionResult(transaction -> {
-            // 先取得所有 V2 Run 共用的幂等锁，再取得视频命令锁；随后才锁 Novel/Project。
+            // 先取得所有 业务任务 共用的幂等锁，再取得视频命令锁；随后才锁 Novel/Project。
             // 该顺序避免同一请求键被其他 Workflow 与分集命令同时使用时形成反向等待。
             transaction.fetchOne(
                     "SELECT pg_advisory_xact_lock(?)",
@@ -88,7 +76,7 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
             Record command = existingCommand(
                     transaction, userId, normalized.clientRequestId());
             if (command != null) {
-                return replayCommand(command, episodeId, normalized.requestHash());
+                return replayCommand(transaction, command, episodeId, normalized.requestHash());
             }
             Record existing = existingRun(
                     transaction, userId, normalized.clientRequestId());
@@ -108,75 +96,10 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
             }
             FrozenEpisode frozen = freezeEpisode(
                     transaction, userId, episodeId, normalized);
-            if (!settings.routesNewDurableAgentRun(userId, frozen.novelId())) {
-                throw unavailable("当前小说未启用耐久剧本执行");
-            }
-
-            String operationKey = "video." + normalized.operation();
-            boolean development = settings.environment() != CoreSettings.EnvironmentName.PRODUCTION;
-            if (!registry.enabledOperationKeys("video", development).contains(operationKey)) {
-                throw unavailable("单集剧本 Operation 尚未启用");
-            }
-            ExecutionRegistry.ResolvedOperation operation =
-                    registry.resolve(operationKey, development);
-            requireCatalog(operation.operation());
-            ExecutionRegistry.ResolvedStage firstStage = operation.stageSteps().stream()
-                    .filter(stage -> "episode_script".equals(stage.stageKey()))
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("剧本执行计划缺少首阶段"));
-            DurableWorkflowService workflowService = workflows.get();
-            if (workflowService == null) {
-                throw unavailable("耐久剧本执行服务暂时不可用");
-            }
-
-            Map<String, Object> runInput = new LinkedHashMap<>(normalized.body());
-            runInput.put("dispatchNamespace", settings.videoDispatchNamespace());
-            Map<String, Object> stepInput = new LinkedHashMap<>();
-            stepInput.put("stageKey", "episode_script");
-            stepInput.put("cycle", 0);
-            stepInput.put("candidate", null);
-            stepInput.put("requiredChanges", List.of());
-            stepInput.put("dependencies", List.of());
-            WorkflowStartPlan plan = new WorkflowStartPlan(
-                    userId,
-                    normalized.clientRequestId(),
-                    normalized.requestHash(),
-                    "video",
-                    normalized.operation(),
-                    registry.catalogVersion(),
-                    "chat",
-                    frozen.novelId(),
-                    null,
-                    null,
-                    "video_episode_script",
-                    episodeId,
-                    runInput,
-                    operation.operation().evidencePolicy(),
-                    List.of(new WorkflowEvidenceItemPlan(
-                            "video_episode_script_context",
-                            episodeId,
-                            true,
-                            frozen.draftRevision(),
-                            frozen.draftUpdatedAt(),
-                            null,
-                            frozen.context(),
-                            null,
-                            null,
-                            Map.of(
-                                    "role", "video_episode_script_context",
-                                    "schemaVersion", "video-episode-script-context/1.0"))),
-                    operation.operation().runBudget(),
-                    registry.freezePlan(operationKey, development),
-                    new WorkflowInitialStepPlan(
-                            "generation",
-                            operation.operation().lane(),
-                            stepInput,
-                            firstStage.profile(),
-                            firstStage.stepBudget(),
-                            firstStage.outputSchema()),
-                    null,
-                    new WorkflowStartPlan.SourceBinding("video_episode_script", episodeId));
-            String runId = workflowService.startFresh(plan).runId();
+            String runId = tasks.create(transaction, userId, frozen.novelId(), episodeId,
+                    normalized.clientRequestId(), normalized.requestHash(), normalized.operation(),
+                    "video_episode_script", normalized.body(), frozen.context(),
+                    frozen.draftRevision(), frozen.draftUpdatedAt());
             Record created = requireRun(transaction, userId, episodeId, runId);
             ObjectNode response = runResponse(transaction, created, episodeId);
             insertCommand(
@@ -196,9 +119,6 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
         requireIdentity(userId, "用户 ID");
         requireIdentity(episodeId, "分集 ID");
         requireIdentity(runId, "Run ID");
-        if (!settings.durableAgentExecutionSchemaReady()) {
-            throw unavailable("耐久 Agent 结构尚未就绪，不能读取剧本任务");
-        }
         return database.transactionResult(transaction -> runResponse(
                 transaction,
                 requireRun(transaction, userId, episodeId, runId),
@@ -557,16 +477,6 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
         }
     }
 
-    private void requireCatalog(ExecutionRegistry.Operation operation) {
-        if (!"video".equals(operation.workflow())
-                || !OPERATIONS.contains(operation.operation())
-                || !operation.targetKinds().contains("video_episode_script")
-                || !operation.scopeKinds().contains("episode")
-                || !"evidence.video.episode_script.v1".equals(operation.evidencePolicy())
-                || !operation.developmentOnly()) {
-            throw new IllegalStateException("单集剧本 Operation Catalog 身份不一致");
-        }
-    }
 
     private Record existingRun(
             DSLContext transaction, String userId, String clientRequestId) {
@@ -574,7 +484,7 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
                 """
                 SELECT *
                 FROM public."WorkflowRun"
-                WHERE "engineVersion" = 2
+                WHERE "engineVersion" IN (1, 2)
                   AND "userId" = ?
                   AND "idempotencyKey" = ?
                 FOR UPDATE
@@ -604,7 +514,7 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
     }
 
     private ObjectNode replayCommand(
-            Record command, String episodeId, String requestHash) {
+            DSLContext transaction, Record command, String episodeId, String requestHash) {
         if (!"episode.script.run".equals(command.get("operation", String.class))
                 || !episodeId.equals(command.get("episodeId", String.class))
                 || !requestHash.equals(command.get("requestHash", String.class))) {
@@ -618,6 +528,12 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
                 || !episodeId.equals(response.path("episodeId").asText())
                 || response.path("runId").asText().isBlank()) {
             throw new IllegalStateException("剧本任务命令回执已损坏");
+        }
+        // 历史启动回执没有 revision；补充当前权威版本供新取消入口 CAS，正文和历史身份不改写。
+        if (!response.hasNonNull("revision")) {
+            Record run=transaction.fetchOne("SELECT revision FROM public.\"WorkflowRun\" WHERE id=?",response.path("runId").asText());
+            if(run==null) throw notFound("VIDEO_EPISODE_RUN_NOT_FOUND","历史视频任务不存在");
+            response.put("revision",run.get("revision",Integer.class));
         }
         return response;
     }
@@ -696,7 +612,7 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
                 SELECT *
                 FROM public."WorkflowRun"
                 WHERE id = ?
-                  AND "engineVersion" = 2
+                  AND "engineVersion" IN (1, 2)
                   AND "userId" = ?
                   AND workflow = 'video'
                   AND operation IN ('episode_script_generate', 'episode_script_revise')
@@ -729,6 +645,7 @@ final class JooqVideoEpisodeScriptRunStore implements VideoEpisodeScriptRunStore
                 run.get("id", String.class));
         ObjectNode response = json.createObjectNode();
         response.put("runId", run.get("id", String.class));
+        response.put("revision", run.get("revision", Integer.class));
         response.put("episodeId", episodeId);
         response.put("status", run.get("status", String.class));
         putNullable(response, "artifactId", artifact == null ? null : artifact.get("id", String.class));

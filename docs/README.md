@@ -37,7 +37,8 @@
 | `specs/2026-09-04-java-cli-operator-cutover.md` | macOS 两份 Operator Skill 的 Java CLI 实际入口、配置升级与验证 |
 | `specs/2026-09-04-durable-natural-language-entry.md` | 普通新消息、同 Run 澄清、草案返工的持久化与 Web/CLI 分流 |
 | `../tools/inkforge-cli-java/README.md` | Java CLI 构建、Windows／macOS Skill 安装入口与受限授权 |
-| `DURABLE_AGENT_V2_ROLLOUT.md` | Durable Agent V2 人工迁移、contract 复验、allowlist canary 与回滚手册 |
+| `ENGINE_RETIREMENT_ROLLOUT.md` | 当前 V1 单引擎发布、排空备份、健康验证和编排回滚 |
+| `DURABLE_AGENT_V2_ROLLOUT.md` | 已退役引擎的历史迁移记录，仅供结构与账务追溯 |
 | `JAVA_CORE_CUTOVER.md` | Java Core 单服务发布、验证和 V2 兼容 Java 回退手册 |
 | `architecture-decisions/001-004` | Java 技术栈、契约优先、单 Core 切换与 Python 退役决策 |
 | `specs/2026-09-12-java-only-core-contract-and-python-retirement.md` | Java 唯一契约、Python Core／CLI 退役与 Windows Operator 切换 |
@@ -47,7 +48,7 @@
 | `specs/2026-09-09-serial-drama-production-product-plan.md` | 连载短剧／漫剧生产级产品规划草案：剧集流程、素材与声音、成本恢复、首发范围及验收 |
 | `specs/2026-09-09-seedance-25-lore-visual-production.md` | Seedance 2.5 国内官方接口规划：设定定妆、多模态参考、原生声音、生成片段、编辑与延长 |
 | `specs/2026-09-09-video-production-redesign.md` | 已落地的视频交互设计：独立分集、单集剧本、三条创作场景、制作基线与返工影响 |
-| `specs/2026-09-10-video-episode-production-implementation.md` | 剧集重构实施规格：数据关系、公共契约、V2 接入、共享引用与验收结果 |
+| `specs/2026-09-10-video-episode-production-implementation.md` | 剧集重构实施规格：数据关系、公共契约、任务与候选、共享引用与验收结果 |
 | `plans/2026-09-10-video-episode-production-rebuild.md` | 已执行的剧集重构分批计划：准备、剧本、分镜返工、素材后期和旧入口退出 |
 | `audits/2026-09-10-video-episode-production-p0.md` | 剧集重构开工现场、暂停补丁取舍、旧入口与共享依赖保护清单 |
 | `audits/2026-09-10-video-p3-media-provider-boundary.md` | P3 媒体旧链复用／退役清单、供应商中立适配和默认模拟验证 |

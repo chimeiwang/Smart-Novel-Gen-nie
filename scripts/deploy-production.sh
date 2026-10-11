@@ -9,12 +9,12 @@ DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:-}"
 INKFORGE_IMAGE_TAG="${INKFORGE_IMAGE_TAG:?必须设置镜像标签}"
 compose_file="infra/compose.yaml"
 durable_migration_helper="scripts/durable-agent-execution-migration.sh"
-durable_image_verifier="scripts/verify-durable-agent-v2-image.sh"
-execution_manifest_path="contracts/agent-execution/manifest.json"
+image_verifier="scripts/verify-retired-engine-image.sh"
+rollback_compose_file="$APP_DIR/infra/.rollback-${DEPLOY_SHA}.yaml"
 
 # Compose 的调用进程环境优先于 --env-file。部署配置必须只来自服务器已审核的
 # .env，不能被 SSH AcceptEnv、操作者 shell 或旧自动化残留覆盖。
-unset DATABASE_URL EXECUTION_REDIS_URL \
+unset DATABASE_URL EXECUTION_REDIS_URL HISTORICAL_WORKFLOW_SCHEMA_READY \
   DURABLE_AGENT_EXECUTION_SCHEMA_READY \
   DURABLE_AGENT_EXECUTION_ROUTE_MODE \
   DURABLE_AGENT_EXECUTION_USER_ALLOWLIST \
@@ -81,9 +81,6 @@ initialize_persistent_volumes() {
   initialize_persistent_volume \
     inkforge_agent_logs /data/agent-logs "inkforge-agent-service:$INKFORGE_IMAGE_TAG" \
     10001:10001 /usr/bin/chown
-  initialize_persistent_volume \
-    inkforge_execution_redis_data /data redis:7.4-alpine \
-    999:999 /bin/chown
 }
 
 refresh_nginx() {
@@ -100,56 +97,6 @@ find_service_container() {
 
 safe_git() {
   git -c safe.directory="$APP_DIR" "$@"
-}
-
-execution_manifest_fingerprint() {
-  manifest_path="$1"
-  python3 - "$manifest_path" <<'PY'
-import hashlib
-import json
-import sys
-from pathlib import Path
-
-
-def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"execution manifest 存在重复 key：{key}")
-        result[key] = value
-    return result
-
-
-def canonical(value: object) -> str:
-    if value is None:
-        return "null"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, str):
-        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
-            raise ValueError("execution manifest 含未配对 Unicode 代理字符")
-        return json.dumps(value, ensure_ascii=False, allow_nan=False)
-    if isinstance(value, list):
-        return "[" + ",".join(canonical(item) for item in value) + "]"
-    if isinstance(value, dict):
-        return "{" + ",".join(
-            f"{canonical(key)}:{canonical(value[key])}" for key in sorted(value)
-        ) + "}"
-    raise ValueError(f"execution manifest 含不支持的值类型：{type(value).__name__}")
-
-
-document = json.loads(
-    Path(sys.argv[1]).read_text(encoding="utf-8"),
-    object_pairs_hook=unique_object,
-)
-if not isinstance(document, dict):
-    raise ValueError("execution manifest 顶层必须是对象")
-print(hashlib.sha256(canonical(document).encode("utf-8")).hexdigest())
-PY
 }
 
 verify_java_stack() {
@@ -284,6 +231,31 @@ else
   safe_git remote set-url origin "$REPO_URL"
 fi
 
+# 首次跨引擎发布必须连同旧服务依赖一起保留；回滚不能拿新 Compose 启动旧 Agent。
+if [ -f "$compose_file" ] && [ ! -e "$rollback_compose_file" ]; then
+  APP_DIR="$APP_DIR" DEPLOY_SHA="$DEPLOY_SHA" python3 - <<'PY_SNAPSHOT'
+from pathlib import Path
+import os
+import shutil
+app = Path(os.environ["APP_DIR"])
+sha = os.environ["DEPLOY_SHA"]
+state = app / "infra" / (".rollback-" + sha + "-config")
+state.mkdir(mode=0o700, exist_ok=True)
+os.chmod(state, 0o700)
+source = (app / "infra/compose.yaml").read_text()
+for name in ("redis", "nginx"):
+    original = app / "infra" / name
+    if original.exists():
+        destination = state / name
+        shutil.copytree(original, destination, dirs_exist_ok=True)
+        source = source.replace("./" + name + "/", str(destination) + "/")
+target = app / "infra" / (".rollback-" + sha + ".yaml")
+fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w") as stream:
+    stream.write(source)
+PY_SNAPSHOT
+fi
+
 if [ -n "$DEPLOY_BUNDLE_PATH" ]; then
   # 标准 CI 部署只信任 runner 已 checkout 并经固定主机身份上传的 bundle；服务器无需访问 GitHub。
   safe_git bundle verify "$DEPLOY_BUNDLE_PATH"
@@ -321,8 +293,7 @@ safe_git reset --hard "$DEPLOY_SHA"
 [ -f .env ] || { echo "缺少 .env" >&2; exit 1; }
 [ -r .env ] || { echo "部署用户无法读取 .env" >&2; exit 1; }
 [ -r "$durable_migration_helper" ] || { echo "缺少耐久 Agent 具名迁移 helper" >&2; exit 1; }
-[ -r "$durable_image_verifier" ] || { echo "缺少 V2-aware 镜像检查器" >&2; exit 1; }
-[ -r "$execution_manifest_path" ] || { echo "缺少冻结 execution manifest" >&2; exit 1; }
+[ -r "$image_verifier" ] || { echo "缺少引擎退役镜像检查器" >&2; exit 1; }
 # 以下检查都在启动新容器前完成，失败时不得触碰现有生产进程。
 grep -q 'host.docker.internal' "$compose_file" || {
   echo "生产编排未配置宿主机数据库网关" >&2
@@ -375,137 +346,17 @@ fi
   exit 1
 }
 
-if expected_execution_manifest_fingerprint="$(
-  execution_manifest_fingerprint "$execution_manifest_path"
-)"; then
-  :
-else
-  echo "无法从发布源码计算冻结 execution manifest 指纹" >&2
-  exit 1
-fi
-case "$expected_execution_manifest_fingerprint" in
-  *[!0-9a-f]*)
-    echo "发布源码产生了无效的 execution manifest 指纹" >&2
-    exit 1
-    ;;
-esac
-[ "${#expected_execution_manifest_fingerprint}" -eq 64 ] || {
-  echo "发布源码产生了无效的 execution manifest 指纹" >&2
-  exit 1
-}
-
-# 此版部署入口只接受同时理解迁移前/后 contract 且能收敛既有 V2 Run/Step 的三服务组合。
-# Agent 探针还必须完整加载镜像内全部版本化 execution 资产，并与本次发布源码精确同指纹。
-# 检查过程无网络、不挂载卷、不注入环境变量，不能靠 runtime=java 标签冒充 V2-aware。
-sh "$durable_image_verifier" agent "inkforge-agent-service:$INKFORGE_IMAGE_TAG" \
-  "$expected_execution_manifest_fingerprint" >/dev/null
-
-durable_rollout_config="$(python3 - .env <<'PY'
-import sys
-from pathlib import Path
-
-allowed = {
-    "EXECUTION_REDIS_URL",
-    "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
-    "DURABLE_AGENT_EXECUTION_ROUTE_MODE",
-    "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST",
-    "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST",
-    "V1_FRESH_AGENT_STARTS_ENABLED",
-}
-values: dict[str, str] = {}
-for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    key = key.strip()
-    if key not in allowed:
-        continue
-    if key in values:
-        print("durable-rollout-config:duplicate", file=sys.stderr)
-        raise SystemExit(1)
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        value = value[1:-1].strip()
-    values[key] = value
-if values.get("EXECUTION_REDIS_URL") != "redis://execution-redis:6379/0":
-    print("durable-rollout-config:execution-redis", file=sys.stderr)
-    raise SystemExit(1)
-schema_ready = values.get("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "false").lower()
-route_mode = values.get("DURABLE_AGENT_EXECUTION_ROUTE_MODE", "off").lower()
-v1_fresh_starts = values.get("V1_FRESH_AGENT_STARTS_ENABLED", "true").lower()
-if schema_ready not in {"true", "false"} or route_mode not in {
-    "off", "allowlist", "all"
-} or v1_fresh_starts not in {"true", "false"}:
-    print("durable-rollout-config:invalid", file=sys.stderr)
-    raise SystemExit(1)
-print(schema_ready)
-print(route_mode)
-print("present" if values.get("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "").strip() else "absent")
-print("present" if values.get("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "").strip() else "absent")
-print(v1_fresh_starts)
-PY
-)" || { echo "耐久 Agent 发布配置无法安全解析" >&2; exit 1; }
-durable_schema_ready="$(printf '%s\n' "$durable_rollout_config" | sed -n '1p')"
-durable_route_mode="$(printf '%s\n' "$durable_rollout_config" | sed -n '2p')"
-durable_user_allowlist="$(printf '%s\n' "$durable_rollout_config" | sed -n '3p')"
-durable_novel_allowlist="$(printf '%s\n' "$durable_rollout_config" | sed -n '4p')"
-durable_v1_fresh_starts="$(printf '%s\n' "$durable_rollout_config" | sed -n '5p')"
-durable_core_probe="core"
-if [ "$durable_route_mode" = "all" ]; then
-  [ "$durable_schema_ready" = "true" ] && [ "$durable_v1_fresh_starts" = "false" ] || {
-    echo "耐久 Agent 全量必须 schemaReady=true 且关闭 V1 新建入口" >&2
-    exit 1
-  }
-  durable_core_probe="core-all"
-fi
-# 只加严 all；目标与回滚 Core 必须能解析本次保留的同一份路由配置。
-sh "$durable_image_verifier" "$durable_core_probe" \
-  "inkforge-core-api:$INKFORGE_IMAGE_TAG" >/dev/null
-if [ "$durable_route_mode" = "allowlist" ]; then
-  [ "$durable_user_allowlist" = "present" ] \
-    && [ "$durable_novel_allowlist" = "present" ] \
-    && [ "$durable_v1_fresh_starts" = "true" ] || {
-      echo "耐久 Agent allowlist 必须同时配置用户与隔离小说 ID" >&2
-      exit 1
-    }
-fi
+# 离线证明新镜像已移除执行器，同时仍可读取历史来源与结构契约。
+sh "$image_verifier" core "inkforge-core-api:$INKFORGE_IMAGE_TAG" >/dev/null
+sh "$image_verifier" agent "inkforge-agent-service:$INKFORGE_IMAGE_TAG" >/dev/null
 
 durable_migration_state="$(
   APP_DIR="$APP_DIR" DURABLE_AGENT_MIGRATION_ENV_FILE="$APP_DIR/.env" \
     sh "$durable_migration_helper" status novelwriter
-)" || { echo "无法读取耐久 Agent 数据库状态" >&2; exit 1; }
-if [ "$durable_route_mode" = "all" ] && [ "$durable_migration_state" != "migrated-with-v2" ]; then
-  echo "全量前必须先完成 V2 canary，空 V2 或未迁移结构禁止直接全量" >&2
-  exit 1
-fi
+)" || { echo "无法读取历史结构状态" >&2; exit 1; }
 case "$durable_migration_state" in
-  unmigrated)
-    [ "$durable_schema_ready" = "false" ] \
-      && [ "$durable_route_mode" = "off" ] || {
-      echo "迁移前结构只允许 schemaReady=false、route=off" >&2
-      exit 1
-    }
-    ;;
-  migrated-empty-v2)
-    if [ "$durable_schema_ready" = "false" ]; then
-      [ "$durable_route_mode" = "off" ] || {
-        echo "schemaReady=false 时耐久 Agent route 必须为 off" >&2
-        exit 1
-      }
-    fi
-    ;;
-  migrated-with-v2)
-    [ "$durable_schema_ready" = "true" ] || {
-      echo "已有 V2 Run 后必须保持 schemaReady=true 以继续收敛" >&2
-      exit 1
-    }
-    ;;
-  partial)
-    echo "耐久 Agent schema 处于 partial drift，停止部署" >&2
-    exit 1
-    ;;
-  *) echo "耐久 Agent schema 状态无效" >&2; exit 1 ;;
+  unmigrated|migrated-empty-v2|migrated-with-v2) ;;
+  *) echo "历史结构存在漂移，停止部署" >&2; exit 1 ;;
 esac
 
 web_container="$(find_service_container web)"
@@ -519,9 +370,12 @@ existing_service_count="0"
 
 previous_tag=""
 previous_core_runtime=""
-route_off_manifest_mismatch="0"
 # 自动回滚的权威来源是切换前同一时刻实际运行的三容器，而不是可能经历过复用的历史标签。
 if [ "$existing_service_count" -eq 0 ]; then
+  [ "$durable_migration_state" = unmigrated ] || {
+    echo "已有历史执行结构但现网 Core 缺失，无法证明日志已排空，停止首次部署" >&2
+    exit 1
+  }
   echo "未发现现有生产容器，本次按首次部署处理"
 elif [ "$existing_service_count" -ne 3 ]; then
   echo "现有生产服务不完整，停止部署并等待人工检查" >&2
@@ -551,66 +405,13 @@ else
     echo "上一 Core 镜像 runtime 标签无法识别" >&2
     exit 1
   }
-  if [ "$durable_migration_state" != "unmigrated" ]; then
-    [ "$previous_core_runtime" = "java" ] || {
-      echo "迁移后结构禁止把 V1-only Python Core 保留为自动回滚目标" >&2
-      exit 1
-    }
-    sh "$durable_image_verifier" "$durable_core_probe" "$core_image_id" >/dev/null || {
-      echo "迁移后结构的上一 Core 镜像不兼容当前耐久路由配置，停止部署" >&2
-      exit 1
-    }
-    if [ "$durable_route_mode" != "off" ]; then
-      sh "$durable_image_verifier" agent "$agent_image_id" \
-        "$expected_execution_manifest_fingerprint" >/dev/null || {
-          echo "新建 V2 路由的上一 Agent 回滚镜像与冻结 execution manifest 不兼容，停止部署" >&2
-          exit 1
-        }
-    else
-      if rollback_agent_probe="$(
-        sh "$durable_image_verifier" agent "$agent_image_id"
-      )"; then
-        :
-      else
-        echo "迁移后结构的上一 Agent 镜像无法离线验证 execution manifest，停止部署" >&2
-        exit 1
-      fi
-      case "$rollback_agent_probe" in
-        v2-aware-image-ok:agent:*)
-          rollback_agent_manifest_fingerprint="${rollback_agent_probe#v2-aware-image-ok:agent:}"
-          ;;
-        *)
-          echo "迁移后结构的上一 Agent 镜像探针输出格式无效，停止部署" >&2
-          exit 1
-          ;;
-      esac
-      case "$rollback_agent_manifest_fingerprint" in
-        ""|*[!0-9a-f]*)
-          echo "迁移后结构的上一 Agent 镜像输出了无效 manifest 指纹，停止部署" >&2
-          exit 1
-          ;;
-      esac
-      [ "${#rollback_agent_manifest_fingerprint}" -eq 64 ] || {
-        echo "迁移后结构的上一 Agent 镜像输出了无效 manifest 指纹，停止部署" >&2
-        exit 1
-      }
-      if [ "$rollback_agent_manifest_fingerprint" != \
-        "$expected_execution_manifest_fingerprint" ]; then
-        route_off_manifest_mismatch="1"
-      fi
-    fi
-    sh scripts/verify-running-core-schema.sh "$core_container" >/dev/null || {
-      echo "迁移后实时 PostgreSQL 未精确命中冻结 contract，停止部署" >&2
-      exit 1
-    }
-  fi
+  [ -r "$rollback_compose_file" ] || { echo "缺少旧编排恢复点" >&2; exit 1; }
+  sh scripts/verify-running-core-schema.sh "$core_container" >/dev/null || {
+    echo "实时 PostgreSQL 未精确命中冻结 contract，停止部署" >&2
+    exit 1
+  }
   previous_tag="$rollback_snapshot_tag"
   echo "已冻结当前生产三服务精确回滚快照：${previous_tag}（${previous_core_runtime}）"
-fi
-
-if [ "$durable_route_mode" != "off" ] && [ -z "$previous_tag" ]; then
-  echo "allowlist canary 或全量必须先冻结与当前 execution manifest 完全兼容的回滚镜像" >&2
-  exit 1
 fi
 
 docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; exit 1; }
@@ -659,6 +460,7 @@ rollback() {
     exit "$original_status"
   fi
 
+  compose_file="$rollback_compose_file"
   INKFORGE_IMAGE_TAG="$previous_tag"
   export INKFORGE_IMAGE_TAG
   compose up --no-build -d --wait
@@ -682,31 +484,12 @@ rollback() {
 
 trap 'rollback "$?"' EXIT
 
-# route-off 只阻止新建，不保证不同 manifest 能收敛在途 V2 Run。查询必须尽量靠近版本切换，且失败时
-# version_switch_started 仍为 0，保证不会执行新版本或自动回滚的 compose up。
-if [ "$route_off_manifest_mismatch" = "1" ]; then
-  docker exec "$core_container" /bin/sh -ec \
-    'test "${DURABLE_AGENT_EXECUTION_ROUTE_MODE:-}" = off' || {
-      echo "当前运行 Core 未精确证明 route=off，停止 manifest 切换" >&2
-      exit 1
-    }
-  active_v2_run_count="$(
-    APP_DIR="$APP_DIR" DURABLE_AGENT_MIGRATION_ENV_FILE="$APP_DIR/.env" \
-      sh "$durable_migration_helper" active-v2-count novelwriter
-  )" || {
-    echo "无法从权威 PostgreSQL 读取 V2 非终态 Run 数量，停止 manifest 切换" >&2
-    exit 1
-  }
-  case "$active_v2_run_count" in
-    ""|*[!0-9]*)
-      echo "权威 PostgreSQL 返回了无效的 V2 非终态 Run 数量，停止 manifest 切换" >&2
-      exit 1
-      ;;
-  esac
-  [ "$active_v2_run_count" = "0" ] || {
-    echo "仍有 V2 非终态 Run，route-off 禁止切换到不同 execution manifest" >&2
-    exit 1
-  }
+# 在新建路由已关闭的现网做只读排空检查，并保存可恢复数据库与旧日志快照。
+# 失败发生在切换前；不会为通过检查删除任务或把未知用量改成零。
+if [ -n "$core_container" ]; then
+  execution_container="$(find_service_container execution-redis)"
+  APP_DIR="$APP_DIR" DEPLOY_SHA="$DEPLOY_SHA" \
+    python3 scripts/engine_retirement_preflight.py "$core_container" "$execution_container"
 fi
 
 # 到此数据库已达到目标状态且幂等复验通过，才允许承担切换生产容器的回滚责任。
@@ -714,6 +497,10 @@ version_switch_started="1"
 compose up --no-build -d --wait
 refresh_nginx
 verify_java_stack
+# 保留旧日志卷及容器作为恢复点，只在新栈验证成功后停止退役日志服务。
+if [ -n "${execution_container:-}" ]; then
+  docker stop "$execution_container" >/dev/null
+fi
 cleanup_deploy_bundle
 trap - EXIT
 echo "生产编排已启动"

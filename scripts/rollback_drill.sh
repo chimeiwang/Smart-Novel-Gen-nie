@@ -53,8 +53,8 @@ rollback_runtime="$(classify_core_runtime "$(core_image_runtime_label "inkforge-
   exit 1
 }
 for tag in "$CURRENT_IMAGE_TAG" "$ROLLBACK_IMAGE_TAG"; do
-  capability="$(docker image inspect --format '{{ index .Config.Labels "cn.inkforge.durable-route-all" }}' "inkforge-core-api:$tag")"
-  [ "$capability" = "true" ] || { echo "Core 镜像不具备 V2 全量兼容能力" >&2; exit 1; }
+  sh scripts/verify-retired-engine-image.sh core "inkforge-core-api:$tag"
+  sh scripts/verify-retired-engine-image.sh agent "inkforge-agent-service:$tag"
 done
 
 compose_java() {

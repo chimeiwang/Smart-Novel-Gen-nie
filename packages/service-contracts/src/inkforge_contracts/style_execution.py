@@ -5,7 +5,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .execution import ExecutionId, Sha256
+from .content import ResourceId as ExecutionId
+from .content import Sha256
 
 PortraitSection = Literal[
     "creativeMethodology", "uniqueMarkers", "generationStyle", "expressionFeatures", "styleTraits"

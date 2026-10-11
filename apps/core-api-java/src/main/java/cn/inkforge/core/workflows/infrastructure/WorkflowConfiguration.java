@@ -1,50 +1,28 @@
 package cn.inkforge.core.workflows.infrastructure;
 
-import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.db.DurableAgentSchemaGate;
 import cn.inkforge.core.platform.id.CuidV1Generator;
-import cn.inkforge.core.workflows.application.DurableWorkflowService;
 import cn.inkforge.core.workflows.application.WorkflowBillingReconciliationRepository;
 import cn.inkforge.core.workflows.application.WorkflowBillingReconciliationService;
-import cn.inkforge.core.workflows.application.WorkflowCallbackRepository;
-import cn.inkforge.core.workflows.application.WorkflowCancellationReconciler;
-import cn.inkforge.core.workflows.application.WorkflowDispatchRepository;
 import cn.inkforge.core.workflows.application.WorkflowEventObserverTimeouts;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamService;
 import cn.inkforge.core.workflows.application.WorkflowEventTailObserver;
-import cn.inkforge.core.workflows.application.WorkflowExecutionCanceller;
-import cn.inkforge.core.workflows.application.WorkflowExecutionSubmitter;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
-import cn.inkforge.core.workflows.application.WorkflowIntentBusinessPreparation;
-import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
-import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
-import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
-import cn.inkforge.core.workflows.application.WorkflowRagIndexCompletion;
-import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeScriptCompletion;
-import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeStoryboardCompletion;
-import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
-import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
-import cn.inkforge.core.workflows.application.WorkflowStartRepository;
-import cn.inkforge.core.workflows.application.WorkflowStepDispatcher;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.protocol.WorkflowEventPayloadCodec;
 import jakarta.validation.Validator;
 import java.time.Clock;
 import java.time.Duration;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
-/** 新 V2 Workflow 内核装配；schema 就绪且 route-off 时仍装配读取/收敛能力。 */
+/** 历史执行仅装配来源读取、事件查询和账务对账，不启动或派发模型任务。 */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(
-        name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
-        havingValue = "true")
+@ConditionalOnExpression("${HISTORICAL_WORKFLOW_SCHEMA_READY:${DURABLE_AGENT_EXECUTION_SCHEMA_READY:false}}")
 class WorkflowConfiguration {
 
     WorkflowConfiguration(DurableAgentSchemaGate ignored) {}
@@ -55,114 +33,19 @@ class WorkflowConfiguration {
     }
 
     @Bean
-    WorkflowStartRepository workflowStartRepository(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper objectMapper) {
-        return new JooqWorkflowStartRepository(database, ids, coreClock, objectMapper);
-    }
-
-    @Bean
-    WorkflowDispatchRepository workflowDispatchRepository(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper objectMapper,
-            ExecutionRegistry workflowExecutionRegistry,
-            CoreSettings settings,
-            WorkflowExecutionContextReader contexts,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
-        return new JooqWorkflowDispatchRepository(
-                database,
-                ids,
-                coreClock,
-                objectMapper,
-                workflowExecutionRegistry,
-                Duration.ofSeconds(30),
-                settings.agentMaxConcurrency(), contexts, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable,
-                ragCompletion::getIfAvailable,
-                settings.videoPreviewEnabled() && settings.videoDispatchEnabled(), settings.videoDispatchNamespace());
-    }
-
-    @Bean
-    WorkflowCallbackRepository workflowCallbackRepository(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper objectMapper,
-            ExecutionRegistry workflowExecutionRegistry,
-            WorkflowExecutionContextReader contexts,
-            ObjectProvider<WorkflowIntentBusinessPreparation> preparations,
-            ObjectProvider<WorkflowStructuredCandidatePreparation> structuredCandidates,
-            ObjectProvider<cn.inkforge.core.workflows.application.WorkflowShortMediumCompletion> shortMediumCompletion,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion,
-            ObjectProvider<WorkflowVideoEpisodeScriptCompletion> episodeScriptCompletion,
-            ObjectProvider<WorkflowVideoEpisodeStoryboardCompletion> episodeStoryboardCompletion) {
-        return new JooqWorkflowCallbackRepository(
-                database,
-                ids,
-                coreClock,
-                objectMapper,
-                workflowExecutionRegistry,
-                Duration.ofSeconds(30), contexts, preparations::getIfAvailable, structuredCandidates::getIfAvailable,
-                shortMediumCompletion::getIfAvailable, qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable,
-                ragCompletion::getIfAvailable,
-                episodeScriptCompletion::getIfAvailable,
-                episodeStoryboardCompletion::getIfAvailable);
-    }
-
-    @Bean
     WorkflowBillingReconciliationRepository workflowBillingReconciliationRepository(
             CoreDatabase database,
             CuidV1Generator ids,
             Clock coreClock,
-            ObjectMapper objectMapper,
-            ExecutionRegistry workflowExecutionRegistry) {
+            ObjectMapper objectMapper) {
         return new JooqWorkflowBillingReconciliationRepository(
-                database, ids, coreClock, objectMapper, workflowExecutionRegistry);
+                database, ids, coreClock, objectMapper);
     }
 
     @Bean
     WorkflowBillingReconciliationService workflowBillingReconciliationService(
             WorkflowBillingReconciliationRepository repository) {
         return new WorkflowBillingReconciliationService(repository);
-    }
-
-    @Bean
-    WorkflowRunCancellationRepository workflowRunCancellationRepository(
-            CoreDatabase database,
-            CuidV1Generator ids,
-            Clock coreClock,
-            ObjectMapper objectMapper,
-            ExecutionRegistry workflowExecutionRegistry,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
-        return new JooqWorkflowRunCancellationRepository(
-                database, ids, coreClock, objectMapper, workflowExecutionRegistry, qualityCompletion::getIfAvailable,
-                styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
-    }
-
-    @Bean
-    WorkflowRunCancellationService workflowRunCancellationService(
-            WorkflowRunCancellationRepository repository,
-            ObjectProvider<WorkflowExecutionCanceller> cancellers) {
-        return new WorkflowRunCancellationService(
-                repository, java.util.Optional.ofNullable(cancellers.getIfAvailable()), 20);
-    }
-
-    @Bean
-    WorkflowCancellationReconciler workflowCancellationReconciler(
-            WorkflowRunCancellationService cancellations,
-            ObjectProvider<WorkflowQualityCompletion> qualityCompletion,
-            ObjectProvider<WorkflowStylePortraitCompletion> styleCompletion,
-            ObjectProvider<WorkflowRagIndexCompletion> ragCompletion) {
-        return new WorkflowCancellationReconciler(cancellations, Duration.ofSeconds(1), qualityCompletion::getIfAvailable, styleCompletion::getIfAvailable, ragCompletion::getIfAvailable);
     }
 
     @Bean
@@ -211,21 +94,4 @@ class WorkflowConfiguration {
                 repository, observer, objectMapper, Duration.ofSeconds(15));
     }
 
-    @Bean
-    @ConditionalOnBean(WorkflowExecutionSubmitter.class)
-    WorkflowStepDispatcher workflowStepDispatcher(
-            WorkflowDispatchRepository repository,
-            WorkflowExecutionSubmitter submitter,
-            CoreSettings settings) {
-        return new WorkflowStepDispatcher(
-                repository,
-                submitter,
-                settings.agentMaxConcurrency(),
-                Duration.ofSeconds(1));
-    }
-
-    @Bean
-    DurableWorkflowService durableWorkflowService(WorkflowStartRepository starts) {
-        return new DurableWorkflowService(starts);
-    }
 }

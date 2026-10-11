@@ -6,6 +6,7 @@ printf 'tag=%s|docker %s\n' "${INKFORGE_IMAGE_TAG:-}" "$*" >> "$FAKE_DOCKER_LOG"
 if [ "${FAKE_ASSERT_ROLLOUT_ENV_UNSET:-false}" = "true" ]; then
   if [ "${DATABASE_URL+x}" = "x" ] \
     || [ "${EXECUTION_REDIS_URL+x}" = "x" ] \
+    || [ "${HISTORICAL_WORKFLOW_SCHEMA_READY+x}" = "x" ] \
     || [ "${DURABLE_AGENT_EXECUTION_SCHEMA_READY+x}" = "x" ] \
     || [ "${DURABLE_AGENT_EXECUTION_ROUTE_MODE+x}" = "x" ] \
     || [ "${DURABLE_AGENT_EXECUTION_USER_ALLOWLIST+x}" = "x" ] \

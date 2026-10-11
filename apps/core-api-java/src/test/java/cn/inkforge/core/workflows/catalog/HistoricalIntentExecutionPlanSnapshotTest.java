@@ -56,7 +56,7 @@ class HistoricalIntentExecutionPlanSnapshotTest {
         assertThat(restored.operationPlans())
                 .extracting(ExecutionPlanSnapshot::executionManifestFingerprint)
                 .containsOnly(HISTORICAL_MANIFEST);
-        assertThat(restored.runBudget()).isEqualTo(new ExecutionRegistry.RunBudget(
+        assertThat(restored.runBudget()).isEqualTo(new HistoricalRegistryFixture.RunBudget(
                 "budget.long_serial.natural.v1",
                 9,
                 204_000,
@@ -71,13 +71,13 @@ class HistoricalIntentExecutionPlanSnapshotTest {
         assertThat(restored.operationPlans())
                 .extracting(ExecutionPlanSnapshot::runBudget)
                 .containsExactly(
-                        new ExecutionRegistry.RunBudget(
+                        new HistoricalRegistryFixture.RunBudget(
                                 "budget.long_serial.answer.v1",
                                 1, 40_000, 20_000, 8_000, 0, 8_000, 300_000, 120, 2, 1),
-                        new ExecutionRegistry.RunBudget(
+                        new HistoricalRegistryFixture.RunBudget(
                                 "budget.long_serial.chapter_plan.v1",
                                 4, 120_000, 120_000, 20_000, 12_000, 8_000, 800_000, 480, 2, 1),
-                        new ExecutionRegistry.RunBudget(
+                        new HistoricalRegistryFixture.RunBudget(
                                 "budget.long_serial.chapter_draft.v1",
                                 6, 180_000, 180_000, 40_000, 16_000, 24_000, 2_000_000, 900, 2, 1));
     }

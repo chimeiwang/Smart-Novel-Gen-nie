@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class RagEmbeddingDeploymentTest {
     @Test
     void 仅RAG专用配置可授权且用户积分固定不收费() {
-        var registry = ExecutionRegistryFixtures.ragOperationEnabled(ExecutionRegistry.Environment.TEST);
+        var registry = HistoricalRegistryFixtureFixtures.ragOperationEnabled(HistoricalRegistryFixture.Environment.TEST);
         var model = resolved("e2e-embedding-vector-v1", "http://e2e-control:8090", "embeddings_v1");
         var authorized = registry.requireAuthorizedDeployment(model);
         assertThat(authorized.billable()).isFalse();
@@ -37,7 +37,7 @@ class RagEmbeddingDeploymentTest {
                 .digest("https://Example.test:443/custom/v1/embeddings".getBytes(StandardCharsets.UTF_8)));
         assertThat(config.model()).isEqualTo(model);
         assertThat(config.endpointProfile()).isEqualTo("endpoint.rag-embedding." + expected + ".v1");
-        var registry = ExecutionRegistryFixtures.ragOperationEnabled(ExecutionRegistry.Environment.PRODUCTION)
+        var registry = HistoricalRegistryFixtureFixtures.ragOperationEnabled(HistoricalRegistryFixture.Environment.PRODUCTION)
                 .withRagEmbeddingConfig(model, url);
         assertThat(registry.requireAuthorizedDeployment(resolved(model, url, "embeddings_v1")).model()).isEqualTo(model);
         assertThat(RagEmbeddingDeployment.fromConfiguration("", url)).isNull();

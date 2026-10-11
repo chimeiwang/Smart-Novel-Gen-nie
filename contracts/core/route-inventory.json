@@ -2404,6 +2404,22 @@
       "authentication": "browser_cookie",
       "deprecated": false,
       "exposure": "public",
+      "method": "POST",
+      "mutation": true,
+      "operationId": "cancelVideoEpisodeTask",
+      "path": "/api/v1/video/episodes/{episodeId}/tasks/{taskId}/cancel",
+      "productModule": "video",
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "statusCode": 200,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "exposure": "public",
       "method": "GET",
       "mutation": false,
       "operationId": "list_projects_api_v1_video_novels__novel_id__projects_get",
@@ -2655,24 +2671,6 @@
       "mutation": true,
       "operationId": "cancel_writing_run_api_v1_writing_runs__task_id__cancel_post",
       "path": "/api/v1/writing/runs/{task_id}/cancel",
-      "productModule": "writing",
-      "responseKind": "json",
-      "sideEffects": [
-        "background_dispatch_or_reconciliation",
-        "postgresql_transaction",
-        "redis_event_or_queue"
-      ],
-      "statusCode": 202,
-      "transaction": "write"
-    },
-    {
-      "authentication": "browser_cookie",
-      "deprecated": false,
-      "exposure": "public",
-      "method": "POST",
-      "mutation": true,
-      "operationId": "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post",
-      "path": "/api/v1/writing/runs/{task_id}/clarification",
       "productModule": "writing",
       "responseKind": "json",
       "sideEffects": [
@@ -3111,6 +3109,68 @@
       "authentication": "direct_peer_and_ed25519",
       "deprecated": false,
       "exposure": "internal",
+      "method": "POST",
+      "mutation": true,
+      "operationId": "saveVideoEpisodeTaskCheckpoint",
+      "path": "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/checkpoint",
+      "productModule": "video",
+      "responseKind": "empty",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "exposure": "internal",
+      "method": "POST",
+      "mutation": true,
+      "operationId": "completeVideoEpisodeTask",
+      "path": "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/complete",
+      "productModule": "video",
+      "responseKind": "empty",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "exposure": "internal",
+      "method": "POST",
+      "mutation": true,
+      "operationId": "failVideoEpisodeTask",
+      "path": "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/fail",
+      "productModule": "video",
+      "responseKind": "empty",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "exposure": "internal",
+      "method": "GET",
+      "mutation": false,
+      "operationId": "getVideoEpisodeTaskProgress",
+      "path": "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/progress",
+      "productModule": "video",
+      "responseKind": "json",
+      "sideEffects": [],
+      "statusCode": 200,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "exposure": "internal",
       "method": "PUT",
       "mutation": true,
       "operationId": "reconcile_workflow_billing_internal_v1_workflow_runs__run_id__steps__step_id__billing_reconciliation_put",
@@ -3119,54 +3179,6 @@
       "responseKind": "json",
       "sideEffects": [
         "credit_ledger_or_usage",
-        "postgresql_transaction"
-      ],
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "exposure": "internal",
-      "method": "PUT",
-      "mutation": true,
-      "operationId": "report_execution_failure_internal_v1_workflow_runs__run_id__steps__step_id__failure_put",
-      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure",
-      "productModule": "workflows",
-      "responseKind": "json",
-      "sideEffects": [
-        "postgresql_transaction"
-      ],
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "exposure": "internal",
-      "method": "PUT",
-      "mutation": true,
-      "operationId": "report_execution_progress_internal_v1_workflow_runs__run_id__steps__step_id__progress_put",
-      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
-      "productModule": "workflows",
-      "responseKind": "json",
-      "sideEffects": [
-        "postgresql_transaction"
-      ],
-      "statusCode": null,
-      "transaction": "write"
-    },
-    {
-      "authentication": "direct_peer_and_ed25519",
-      "deprecated": false,
-      "exposure": "internal",
-      "method": "PUT",
-      "mutation": true,
-      "operationId": "report_execution_result_internal_v1_workflow_runs__run_id__steps__step_id__result_put",
-      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result",
-      "productModule": "workflows",
-      "responseKind": "json",
-      "sideEffects": [
         "postgresql_transaction"
       ],
       "statusCode": null,

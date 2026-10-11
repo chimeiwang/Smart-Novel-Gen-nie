@@ -14,9 +14,9 @@ import cn.inkforge.core.reviews.domain.ReviewArtifactRules;
 import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistryFixtures;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixtureFixtures;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import cn.inkforge.core.workflows.domain.DurableBeatPlanArtifact;
 import cn.inkforge.core.workflows.domain.DurableChapterDraftArtifact;
@@ -65,7 +65,7 @@ class JooqDurableReviewDecisionStoreTest {
 
     private static CoreDatabase database;
     private static ObjectMapper json;
-    private static ExecutionRegistry registry;
+    private static HistoricalRegistryFixture registry;
     private static JooqReviewRepository reviews;
     private static JooqWorkflowStartRepository starts;
 
@@ -82,13 +82,25 @@ class JooqDurableReviewDecisionStoreTest {
         executeSql("/tmp/20260831_durable_agent_execution.sql");
         database = CoreDatabase.connect(PostgresConnectionSettings.parse(databaseUrl()));
         json = new ObjectMapper();
-        registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        registry = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         CuidV1Generator ids = new CuidV1Generator(CLOCK);
         JooqFormalArtifactWriter formal =
                 new JooqFormalArtifactWriter(database, ids, CLOCK, json);
         reviews = new JooqReviewRepository(database, ids, CLOCK, json, formal, registry, true,
                 new JooqWorkflowExecutionContextReader(json));
         starts = new JooqWorkflowStartRepository(database, ids, CLOCK, json);
+    }
+
+    @Test
+    void 退役后的返工明确拒绝且保留完整候选与正文() {
+        Fixture fixture = waitingArtifact("retired-revise", true, false, true, false, true);
+        int before = count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", fixture.runId());
+        assertThatThrownBy(() -> reviews.decide(fixture.userId(), fixture.artifactId(),
+                decision("retired-revise-request", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("修改")))
+                .isInstanceOfSatisfying(ApiException.class, failure -> assertThat(failure.code()).isEqualTo("EXECUTION_ENGINE_RETIRED"));
+        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ?", fixture.runId())).isEqualTo(before);
+        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
+        assertThat(reviews.getDetail(fixture.userId(), fixture.artifactId(), 1, null).response().getPayload()).containsEntry("content", "完整模型正文😀");
     }
 
     @AfterAll
@@ -118,53 +130,9 @@ class JooqDurableReviewDecisionStoreTest {
         assertThat(reviews.decide(fixture.userId(), fixture.artifactId(), request)).isEqualTo(response);
     }
 
-    @Test
-    void 自然正文返工保留六次业务额度并在请求哈希中使用有效操作() {
-        Fixture fixture = waitingArtifact("natural-draft-revise", true, false, true, false, true);
-        var request = decision("natural-draft-revise-request-1", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("保留完整来源继续修订");
-        var response = (WritingRunV2Response) reviews.decide(fixture.userId(), fixture.artifactId(), request);
-        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.RUNNING);
-        assertThat(response.getOperation()).isEqualTo("write_chapter");
-        assertThat(response.getActiveSteps()).hasSize(1);
-        Record generation = database.dsl().fetchOne("SELECT input, \"requestHash\", \"evidenceBundleId\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1", fixture.runId());
-        assertThat(json.readTree(generation.get("input", String.class)).path("originalUserInstruction").asText()).contains("initialInstruction", "clarifications");
-        assertThat(generation.get("evidenceBundleId", String.class)).isEqualTo(fixture.bundleId());
-        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
-        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'resolve_intent'", fixture.runId())).isEqualTo(1);
-        assertThat(reviews.decide(fixture.userId(), fixture.artifactId(), request)).isEqualTo(response);
-    }
 
-    @Test
-    void 场景候选详情返工与编辑批准始终保留真实操作() {
-        Fixture revise = waitingSceneArtifact("scene-revise", true);
-        var detail = reviews.getDetail(revise.userId(), revise.artifactId(), 1, null);
-        assertThat(detail.response().getPayload())
-                .containsEntry("operation", "rewrite_scene")
-                .containsEntry("content", "完整模型正文😀");
-        var revised = (WritingRunV2Response) reviews.decide(
-                revise.userId(), revise.artifactId(),
-                decision("scene-revise-request-001", ReviewArtifactDecisionRequest.DecisionEnum.REVISE)
-                        .userMessage("重写场景冲突"));
-        assertThat(revised.getOperation()).isEqualTo("rewrite_scene");
-        Record next = database.dsl().fetchOne(
-                "SELECT input FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1",
-                revise.runId());
-        assertThat(json.readTree(next.get("input", String.class))
-                        .path("previousArtifact").path("payload").path("content").asText())
-                .isEqualTo("完整模型正文😀");
 
-        Fixture approve = waitingSceneArtifact("scene-approve", false);
-        var accepted = (WritingRunV2Response) reviews.decide(
-                approve.userId(), approve.artifactId(),
-                decision("scene-approve-request-01", ReviewArtifactDecisionRequest.DecisionEnum.APPROVE)
-                        .editedContent("作者完整场景🚀"));
-        assertThat(accepted.getOperation()).isEqualTo("rewrite_scene");
-        assertThat(chapterContent(approve.chapterId())).isEqualTo("作者完整场景🚀");
-        assertThat(database.dsl().fetchOne(
-                        "SELECT \"chapterGoal\" FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ?",
-                        approve.chapterId()).get(0, String.class))
-                .isEqualTo("旧正式计划");
-    }
+
 
     @Test
     void 总纲和节点选区编辑批准只替换目标范围() {
@@ -186,40 +154,7 @@ class JooqDurableReviewDecisionStoreTest {
         }
     }
 
-    @Test
-    void 大纲选区返工与丢弃保留来源且来源漂移零副作用() {
-        Fixture revise = waitingOutlineArtifact("outline-revise", "outline_node_content", true);
-        var response = (WritingRunV2Response) reviews.decide(
-                revise.userId(), revise.artifactId(),
-                decision("outline-revise-request-1", ReviewArtifactDecisionRequest.DecisionEnum.REVISE)
-                        .userMessage("让节点转折更清晰"));
-        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.RUNNING);
-        Record next = database.dsl().fetchOne(
-                "SELECT input, \"evidenceBundleId\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1",
-                revise.runId());
-        assertThat(json.readTree(next.get("input", String.class)).path("previousCandidate")
-                        .path("replacement").asText())
-                .isEqualTo("模型改写");
-        assertThat(next.get("evidenceBundleId", String.class)).isEqualTo(revise.bundleId());
 
-        Fixture discard = waitingOutlineArtifact("outline-discard", "outline_content", false);
-        reviews.decide(discard.userId(), discard.artifactId(),
-                decision("outline-discard-request-1", ReviewArtifactDecisionRequest.DecisionEnum.DISCARD));
-        assertThat(outlineContent(discard, "outline_content")).isEqualTo("纲😀要");
-
-        Fixture conflict = waitingOutlineArtifact("outline-conflict", "outline_content", false);
-        database.dsl().execute(
-                "UPDATE public.\"Outline\" SET content = '漂移', \"updatedAt\" = ? WHERE id = ?",
-                NOW.plusSeconds(1), conflict.novelId() + "-outline");
-        assertThatThrownBy(() -> reviews.decide(
-                        conflict.userId(), conflict.artifactId(),
-                        decision("outline-conflict-request-1",
-                                ReviewArtifactDecisionRequest.DecisionEnum.APPROVE)))
-                .isInstanceOfSatisfying(ApiException.class,
-                        error -> assertThat(error.code())
-                                .isEqualTo("ARTIFACT_SOURCE_VERSION_CONFLICT"));
-        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'user_decision'", conflict.runId())).isZero();
-    }
 
     @Test
     void 整章详情重建完整正文来源和强ETag且批准只应用正文() {
@@ -268,87 +203,12 @@ class JooqDurableReviewDecisionStoreTest {
         }
     }
 
-    @Test
-    void 整章显式返工保留同Evidence完整候选和输入AB且丢弃不改正式内容() {
-        Fixture fixture = waitingArtifact("draft-revise", true, false, true);
-        var request = decision("draft-revise-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("本次返工指令B");
-        var accepted = reviews.decide(fixture.userId(), fixture.artifactId(), request);
-        assertThat(reviews.decide(fixture.userId(), fixture.artifactId(), request)).isEqualTo(accepted);
-        Record step = database.dsl().fetchOne("SELECT input, \"evidenceBundleId\", \"artifactRevision\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1", fixture.runId());
-        var input = json.readTree(step.get("input", String.class));
-        assertThat(input.path("userInstruction").asText()).isEqualTo("本次返工指令B");
-        assertThat(input.path("originalUserInstruction").asText()).isEqualTo("完整正文原始指令A");
-        assertThat(input.path("targetWordCount").asInt()).isEqualTo(2500);
-        assertThat(input.path("previousArtifact").path("artifactRevision").asInt()).isEqualTo(1);
-        assertThat(input.path("previousArtifact").path("payload")).isEqualTo(json.valueToTree(DurableChapterDraftArtifact.deriveOutput("完整正文摘要", "完整模型正文😀")));
-        assertThat(step.get("evidenceBundleId", String.class)).isEqualTo(fixture.bundleId());
-        assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
-        Fixture discarded = waitingArtifact("draft-discard", true, false, true);
-        reviews.decide(discarded.userId(), discarded.artifactId(), decision("draft-discard-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.DISCARD));
-        assertThat(chapterContent(discarded.chapterId())).isEqualTo("甲😀乙");
-        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", discarded.artifactId())).isEqualTo(1);
-        assertThat(count("SELECT count(*) FROM public.\"WorkflowEvaluation\" WHERE \"runId\" = ?", discarded.runId())).isEqualTo(2);
-    }
 
-    @Test
-    void 整章作者返工在整轮任何剩余预算不足时提前原子拒绝() {
-        for (String dimension : List.of("input", "completion", "reasoning", "visible", "cost", "wall", "wall_long")) {
-            Fixture fixture = waitingArtifact("draft-budget-" + dimension, true, false, true, true);
-            ExecutionRegistry.ResolvedOperation planOperation = registry.resolve("long_serial.write_chapter", false);
-            WorkflowRunBudget runBudget = planOperation.operation().runBudget().toDomain();
-            long overflowValue = overRoundValue(planOperation, runBudget, dimension);
-            var steps = database.dsl().fetch("SELECT id, ordinal FROM public.\"WorkflowStep\" WHERE \"runId\" = ? ORDER BY ordinal", fixture.runId());
-            for (Record step : steps) {
-                boolean generator = step.get("ordinal", Integer.class) == 1;
-                Map<String, Object> usage = new LinkedHashMap<>(Map.of("usageStatus", "complete", "inputTokens", 30_000,
-                        "cachedTokens", 0, "promptCacheMissTokens", 30_000, "completionTokens", generator ? 16_000 : 2_000,
-                        "reasoningTokens", generator ? 8_000 : 0, "visibleOutputTokens", generator ? 8_000 : 2_000,
-                        "costMicros", generator ? 600_000 : 200_000, "providerAttempts", 1, "protocolCorrections", 0));
-                usage.put("wallTimeMillis", generator ? 300_000 : 75_000);
-                if (generator) {
-                    switch (dimension) {
-                        case "input" -> {
-                            usage.put("inputTokens", overflowValue);
-                            usage.put("promptCacheMissTokens", overflowValue);
-                        }
-                        case "completion" -> {
-                            usage.put("completionTokens", overflowValue);
-                            usage.put("reasoningTokens", 0L);
-                            usage.put("visibleOutputTokens", overflowValue);
-                        }
-                        case "reasoning" -> {
-                            usage.put("completionTokens", overflowValue);
-                            usage.put("reasoningTokens", overflowValue);
-                            usage.put("visibleOutputTokens", 0L);
-                        }
-                        case "visible" -> {
-                            usage.put("completionTokens", overflowValue);
-                            usage.put("reasoningTokens", 0L);
-                            usage.put("visibleOutputTokens", overflowValue);
-                        }
-                        case "cost" -> usage.put("costMicros", overflowValue);
-                        case "wall", "wall_long" -> usage.put("wallTimeMillis", overflowValue);
-                        default -> throw new AssertionError(dimension);
-                    }
-                } else if ("cost".equals(dimension)) {
-                    usage.clear();
-                    usage.putAll(Map.of("usageStatus", "unknown", "providerAttempts", 1, "protocolCorrections", 0,
-                            "wallTimeMillis", generator ? 300_000 : 75_000));
-                }
-                database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE id = ?", json.writeValueAsString(usage), step.get("id", String.class));
-            }
-            var request = decision("draft-budget-request-" + dimension, ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("再次完整生成并复审");
-            assertThatThrownBy(() -> reviews.decide(fixture.userId(), fixture.artifactId(), request))
-                    .isInstanceOf(ApiException.class).satisfies(error -> assertThat(((ApiException) error).code()).isEqualTo("WORKFLOW_REVISION_BUDGET_EXCEEDED"));
-            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", fixture.runId())).isEqualTo(1);
-            assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'user_decision'", fixture.runId())).isZero();
-            assertThat(count("SELECT count(*) FROM public.\"ReviewArtifact\" WHERE id = ? AND status = 'awaiting_user' AND revision = 1", fixture.artifactId())).isEqualTo(1);
-            assertThat(chapterContent(fixture.chapterId())).isEqualTo("甲😀乙");
-        }
-    }
+
+
 
     private static long overRoundValue(
-            ExecutionRegistry.ResolvedOperation operation,
+            HistoricalRegistryFixture.ResolvedOperation operation,
             WorkflowRunBudget runBudget,
             String dimension) {
         WorkflowRunBudgetCharge round = WorkflowRunBudgetCharge.active(operation.generatorStepBudget().budget());
@@ -379,19 +239,7 @@ class JooqDurableReviewDecisionStoreTest {
                 : overflow;
     }
 
-    @Test
-    void 整章未知供应商用量按Step上限保留且恰好够完整一轮时允许返工() {
-        Fixture fixture = waitingArtifact("draft-budget-boundary", true, false, true);
-        for (Record step : database.dsl().fetch("SELECT id, ordinal FROM public.\"WorkflowStep\" WHERE \"runId\" = ? ORDER BY ordinal", fixture.runId())) {
-            Map<String, Object> usage = Map.of("usageStatus", "unknown", "providerAttempts", 1, "protocolCorrections", 0,
-                    "wallTimeMillis", step.get("ordinal", Integer.class) == 1 ? 300_000 : 75_000);
-            database.dsl().execute("UPDATE public.\"WorkflowStep\" SET \"usageJson\" = ? WHERE id = ?", json.writeValueAsString(usage), step.get("id", String.class));
-        }
-        var request = decision("draft-budget-boundary-request", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("恰好覆盖完整生成和双复审");
-        var response = (WritingRunV2Response) reviews.decide(fixture.userId(), fixture.artifactId(), request);
-        assertThat(response.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.RUNNING);
-        assertThat(count("SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'", fixture.runId())).isEqualTo(2);
-    }
+
 
     @Test
     void 整章拒绝错误编辑字段空白正文旧修订和完整来源漂移() {
@@ -444,23 +292,7 @@ class JooqDurableReviewDecisionStoreTest {
         assertThat(stored.has("plan")).isTrue();
     }
 
-    @Test
-    void 章节计划显式返工绑定同Evidence完整计划和原始指令且丢弃保留审计() {
-        Fixture revise = waitingArtifact("plan-revise", false, true);
-        var request = decision("plan-revise-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.REVISE).userMessage("让第二个场景更清晰");
-        var response = reviews.decide(revise.userId(), revise.artifactId(), request);
-        assertThat(reviews.decide(revise.userId(), revise.artifactId(), request)).isEqualTo(response);
-        Record step = database.dsl().fetchOne("SELECT input, \"evidenceBundleId\", \"artifactId\", \"artifactRevision\" FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation' ORDER BY ordinal DESC LIMIT 1", revise.runId());
-        assertThat(step.get("evidenceBundleId", String.class)).isEqualTo(revise.bundleId());
-        assertThat(json.readTree(step.get("input", String.class)).path("previousArtifact").path("payload")).isEqualTo(json.valueToTree(planOutput()));
-        assertThat(json.readTree(step.get("input", String.class)).path("targetWordCount").asInt()).isEqualTo(2500);
-        assertThat(json.readTree(step.get("input", String.class)).path("originalUserInstruction").asText()).isEqualTo("规划完整章节");
-        Fixture discard = waitingArtifact("plan-discard", false, true);
-        reviews.decide(discard.userId(), discard.artifactId(), decision("plan-discard-request-0001", ReviewArtifactDecisionRequest.DecisionEnum.DISCARD));
-        assertThat(count("SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?", discard.artifactId())).isEqualTo(1);
-        assertThat(count("SELECT count(*) FROM public.\"ChapterBeatPlan\" WHERE \"chapterId\" = ? AND status = 'approved'", discard.chapterId())).isEqualTo(1);
-        assertThat(chapterContent(discard.chapterId())).isEqualTo("甲😀乙");
-    }
+
 
     @Test
     void 章节计划来源漂移旧修订与正文编辑字段均拒绝且无正式副作用() {
@@ -588,110 +420,9 @@ class JooqDurableReviewDecisionStoreTest {
         assertThat(eventTypes(fixture.runId())).endsWith("completed");
     }
 
-    @Test
-    void 返工创建同Evidence旧Revision绑定的新Generation且幂等不复制() {
-        Fixture fixture = waitingArtifact("decision-revise", true);
-        ReviewArtifactDecisionRequest request = decision(
-                        "decision-revise-client-0001",
-                        ReviewArtifactDecisionRequest.DecisionEnum.REVISE)
-                .userMessage("保留含义但把动作写得更紧凑");
 
-        WritingRunV2Response first = (WritingRunV2Response)
-                reviews.decide(fixture.userId(), fixture.artifactId(), request);
-        WritingRunV2Response replay = (WritingRunV2Response)
-                reviews.decide(fixture.userId(), fixture.artifactId(), request);
 
-        assertThat(replay).isEqualTo(first);
-        assertThat(first.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.RUNNING);
-        assertThat(first.getCurrentStep().getPurpose()).isEqualTo("generation");
-        assertThat(first.getCurrentStep().getStatus().getValue()).isEqualTo("pending");
-        assertThat(first.getArtifact().getStatus().getValue()).isEqualTo("draft");
-        Record generation = database.dsl().fetchOne(
-                """
-                SELECT "evidenceBundleId", "artifactId", "artifactRevision", input
-                FROM public."WorkflowStep"
-                WHERE "runId" = ? AND purpose = 'generation'
-                ORDER BY ordinal DESC LIMIT 1
-                """,
-                fixture.runId());
-        assertThat(generation.get("evidenceBundleId", String.class))
-                .isEqualTo(fixture.bundleId());
-        assertThat(generation.get("artifactId", String.class)).isEqualTo(fixture.artifactId());
-        assertThat(generation.get("artifactRevision", Integer.class)).isEqualTo(1);
-        assertThat(json.readTree(generation.get("input", String.class))
-                        .path("userInstruction").asText())
-                .isEqualTo("保留含义但把动作写得更紧凑");
-        assertThat(count(
-                        "SELECT count(*) FROM public.\"WorkflowStep\" WHERE \"runId\" = ? AND purpose = 'generation'",
-                        fixture.runId()))
-                .isEqualTo(2);
-        assertThat(count(
-                        "SELECT count(*) FROM public.\"ReviewArtifactRevision\" WHERE \"artifactId\" = ?",
-                        fixture.artifactId()))
-                .isEqualTo(1);
 
-        ReviewArtifactDecisionRequest changed = decision(
-                        "decision-revise-client-0001",
-                        ReviewArtifactDecisionRequest.DecisionEnum.REVISE)
-                .userMessage("换一条不同意见");
-        assertThatThrownBy(() -> reviews.decide(
-                        fixture.userId(), fixture.artifactId(), changed))
-                .isInstanceOfSatisfying(ApiException.class, error ->
-                        assertThat(error.code()).isEqualTo("IDEMPOTENCY_KEY_REUSED"));
-    }
-
-    @Test
-    void 当前Operation下线后旧Run仍可返工或批准而新解析被拒绝() {
-        ExecutionRegistry downlined = ExecutionRegistryFixtures.selectionOperationDownlined(
-                ExecutionRegistry.Environment.TEST);
-        assertThatThrownBy(() -> downlined.resolve(
-                        "long_serial.rewrite_chapter_selection", false))
-                .hasMessageContaining("尚未启用");
-        CuidV1Generator ids = new CuidV1Generator(Clock.offset(CLOCK, java.time.Duration.ofMillis(3)));
-        JooqReviewRepository afterUpgrade = new JooqReviewRepository(
-                database,
-                ids,
-                CLOCK,
-                json,
-                new JooqFormalArtifactWriter(database, ids, CLOCK, json),
-                downlined);
-
-        Fixture revised = waitingArtifact("decision-downlined-revise", true);
-        WritingRunV2Response revision = (WritingRunV2Response) afterUpgrade.decide(
-                revised.userId(),
-                revised.artifactId(),
-                decision(
-                                "decision-downlined-revise-client-0001",
-                                ReviewArtifactDecisionRequest.DecisionEnum.REVISE)
-                        .userMessage("目录升级后继续返工"));
-        assertThat(revision.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.RUNNING);
-        assertThat(database.dsl().fetchOne(
-                                """
-                                SELECT "modelProfile", "outputSchema", "budgetJson"
-                                FROM public."WorkflowStep"
-                                WHERE "runId" = ? AND purpose = 'generation'
-                                ORDER BY ordinal DESC LIMIT 1
-                                """,
-                                revised.runId()))
-                .satisfies(step -> {
-                    assertThat(step.get("modelProfile", String.class))
-                            .isEqualTo("writer.chapter_selection.v1");
-                    assertThat(step.get("outputSchema", String.class))
-                            .isEqualTo("output.chapter_selection_replacement.v1");
-                    assertThat(step.get("budgetJson", String.class))
-                            .contains("step_budget.long_serial.rewrite_chapter_selection.generator.v1");
-                });
-
-        Fixture approved = waitingArtifact("decision-downlined-approve", true);
-        WritingRunV2Response approval = (WritingRunV2Response) afterUpgrade.decide(
-                approved.userId(),
-                approved.artifactId(),
-                decision(
-                        "decision-downlined-approve-client-0001",
-                        ReviewArtifactDecisionRequest.DecisionEnum.APPROVE));
-        assertThat(approval.getStatus()).isEqualTo(WritingRunV2Response.StatusEnum.COMPLETED);
-        assertThat(chapterContent(approved.chapterId())).isEqualTo("甲模型改写乙");
-    }
 
     @Test
     void 来源漂移时不创建用户Revision决定StepEvent或正式写入() {
@@ -939,7 +670,7 @@ class JooqDurableReviewDecisionStoreTest {
                         : beatPlan
                                 ? "long_serial.plan_chapter"
                                 : "long_serial.rewrite_chapter_selection";
-        ExecutionRegistry.ResolvedOperation operation = registry.resolve(
+        HistoricalRegistryFixture.ResolvedOperation operation = registry.resolve(
                 operationKey, false);
         String selectedHash = ReviewArtifactRules.sha256("😀");
         Map<String, Object> input = new LinkedHashMap<>();

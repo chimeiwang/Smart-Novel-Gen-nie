@@ -43,20 +43,18 @@ def test_agent_to_core_whitelist_contains_only_rag_write_direction() -> None:
     assert ServiceScope.QUALITY_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
 
 
-def test_v2_execution_scopes_have_one_fixed_direction() -> None:
+def test_retired_execution_scopes_are_not_authorized_by_agent() -> None:
     import inkforge_agents.service_auth as service_auth
 
-    assert ServiceScope.EXECUTION_SUBMIT in service_auth._CORE_TO_AGENT_SCOPES
-    assert ServiceScope.EXECUTION_CANCEL in service_auth._CORE_TO_AGENT_SCOPES
-    assert ServiceScope.EXECUTION_PROGRESS not in service_auth._CORE_TO_AGENT_SCOPES
-    assert ServiceScope.EXECUTION_RESULT not in service_auth._CORE_TO_AGENT_SCOPES
-
-    assert ServiceScope.EXECUTION_PROGRESS in service_auth._AGENT_TO_CORE_SCOPES
-    assert ServiceScope.EXECUTION_RESULT in service_auth._AGENT_TO_CORE_SCOPES
+    retired = {
+        ServiceScope.EXECUTION_SUBMIT,
+        ServiceScope.EXECUTION_CANCEL,
+        ServiceScope.EXECUTION_PROGRESS,
+        ServiceScope.EXECUTION_RESULT,
+    }
+    assert retired.isdisjoint(service_auth._CORE_TO_AGENT_SCOPES)
+    assert retired.isdisjoint(service_auth._AGENT_TO_CORE_SCOPES)
     assert ServiceScope.BILLING_RECONCILE in service_auth._AGENT_TO_CORE_SCOPES
-    assert ServiceScope.EXECUTION_SUBMIT not in service_auth._AGENT_TO_CORE_SCOPES
-    assert ServiceScope.EXECUTION_CANCEL not in service_auth._AGENT_TO_CORE_SCOPES
-    assert ServiceScope.BILLING_RECONCILE not in service_auth._CORE_TO_AGENT_SCOPES
 
 
 def test_agent_wrapper_installs_service_auth_error_handler() -> None:

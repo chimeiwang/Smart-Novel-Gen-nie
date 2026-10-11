@@ -10,18 +10,8 @@ import cn.inkforge.core.db.generated.enums.Writingtaskphase;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.db.DurableAgentSchemaGate;
 import cn.inkforge.core.platform.http.InternalServiceAuthenticator;
-import cn.inkforge.core.workflows.api.WorkflowsController;
-import cn.inkforge.core.workflows.application.DurableWorkflowService;
-import cn.inkforge.core.workflows.application.WorkflowCallbackRepository;
-import cn.inkforge.core.workflows.application.WorkflowCancellationReconciler;
-import cn.inkforge.core.workflows.application.WorkflowDispatchRepository;
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository;
 import cn.inkforge.core.workflows.application.WorkflowEventTailObserver;
-import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
-import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
-import cn.inkforge.core.workflows.application.WorkflowStartRepository;
-import cn.inkforge.core.workflows.application.WorkflowStepDispatcher;
-import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingCommandSubmitter;
 import cn.inkforge.core.writing.application.WritingEventStreamService;
@@ -159,23 +149,13 @@ class WritingRuntimeIntegrationTest {
         assertThat(dispatcher).isNotNull();
         assertThat(callbacks).isNotNull();
         assertThat(streams).isNotNull();
-        assertThat(context.getBeansOfType(DurableWorkflowService.class)).isEmpty();
         assertThat(context.getBeansOfType(DurableAgentSchemaGate.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowStartRepository.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowCallbackRepository.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowDispatchRepository.class)).isEmpty();
         assertThat(context.getBeansOfType(WorkflowEventStreamRepository.class)).isEmpty();
         assertThat(context.getBeansOfType(WorkflowEventTailObserver.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowRunCancellationRepository.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowRunCancellationService.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowCancellationReconciler.class)).isEmpty();
         assertThat(context.getBeansOfType(
                                 cn.inkforge.core.workflows.application.WorkflowEventStreamService
                                         .class))
                 .isEmpty();
-        assertThat(context.getBeansOfType(WorkflowStepDispatcher.class)).isEmpty();
-        assertThat(context.getBeansOfType(LongSerialDurableRunStarter.class)).isEmpty();
-        assertThat(context.getBeansOfType(WorkflowsController.class)).isEmpty();
         assertThat(context.containsBean("workflowCancellationReconcilerStarter")).isFalse();
         assertThat(context.containsBean("workflowStepDispatcherStarter")).isFalse();
         HttpResponse<String> disabledV2Callback = send(

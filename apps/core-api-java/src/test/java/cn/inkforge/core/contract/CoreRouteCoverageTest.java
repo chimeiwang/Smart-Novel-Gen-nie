@@ -16,12 +16,12 @@ import cn.inkforge.core.generated.api.ReviewsApi;
 import cn.inkforge.core.generated.api.ShortmediumApi;
 import cn.inkforge.core.generated.api.StylesApi;
 import cn.inkforge.core.generated.api.VideoApi;
+import cn.inkforge.core.generated.api.VideoEpisodeTasksApi;
 import cn.inkforge.core.generated.api.VideoepisodeimpactsApi;
 import cn.inkforge.core.generated.api.VideoepisodepostproductionApi;
 import cn.inkforge.core.generated.api.VideoepisoderendersApi;
 import cn.inkforge.core.generated.api.VideoepisodesApi;
 import cn.inkforge.core.generated.api.VideoproductionApi;
-import cn.inkforge.core.generated.api.WorkflowsApi;
 import cn.inkforge.core.generated.api.WritingApi;
 import cn.inkforge.core.operations.api.HealthController;
 import java.io.IOException;
@@ -49,31 +49,31 @@ import org.mockito.Mockito;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** 仅通过 Spring MVC 实际 HandlerMethod 核对 207 条 canonical 路由，不启动业务数据库。 */
+/** 仅通过 Spring MVC 实际 HandlerMethod 核对 208 条 canonical 路由，不启动业务数据库。 */
 class CoreRouteCoverageTest {
 
     private static final List<Class<?>> GENERATED_APIS = List.of(
             BillingApi.class, ChaptersApi.class, DebugApi.class, IdentityApi.class, LoreApi.class,
             NovelsApi.class, OperationsApi.class, OutlinesApi.class, QualityApi.class,
             ReferencesApi.class, ReviewsApi.class, ShortmediumApi.class, StylesApi.class,
-            VideoApi.class, VideoepisodeimpactsApi.class, VideoepisodepostproductionApi.class,
+            VideoApi.class, VideoEpisodeTasksApi.class, VideoepisodeimpactsApi.class, VideoepisodepostproductionApi.class,
             VideoepisoderendersApi.class, VideoepisodesApi.class, VideoproductionApi.class,
-            WorkflowsApi.class, WritingApi.class);
+            WritingApi.class);
 
     @Test
-    void 生成接口和健康Controller必须覆盖canonical的207条路由() throws Exception {
+    void 生成接口和健康Controller必须覆盖canonical的208条路由() throws Exception {
         Map<Route, ContractRoute> contract = readContractRoutes();
         Map<Route, GeneratedRoute> generated = generatedRoutes(contract);
         Map<Route, ActualRoute> actual = springRoutes();
 
-        assertThat(generated).hasSize(207);
+        assertThat(generated).hasSize(208);
         assertThat(actual).containsOnlyKeys(contract.keySet());
         assertThat(actual).containsOnlyKeys(generated.keySet());
         assertThat(contract.keySet()).containsExactlyInAnyOrderElementsOf(actual.keySet());
         assertThat(contract.keySet().stream().filter(route -> route.path().startsWith("/api/v1/")).count())
                 .isEqualTo(183);
         assertThat(contract.keySet().stream().filter(route -> route.path().startsWith("/internal/v1/")).count())
-                .isEqualTo(24);
+                .isEqualTo(25);
         assertThat(contract.values().stream().filter(route -> route.exposure().equals("public")).count())
                 .isEqualTo(182);
         assertThat(contract.values().stream().filter(route -> route.exposure().equals("provider_media")).count())

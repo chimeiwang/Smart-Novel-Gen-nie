@@ -1397,41 +1397,6 @@
         ],
         "type": "string"
       },
-      "ClarifyWritingRunRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "clientRequestId": {
-            "maxLength": 128,
-            "minLength": 16,
-            "title": "Clientrequestid",
-            "type": "string"
-          },
-          "decisionStepId": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Decisionstepid",
-            "type": "string"
-          },
-          "expectedRevision": {
-            "exclusiveMinimum": 0,
-            "title": "Expectedrevision",
-            "type": "integer"
-          },
-          "userMessage": {
-            "minLength": 1,
-            "title": "Usermessage",
-            "type": "string"
-          }
-        },
-        "required": [
-          "clientRequestId",
-          "expectedRevision",
-          "decisionStepId",
-          "userMessage"
-        ],
-        "title": "ClarifyWritingRunRequest",
-        "type": "object"
-      },
       "ConfirmVideoAssetRequest": {
         "additionalProperties": false,
         "description": "用户确认素材权利并锁定，受限或拒绝素材不能锁定。",
@@ -11549,6 +11514,10 @@
             "format": "date-time",
             "title": "Updatedat",
             "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
@@ -11559,7 +11528,8 @@
           "errorCode",
           "errorMessage",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "revision"
         ],
         "title": "VideoEpisodeScriptRunResponse",
         "type": "object"
@@ -16874,6 +16844,24 @@
         ],
         "title": "WritingTaskSummary",
         "type": "object"
+      },
+      "VideoEpisodeTaskCancelRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clientRequestId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "clientRequestId",
+          "expectedRevision"
+        ]
       }
     }
   },
@@ -42089,6 +42077,174 @@
         "x-inkforge-status-code": null
       }
     },
+    "/api/v1/video/episodes/{episodeId}/tasks/{taskId}/cancel": {
+      "post": {
+        "operationId": "cancelVideoEpisodeTask",
+        "summary": "取消剧集任务",
+        "tags": [
+          "video-episode-tasks"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "episodeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "taskId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "inkforge-token",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoEpisodeScriptRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "x-inkforge-exposure": "public",
+        "x-inkforge-authentication": "browser_cookie",
+        "x-inkforge-product-module": "video",
+        "x-inkforge-response-kind": "json",
+        "x-inkforge-transaction": "write",
+        "x-inkforge-side-effects": [
+          "postgresql_transaction"
+        ],
+        "x-inkforge-mutation": true,
+        "x-inkforge-status-code": 200,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoEpisodeTaskCancelRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/video/novels/{novel_id}/projects": {
       "get": {
         "description": "列出当前小说的视频项目。",
@@ -44656,170 +44812,6 @@
           }
         },
         "summary": "Cancel Writing Run",
-        "tags": [
-          "writing"
-        ],
-        "x-inkforge-exposure": "public",
-        "x-inkforge-authentication": "browser_cookie",
-        "x-inkforge-product-module": "writing",
-        "x-inkforge-response-kind": "json",
-        "x-inkforge-transaction": "write",
-        "x-inkforge-side-effects": [
-          "background_dispatch_or_reconciliation",
-          "postgresql_transaction",
-          "redis_event_or_queue"
-        ],
-        "x-inkforge-mutation": true,
-        "x-inkforge-status-code": 202
-      }
-    },
-    "/api/v1/writing/runs/{task_id}/clarification": {
-      "post": {
-        "operationId": "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "title": "Task Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "inkforge-token",
-            "required": false,
-            "schema": {
-              "nullable": true,
-              "title": "Inkforge-Token",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClarifyWritingRunRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WritingRunV2Response"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          }
-        },
-        "summary": "Clarify Writing Run",
         "tags": [
           "writing"
         ],

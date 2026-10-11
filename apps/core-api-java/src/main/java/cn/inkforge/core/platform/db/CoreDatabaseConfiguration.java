@@ -2,6 +2,7 @@ package cn.inkforge.core.platform.db;
 
 import cn.inkforge.core.platform.config.CoreSettings;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -22,9 +23,7 @@ class CoreDatabaseConfiguration {
     }
 
     @Bean
-    @ConditionalOnProperty(
-            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
-            havingValue = "true")
+    @ConditionalOnExpression("${HISTORICAL_WORKFLOW_SCHEMA_READY:${DURABLE_AGENT_EXECUTION_SCHEMA_READY:false}}")
     DurableAgentSchemaGate durableAgentSchemaGate(
             CoreDatabase database, CoreSettings settings) {
         return new DurableAgentSchemaGate(database, schemaProfile(settings));

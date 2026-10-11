@@ -8,10 +8,6 @@ import cn.inkforge.core.quality.application.QualityRunDispatcher;
 import cn.inkforge.core.quality.application.QualityRunSubmitter;
 import cn.inkforge.core.quality.application.QualityService;
 import cn.inkforge.core.quality.application.QualityRunStarter;
-import cn.inkforge.core.quality.application.QualityExecutionReadiness;
-import cn.inkforge.core.workflows.application.DurableWorkflowService;
-import cn.inkforge.core.workflows.application.WorkflowQualityCompletion;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,7 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
-/** 装配质量检查的持久化、V1 投递和 V2 耐久完成链路。 */
+/** 装配 V1 质量检查投递与历史结果的只读来源验证。 */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class QualityConfiguration {
@@ -33,7 +29,7 @@ class QualityConfiguration {
             ObjectMapper objectMapper,
             CoreSettings settings) {
         return new JooqQualityRepository(database, ids, coreClock, objectMapper,
-                settings.durableAgentExecutionSchemaReady());
+                settings.historicalWorkflowSchemaReady());
     }
 
     @Bean
@@ -58,20 +54,9 @@ class QualityConfiguration {
     @Bean
     QualityRunStarter qualityRunStarter(CoreDatabase database, JooqQualityRepository repository,
             ObjectProvider<QualityRunDispatcher> dispatchers,
-            ObjectProvider<DurableWorkflowService> workflows,
-            ObjectProvider<QualityExecutionReadiness> readiness,
-            ExecutionRegistry registry, CoreSettings settings, Clock coreClock, ObjectMapper objectMapper) {
+            CoreSettings settings, ObjectMapper objectMapper) {
         return new JooqQualityRunStarter(database, repository, dispatchers::getIfAvailable,
-                workflows::getIfAvailable, () -> {
-                    var configured = readiness.getIfAvailable();
-                    return configured != null && configured.check();
-                }, registry, settings, coreClock, objectMapper);
+                settings, objectMapper);
     }
 
-    @Bean
-    @ConditionalOnProperty(name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY", havingValue = "true")
-    WorkflowQualityCompletion workflowQualityCompletion(CoreDatabase database, Clock coreClock,
-            ObjectMapper objectMapper) {
-        return new JooqWorkflowQualityCompletion(database, coreClock, objectMapper);
-    }
 }

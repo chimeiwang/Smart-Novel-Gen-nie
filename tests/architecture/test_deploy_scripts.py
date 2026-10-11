@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shutil
@@ -206,7 +205,7 @@ def test_rollback_drill_preserves_full_java_schema_validation() -> None:
 
     assert "verify-running-core-schema.sh" in source
     assert "compatibility-fingerprint-v1" not in source
-    assert "cn.inkforge.durable-route-all" in source
+    assert "verify-retired-engine-image.sh" in source
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -219,18 +218,6 @@ def _posix_path(path: Path) -> str:
     if os.name != "nt":
         return resolved.as_posix()
     return f"/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}"
-
-
-def _execution_manifest_fingerprint(path: Path) -> str:
-    document = json.loads(path.read_text(encoding="utf-8"))
-    canonical = json.dumps(
-        document,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _run_upload(
@@ -282,18 +269,32 @@ def _run_upload(
         "  *'mktemp -d'*)\n"
         '    remote_dir="$(/usr/bin/mktemp -d /tmp/inkforge-images.XXXXXXXXXX)" || exit\n'
         '    printf \'%s\\n\' "$remote_dir" > "$REMOTE_DIR_RECORD"\n'
-        '    printf \'%s\\n\' "$remote_dir"; exit 0 ;;\n'
+        "    printf '%s\\n' \"$remote_dir\"; exit 0 ;;\n"
         "  *'dd '*)\n"
         '    if [ "$FAKE_TRANSFER_STATUS" -ne 0 ]; then\n'
         '      cat >/dev/null; exit "$FAKE_TRANSFER_STATUS"\n'
-        '    fi ;;\n'
+        "    fi ;;\n"
         "  *sha256sum*|*shasum*)\n"
         '    if [ "$FAKE_CHECKSUM_STATUS" -ne 0 ]; then\n'
         '      exit "$FAKE_CHECKSUM_STATUS"\n'
-        '    fi ;;\n'
+        "    fi ;;\n"
         "esac\n"
-        'export FAKE_SSH_REMOTE=1\n'
+        "export FAKE_SSH_REMOTE=1\n"
         'exec /bin/bash -c "$command_text"\n',
+    )
+    _write_executable(
+        bin_dir / "sha256sum",
+        "#!/usr/bin/env python\n"
+        "import hashlib, pathlib, sys\n"
+        "if '--check' in sys.argv or '-c' in sys.argv:\n"
+        "    for line in sys.stdin:\n"
+        "        digest, filename = line.strip().split(None, 1)\n"
+        "        actual = hashlib.sha256(pathlib.Path(filename.strip()).read_bytes()).hexdigest()\n"
+        "        if actual != digest: sys.exit(1)\n"
+        "else:\n"
+        "    for filename in sys.argv[1:]:\n"
+        "        digest = hashlib.sha256(pathlib.Path(filename).read_bytes()).hexdigest()\n"
+        "        print(digest + '  ' + filename)\n",
     )
     _write_executable(
         bin_dir / "dd",
@@ -301,11 +302,11 @@ def _run_upload(
         'output=""\n'
         'for argument in "$@"; do\n'
         '  case "$argument" in of=*) output="${argument#of=}" ;; esac\n'
-        'done\n'
-        '/usr/bin/dd "$@" || exit\n'
+        "done\n"
+        '/bin/dd "$@" || exit\n'
         'if [ "$FAKE_CORRUPT_TRANSFER" = 1 ] && [ -n "$output" ]; then\n'
         '  printf x >> "$output"\n'
-        'fi\n',
+        "fi\n",
     )
     _write_executable(
         bin_dir / "df",
@@ -316,7 +317,7 @@ def _run_upload(
         '    printf "dockerfs 3000000 0 %s 0%% /var/lib/docker\\n" "$FAKE_DOCKER_FREE_KB" ;;\n'
         '  *"/tmp"*)\n'
         '    printf "%s 3000000 0 %s 0%% /tmp\\n" "$FAKE_TEMP_DEVICE" "$FAKE_TEMP_FREE_KB" ;;\n'
-        'esac\n',
+        "esac\n",
     )
     _write_executable(
         bin_dir / "timeout",
@@ -588,6 +589,8 @@ def _run_deploy(
     new_status: int = 0,
     rollback_status: int = 0,
     schema_verify_status: int = 0,
+    initial_schema_verify_status: int = 0,
+    preflight_status: int = 0,
     agent_ready_sequence: str = "",
     agent_log_init_status: int = 0,
     upload_init_status: int = 0,
@@ -639,6 +642,12 @@ def _run_deploy(
         "services:\n  core-api:\n    extra_hosts:\n      - host.docker.internal:host-gateway\n",
         encoding="utf-8",
     )
+    (app_dir / "infra/redis").mkdir()
+    (app_dir / "infra/nginx").mkdir()
+    (app_dir / "infra/redis/execution-redis.conf").write_text("appendonly yes\n")
+    (app_dir / "infra/nginx/nginx.conf").write_text("events {}\n")
+    with (app_dir / "infra/compose.yaml").open("a") as fixture:
+        fixture.write("    volumes:\n      - ./redis/execution-redis.conf:/old.conf:ro\n")
     for key_file in (
         "core-to-agent-private.pem",
         "core-to-agent-jwks.json",
@@ -654,18 +663,13 @@ def _run_deploy(
         "#!/bin/sh\n"
         '[ "$1" = container-core-api ] || exit 2\n'
         'printf \'schema-probe %s\\n\' "$1" >> "$FAKE_DOCKER_LOG"\n'
+        'count=$(cat "$FAKE_SCHEMA_COUNT" 2>/dev/null || echo 0)\n'
+        'echo $((count + 1)) > "$FAKE_SCHEMA_COUNT"\n'
+        '[ "$count" -gt 0 ] || exit "$FAKE_INITIAL_SCHEMA_VERIFY_STATUS"\n'
         'exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}"\n',
     )
-    source_manifest = ROOT / "contracts" / "agent-execution" / "manifest.json"
-    fixture_manifest = app_dir / "contracts" / "agent-execution" / "manifest.json"
-    shutil.copy2(source_manifest, fixture_manifest)
-    expected_manifest_fingerprint = _execution_manifest_fingerprint(fixture_manifest)
-    target_agent_manifest_fingerprint = (
-        target_agent_manifest_fingerprint or expected_manifest_fingerprint
-    )
-    rollback_agent_manifest_fingerprint = (
-        rollback_agent_manifest_fingerprint or expected_manifest_fingerprint
-    )
+    target_agent_manifest_fingerprint = target_agent_manifest_fingerprint or "unused"
+    rollback_agent_manifest_fingerprint = rollback_agent_manifest_fingerprint or "unused"
     _write_executable(
         app_dir / "scripts" / "token-usage-production-migration.sh",
         "#!/bin/sh\n"
@@ -701,32 +705,21 @@ def _run_deploy(
         "esac\n",
     )
     _write_executable(
-        app_dir / "scripts" / "verify-durable-agent-v2-image.sh",
+        app_dir / "scripts" / "verify-retired-engine-image.sh",
         "#!/bin/sh\n"
-        'printf \'v2-image %s %s %s\\n\' "$1" "$2" "${3:-<none>}" '
-        '>> "$FAKE_DOCKER_LOG"\n'
+        'printf \'retired-image %s %s\\n\' "$1" "$2" >> "$FAKE_DOCKER_LOG"\n'
         'case "$1" in\n'
         '  core) exit "${FAKE_CORE_V2_AWARE_STATUS:-0}" ;;\n'
-        '  core-all)\n'
-        '    [ "${FAKE_CORE_V2_AWARE_STATUS:-0}" -eq 0 ] || exit "$FAKE_CORE_V2_AWARE_STATUS"\n'
-        '    case "$2" in\n'
-        '      inkforge-core-api:"$FAKE_NEW_TAG") '
-        '        [ "$FAKE_TARGET_CORE_ALL_CAPABLE" = true ] ;;\n'
-        '      *) [ "$FAKE_ROLLBACK_CORE_ALL_CAPABLE" = true ] ;;\n'
-        '    esac ;;\n'
-        "  agent)\n"
-        '    [ "${FAKE_AGENT_V2_AWARE_STATUS:-0}" -eq 0 ] '
-        '      || exit "$FAKE_AGENT_V2_AWARE_STATUS"\n'
-        '    case "$2" in\n'
-        '      inkforge-agent-service:"$FAKE_NEW_TAG") '
-        '        actual="$FAKE_TARGET_AGENT_MANIFEST_FINGERPRINT" ;;\n'
-        '      *) actual="$FAKE_ROLLBACK_AGENT_MANIFEST_FINGERPRINT" ;;\n'
-        "    esac\n"
-        '    [ -z "${3:-}" ] || [ "$3" = "$actual" ] || exit 29\n'
-        "    printf 'v2-aware-image-ok:agent:%s\\n' \"$actual\"\n"
-        "    ;;\n"
+        '  agent) exit "${FAKE_AGENT_V2_AWARE_STATUS:-0}" ;;\n'
         "  *) exit 2 ;;\n"
         "esac\n",
+    )
+    (app_dir / "scripts" / "engine_retirement_preflight.py").write_text(
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "with Path(os.environ['FAKE_DOCKER_LOG']).open('a') as log:\n"
+        "    log.write('retirement-preflight ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+        "sys.exit(int(os.environ.get('FAKE_PREFLIGHT_STATUS', '0')))\n"
     )
     shutil.copy2(FAKE_DOCKER, bin_dir / "docker")
     (bin_dir / "docker").chmod(0o755)
@@ -752,13 +745,11 @@ def _run_deploy(
     )
     _write_executable(
         bin_dir / "flock",
-        "#!/bin/sh\n"
-        'printf \'flock %s\\n\' "$*" >> "$FAKE_DOCKER_LOG"\n'
-        'exit "$FAKE_FLOCK_STATUS"\n',
+        '#!/bin/sh\nprintf \'flock %s\\n\' "$*" >> "$FAKE_DOCKER_LOG"\nexit "$FAKE_FLOCK_STATUS"\n',
     )
     # Windows 的 python3.exe 是 Microsoft Store 占位符；Git Bash 中会被
     # PATH 优先命中并返回失败。用真实 Python 转发部署脚本的内嵌校验。
-    _write_executable(bin_dir / "python3", "#!/bin/sh\nexec python \"$@\"\n")
+    _write_executable(bin_dir / "python3", '#!/bin/sh\nexec python "$@"\n')
     log_path = tmp_path / "docker.log"
     agent_counter_path = tmp_path / "agent-ready-counter"
     migration_state_path = tmp_path / "migration-state"
@@ -768,10 +759,10 @@ def _run_deploy(
     # 必须使用与生产脚本相同的固定目录，SHA 让并行测试互不覆盖。
     # Git Bash 将 `/tmp` 映射到 Windows 的 tempfile 目录；PowerShell 的
     # `Path("/tmp")` 则可能解析为当前盘根目录，测试文件必须写入前者。
-    bundle_path = Path(tempfile.gettempdir()) / f"inkforge-deploy-{deploy_sha}.bundle"
-    bundle_posix_path = (
-        f"/tmp/inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108 - Git Bash 的固定 bundle 目录契约
-    )
+    bundle_path = (
+        Path(tempfile.gettempdir()) if os.name == "nt" else Path("/tmp")  # noqa: S108 - 与发布脚本固定bundle目录一致。
+    ) / f"inkforge-deploy-{deploy_sha}.bundle"
+    bundle_posix_path = f"/tmp/inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108 - Git Bash 的固定 bundle 目录契约
     if deploy_bundle:
         bundle_path.write_text("bundle fixture", encoding="utf-8")
     env = {
@@ -788,6 +779,9 @@ def _run_deploy(
         "FAKE_NEW_UP_STATUS": str(new_status),
         "FAKE_ROLLBACK_UP_STATUS": str(rollback_status),
         "FAKE_SCHEMA_VERIFY_STATUS": str(schema_verify_status),
+        "FAKE_INITIAL_SCHEMA_VERIFY_STATUS": str(initial_schema_verify_status),
+        "FAKE_PREFLIGHT_STATUS": str(preflight_status),
+        "FAKE_SCHEMA_COUNT": _posix_path(tmp_path / "schema-count"),
         "FAKE_AGENT_READY_COUNTER": _posix_path(agent_counter_path),
         "FAKE_AGENT_READY_SEQUENCE": agent_ready_sequence,
         "FAKE_AGENT_LOG_INIT_STATUS": str(agent_log_init_status),
@@ -816,6 +810,7 @@ def _run_deploy(
         env.update(
             {
                 "DATABASE_URL": "postgresql://ambient.invalid/other",
+                "HISTORICAL_WORKFLOW_SCHEMA_READY": "false",
                 "EXECUTION_REDIS_URL": "redis://ambient.invalid:6379/9",
                 "DURABLE_AGENT_EXECUTION_SCHEMA_READY": "true",
                 "DURABLE_AGENT_EXECUTION_ROUTE_MODE": "all",
@@ -850,10 +845,10 @@ def test_deploy_fetches_from_bundle_without_contacting_origin_and_cleans_file(
 ) -> None:
     # SHA-1 只用于生成 Git 风格测试标识，不承担密码学安全职责。
     deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
-    bundle_path = Path(tempfile.gettempdir()) / f"inkforge-deploy-{deploy_sha}.bundle"
-    bundle_posix_path = (
-        f"/tmp/inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108 - Git Bash 的固定 bundle 目录契约
-    )
+    bundle_path = (
+        Path(tempfile.gettempdir()) if os.name == "nt" else Path("/tmp")  # noqa: S108 - 与发布脚本固定bundle目录一致。
+    ) / f"inkforge-deploy-{deploy_sha}.bundle"
+    bundle_posix_path = f"/tmp/inkforge-deploy-{deploy_sha}.bundle"  # noqa: S108 - Git Bash 的固定 bundle 目录契约
     try:
         result, log = _run_deploy(
             tmp_path,
@@ -995,22 +990,12 @@ def test_deployment_initializes_persistent_volumes_before_version_switch(
         for index, line in enumerate(lines)
         if "source=inkforge_agent_logs,target=/data/agent-logs" in line
     )
-    execution_create_index = next(
-        index
-        for index, line in enumerate(lines)
-        if "docker volume create inkforge_execution_redis_data" in line
-    )
-    execution_init_index = next(
-        index
-        for index, line in enumerate(lines)
-        if "source=inkforge_execution_redis_data,target=/data" in line
-    )
     up_index = next(
         index for index, line in enumerate(lines) if line.endswith(" up --no-build -d --wait")
     )
     assert uploads_create_index < uploads_init_index < logs_create_index
-    assert logs_create_index < logs_init_index < execution_create_index
-    assert execution_create_index < execution_init_index < up_index
+    assert logs_create_index < logs_init_index < up_index
+    assert "inkforge_execution_redis_data" not in log
     for init_index in (uploads_init_index, logs_init_index):
         assert (
             "docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN"
@@ -1020,9 +1005,6 @@ def test_deployment_initializes_persistent_volumes_before_version_switch(
         assert "--entrypoint /usr/bin/chown" in lines[init_index]
     assert "inkforge-core-api:new-tag 10001:10001 /data/uploads" in lines[uploads_init_index]
     assert "inkforge-agent-service:new-tag 10001:10001 /data/agent-logs" in lines[logs_init_index]
-    assert "--entrypoint /bin/chown" in lines[execution_init_index]
-    assert "redis:7.4-alpine 999:999 /data" in lines[execution_init_index]
-    assert " -R " not in lines[execution_init_index]
 
 
 def test_deployment_requires_java_core_label_and_uses_java_schema_guard() -> None:
@@ -1112,7 +1094,7 @@ def test_failed_new_version_restores_previous_java_with_java_guard(
         "tag=rollback-new-tag",
     ]
     assert "compose.python-core-rollback.yaml" not in up_lines[1]
-    assert log.count("schema-probe container-core-api") == 1
+    assert log.count("schema-probe container-core-api") == 2
     assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in log
     assert "exec -T core-api python -c" not in log
     assert "新版本部署失败，旧版本已恢复" in result.stdout
@@ -1238,23 +1220,6 @@ def test_ordinary_route_off_deploy_keeps_v1_fresh_starts_available(
     assert len(_full_stack_up_lines(log)) == 1
 
 
-def test_deploy_rejects_duplicate_execution_redis_configuration_before_switch(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        execution_redis_config=(
-            "EXECUTION_REDIS_URL=redis://execution-redis:6379/0\n"
-            "EXECUTION_REDIS_URL=redis://redis:6379/0"
-        ),
-    )
-
-    assert result.returncode != 0
-    assert "durable-rollout-config:duplicate" in result.stderr
-    assert _full_stack_up_lines(log) == []
-
-
 def test_deploy_clears_ambient_overrides_before_any_compose_operation(
     tmp_path: Path,
 ) -> None:
@@ -1304,7 +1269,9 @@ def test_rejected_overlapping_deploy_does_not_delete_active_bundle(
     tmp_path: Path,
 ) -> None:
     deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
-    bundle_path = Path(tempfile.gettempdir()) / f"inkforge-deploy-{deploy_sha}.bundle"
+    bundle_path = (
+        Path(tempfile.gettempdir()) if os.name == "nt" else Path("/tmp")  # noqa: S108 - 与发布脚本固定bundle目录一致。
+    ) / f"inkforge-deploy-{deploy_sha}.bundle"
     try:
         result, log = _run_deploy(
             tmp_path,
@@ -1331,7 +1298,7 @@ def test_durable_agent_partial_schema_stops_before_image_switch(tmp_path: Path) 
     )
 
     assert result.returncode != 0
-    assert "partial drift" in result.stderr
+    assert "历史结构存在漂移" in result.stderr
     assert _full_stack_up_lines(log) == []
 
 
@@ -1377,7 +1344,7 @@ def test_post_durable_schema_exact_contract_is_checked_before_switch(
         previous_state="valid",
         previous_core_runtime="java",
         durable_migration_state="migrated-empty-v2",
-        schema_verify_status=25,
+        initial_schema_verify_status=25,
     )
 
     assert result.returncode != 0
@@ -1385,249 +1352,34 @@ def test_post_durable_schema_exact_contract_is_checked_before_switch(
     assert _full_stack_up_lines(log) == []
 
 
-def test_existing_v2_data_requires_schema_ready_even_when_route_is_off(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=False,
-        durable_route_mode="off",
-    )
-
-    assert result.returncode != 0
-    assert "必须保持 schemaReady=true" in result.stderr
+def test_retirement_preflight_failure_never_switches_running_services(tmp_path):
+    result, log = _run_deploy(tmp_path, previous_state="valid", preflight_status=37)
+    assert result.returncode == 37
+    assert "retirement-preflight" in log
     assert _full_stack_up_lines(log) == []
+    assert "镜像切换前" in result.stderr
 
 
-def test_deploy_cannot_skip_allowlist_and_enable_all_routes(tmp_path: Path) -> None:
+def test_rollback_snapshot_keeps_old_compose_dependencies(tmp_path):
+    result, log = _run_deploy(tmp_path, previous_state="valid", new_status=23)
+    assert result.returncode == 23
+    app = tmp_path / "app"
+    recovery = app / "infra/.rollback-new-tag.yaml"
+    configs = app / "infra/.rollback-new-tag-config"
+    assert (recovery.stat().st_mode & 0o777) == 0o600
+    assert (configs.stat().st_mode & 0o777) == 0o700
+    assert (configs / "redis/execution-redis.conf").read_text() == "appendonly yes\n"
+    assert (configs / "nginx/nginx.conf").read_text() == "events {}\n"
+    assert str(configs / "redis/execution-redis.conf") in recovery.read_text()
+    rollback_line = _full_stack_up_lines(log)[-1]
+    assert str(recovery) in rollback_line
+    assert "docker volume rm" not in log
+
+
+def test_missing_running_core_cannot_bypass_retirement_gate_for_historical_database(tmp_path):
     result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-empty-v2",
-        durable_schema_ready=True,
-        durable_route_mode="all",
-    )
-
-    assert result.returncode != 0
-    assert "禁止直接全量" in result.stderr
-    assert _full_stack_up_lines(log) == []
-
-
-def test_deploy_all_routes_requires_closed_v1_and_compatible_rollback(tmp_path: Path) -> None:
-    accepted, accepted_log = _run_deploy(
-        tmp_path / "accepted",
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="all",
-    )
-    assert accepted.returncode == 0, accepted.stderr
-    assert len(_full_stack_up_lines(accepted_log)) == 1
-    assert "v2-image core-all inkforge-core-api:new-tag" in accepted_log
-    assert f"v2-image core-all sha256:{'5' * 64}" in accepted_log
-    rejected, rejected_log = _run_deploy(
-        tmp_path / "v1-open",
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="all",
-        v1_fresh_starts=True,
-    )
-    assert rejected.returncode != 0
-    assert "关闭 V1 新建入口" in rejected.stderr
-    assert _full_stack_up_lines(rejected_log) == []
-    mismatch, mismatch_log = _run_deploy(
-        tmp_path / "manifest-mismatch",
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="all",
-        rollback_agent_manifest_fingerprint="b" * 64,
-    )
-    assert mismatch.returncode != 0
-    assert "回滚镜像与冻结 execution manifest 不兼容" in mismatch.stderr
-    assert _full_stack_up_lines(mismatch_log) == []
-
-
-@pytest.mark.parametrize("missing", ["target", "rollback"])
-def test_all_route_rejects_core_without_all_capability_before_switch(
-    tmp_path: Path, missing: str
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="all",
-        target_core_all_capable=missing != "target",
-        rollback_core_all_capable=missing != "rollback",
+        tmp_path, previous_state="none", durable_migration_state="migrated-with-v2"
     )
     assert result.returncode != 0
-    assert "v2-image core-all inkforge-core-api:new-tag" in log
-    if missing == "rollback":
-        assert f"v2-image core-all sha256:{'5' * 64}" in log
-    assert _full_stack_up_lines(log) == []
-
-
-@pytest.mark.parametrize("mode", ["off", "allowlist"])
-def test_old_route_modes_do_not_require_new_all_capability(tmp_path: Path, mode: str) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode=mode,
-        durable_user_allowlist="user-canary",
-        durable_novel_allowlist="novel-canary",
-        target_core_all_capable=False,
-        rollback_core_all_capable=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "v2-image core-all" not in log
-
-
-def test_deploy_allows_only_complete_user_and_novel_intersection_allowlist(
-    tmp_path: Path,
-) -> None:
-    rejected, rejected_log = _run_deploy(
-        tmp_path / "rejected",
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-empty-v2",
-        durable_schema_ready=True,
-        durable_route_mode="allowlist",
-        durable_user_allowlist="user-canary",
-    )
-    accepted, accepted_log = _run_deploy(
-        tmp_path / "accepted",
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-empty-v2",
-        durable_schema_ready=True,
-        durable_route_mode="allowlist",
-        durable_user_allowlist="user-canary",
-        durable_novel_allowlist="novel-canary",
-    )
-
-    assert rejected.returncode != 0
-    assert "必须同时配置" in rejected.stderr
-    assert _full_stack_up_lines(rejected_log) == []
-    assert accepted.returncode == 0, accepted.stderr
-    assert len(_full_stack_up_lines(accepted_log)) == 1
-    expected = _execution_manifest_fingerprint(
-        ROOT / "contracts" / "agent-execution" / "manifest.json"
-    )
-    assert (f"v2-image agent sha256:{'6' * 64} " + expected) in accepted_log
-
-
-def test_allowlist_rejects_rollback_agent_with_older_execution_manifest(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-empty-v2",
-        durable_schema_ready=True,
-        durable_route_mode="allowlist",
-        durable_user_allowlist="user-canary",
-        durable_novel_allowlist="novel-canary",
-        rollback_agent_manifest_fingerprint="b" * 64,
-    )
-
-    assert result.returncode != 0
-    assert "回滚镜像与冻结 execution manifest 不兼容" in result.stderr
-    assert f"v2-image agent sha256:{'6' * 64}" in log
-    assert _full_stack_up_lines(log) == []
-
-
-def test_allowlist_requires_a_complete_compatible_rollback_snapshot(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="none",
-        durable_migration_state="migrated-empty-v2",
-        durable_schema_ready=True,
-        durable_route_mode="allowlist",
-        durable_user_allowlist="user-canary",
-        durable_novel_allowlist="novel-canary",
-    )
-
-    assert result.returncode != 0
-    assert "allowlist canary 或全量必须先冻结" in result.stderr
-    assert _full_stack_up_lines(log) == []
-
-
-def test_v2_aware_route_off_rollback_combination_remains_deployable(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="off",
-        rollback_agent_manifest_fingerprint="b" * 64,
-        active_v2_run_count=0,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "v2-image core inkforge-core-api:new-tag" in log
-    assert "v2-image agent inkforge-agent-service:new-tag" in log
-    assert f"v2-image core sha256:{'5' * 64}" in log
-    assert f"v2-image agent sha256:{'6' * 64} <none>" in log
-    assert "durable-migration active-v2-count novelwriter" in log
-    assert len(_full_stack_up_lines(log)) == 1
-
-
-def test_route_off_rejects_different_manifest_while_any_v2_run_is_active(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="off",
-        rollback_agent_manifest_fingerprint="b" * 64,
-        active_v2_run_count=1,
-    )
-
-    assert result.returncode != 0
-    assert "仍有 V2 非终态 Run" in result.stderr
-    assert "durable-migration active-v2-count novelwriter" in log
-    assert _full_stack_up_lines(log) == []
-
-
-def test_target_route_off_does_not_override_running_allowlist_during_manifest_switch(
-    tmp_path: Path,
-) -> None:
-    result, log = _run_deploy(
-        tmp_path,
-        previous_state="valid",
-        previous_core_runtime="java",
-        durable_migration_state="migrated-with-v2",
-        durable_schema_ready=True,
-        durable_route_mode="off",
-        rollback_agent_manifest_fingerprint="b" * 64,
-        active_v2_run_count=0,
-        running_core_route_mode="allowlist",
-    )
-
-    assert result.returncode != 0
-    assert "当前运行 Core 未精确证明 route=off" in result.stderr
-    assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE" in log
-    assert "durable-migration active-v2-count novelwriter" not in log
+    assert "无法证明日志已排空" in result.stderr
     assert _full_stack_up_lines(log) == []

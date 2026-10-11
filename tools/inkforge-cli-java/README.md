@@ -1,5 +1,7 @@
 # InkForge Java CLI
 
+当前源码新任务统一使用 V1。普通 CLI 的自然输入转为完整 `userMessage`，旧 `inputMode=clarification` 返回 `ENGINE_RETIRED`；历史任务、候选与账务仍可读取。已安装固定包和 Operator 白名单不随源码自动更新。
+
 当前入口（2026-09-12）：Python CLI 已退役；本机 Windows 两份 Operator 已切换固定 Java JAR，沿用 84 命令／
 五操作授权。macOS 原有 45 命令／三操作投影独立保留。下文旧日期、旧包哈希和“Windows 尚未验收”均为历史记录，
 本次真实测试及未验证项以 [Java-only 清理审计](../../docs/audits/2026-09-12-java-only-core-retirement.md) 为准。

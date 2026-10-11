@@ -13,7 +13,6 @@ import cn.inkforge.contracts.api.ResumeWritingRunRequest;
 import cn.inkforge.contracts.api.ResumeWritingRunResponse;
 import cn.inkforge.contracts.api.WritingRunV2Response;
 import cn.inkforge.core.platform.http.ApiException;
-import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import org.junit.jupiter.api.Test;
 
 class WritingRunServiceV2CancellationTest {
@@ -35,7 +34,7 @@ class WritingRunServiceV2CancellationTest {
         assertThat(result).isSameAs(expected);
         verify(dependencies.commands()).resume("user-1", "legacy-task", request);
         verify(dependencies.dispatcher()).runOnce();
-        verifyNoInteractions(dependencies.queries(), dependencies.cancellations());
+        verifyNoInteractions(dependencies.queries());
     }
 
     @Test
@@ -56,7 +55,6 @@ class WritingRunServiceV2CancellationTest {
         verify(dependencies.commands()).cancel("user-1", "legacy-task", request);
         verifyNoInteractions(
                 dependencies.queries(),
-                dependencies.cancellations(),
                 dependencies.dispatcher());
     }
 
@@ -82,7 +80,6 @@ class WritingRunServiceV2CancellationTest {
                 .isSameAs(forbidden);
         verifyNoInteractions(
                 dependencies.queries(),
-                dependencies.cancellations(),
                 dependencies.dispatcher());
     }
 
@@ -104,103 +101,33 @@ class WritingRunServiceV2CancellationTest {
         verifyNoInteractions(
                 dependencies.commands(),
                 dependencies.queries(),
-                dependencies.dispatcher(),
-                dependencies.cancellations());
+                dependencies.dispatcher());
     }
 
-    @Test
-    void 按轻量持久Engine身份将V2取消交给Workflow并在提交后回读Snapshot() {
-        Dependencies dependencies = dependencies();
-        WritingRunV2Response after = mock(WritingRunV2Response.class);
-        when(dependencies.engines().probe("user-1", "run-2"))
-                .thenReturn(EngineIdentityProbe.EngineIdentity.V2);
-        when(dependencies.queries().getPublic("user-1", "run-2")).thenReturn(after);
 
-        var result = dependencies.service().cancel(
-                "user-1", "run-2", new CancelWritingRunRequest("cancel-request-0003"));
 
-        assertThat(result).isSameAs(after);
-        verify(dependencies.cancellations())
-                .cancel("user-1", "run-2", "cancel-request-0003");
-        verify(dependencies.queries()).getPublic("user-1", "run-2");
-        verifyNoInteractions(dependencies.commands(), dependencies.dispatcher());
-    }
+
+
+
 
     @Test
-    void 越权V2身份禁止回退到同ID的V1命令() {
-        Dependencies dependencies = dependencies();
-        ApiException forbidden = new ApiException(
-                403, "WRITING_TASK_FORBIDDEN", "无权访问该写作任务");
-        when(dependencies.engines().probe("user-1", "identity-collision"))
-                .thenThrow(forbidden);
-
-        assertThatThrownBy(() -> dependencies.service().resume(
-                        "user-1",
-                        "identity-collision",
-                        new ResumeWritingRunRequest("resume-request-0004")))
-                .isSameAs(forbidden);
-        assertThatThrownBy(() -> dependencies.service().cancel(
-                        "user-1",
-                        "identity-collision",
-                        new CancelWritingRunRequest("cancel-request-0004")))
-                .isSameAs(forbidden);
-
-        verifyNoInteractions(
-                dependencies.commands(),
-                dependencies.queries(),
-                dependencies.dispatcher(),
-                dependencies.cancellations());
-    }
-
-    @Test
-    void V2取消器未装配时返回稳定503且不回退V1() {
-        Dependencies dependencies = dependencies(null);
-        when(dependencies.engines().probe("user-1", "run-2"))
-                .thenReturn(EngineIdentityProbe.EngineIdentity.V2);
-
-        assertThatThrownBy(() -> dependencies.service().cancel(
-                        "user-1",
-                        "run-2",
-                        new CancelWritingRunRequest("cancel-request-0005")))
-                .isInstanceOfSatisfying(ApiException.class, error -> {
-                    assertThat(error.statusCode()).isEqualTo(503);
-                    assertThat(error.code()).isEqualTo("WORKFLOW_CANCELLATION_UNAVAILABLE");
-                });
-
-        verifyNoInteractions(
-                dependencies.commands(), dependencies.queries(), dependencies.dispatcher());
+    void 历史取消明确拒绝且不调用旧引擎或写作命令() {
+        var d = dependencies();
+        when(d.engines().probe("user-1", "old-run")).thenReturn(EngineIdentityProbe.EngineIdentity.V2);
+        assertThatThrownBy(() -> d.service().cancel("user-1", "old-run", new CancelWritingRunRequest("retired-cancel")))
+                .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.code()).isEqualTo("EXECUTION_ENGINE_RETIRED"));
+        verifyNoInteractions(d.commands(), d.queries(), d.dispatcher());
     }
 
     private static Dependencies dependencies() {
-        return dependencies(mock(WorkflowRunCancellationService.class));
+        var parser = mock(WritingRunStartRequestParser.class);
+        WritingRunStarter starter = (u, r) -> { throw new AssertionError("本测试不创建任务"); };
+        var commands = mock(WritingCommandRepository.class);
+        var queries = mock(WritingRunQueryRepository.class);
+        var dispatcher = mock(WritingRunCommandDispatcher.class);
+        var engines = mock(EngineIdentityProbe.class);
+        return new Dependencies(new WritingRunService(parser, starter, commands, queries, dispatcher, engines), commands, queries, dispatcher, engines);
     }
-
-    private static Dependencies dependencies(WorkflowRunCancellationService cancellations) {
-        WritingRunStartRequestParser parser = mock(WritingRunStartRequestParser.class);
-        WritingRunStarter starter = (userId, request) -> {
-            throw new AssertionError("本测试不应启动新的写作运行");
-        };
-        WritingCommandRepository commands = mock(WritingCommandRepository.class);
-        WritingRunQueryRepository queries = mock(WritingRunQueryRepository.class);
-        WritingRunCommandDispatcher dispatcher = mock(WritingRunCommandDispatcher.class);
-        EngineIdentityProbe engines = mock(EngineIdentityProbe.class);
-        WritingRunService service = new WritingRunService(
-                parser,
-                starter,
-                commands,
-                queries,
-                dispatcher,
-                engines,
-                cancellations);
-        return new Dependencies(
-                service, commands, queries, dispatcher, engines, cancellations);
-    }
-
-    private record Dependencies(
-            WritingRunService service,
-            WritingCommandRepository commands,
-            WritingRunQueryRepository queries,
-            WritingRunCommandDispatcher dispatcher,
-            EngineIdentityProbe engines,
-            WorkflowRunCancellationService cancellations) {}
+    private record Dependencies(WritingRunService service, WritingCommandRepository commands,
+            WritingRunQueryRepository queries, WritingRunCommandDispatcher dispatcher, EngineIdentityProbe engines) {}
 }

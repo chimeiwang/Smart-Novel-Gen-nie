@@ -1,6 +1,6 @@
 package cn.inkforge.core.workflows.protocol;
 
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalExecutionTypes;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -50,7 +50,7 @@ public final class WorkflowOutputValidator {
     private WorkflowOutputValidator() {}
 
     /** 按已解析的注册表 Schema 校验一次模型结构化输出。 */
-    public static void validate(ExecutionRegistry.OutputSchema outputSchema, Object value) {
+    public static void validate(HistoricalExecutionTypes.OutputSchema outputSchema, Object value) {
         Objects.requireNonNull(outputSchema, "输出 Schema 不能为空");
         if (!outputSchema.supported()) {
             throw new IllegalArgumentException("输出 Schema 尚未启用");

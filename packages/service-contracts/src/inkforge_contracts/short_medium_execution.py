@@ -7,7 +7,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
-from .execution import ExecutionId, Sha256
+from .content import ResourceId as ExecutionId
+from .content import Sha256
 
 Text = Annotated[str, Field(min_length=1)]
 Index = Annotated[int, Field(strict=True, ge=0, le=5)]

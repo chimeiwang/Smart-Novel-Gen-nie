@@ -17,7 +17,7 @@ import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
-import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
 import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.nio.ByteBuffer;
@@ -53,7 +53,7 @@ class JooqAgentUpdatesEvidenceExpansionTest {
             .withDatabaseName("novelwriterdev").withUsername("inkforge").withPassword("test-only-password");
     private static CoreDatabase database;
     private static JooqWorkflowStartRepository starts;
-    private static ExecutionRegistry registry;
+    private static HistoricalRegistryFixture registry;
 
     @BeforeAll
     static void schema() throws Exception {
@@ -64,7 +64,7 @@ class JooqAgentUpdatesEvidenceExpansionTest {
         }
         database = CoreDatabase.connect(PostgresConnectionSettings.parse("postgresql://" + POSTGRES.getUsername() + ":" + POSTGRES.getPassword()
                 + "@" + POSTGRES.getHost() + ":" + POSTGRES.getMappedPort(5432) + "/" + POSTGRES.getDatabaseName()));
-        registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        registry = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
         starts = new JooqWorkflowStartRepository(database, new CuidV1Generator(CLOCK), CLOCK, JSON);
     }
 
@@ -248,10 +248,10 @@ class JooqAgentUpdatesEvidenceExpansionTest {
         // 仅保存不可变 bundle 使用现有运行仓储；不派发、不伪造模型终态，也不翻转五项 Catalog。
         var base = registry.resolve("long_serial.plan_chapter", false);
         var old = base.operation();
-        var operation = new ExecutionRegistry.Operation("long_serial.revise_lore", "long_serial", "revise_lore", List.of("novel"), List.of("novel"),
+        var operation = new HistoricalRegistryFixture.Operation("long_serial.revise_lore", "long_serial", "revise_lore", List.of("novel"), List.of("novel"),
                 true, false, true, old.lane(), old.evidencePolicy(), old.generatorProfile(), old.generatorStepBudgetProfile(), base.outputSchema().key(),
                 old.deterministicValidators(), old.reviewPolicy(), "apply.agent_updates.v1", old.runBudget());
-        var resolved = new ExecutionRegistry.ResolvedOperation(operation, base.generatorProfile(), base.generatorStepBudget(), base.outputSchema(), base.reviewers(), base.reviewerOutputSchema());
+        var resolved = new HistoricalRegistryFixture.ResolvedOperation(operation, base.generatorProfile(), base.generatorStepBudget(), base.outputSchema(), base.reviewers(), base.reviewerOutputSchema());
         var plan = ExecutionPlanSnapshot.freeze("1", registry.manifestFingerprint(), resolved);
         Map<String, Object> input = Map.of("userInstruction", "调整资料");
         var started = starts.start(new WorkflowStartPlan(n, n + "-request", ExecutionCanonicalJson.sha256(n), "long_serial", "revise_lore", "1",

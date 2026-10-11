@@ -94,6 +94,8 @@ def target_snapshot(container_id):
         "VIDEO_PREVIEW_ENABLED",
         "PHONE_AUTH_ENABLED",
         "PHONE_AUTH_SEND_ENABLED",
+        "HISTORICAL_WORKFLOW_SCHEMA_READY",
+        "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
     )
     environment = {}
     for entry in entries:
@@ -105,8 +107,10 @@ def target_snapshot(container_id):
         environment[name] = value
     if not environment.get("DATABASE_URL"):
         raise ProbeFailure("目标 Core 缺少数据库配置")
-    for name in names[1:]:
+    for name in names[1:4]:
         environment.setdefault(name, "false")
+    environment.setdefault("HISTORICAL_WORKFLOW_SCHEMA_READY",
+                           environment.get("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "false"))
     return (container_id, image, started_at, restart_count, environment, paused, restarting)
 
 

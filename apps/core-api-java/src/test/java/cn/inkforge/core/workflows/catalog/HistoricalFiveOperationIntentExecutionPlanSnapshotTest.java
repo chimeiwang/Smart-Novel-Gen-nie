@@ -64,7 +64,7 @@ class HistoricalFiveOperationIntentExecutionPlanSnapshotTest {
                 .containsOnly(manifest);
         assertThat(restored.maxClarifications()).isEqualTo(2);
         assertThat(restored.resolver().stepBudget().profile()).isEqualTo("step_budget.system.resolve_intent.v1");
-        assertThat(restored.runBudget()).isEqualTo(new ExecutionRegistry.RunBudget(
+        assertThat(restored.runBudget()).isEqualTo(new HistoricalRegistryFixture.RunBudget(
                 "budget.long_serial.natural.v1", 9, 204_000, 204_000, 43_000, 16_000, 27_000,
                 2_150_000, 990, 2, 1));
     }

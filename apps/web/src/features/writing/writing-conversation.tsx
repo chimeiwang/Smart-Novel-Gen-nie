@@ -2003,7 +2003,7 @@ export function WritingConversation({
             },
       }));
       if (run.engineVersion !== 1) {
-        throw new Error("当前响应属于新版工作流，请开始新对话");
+        throw new Error("当前响应属于已退役的历史工作流，请开始新对话");
       }
       if (attachment) selectionBridge?.removeSelection();
       setTaskId(run.id);
@@ -2087,7 +2087,7 @@ export function WritingConversation({
             signal: controller.signal,
           }));
           if (accepted.engineVersion !== 1) {
-            throw new Error("当前响应属于新版工作流，请开始新对话");
+            throw new Error("当前响应属于已退役的历史工作流，请开始新对话");
           }
           selectionBridge?.removeSelection();
           const sessionIdForRequest = currentSessionIdRef.current;
@@ -2224,7 +2224,7 @@ export function WritingConversation({
           { params: { path: { task_id: streamTaskId } }, cache: "no-store" },
         ));
         if (terminal.engineVersion !== 1) {
-          throw new Error("当前运行属于新版工作流，请开始新对话");
+          throw new Error("当前运行属于已退役的历史工作流，请开始新对话");
         }
         const outcome = parseSseEvent(terminal.outcome, "run_outcome");
         if (!outcome || outcome.type !== "run_outcome") {
@@ -2910,7 +2910,7 @@ export function WritingConversation({
   ) {
     const guarded = runSendAction(async () => {
       if (artifact.engineVersion !== 1) {
-        const message = "这项待确认变更属于新版工作流，当前兼容页面不能继续，请开始新对话。";
+        const message = "这项待确认变更属于已退役的历史工作流，当前兼容页面不能继续，请开始新对话。";
         updateReviewArtifactAction({
           artifactId: artifact.id,
           decision,
@@ -2975,7 +2975,7 @@ export function WritingConversation({
           },
         ));
         if (accepted.engineVersion !== 1) {
-          throw new Error("当前响应属于新版工作流，请开始新对话");
+          throw new Error("当前响应属于已退役的历史工作流，请开始新对话");
         }
         const streamScope: StreamUiScope = isCurrentSessionArtifact && currentSessionIdRef.current
           ? { mode: "session", sessionId: currentSessionIdRef.current }

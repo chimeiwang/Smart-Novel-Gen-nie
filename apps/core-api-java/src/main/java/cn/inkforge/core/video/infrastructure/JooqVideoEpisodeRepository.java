@@ -5,7 +5,7 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.video.application.VideoEpisodeRepository;
-import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeScriptCompletion;
+import cn.inkforge.core.video.application.VideoEpisodeScriptCompletion;
 
 import org.jooq.DSLContext;
 import org.jooq.Record;
@@ -32,7 +32,7 @@ import java.util.Set;
 
 /** 独立集的来源、工作稿和正式版本；命令回执与业务事实在同一事务提交。 */
 public final class JooqVideoEpisodeRepository
-        implements VideoEpisodeRepository, WorkflowVideoEpisodeScriptCompletion {
+        implements VideoEpisodeRepository, VideoEpisodeScriptCompletion {
     private final CoreDatabase database;
     private final CuidV1Generator ids;
     private final Clock clock;
@@ -621,7 +621,7 @@ public final class JooqVideoEpisodeRepository
                 apiTime(row, "createdAt"));
     }
 
-    /** 仅对存在完整 V2 结构的环境读取运行观察；关闭结构门禁时仍可读取手工剧本。 */
+    /** 仅对存在业务任务结构的环境读取运行观察；关闭结构门禁时仍可读取手工剧本。 */
     private ObjectNode latestRun(DSLContext tx, String episodeId) {
         if (!tx.fetchExists(
                 org.jooq
@@ -636,10 +636,10 @@ public final class JooqVideoEpisodeRepository
         Record r =
                 tx.fetchOne(
                         "SELECT"
-                            + " r.id,r.status,r.\"errorCode\",r.\"errorMessage\",r.\"createdAt\",r.\"updatedAt\",(SELECT"
+                            + " r.id,r.revision,r.status,r.\"errorCode\",r.\"errorMessage\",r.\"createdAt\",r.\"updatedAt\",(SELECT"
                             + " a.id FROM \"ReviewArtifact\" a WHERE a.\"workflowRunId\"=r.id AND"
                             + " a.\"videoEpisodeId\"=? LIMIT 1) artifact FROM \"WorkflowRun\" r"
-                            + " WHERE r.\"engineVersion\"=2 AND r.workflow='video' AND"
+                            + " WHERE r.\"engineVersion\" IN (1,2) AND r.workflow='video' AND"
                             + " r.\"targetId\"=? AND r.operation IN"
                             + " ('episode_script_generate','episode_script_revise') ORDER BY"
                             + " r.\"createdAt\" DESC,r.id DESC LIMIT 1",
@@ -650,6 +650,8 @@ public final class JooqVideoEpisodeRepository
                 : object(
                         "runId",
                         r.get("id"),
+                        "revision",
+                        r.get("revision"),
                         "episodeId",
                         episodeId,
                         "status",
@@ -725,7 +727,7 @@ public final class JooqVideoEpisodeRepository
                         "SELECT e.id FROM \"WorkflowRun\" r JOIN \"VideoEpisode\" e ON"
                             + " e.id=r.\"targetId\" AND e.\"novelId\"=r.\"novelId\" JOIN \"Novel\""
                             + " n ON n.id=e.\"novelId\" AND n.\"userId\"=r.\"userId\" WHERE r.id=?"
-                            + " AND r.\"engineVersion\"=2 AND r.workflow='video' AND r.operation IN"
+                            + " AND r.\"engineVersion\" IN (1,2) AND r.workflow='video' AND r.operation IN"
                             + " ('episode_script_generate','episode_script_revise') AND"
                             + " e.\"archivedAt\" IS NULL",
                         runId)

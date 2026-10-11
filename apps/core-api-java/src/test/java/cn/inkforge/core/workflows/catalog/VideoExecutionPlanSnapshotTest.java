@@ -79,7 +79,7 @@ class VideoExecutionPlanSnapshotTest {
         assertThatThrownBy(() -> ExecutionPlanSnapshot.fromStored(root)).hasMessageContaining("不匹配");
     }
 
-    private static ExecutionRegistry registry() { return ExecutionRegistryFixtures.videoOperationsEnabled(ExecutionRegistry.Environment.TEST); }
+    private static HistoricalRegistryFixture registry() { return HistoricalRegistryFixtureFixtures.videoOperationsEnabled(HistoricalRegistryFixture.Environment.TEST); }
     private Map<String, Object> copy(Map<String, Object> value) { return json.readValue(json.writeValueAsString(value), new TypeReference<>() {}); }
     @SuppressWarnings("unchecked")
     private static Map<String, Object> object(Object value) { return (Map<String, Object>) value; }
