@@ -24,7 +24,10 @@
 再次验证健康、schema 与 smoke，保留原发布失败退出码。回滚不删除卷、不回退 DDL、不改小说内容。
 
 首次退役后的普通版本回滚只允许兼容历史来源和账务的新栈。旧引擎恢复点只用于本次受控发布失败恢复，
-不能用它重新开放已经移除的新建功能。历史 `DURABLE_AGENT_V2_ROLLOUT.md` 中的 rollout gate 和 manifest 步骤已退役。
+不能用它重新开放已经移除的新建功能。历史 `DURABLE_AGENT_V2_ROLLOUT.md` 中的 rollout gate、manifest、
+联合 drain、旧任务 archive 和 execution journal 恢复步骤均已退役，不作为当前栈的运维入口。
+仓库中的旧恢复脚本仅供历史追溯；不能在新栈调用依赖已删除 execution Redis 配置的脚本。
+本次应用失败恢复使用被冻结的旧编排和原卷；数据库或日志灾难恢复须另行确定目标及恢复方案。
 
 ## 验收记录
 

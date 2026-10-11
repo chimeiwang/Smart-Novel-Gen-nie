@@ -102,7 +102,8 @@ safe_git() {
 verify_java_stack() {
   compose ps &&
   sh scripts/verify-running-core-schema.sh "$(compose ps -q core-api)" &&
-  COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
+  COMPOSE_ENV_FILE=.env COMPOSE_BASE_FILE="$compose_file" COMPOSE_OVERRIDE_FILE= \
+    sh scripts/compose_smoke.sh
 }
 
 core_image_runtime_label() {

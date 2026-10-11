@@ -1071,7 +1071,8 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
         "tag=new-tag",
         "tag=rollback-new-tag",
     ]
-    assert " compose --env-file .env -f infra/compose.yaml ps" in log
+    recovery = _posix_path(tmp_path / "app/infra/.rollback-new-tag.yaml")
+    assert f" compose --env-file .env -f {recovery} ps" in log
     assert "schema-probe container-core-api" in log
     assert "新版本部署失败，旧版本已恢复" in result.stdout
     assert "生产编排已启动" not in result.stdout
@@ -1373,6 +1374,11 @@ def test_rollback_snapshot_keeps_old_compose_dependencies(tmp_path):
     assert str(configs / "redis/execution-redis.conf") in recovery.read_text()
     rollback_line = _full_stack_up_lines(log)[-1]
     assert str(recovery) in rollback_line
+    # 回滚后的真实冒烟必须检查保存的旧编排，不能重新读取已退役的新编排。
+    rollback_checks = log[log.index(rollback_line):].splitlines()
+    smoke_execs = [line for line in rollback_checks if " exec -T " in line]
+    assert smoke_execs
+    assert all(str(recovery) in line for line in smoke_execs)
     assert "docker volume rm" not in log
 
 
