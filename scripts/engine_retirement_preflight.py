@@ -73,8 +73,9 @@ def database_environment(app: Path) -> dict[str, str]:
 
 
 def database_snapshot(env: dict[str, str]) -> dict[str, int]:
+    # psql -c 多语句只回报最后一条；单 SELECT 的各子查询共享同一语句快照。
+    # 会话只读由 database_environment 的 PGOPTIONS 强制，不在此追加 COMMIT。
     statement = """
-BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
 SELECT json_build_object(
   'activeV2Runs',(SELECT count(*) FROM "WorkflowRun" WHERE "engineVersion"=2
     AND status::text NOT IN ('completed','failed','cancelled')),
@@ -82,7 +83,6 @@ SELECT json_build_object(
     WHERE r."engineVersion"=2 AND s.status::text NOT IN ('completed','failed','skipped')),
   'unsettledReservations',(SELECT count(*) FROM "WorkflowBillingReservation"
     WHERE status::text NOT IN ('settled','released')));
-COMMIT;
 """
     output = run(
         [

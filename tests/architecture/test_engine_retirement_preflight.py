@@ -97,7 +97,8 @@ def test_pending_billing_is_reported_without_fabricated_settlement(monkeypatch):
 
     monkeypatch.setattr(probe, "run", run)
     assert probe.database_snapshot({})["unsettledReservations"] == 9
-    assert "READ ONLY" in seen[0][-1]
+    assert "BEGIN" not in seen[0][-1]
+    assert "COMMIT" not in seen[0][-1]
     assert "UPDATE" not in seen[0][-1]
 
 
@@ -212,3 +213,122 @@ def test_command_timeout_has_bounded_safe_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="超时") as failure:
         probe.run(["pg_dump", "--format=custom"])
     assert "credential-test" not in str(failure.value)
+
+
+def test_real_postgres14_psql_returns_single_snapshot_without_mutations(tmp_path):
+    """真实 psql 14 的 -c 输出规则，不能由假 subprocess 的 JSON 响应代证。"""
+    import os
+    import shutil
+    import subprocess
+    import time
+    import uuid
+
+    docker_executable = shutil.which("docker")
+    if docker_executable is None:
+        pytest.skip("真实 PostgreSQL 回归需要 Docker")
+    image = "pgvector/pgvector:0.8.0-pg14"
+    available = subprocess.run(  # noqa: S603 - 本地固定镜像只读检查，不自动下载。
+        [docker_executable, "image", "inspect", image], capture_output=True, timeout=15, check=False
+    )
+    if available.returncode:
+        pytest.skip("本机没有隔离 PostgreSQL 14 测试镜像")
+    container = "inkforge-retirement-pg14-" + uuid.uuid4().hex
+
+    def docker(*arguments, stdin=None):
+        result = subprocess.run(  # noqa: S603 - 固定 Docker 程序和随机隔离容器身份。
+            [docker_executable, *arguments],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    try:
+        docker(
+            "run",
+            "--detach",
+            "--rm",
+            "--network",
+            "none",
+            "--name",
+            container,
+            "--env",
+            "POSTGRES_HOST_AUTH_METHOD=trust",
+            "--env",
+            "POSTGRES_DB=novelwriter",
+            image,
+        )
+        for _ in range(60):
+            ready = subprocess.run(  # noqa: S603 - 隔离 PostgreSQL 就绪检查。
+                [
+                    docker_executable,
+                    "exec",
+                    container,
+                    "pg_isready",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                ],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            if ready.returncode == 0:
+                break
+            time.sleep(0.1)
+        else:
+            pytest.fail("隔离 PostgreSQL 未就绪")
+        version = docker("exec", container, "psql", "--version")
+        assert " 14." in version
+        docker(
+            "exec",
+            "-i",
+            container,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            "novelwriter",
+            "-v",
+            "ON_ERROR_STOP=1",
+            stdin="""
+CREATE TABLE "WorkflowRun" (id text PRIMARY KEY, "engineVersion" int, status text);
+CREATE TABLE "WorkflowStep" ("runId" text, status text);
+CREATE TABLE "WorkflowBillingReservation" (status text);
+INSERT INTO "WorkflowRun" VALUES ('done',2,'completed'),('ordinary',1,'running');
+INSERT INTO "WorkflowStep" VALUES ('done','completed'),('ordinary','running');
+INSERT INTO "WorkflowBillingReservation" VALUES ('pending'),('settled'),('released');
+""",
+        )
+        binary = tmp_path / "bin"
+        binary.mkdir()
+        wrapper = binary / "psql"
+        wrapper.write_text(
+            "#!/bin/sh\nexec docker exec -i --env PGOPTIONS --env PGDATABASE "
+            "--env PGUSER --env PGHOST=127.0.0.1 --env PGPORT=5432 " + container + ' psql "$@"\n'
+        )
+        wrapper.chmod(0o755)
+        env = {
+            **os.environ,
+            "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+            "PGUSER": "postgres",
+            "PGDATABASE": "novelwriter",
+            "PGOPTIONS": "-c default_transaction_read_only=on -c statement_timeout=30000",
+        }
+        result = probe.database_snapshot(env)
+        assert result == facts(unsettledReservations=1)
+        assert probe.run(["psql", "-Atc", "SHOW default_transaction_read_only"], env=env) == "on"
+        with pytest.raises(RuntimeError):
+            probe.run(["psql", "-v", "ON_ERROR_STOP=1", "-c", 'DELETE FROM "WorkflowRun"'], env=env)
+        assert probe.database_snapshot(env) == result
+    finally:
+        subprocess.run(  # noqa: S603 - 只删除本测试随机容器；没有卷或生产对象。
+            [docker_executable, "rm", "--force", container],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
