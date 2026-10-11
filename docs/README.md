@@ -37,7 +37,8 @@
 | `specs/2026-09-04-java-cli-operator-cutover.md` | macOS 两份 Operator Skill 的 Java CLI 实际入口、配置升级与验证 |
 | `specs/2026-09-04-durable-natural-language-entry.md` | 普通新消息、同 Run 澄清、草案返工的持久化与 Web/CLI 分流 |
 | `../tools/inkforge-cli-java/README.md` | Java CLI 构建、Windows／macOS Skill 安装入口与受限授权 |
-| `ENGINE_RETIREMENT_ROLLOUT.md` | 当前 V1 单引擎发布、排空备份、健康验证和编排回滚 |
+| [生产代码回滚](specs/2026-10-11-production-code-rollback.md) | 当前生产恢复 `25c2e099`，仓内实现保留；结果见[审计](audits/2026-10-11-production-code-rollback.md) |
+| `ENGINE_RETIREMENT_ROLLOUT.md` | 仓内 V1 单引擎的发布、排空备份、健康验证和编排回滚；现网版本以回滚审计为准 |
 | `DURABLE_AGENT_V2_ROLLOUT.md` | 已退役引擎的历史迁移记录，仅供结构与账务追溯 |
 | `JAVA_CORE_CUTOVER.md` | Java Core 单服务发布、验证和 V2 兼容 Java 回退手册 |
 | `architecture-decisions/001-004` | Java 技术栈、契约优先、单 Core 切换与 Python 退役决策 |
