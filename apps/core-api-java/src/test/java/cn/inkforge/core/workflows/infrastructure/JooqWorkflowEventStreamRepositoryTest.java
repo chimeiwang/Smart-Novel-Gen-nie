@@ -14,7 +14,7 @@ import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository.Even
 import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository.RunKey;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
-import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.protocol.WorkflowEventPayloadCodec;
@@ -63,8 +63,8 @@ class JooqWorkflowEventStreamRepositoryTest {
     private static jakarta.validation.ValidatorFactory validators;
     private static JooqWorkflowEventStreamRepository repository;
     private static JooqWorkflowStartRepository starts;
-    private static HistoricalRegistryFixture registry;
-    private static HistoricalRegistryFixture.ResolvedOperation operation;
+    private static ExecutionRegistry registry;
+    private static ExecutionRegistry.ResolvedOperation operation;
 
     @BeforeAll
     static void rebuildSchema() throws Exception {
@@ -86,7 +86,7 @@ class JooqWorkflowEventStreamRepositoryTest {
                 json);
         starts = new JooqWorkflowStartRepository(
                 database, new CuidV1Generator(CLOCK), CLOCK, json);
-        registry = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
+        registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
         operation = registry.resolve("long_serial.rewrite_chapter_selection", false);
     }
 
@@ -146,7 +146,7 @@ class JooqWorkflowEventStreamRepositoryTest {
     void Snapshot从当前Fence的持久Progress恢复真实阶段且忽略旧Fence() {
         Fixture fixture = fixture("sse-progress-snapshot");
         var started = starts.start(plan(fixture));
-        HistoricalRegistryFixture.Profile profile = operation.generatorProfile();
+        ExecutionRegistry.Profile profile = operation.generatorProfile();
         Map<String, Object> logical = modelProfile(profile);
         Map<String, Object> resolved = resolvedModel(profile);
         database.transactionResult(transaction -> {
@@ -480,7 +480,7 @@ class JooqWorkflowEventStreamRepositoryTest {
     }
 
     private static String queuedPayload() {
-        HistoricalRegistryFixture.Profile profile =
+        ExecutionRegistry.Profile profile =
                 operation.reviewers().getFirst().profile();
         Map<String, Object> modelProfile = modelProfile(profile);
         return json.writeValueAsString(Map.of(
@@ -494,7 +494,7 @@ class JooqWorkflowEventStreamRepositoryTest {
                 "reason", "review"));
     }
 
-    private static Map<String, Object> modelProfile(HistoricalRegistryFixture.Profile profile) {
+    private static Map<String, Object> modelProfile(ExecutionRegistry.Profile profile) {
         return Map.of(
                 "profile", profile.key(),
                 "version", profile.version(),
@@ -506,7 +506,7 @@ class JooqWorkflowEventStreamRepositoryTest {
                         "sha256", profile.promptProfile().sha256()));
     }
 
-    private static Map<String, Object> resolvedModel(HistoricalRegistryFixture.Profile profile) {
+    private static Map<String, Object> resolvedModel(ExecutionRegistry.Profile profile) {
         String fingerprint = WorkflowResolvedModel.fingerprint(
                 profile.deploymentProfileKey(),
                 "openai_compatible",

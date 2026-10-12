@@ -2116,23 +2116,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/video/episodes/{episodeId}/tasks/{taskId}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 取消剧集任务 */
-        post: operations["cancelVideoEpisodeTask"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/video/novels/{novel_id}/projects": {
         parameters: {
             query?: never;
@@ -2347,6 +2330,23 @@ export interface paths {
         put?: never;
         /** Cancel Writing Run */
         post: operations["cancel_writing_run_api_v1_writing_runs__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/writing/runs/{task_id}/clarification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clarify Writing Run */
+        post: operations["clarify_writing_run_api_v1_writing_runs__task_id__clarification_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2958,6 +2958,17 @@ export interface components {
         };
         /** @enum {string} */
         CharacterStatus: "active" | "missing" | "dead" | "imprisoned" | "unknown";
+        /** ClarifyWritingRunRequest */
+        ClarifyWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Decisionstepid */
+            decisionStepId: string;
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Usermessage */
+            userMessage: string;
+        };
         /**
          * ConfirmVideoAssetRequest
          * @description 用户确认素材权利并锁定，受限或拒绝素材不能锁定。
@@ -6549,7 +6560,6 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
-            revision: number;
         };
         /** VideoEpisodeScriptScene */
         VideoEpisodeScriptScene: {
@@ -8428,10 +8438,6 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
-        };
-        VideoEpisodeTaskCancelRequest: {
-            clientRequestId: string;
-            expectedRevision: number;
         };
     };
     responses: never;
@@ -26618,125 +26624,6 @@ export interface operations {
             };
         };
     };
-    cancelVideoEpisodeTask: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                episodeId: string;
-                taskId: string;
-            };
-            cookie?: {
-                "inkforge-token"?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["VideoEpisodeTaskCancelRequest"];
-            };
-        };
-        responses: {
-            /** @description 成功响应 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoEpisodeScriptRunResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 统一错误响应 */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     list_projects_api_v1_video_novels__novel_id__projects_get: {
         parameters: {
             query?: never;
@@ -28502,6 +28389,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancelWritingRunPublicResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    clarify_writing_run_api_v1_writing_runs__task_id__clarification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClarifyWritingRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingRunV2Response"];
                 };
             };
             /** @description 统一错误响应 */

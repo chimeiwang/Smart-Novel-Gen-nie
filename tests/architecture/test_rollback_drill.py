@@ -214,7 +214,7 @@ def test_rollback_restores_current_stack_when_verification_fails() -> None:
     assert "verify-running-core-schema.sh" in source
     assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in source
     assert "--compatibility-fingerprint-v1" not in source
-    assert "verify-retired-engine-image.sh" in source
+    assert "cn.inkforge.durable-route-all" in source
     assert "compose_python" not in source
     assert "COMPOSE_ADDITIONAL_OVERRIDE_FILE" in source
     assert "--no-build" in source

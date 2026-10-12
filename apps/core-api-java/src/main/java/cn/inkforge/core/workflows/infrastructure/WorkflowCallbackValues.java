@@ -108,6 +108,21 @@ final class WorkflowCallbackValues {
                 prompt.getSha256());
     }
 
+    static Map<String, Object> modelProfileMap(
+            cn.inkforge.contracts.agent.ModelProfileRef value) {
+        Objects.requireNonNull(value, "modelProfile 不能为空");
+        var prompt = Objects.requireNonNull(
+                value.getPromptProfile(), "modelProfile.promptProfile 不能为空");
+        return modelProfileMap(
+                value.getProfile(),
+                value.getVersion(),
+                value.getReasoningMode().getValue(),
+                value.getDeploymentProfileKey(),
+                prompt.getName(),
+                prompt.getVersion(),
+                prompt.getSha256());
+    }
+
     private static Map<String, Object> modelProfileMap(
             String profile,
             Integer version,

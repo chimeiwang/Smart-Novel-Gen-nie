@@ -6,7 +6,7 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.video.application.VideoEpisodeStoryboardCandidateRepository;
-import cn.inkforge.core.video.application.VideoEpisodeStoryboardCompletion;
+import cn.inkforge.core.workflows.application.WorkflowVideoEpisodeStoryboardCompletion;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -27,14 +27,14 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * 分镜候选与工作稿 CAS。
+ * 分镜 V2 候选与工作稿 CAS。
  *
  * <p>Workflow 完成只插入 awaiting_user Artifact；采用命令才分配临时镜头身份并更新工作稿，正式分镜和
  * 制作基线始终由后续独立作者命令创建。
  */
 final class JooqVideoEpisodeStoryboardCandidateRepository
         implements VideoEpisodeStoryboardCandidateRepository,
-                VideoEpisodeStoryboardCompletion {
+                WorkflowVideoEpisodeStoryboardCompletion {
     private static final Set<String> OPERATIONS =
             Set.of("episode_storyboard_generate", "episode_storyboard_revise");
     private static final Set<String> FRAMINGS = Set.of(
@@ -65,7 +65,7 @@ final class JooqVideoEpisodeStoryboardCandidateRepository
                           ON episode.id=run."targetId" AND episode."novelId"=run."novelId"
                         JOIN public."Novel" novel
                           ON novel.id=episode."novelId" AND novel."userId"=run."userId"
-                        WHERE run.id=? AND run."engineVersion" IN (1,2) AND run.workflow='video'
+                        WHERE run.id=? AND run."engineVersion"=2 AND run.workflow='video'
                           AND run.operation IN ('episode_storyboard_generate','episode_storyboard_revise')
                           AND run."sourceType"='video_episode_storyboard'
                           AND run."targetType"='video_episode_storyboard'
@@ -188,7 +188,7 @@ final class JooqVideoEpisodeStoryboardCandidateRepository
                 json);
 
         return database.transactionResult(tx -> {
-            // 锁序与其他视频命令一致：共用幂等锁、视频命令锁、Novel/Project/Episode、Artifact、Draft。
+            // 锁序与其他 V2/视频命令一致：共用幂等锁、视频命令锁、Novel/Project/Episode、Artifact、Draft。
             tx.fetchOne(
                     "SELECT pg_advisory_xact_lock(?)",
                     CommandIdempotency.advisoryLockKey(userId, clientRequestId));

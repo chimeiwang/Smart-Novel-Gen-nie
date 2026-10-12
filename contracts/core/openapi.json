@@ -14973,10 +14973,6 @@
             "format": "date-time",
             "title": "Updatedat",
             "type": "string"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1
           }
         },
         "required": [
@@ -14987,8 +14983,7 @@
           "errorCode",
           "errorMessage",
           "createdAt",
-          "updatedAt",
-          "revision"
+          "updatedAt"
         ],
         "title": "VideoEpisodeScriptRunResponse",
         "type": "object"
@@ -20475,95 +20470,6 @@
         ],
         "title": "WritingTaskSummary",
         "type": "object"
-      },
-      "VideoEpisodeTaskCompleteRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "result": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "required": [
-          "result"
-        ]
-      },
-      "VideoEpisodeTaskFailureRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "errorCode": {
-            "type": "string"
-          },
-          "errorMessage": {
-            "type": "string"
-          },
-          "cancelled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "errorCode",
-          "errorMessage",
-          "cancelled"
-        ]
-      },
-      "VideoEpisodeTaskCheckpointRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "checkpoint": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "required": [
-          "checkpoint"
-        ]
-      },
-      "VideoEpisodeTaskProgressResponse": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "running",
-              "completed",
-              "failed",
-              "cancelled"
-            ]
-          },
-          "checkpoint": {
-            "type": "object",
-            "additionalProperties": true,
-            "nullable": true
-          }
-        },
-        "required": [
-          "status",
-          "checkpoint"
-        ]
-      },
-      "VideoEpisodeTaskCancelRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "clientRequestId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "expectedRevision": {
-            "type": "integer",
-            "minimum": 1
-          }
-        },
-        "required": [
-          "clientRequestId",
-          "expectedRevision"
-        ]
       }
     }
   },
@@ -48504,6 +48410,170 @@
         "x-inkforge-status-code": 202
       }
     },
+    "/api/v1/writing/runs/{task_id}/clarification": {
+      "post": {
+        "operationId": "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "inkforge-token",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Inkforge-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClarifyWritingRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WritingRunV2Response"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Clarify Writing Run",
+        "tags": [
+          "writing"
+        ],
+        "x-inkforge-exposure": "public",
+        "x-inkforge-authentication": "browser_cookie",
+        "x-inkforge-product-module": "writing",
+        "x-inkforge-response-kind": "json",
+        "x-inkforge-transaction": "write",
+        "x-inkforge-side-effects": [
+          "background_dispatch_or_reconciliation",
+          "postgresql_transaction",
+          "redis_event_or_queue"
+        ],
+        "x-inkforge-mutation": true,
+        "x-inkforge-status-code": 202
+      }
+    },
     "/api/v1/writing/runs/{task_id}/events": {
       "get": {
         "operationId": "stream_writing_run_events_api_v1_writing_runs__task_id__events_get",
@@ -52570,6 +52640,489 @@
         "x-inkforge-status-code": null
       }
     },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure": {
+      "put": {
+        "operationId": "report_execution_failure_internal_v1_workflow_runs__run_id__steps__step_id__failure_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepFailure"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCallbackReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Report Execution Failure",
+        "tags": [
+          "workflows"
+        ],
+        "x-inkforge-exposure": "internal",
+        "x-inkforge-authentication": "direct_peer_and_ed25519",
+        "x-inkforge-product-module": "workflows",
+        "x-inkforge-response-kind": "json",
+        "x-inkforge-transaction": "write",
+        "x-inkforge-side-effects": [
+          "postgresql_transaction"
+        ],
+        "x-inkforge-mutation": true,
+        "x-inkforge-status-code": null
+      }
+    },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress": {
+      "put": {
+        "operationId": "report_execution_progress_internal_v1_workflow_runs__run_id__steps__step_id__progress_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepProgress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCallbackReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Report Execution Progress",
+        "tags": [
+          "workflows"
+        ],
+        "x-inkforge-exposure": "internal",
+        "x-inkforge-authentication": "direct_peer_and_ed25519",
+        "x-inkforge-product-module": "workflows",
+        "x-inkforge-response-kind": "json",
+        "x-inkforge-transaction": "write",
+        "x-inkforge-side-effects": [
+          "postgresql_transaction"
+        ],
+        "x-inkforge-mutation": true,
+        "x-inkforge-status-code": null
+      }
+    },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result": {
+      "put": {
+        "operationId": "report_execution_result_internal_v1_workflow_runs__run_id__steps__step_id__result_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCallbackReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Report Execution Result",
+        "tags": [
+          "workflows"
+        ],
+        "x-inkforge-exposure": "internal",
+        "x-inkforge-authentication": "direct_peer_and_ed25519",
+        "x-inkforge-product-module": "workflows",
+        "x-inkforge-response-kind": "json",
+        "x-inkforge-transaction": "write",
+        "x-inkforge-side-effects": [
+          "postgresql_transaction"
+        ],
+        "x-inkforge-mutation": true,
+        "x-inkforge-status-code": null
+      }
+    },
     "/internal/v1/writing/runs/{run_id}/checkpoint": {
       "put": {
         "operationId": "save_checkpoint_internal_v1_writing_runs__run_id__checkpoint_put",
@@ -53184,809 +53737,6 @@
         ],
         "x-inkforge-mutation": true,
         "x-inkforge-status-code": null
-      }
-    },
-    "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/complete": {
-      "post": {
-        "operationId": "completeVideoEpisodeTask",
-        "summary": "完成剧集任务",
-        "tags": [
-          "video-episode-tasks"
-        ],
-        "parameters": [
-          {
-            "in": "path",
-            "name": "userId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "novelId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "taskId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "204": {
-            "description": "成功响应"
-          }
-        },
-        "x-inkforge-exposure": "internal",
-        "x-inkforge-authentication": "direct_peer_and_ed25519",
-        "x-inkforge-product-module": "video",
-        "x-inkforge-response-kind": "empty",
-        "x-inkforge-transaction": "write",
-        "x-inkforge-side-effects": [
-          "postgresql_transaction"
-        ],
-        "x-inkforge-mutation": true,
-        "x-inkforge-status-code": 204,
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VideoEpisodeTaskCompleteRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/fail": {
-      "post": {
-        "operationId": "failVideoEpisodeTask",
-        "summary": "记录剧集任务失败",
-        "tags": [
-          "video-episode-tasks"
-        ],
-        "parameters": [
-          {
-            "in": "path",
-            "name": "userId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "novelId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "taskId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "204": {
-            "description": "成功响应"
-          }
-        },
-        "x-inkforge-exposure": "internal",
-        "x-inkforge-authentication": "direct_peer_and_ed25519",
-        "x-inkforge-product-module": "video",
-        "x-inkforge-response-kind": "empty",
-        "x-inkforge-transaction": "write",
-        "x-inkforge-side-effects": [
-          "postgresql_transaction"
-        ],
-        "x-inkforge-mutation": true,
-        "x-inkforge-status-code": 204,
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VideoEpisodeTaskFailureRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/progress": {
-      "get": {
-        "operationId": "getVideoEpisodeTaskProgress",
-        "summary": "读取剧集任务进度",
-        "tags": [
-          "video-episode-tasks"
-        ],
-        "parameters": [
-          {
-            "in": "path",
-            "name": "userId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "novelId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "taskId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "200": {
-            "description": "成功响应",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VideoEpisodeTaskProgressResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-inkforge-exposure": "internal",
-        "x-inkforge-authentication": "direct_peer_and_ed25519",
-        "x-inkforge-product-module": "video",
-        "x-inkforge-response-kind": "json",
-        "x-inkforge-transaction": "read_only",
-        "x-inkforge-side-effects": [],
-        "x-inkforge-mutation": false,
-        "x-inkforge-status-code": 200
-      }
-    },
-    "/internal/v1/users/{userId}/novels/{novelId}/video/episode-tasks/{taskId}/checkpoint": {
-      "post": {
-        "operationId": "saveVideoEpisodeTaskCheckpoint",
-        "summary": "保存剧集任务检查点",
-        "tags": [
-          "video-episode-tasks"
-        ],
-        "parameters": [
-          {
-            "in": "path",
-            "name": "userId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "novelId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "taskId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "204": {
-            "description": "成功响应"
-          }
-        },
-        "x-inkforge-exposure": "internal",
-        "x-inkforge-authentication": "direct_peer_and_ed25519",
-        "x-inkforge-product-module": "video",
-        "x-inkforge-response-kind": "empty",
-        "x-inkforge-transaction": "write",
-        "x-inkforge-side-effects": [
-          "postgresql_transaction"
-        ],
-        "x-inkforge-mutation": true,
-        "x-inkforge-status-code": 204,
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VideoEpisodeTaskCheckpointRequest"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/video/episodes/{episodeId}/tasks/{taskId}/cancel": {
-      "post": {
-        "operationId": "cancelVideoEpisodeTask",
-        "summary": "取消剧集任务",
-        "tags": [
-          "video-episode-tasks"
-        ],
-        "parameters": [
-          {
-            "in": "path",
-            "name": "episodeId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "taskId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "inkforge-token",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "nullable": true
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "统一错误响应"
-          },
-          "200": {
-            "description": "成功响应",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VideoEpisodeScriptRunResponse"
-                }
-              }
-            }
-          }
-        },
-        "x-inkforge-exposure": "public",
-        "x-inkforge-authentication": "browser_cookie",
-        "x-inkforge-product-module": "video",
-        "x-inkforge-response-kind": "json",
-        "x-inkforge-transaction": "write",
-        "x-inkforge-side-effects": [
-          "postgresql_transaction"
-        ],
-        "x-inkforge-mutation": true,
-        "x-inkforge-status-code": 200,
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VideoEpisodeTaskCancelRequest"
-              }
-            }
-          }
-        }
       }
     }
   },

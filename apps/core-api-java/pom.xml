@@ -121,7 +121,13 @@
       <resource>
         <directory>src/main/resources</directory>
       </resource>
-
+      <resource>
+        <directory>../../contracts/agent-execution</directory>
+        <includes>
+          <include>*.json</include>
+        </includes>
+        <targetPath>agent-execution</targetPath>
+      </resource>
     </resources>
     <plugins>
       <plugin>

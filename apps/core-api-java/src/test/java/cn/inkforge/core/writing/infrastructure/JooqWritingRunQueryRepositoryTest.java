@@ -21,7 +21,7 @@ import cn.inkforge.core.writing.domain.WritingRunCursor;
 import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
-import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.domain.ShortMediumSegments;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
@@ -51,8 +51,8 @@ class JooqWritingRunQueryRepositoryTest {
     private static final Clock CLOCK =
             Clock.fixed(Instant.parse("2026-08-25T07:00:00Z"), ZoneOffset.UTC);
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final HistoricalRegistryFixture EXECUTION_REGISTRY =
-            HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
+    private static final ExecutionRegistry EXECUTION_REGISTRY =
+            ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
     private static final ExecutionPlanSnapshot EXECUTION_PLAN =
             EXECUTION_REGISTRY.freezePlan(
                     "long_serial.rewrite_chapter_selection", false);
@@ -917,7 +917,7 @@ class JooqWritingRunQueryRepositoryTest {
     }
 
     private static ExecutionPlanSnapshot shortPlan(String operation) {
-        return HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST)
+        return ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST)
                 .freezePlan("short_medium." + operation, false);
     }
 

@@ -7,7 +7,7 @@ import cn.inkforge.core.workflows.application.WorkflowEvidenceItemPlan;
 import cn.inkforge.core.workflows.application.WorkflowInitialStepPlan;
 import cn.inkforge.core.workflows.application.WorkflowRunStartResult;
 import cn.inkforge.core.workflows.application.WorkflowStartPlan;
-import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.IntentExecutionPlanSnapshot;
 import cn.inkforge.core.workflows.catalog.WorkflowIntentSelection;
 import cn.inkforge.core.workflows.protocol.ExecutionCanonicalJson;
@@ -22,8 +22,8 @@ public final class IntentSelectedRunTestFixture {
     private IntentSelectedRunTestFixture() {}
 
     public static WorkflowRunStartResult start(CoreDatabase database, CuidV1Generator ids, Clock clock,
-            ObjectMapper json, HistoricalRegistryFixture registry, WorkflowStartPlan business) {
-        var intent = HistoricalRegistryFixture.freezeIntent(registry,
+            ObjectMapper json, ExecutionRegistry registry, WorkflowStartPlan business) {
+        var intent = IntentExecutionPlanSnapshot.freeze(registry,
                 List.of("long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter"));
         var resolver = registry.resolveSystemPurpose("resolve_intent");
         var starts = new JooqWorkflowStartRepository(database, ids, clock, json);

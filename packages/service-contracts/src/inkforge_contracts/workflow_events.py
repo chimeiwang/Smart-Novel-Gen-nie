@@ -16,8 +16,7 @@ from pydantic import (
     model_validator,
 )
 
-from .content import count_chapter_text_length
-from .execution import ModelProfileRef, ResolvedModelRef
+from .execution import ModelProfileRef, ResolvedModelRef, count_chapter_text_length
 
 WORKFLOW_EVENT_PROTOCOL_VERSION = "2.0"
 

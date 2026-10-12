@@ -6,8 +6,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .content import ResourceId as ExecutionId
-from .content import Sha256
+from .execution import ExecutionId, Sha256
 
 IndexGeneration = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")]
 

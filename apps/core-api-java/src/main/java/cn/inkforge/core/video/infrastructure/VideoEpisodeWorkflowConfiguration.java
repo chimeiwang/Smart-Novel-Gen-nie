@@ -8,6 +8,8 @@ import cn.inkforge.core.video.application.VideoEpisodeScriptRunStore;
 import cn.inkforge.core.video.application.VideoEpisodeStoryboardRunService;
 import cn.inkforge.core.video.application.VideoEpisodeStoryboardRunStore;
 import cn.inkforge.core.video.application.VideoEpisodeStoryboardCandidateService;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -15,28 +17,21 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
-/** 独立剧集普通队列任务装配；没有数据库时不会影响最小健康上下文。 */
+/** 独立剧集 V2 启动装配；没有数据库时不会影响最小健康上下文。 */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "DATABASE_URL")
 class VideoEpisodeWorkflowConfiguration {
-
-    @Bean
-    VideoEpisodeTaskCoordinator videoEpisodeTaskCoordinator(CoreDatabase database, CuidV1Generator ids,
-            ObjectMapper json, CoreSettings settings,
-            ObjectProvider<cn.inkforge.core.video.application.VideoEpisodeTaskSubmitter> submitters,
-            JooqVideoEpisodeRepository scripts, JooqVideoEpisodeStoryboardCandidateRepository storyboards) {
-        return new VideoEpisodeTaskCoordinator(database,ids,json,settings,submitters::getIfAvailable,scripts,storyboards);
-    }
 
     @Bean
     VideoEpisodeScriptRunStore videoEpisodeScriptRunStore(
             CoreDatabase database,
             CuidV1Generator ids,
             CoreSettings settings,
-            VideoEpisodeTaskCoordinator tasks,
+            ExecutionRegistry registry,
+            ObjectProvider<DurableWorkflowService> workflows,
             ObjectMapper json) {
         return new JooqVideoEpisodeScriptRunStore(
-                database, ids, settings, tasks, json);
+                database, ids, settings, registry, workflows::getIfAvailable, json);
     }
 
     @Bean
@@ -50,10 +45,11 @@ class VideoEpisodeWorkflowConfiguration {
             CoreDatabase database,
             CuidV1Generator ids,
             CoreSettings settings,
-            VideoEpisodeTaskCoordinator tasks,
+            ExecutionRegistry registry,
+            ObjectProvider<DurableWorkflowService> workflows,
             ObjectMapper json) {
         return new JooqVideoEpisodeStoryboardRunStore(
-                database, ids, settings, tasks, json);
+                database, ids, settings, registry, workflows::getIfAvailable, json);
     }
 
     @Bean

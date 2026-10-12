@@ -14,18 +14,14 @@ from pydantic import (
     model_validator,
 )
 
-from .content import (
-    ResourceId as ExecutionId,
-)
-from .content import (
+from .execution import (
+    EvidenceExpansionRequest,
+    ExecutionId,
     Sha256,
     StrictPositiveInt,
+    canonical_execution_sha256,
     count_chapter_text_length,
 )
-from .content import (
-    canonical_content_sha256 as canonical_execution_sha256,
-)
-from .execution import EvidenceExpansionRequest
 
 CharacterStatus = Literal["active", "missing", "dead", "imprisoned", "unknown"]
 OutlineKind = Literal["stage", "plot_unit", "chapter_group"]

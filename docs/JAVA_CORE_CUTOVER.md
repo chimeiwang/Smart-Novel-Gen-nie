@@ -1,8 +1,7 @@
 # Java Core 发布与兼容回退手册
 
 当前 Core 与 CLI 只保留 Java。首次 Python→Java 切换已成为历史；Python Core 镜像没有现正式库回滚资格。
-正式数据库保留历史运行事实；应用回退必须保留来源与账务读取，永久禁止 DDL rollback。
-当前执行引擎已退役，首次切换还须遵循[退役发布手册](ENGINE_RETIREMENT_ROLLOUT.md)。
+正式数据库已有 Durable Agent V2 事实，应用回退必须保留 V2 查询与收敛能力，永久禁止 DDL rollback。
 普通代码修改不自动授权生产发布。
 
 ## 前置门禁
@@ -11,7 +10,7 @@
 - `npm run api:check` 证明 canonical、公共投影和生成客户端无漂移；
 - 三服务使用同一次已验证发布的镜像组合，Core 标签 `cn.inkforge.core.runtime=java`；
 - 镜像在生产资源限额、只读根文件系统、JVM 上限下通过 readiness、schema guard 和 OOM 检查；
-- 核对 HISTORICAL_WORKFLOW_SCHEMA_READY、V1 fresh 和退役排空／备份证据，生产视频继续关闭；
+- 核对 V2 schemaReady／route／V1 fresh 配置、execution Redis 和恢复证据，生产视频继续关闭；
 - 当前实际运行的 Web、Core、Agent 不可变镜像 ID 可回查；应用回退不恢复数据库备份、不执行迁移；
 - 环境与服务密钥权限满足部署门禁，发布时没有正在处理的写作／媒体任务。
 
@@ -21,7 +20,7 @@
 三服务精确镜像组合为 `rollback-<提交>`。缺少服务、镜像身份异常、既有标签冲突或当前 Core 非 Java 时，
 在业务迁移与容器切换前拒绝继续；不得拼接任意历史版本成为回退基线。
 
-脚本只读核对 TokenUsage 与历史结构状态，再以 `--no-build` 原位替换同名服务；普通部署不执行 DDL。
+脚本按既有门禁处理具名 TokenUsage 迁移，再以 `--no-build` 原位替换同名服务。普通部署不会执行 Durable V2 DDL。
 结构守卫使用：
 
 ```bash
@@ -34,7 +33,7 @@ scripts/verify-running-core-schema.sh <完整Core容器ID>
 
 ## 本地隔离回退演练
 
-仅使用 `infra/compose.test.yaml` 和独立测试 PostgreSQL。当前及回退 Core 都必须是支持历史数据的新 Java
+仅使用 `infra/compose.test.yaml` 和独立测试 PostgreSQL。当前及回退 Core 都必须是支持现有 V2 数据的 Java
 镜像。演练比较完整 schema 指纹，最终恢复并验证当前 Java 组合。
 
 ```bash
@@ -54,7 +53,7 @@ scripts/rollback_drill.sh
 `scripts/export_schema_contract.sh --output <新证据文件>`；数据库 URL 从环境或 stdin 读取，不进入命令参数，
 已有证据默认禁止覆盖。导出不修改数据库，也不自动替换提交的契约。
 
-`ALLOW_RECOVERY_DRILL=yes scripts/recovery_drill.sh` 执行现有 V1 队列和检查点隔离恢复回归；
+`ALLOW_RECOVERY_DRILL=yes scripts/recovery_drill.sh` 转入现有 V2 隔离 Compose 最小故障恢复测试；
 它不接受生产 TASK_ID，不删除生产队列键，不再执行 V1 Python Core 维护脚本。
 
 ## 发布后观察

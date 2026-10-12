@@ -75,7 +75,7 @@ public final class WorkflowExecutionContext {
         return initialIntentPlan == null ? requireBusinessPlan().stored() : initialIntentPlan.stored();
     }
 
-    public HistoricalExecutionTypes.RunBudget outerRunBudget() {
+    public ExecutionRegistry.RunBudget outerRunBudget() {
         return initialIntentPlan == null ? requireBusinessPlan().runBudget() : initialIntentPlan.runBudget();
     }
 

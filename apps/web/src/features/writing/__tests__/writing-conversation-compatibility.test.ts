@@ -14,12 +14,3 @@ test("流程日志保留完整用户输入", () => {
   assert.match(source, /content: `用户: \$\{userMessage\}`/);
   assert.doesNotMatch(source, /用户: \$\{userMessage\.slice\(0, 50\)/);
 });
-
-
-test("前台展示现有 Agent 流程并屏蔽历史执行器内部状态", () => {
-  assert.match(source, /liveAgentRuns\.map\(\(run\)\s*=>/);
-  assert.match(source, /openWritingRunEvents/);
-  assert.match(source, /case "run_outcome"/);
-  assert.doesNotMatch(source, /workflowRun\.activeSteps|createWorkflowRunUiState/);
-  assert.doesNotMatch(source, /deploymentFingerprint|deploymentProfileKey|endpointProfile/);
-});

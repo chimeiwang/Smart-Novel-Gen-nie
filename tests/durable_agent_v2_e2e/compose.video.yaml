@@ -1,0 +1,13 @@
+# 仅隔离 video phase；Seedance、渲染与其他真实供应商保持关闭。
+services:
+  core-api:
+    environment:
+      VIDEO_PREVIEW_ENABLED: "true"
+      VIDEO_DISPATCH_ENABLED: "true"
+      VIDEO_DISPATCH_NAMESPACE: e2e-video
+      SEEDANCE_CONFIGURED: "false"
+      SEEDANCE_ENABLED: "false"
+  agent-service:
+    environment:
+      E2E_VIDEO_RESPONSES_ENABLED: "true"
+      SEEDANCE_ENABLED: "false"

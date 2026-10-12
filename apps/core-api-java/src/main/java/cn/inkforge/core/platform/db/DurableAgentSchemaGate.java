@@ -3,11 +3,11 @@ package cn.inkforge.core.platform.db;
 import java.sql.Connection;
 
 /**
- * 历史执行数据结构的只读装配闸门。
+ * V2 数据库能力的装配闸门。
  *
  * <p>兼容镜像的普通 readiness 同时接受迁移前、迁移后两份完整契约，保证在线迁移期间旧实例不掉线；但
- * {@code HISTORICAL_WORKFLOW_SCHEMA_READY=true} 只能装配在精确迁移后结构上。这里在历史
- * 来源查询与账务对账仓储创建前做只读校验，避免错误配置把缺列异常推迟到首个请求或后台循环。
+ * {@code DURABLE_AGENT_EXECUTION_SCHEMA_READY=true} 只能装配在精确迁移后结构上。这里在任何 V2
+ * repository/worker 创建前做只读校验，避免错误配置把缺列异常推迟到首个请求或后台循环。
  */
 public final class DurableAgentSchemaGate {
 

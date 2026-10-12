@@ -8,7 +8,11 @@ import cn.inkforge.core.styles.application.PortraitTaskDispatcher;
 import cn.inkforge.core.styles.application.StyleFileStorage;
 import cn.inkforge.core.styles.application.StyleRepository;
 import cn.inkforge.core.styles.application.StyleService;
+import cn.inkforge.core.styles.application.StylePortraitExecutionReadiness;
 import cn.inkforge.core.styles.application.StylePortraitRunStarter;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.application.WorkflowStylePortraitCompletion;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
@@ -30,7 +34,7 @@ class StyleConfiguration {
     @Bean
     JooqStyleRepository styleRepository(
             CoreDatabase database, CuidV1Generator ids, Clock coreClock, CoreSettings settings, ObjectMapper json) {
-        return new JooqStyleRepository(database, ids, coreClock, settings.historicalWorkflowSchemaReady(), json);
+        return new JooqStyleRepository(database, ids, coreClock, settings.durableAgentExecutionSchemaReady(), json);
     }
 
     @Bean
@@ -44,8 +48,20 @@ class StyleConfiguration {
 
     @Bean
     StylePortraitRunStarter stylePortraitRunStarter(CoreDatabase database, JooqStyleRepository repository,
-            ObjectProvider<PortraitRunSubmitter> submitters, CoreSettings settings) {
-        return new JooqStylePortraitRunStarter(database, repository, submitters::getIfAvailable, settings);
+            StyleFileStorage storage, ObjectProvider<PortraitRunSubmitter> submitters,
+            ObjectProvider<DurableWorkflowService> workflows, ObjectProvider<StylePortraitExecutionReadiness> readiness,
+            ExecutionRegistry registry, CoreSettings settings, CuidV1Generator ids, Clock coreClock, ObjectMapper json) {
+        return new JooqStylePortraitRunStarter(database, repository, storage, submitters::getIfAvailable,
+                workflows::getIfAvailable, () -> {
+                    var configured = readiness.getIfAvailable();
+                    return configured != null && configured.check();
+                }, registry, settings, ids, coreClock, json);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY", havingValue = "true")
+    WorkflowStylePortraitCompletion workflowStylePortraitCompletion(CoreDatabase database, Clock coreClock, ObjectMapper json) {
+        return new JooqWorkflowStylePortraitCompletion(database, coreClock, json);
     }
 
     @Bean

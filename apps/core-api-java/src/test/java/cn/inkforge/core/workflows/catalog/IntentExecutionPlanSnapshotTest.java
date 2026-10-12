@@ -30,8 +30,8 @@ class IntentExecutionPlanSnapshotTest {
 
     @Test
     void 冻结真实解析器与三个完整旧版子计划并可严格重建() {
-        HistoricalRegistryFixture registry = registry();
-        IntentExecutionPlanSnapshot snapshot = HistoricalRegistryFixture.freezeIntent(registry, OPERATIONS);
+        ExecutionRegistry registry = registry();
+        IntentExecutionPlanSnapshot snapshot = IntentExecutionPlanSnapshot.freeze(registry, OPERATIONS);
 
         assertThat(snapshot.stored().get("planVersion")).isEqualTo("2");
         assertThat(snapshot.operationCatalogVersion()).isEqualTo(registry.catalogVersion());
@@ -69,10 +69,10 @@ class IntentExecutionPlanSnapshotTest {
 
     @Test
     void 新计划冻结五项而旧三项存储计划继续按原内容恢复() {
-        HistoricalRegistryFixture registry = registry();
-        IntentExecutionPlanSnapshot old = HistoricalRegistryFixture.freezeIntent(registry, OPERATIONS);
+        ExecutionRegistry registry = registry();
+        IntentExecutionPlanSnapshot old = IntentExecutionPlanSnapshot.freeze(registry, OPERATIONS);
         Map<String, Object> oldStored = copy(old.stored());
-        IntentExecutionPlanSnapshot current = HistoricalRegistryFixture.freezeIntent(registry, FIVE_OPERATIONS);
+        IntentExecutionPlanSnapshot current = IntentExecutionPlanSnapshot.freeze(registry, FIVE_OPERATIONS);
         assertThat(current.operationPlans()).extracting(plan -> plan.operation().key())
                 .containsExactlyElementsOf(FIVE_OPERATIONS);
         IntentExecutionPlanSnapshot restoredOld = IntentExecutionPlanSnapshot.fromStored(oldStored);
@@ -109,8 +109,8 @@ class IntentExecutionPlanSnapshotTest {
     @Test
     void 授权集合排序不影响哈希但未冻结的操作不能被选择() {
         IntentExecutionPlanSnapshot all = snapshot();
-        assertThat(HistoricalRegistryFixture.freezeIntent(registry(), OPERATIONS.reversed()).stored()).isEqualTo(all.stored());
-        IntentExecutionPlanSnapshot answerOnly = HistoricalRegistryFixture.freezeIntent(registry(), List.of(OPERATIONS.getFirst()));
+        assertThat(IntentExecutionPlanSnapshot.freeze(registry(), OPERATIONS.reversed()).stored()).isEqualTo(all.stored());
+        IntentExecutionPlanSnapshot answerOnly = IntentExecutionPlanSnapshot.freeze(registry(), List.of(OPERATIONS.getFirst()));
         assertThat(answerOnly.operationPlans()).hasSize(1);
         assertThatThrownBy(() -> answerOnly.requireOperationPlan("long_serial.write_chapter"))
                 .isInstanceOf(IllegalStateException.class);
@@ -120,13 +120,13 @@ class IntentExecutionPlanSnapshotTest {
 
     @Test
     void 空授权重复授权和越界操作均明确拒绝而不静默过滤() {
-        assertThatThrownBy(() -> HistoricalRegistryFixture.freezeIntent(registry(), List.of()))
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.freeze(registry(), List.of()))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> HistoricalRegistryFixture.freezeIntent(registry(), List.of(OPERATIONS.getFirst(), OPERATIONS.getFirst())))
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.freeze(registry(), List.of(OPERATIONS.getFirst(), OPERATIONS.getFirst())))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> HistoricalRegistryFixture.freezeIntent(registry(), List.of("long_serial.rewrite_chapter_selection")))
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.freeze(registry(), List.of("long_serial.rewrite_chapter_selection")))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> HistoricalRegistryFixture.freezeIntent(registry(), List.of("long_serial.unknown")))
+        assertThatThrownBy(() -> IntentExecutionPlanSnapshot.freeze(registry(), List.of("long_serial.unknown")))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -311,8 +311,8 @@ class IntentExecutionPlanSnapshotTest {
     @ValueSource(strings = {"create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing"})
     void 结构化自然子计划冻结唯一默认范围且旧解析器不能追认(String operation) {
         String key = "long_serial." + operation;
-        HistoricalRegistryFixture registry = HistoricalRegistryFixtureFixtures.structuredOperationEnabled(HistoricalRegistryFixture.Environment.TEST, key);
-        IntentExecutionPlanSnapshot plan = HistoricalRegistryFixture.freezeIntent(registry, List.of("long_serial.answer_question", key));
+        ExecutionRegistry registry = ExecutionRegistryFixtures.structuredOperationEnabled(ExecutionRegistry.Environment.TEST, key);
+        IntentExecutionPlanSnapshot plan = IntentExecutionPlanSnapshot.freeze(registry, List.of("long_serial.answer_question", key));
         String scope = "manage_foreshadowing".equals(operation) ? "chapter" : "novel";
         assertThat(plan.scopeKindForOperation(key)).isEqualTo(scope);
         assertThat(IntentExecutionPlanSnapshot.defaultScopeKind(key)).isEqualTo(scope);
@@ -356,7 +356,7 @@ class IntentExecutionPlanSnapshotTest {
         fake.requireAuthorizedBy(plan.resolver().modelProfile().toDomain());
         assertThat(registry().requireAuthorizedDeployment(fake).billable()).isFalse();
 
-        HistoricalRegistryFixture production = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.PRODUCTION);
+        ExecutionRegistry production = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.PRODUCTION);
         assertThatThrownBy(() -> production.requireAuthorizedDeployment(fake)).isInstanceOf(IllegalStateException.class);
         WorkflowResolvedModel official = resolvedModel(plan,
                 "openai_compatible", "deepseek-v4-flash", "transport.deepseek-v4.v1", "endpoint.deepseek-official.v1",
@@ -394,12 +394,12 @@ class IntentExecutionPlanSnapshotTest {
         assertThatThrownBy(() -> restored.operationPlans().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
 
-    private static HistoricalRegistryFixture registry() {
-        return HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
+    private static ExecutionRegistry registry() {
+        return ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
     }
 
     private static IntentExecutionPlanSnapshot snapshot() {
-        return HistoricalRegistryFixture.freezeIntent(registry(), OPERATIONS);
+        return IntentExecutionPlanSnapshot.freeze(registry(), OPERATIONS);
     }
 
     private static WorkflowResolvedModel resolvedModel(

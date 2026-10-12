@@ -6,6 +6,7 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock .python-version ./
+COPY contracts/agent-execution contracts/agent-execution
 COPY packages/service-auth/pyproject.toml packages/service-auth/pyproject.toml
 COPY packages/service-auth/src packages/service-auth/src
 COPY packages/service-contracts/pyproject.toml packages/service-contracts/pyproject.toml
@@ -21,6 +22,7 @@ RUN install -d -o 10001 -g 10001 /data/agent-logs
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv
+COPY --from=builder --chown=10001:10001 /app/contracts/agent-execution /app/contracts/agent-execution
 USER 10001:10001
 EXPOSE 8001
 CMD ["uvicorn", "inkforge_agents.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8001", "--workers", "1", "--no-access-log"]

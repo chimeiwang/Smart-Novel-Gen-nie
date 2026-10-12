@@ -5,8 +5,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .content import ResourceId as ExecutionId
-from .content import Sha256
+from .execution import ExecutionId, Sha256
 
 
 class QualityContextV2(BaseModel):

@@ -8,10 +8,14 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
+import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
+import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.ParsedWritingRunStartRequest;
+import cn.inkforge.core.writing.application.ShortMediumDurableRunStarter;
 import cn.inkforge.core.writing.application.WritingCommandRepository;
 import cn.inkforge.core.writing.application.WritingRunStarter;
 import cn.inkforge.core.workflows.catalog.ExecutionPlanSnapshot;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import java.util.HashSet;
@@ -26,7 +30,7 @@ import org.openapitools.jackson.nullable.JsonNullable;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
-/** 新任务固定使用 V1；保留历史请求重放与跨旧任务互斥，禁止转换既有引擎身份。 */
+/** 先无锁预解析并握手，再在用户级锁内冻结引擎身份；开关变化不迁移既有请求。 */
 final class RoutingWritingRunStarter implements WritingRunStarter {
 
     private static final Set<String> PROVABLY_READ_ONLY_LEGACY_OPERATIONS =
@@ -34,80 +38,248 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
 
     private final CoreDatabase database;
     private final WritingCommandRepository legacy;
+    private final LongSerialDurableRunStarter durable;
+    private final ShortMediumDurableRunStarter shortMediumDurable;
     private final CommandIdempotencyStore idempotency;
     private final CoreSettings settings;
+    private final DurableAgentExecutionReadiness agentReadiness;
     private final ObjectMapper json;
+    private final ExecutionRegistry registry;
+    private final Set<String> routableOperationKeys;
+    private final Set<String> routableShortMediumOperationKeys;
     private final WorkflowExecutionContextReader executionContexts;
-    private final cn.inkforge.core.writing.application.WritingRunQueryRepository queries;
+
+    RoutingWritingRunStarter(
+            CoreDatabase database,
+            WritingCommandRepository legacy,
+            LongSerialDurableRunStarter durable,
+            CommandIdempotencyStore idempotency,
+            CoreSettings settings,
+            DurableAgentExecutionReadiness agentReadiness,
+            ObjectMapper json,
+            ExecutionRegistry registry) {
+        this(database, legacy, durable, null, idempotency, settings, agentReadiness, json, registry, null);
+    }
 
     RoutingWritingRunStarter(CoreDatabase database, WritingCommandRepository legacy,
-            CommandIdempotencyStore idempotency, CoreSettings settings, ObjectMapper json,
-            WorkflowExecutionContextReader contexts,
-            cn.inkforge.core.writing.application.WritingRunQueryRepository queries) {
+            LongSerialDurableRunStarter durable, CommandIdempotencyStore idempotency, CoreSettings settings,
+            DurableAgentExecutionReadiness agentReadiness, ObjectMapper json, ExecutionRegistry registry,
+            WorkflowExecutionContextReader executionContexts) {
+        this(database, legacy, durable, null, idempotency, settings, agentReadiness, json, registry,
+                executionContexts);
+    }
+
+    RoutingWritingRunStarter(CoreDatabase database, WritingCommandRepository legacy,
+            LongSerialDurableRunStarter durable, ShortMediumDurableRunStarter shortMediumDurable,
+            CommandIdempotencyStore idempotency, CoreSettings settings,
+            DurableAgentExecutionReadiness agentReadiness, ObjectMapper json, ExecutionRegistry registry,
+            WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);
         this.legacy = Objects.requireNonNull(legacy);
+        this.durable = Objects.requireNonNull(durable);
+        this.shortMediumDurable = shortMediumDurable;
         this.idempotency = Objects.requireNonNull(idempotency);
         this.settings = Objects.requireNonNull(settings);
+        this.agentReadiness = Objects.requireNonNull(agentReadiness);
         this.json = Objects.requireNonNull(json);
-        this.executionContexts = contexts;
-        this.queries = Objects.requireNonNull(queries);
+        this.registry = Objects.requireNonNull(registry);
+        this.executionContexts = executionContexts;
+        this.routableOperationKeys = registry.enabledOperationKeys("long_serial", false);
+        this.routableShortMediumOperationKeys =
+                registry.enabledOperationKeys("short_medium", false);
+        Set<String> missingHandlers = new HashSet<>(routableOperationKeys);
+        missingHandlers.removeAll(durable.supportedOperationKeys());
+        Set<String> missingShortMediumHandlers =
+                new HashSet<>(routableShortMediumOperationKeys);
+        if (shortMediumDurable != null) {
+            missingShortMediumHandlers.removeAll(shortMediumDurable.supportedOperationKeys());
+        }
+        missingHandlers.addAll(missingShortMediumHandlers);
+        if (!missingHandlers.isEmpty()) {
+            throw new IllegalStateException(
+                    "Operation Catalog 已启用但 Core 未装配 V2 handler：" + missingHandlers);
+        }
     }
 
     @Override
-    public WritingRunStartResponse start(String userId, ParsedWritingRunStartRequest request) {
-        String key = clientRequestId(request);
-        var existing = database.transactionResult(tx -> idempotency.resolve(tx, userId, key, null));
-        if (existing != null) return replay(userId, request, key, existing);
-        if (request instanceof ParsedWritingRunStartRequest.Natural) throw retired();
-        if (!settings.v1FreshAgentStartsEnabled()) throw V1FreshAgentStartGate.draining();
-        return database.transactionResult(tx -> {
-            tx.execute("SELECT pg_catalog.pg_advisory_xact_lock(?)", CommandIdempotency.advisoryLockKey(userId, key));
-            var concurrent = idempotency.resolve(tx, userId, key, null);
-            if (concurrent != null) return replay(userId, request, key, concurrent);
-            StartScope requested = startScope(request);
-            StartScope scope = requested == null ? null : lockStartScope(tx, userId, requested);
-            if (scope != null) {
-                if (scope.writingSessionId() != null) requireNoActiveForegroundRun(tx, scope.writingSessionId());
-                if (isLegacyMutation(request) || isShortMedium(request)) requireNoActiveDurableMutation(tx, scope);
+    public WritingRunStartResponse start(
+            String userId, ParsedWritingRunStartRequest request) {
+        String clientRequestId = clientRequestId(request);
+        // 先做无锁只读预解析：已有 V1/V2 身份必须能在 Agent 离线或 manifest 升级时重放。
+        CommandIdempotencyStore.Resolution preexisting = database.transactionResult(
+                transaction -> idempotency.resolve(
+                        transaction, userId, clientRequestId, null));
+        if (preexisting != null) {
+            return replayExisting(userId, request, clientRequestId, preexisting);
+        }
+
+        boolean routeDurable = routesDurable(userId, request);
+        if (request instanceof ParsedWritingRunStartRequest.Natural && !routeDurable) {
+            throw new ApiException(409, "DURABLE_NATURAL_ENTRY_NOT_ENABLED", "自然请求需要已授权的耐久执行入口");
+        }
+        if (!routeDurable && !settings.v1FreshAgentStartsEnabled()) {
+            // 必须位于既有幂等身份重放之后、任何 Agent readiness、业务锁或新写入之前。
+            throw V1FreshAgentStartGate.draining();
+        }
+        if (isDurableAnswerWithoutSession(routeDurable, request)) {
+            // 缺会话是 answer_question 的确定性结构错误，不能被外部 Agent readiness 覆盖。
+            // 仍要在用户级幂等锁内二次解析，保证首轮只读检查后的并发创建优先按原引擎重放。
+            return database.transactionResult(transaction -> {
+                transaction.execute(
+                        "SELECT pg_catalog.pg_advisory_xact_lock(?)",
+                        CommandIdempotency.advisoryLockKey(userId, clientRequestId));
+                CommandIdempotencyStore.Resolution existing = idempotency.resolve(
+                        transaction, userId, clientRequestId, null);
+                if (existing != null) {
+                    return replayExisting(userId, request, clientRequestId, existing);
+                }
+                throw writingSessionRequired();
+            });
+        }
+        // 网络握手必须发生在 advisory/Run/章节锁之外。稍后会在原用户事务内二次解析，
+        // 因此并发同标识即使同时通过握手，也只会创建一个 Run。
+        boolean agentCompatible = !routeDurable || agentReadiness.check();
+        return database.transactionResult(transaction -> {
+            transaction.execute(
+                    "SELECT pg_catalog.pg_advisory_xact_lock(?)",
+                    CommandIdempotency.advisoryLockKey(userId, clientRequestId));
+            CommandIdempotencyStore.Resolution existing = idempotency.resolve(
+                    transaction, userId, clientRequestId, null);
+            if (existing != null) {
+                return replayExisting(userId, request, clientRequestId, existing);
+            }
+            if (routeDurable && !agentCompatible) throw agentUnavailable();
+            StartScope requestedScope = startScope(request);
+            StartScope scope = requestedScope == null
+                    ? null
+                    : lockStartScope(transaction, userId, requestedScope);
+            boolean locked = scope != null;
+            if (locked && scope.writingSessionId() != null) {
+                requireNoActiveForegroundRun(transaction, scope.writingSessionId());
+            }
+            if (routeDurable) {
+                if (locked && (isDurableMutation(request) || isShortMedium(request))) {
+                    requireNoActiveLegacyMutation(transaction, scope);
+                    requireNoActiveDurableMutation(transaction, scope);
+                }
+                if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
+                    return durable.startNatural(userId, natural.request());
+                }
+                if (request instanceof ParsedWritingRunStartRequest.ShortMedium shortMedium) {
+                    return requireShortMediumDurable().startFresh(
+                            userId, shortMedium.request());
+                }
+                LongSerialStartWritingRunRequest durableRequest = durableRequest(request);
+                return durable.startFresh(userId, durableRequest);
+            }
+            if (locked && (isLegacyMutation(request) || isShortMedium(request))) {
+                requireNoActiveDurableMutation(transaction, scope);
             }
             return legacy.start(userId, request);
         });
     }
 
-    /** 历史请求只返回原运行，不重新派发；仍核对完整请求指纹，防止复用键转换引擎。 */
-    private WritingRunStartResponse replay(String userId, ParsedWritingRunStartRequest request,
-            String key, CommandIdempotencyStore.Resolution existing) {
-        if (existing.recordKind() == CommandIdempotencyStore.RecordKind.WRITING_COMMAND) {
-            if (request instanceof ParsedWritingRunStartRequest.Natural) throw CommandIdempotencyStore.reused(key);
-            return legacy.start(userId, request);
+    private WritingRunStartResponse replayExisting(
+            String userId,
+            ParsedWritingRunStartRequest request,
+            String clientRequestId,
+            CommandIdempotencyStore.Resolution existing) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
+            if (existing.recordKind() != CommandIdempotencyStore.RecordKind.WORKFLOW_RUN) {
+                throw CommandIdempotencyStore.reused(clientRequestId);
+            }
+            return durable.replayNatural(userId, natural.request());
         }
-        if (existing.recordKind() != CommandIdempotencyStore.RecordKind.WORKFLOW_RUN) throw CommandIdempotencyStore.reused(key);
-        var matched = database.transactionResult(tx -> idempotency.resolve(tx, userId, key, historicalFingerprint(request)));
-        if (matched == null || !existing.recordId().equals(matched.recordId())) throw CommandIdempotencyStore.reused(key);
-        Object response = queries.getPublic(userId, existing.recordId());
-        if (!(response instanceof cn.inkforge.contracts.api.WritingRunV2Response historical)) throw CommandIdempotencyStore.reused(key);
-        return historical;
+        return switch (existing.recordKind()) {
+            case WRITING_COMMAND -> legacy.start(userId, request);
+            case WORKFLOW_RUN -> durableReplay(userId, request, clientRequestId);
+            case CONTROL_DECISION -> throw CommandIdempotencyStore.reused(clientRequestId);
+        };
     }
 
-    private String historicalFingerprint(ParsedWritingRunStartRequest request) {
-        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) return new LongSerialRunAssembler(json, new WritingSourceBindingCapture(json)).normalize(value.request()).fingerprint();
-        if (request instanceof ParsedWritingRunStartRequest.Natural value) {
-            var r = value.request();
-            Map<String, Object> body = Map.of("inputMode", "natural", "workflow", "long_serial", "novelId", r.getNovelId(), "chapterId", r.getChapterId(), "writingSessionId", r.getWritingSessionId(), "userInstruction", r.getUserInstruction(), "targetWordCount", r.getTargetWordCount() == null ? 4000 : r.getTargetWordCount());
-            return CommandIdempotency.requestFingerprint("start", Map.of("novelId", r.getNovelId(), "chapterId", r.getChapterId()), body, json);
+    private WritingRunStartResponse durableReplay(
+            String userId,
+            ParsedWritingRunStartRequest request,
+            String clientRequestId) {
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value
+                && durable.supportedOperationKeys().contains(operationKey(value.request()))) {
+            return durable.replayExisting(userId, value.request());
+        }
+        if (request instanceof ParsedWritingRunStartRequest.ShortMedium value
+                && requireShortMediumDurable().supportedOperationKeys()
+                        .contains(operationKey(value.request()))) {
+            return requireShortMediumDurable().replayExisting(userId, value.request());
+        }
+        throw CommandIdempotencyStore.reused(clientRequestId);
+    }
+
+    private boolean routesDurable(
+            String userId, ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural natural) {
+            return settings.durableAgentExecutionSchemaReady()
+                    && settings.routesNewDurableAgentRun(userId, natural.request().getNovelId());
+        }
+        return isDurableOperation(request)
+                && settings.routesNewDurableAgentRun(userId, novelId(request));
+    }
+
+    private boolean isDurableOperation(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return routableOperationKeys.contains(operationKey(value.request()));
+        }
+        return request instanceof ParsedWritingRunStartRequest.ShortMedium value
+                && routableShortMediumOperationKeys.contains(operationKey(value.request()));
+    }
+
+    private boolean isDurableMutation(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.Natural) return true;
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return registry.requireKnownOperation(operationKey(value.request())).mutating();
         }
         if (request instanceof ParsedWritingRunStartRequest.ShortMedium value) {
-            var r = value.request();
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("workflow", r.getWorkflow()); body.put("novelId", r.getNovelId()); body.put("operation", r.getOperation().getValue()); body.put("documentType", r.getDocumentType().getValue()); body.put("chapterId", nullable(r.getChapterId())); body.put("baseVersionId", nullable(r.getBaseVersionId())); body.put("sourceOutlineVersionId", nullable(r.getSourceOutlineVersionId())); body.put("selectionStart", nullable(r.getSelectionStart())); body.put("selectionEnd", nullable(r.getSelectionEnd())); body.put("selectedTextHash", nullable(r.getSelectedTextHash())); body.put("userInstruction", nullable(r.getUserInstruction()));
-            Map<String, Object> resource = new LinkedHashMap<>(); resource.put("novelId", r.getNovelId()); resource.put("chapterId", nullable(r.getChapterId()));
-            return CommandIdempotency.requestFingerprint("start", resource, body, json);
+            return registry.requireKnownOperation(operationKey(value.request())).mutating();
         }
-        throw CommandIdempotencyStore.reused(clientRequestId(request));
+        return false;
     }
 
-    private static ApiException retired() {
-        return new ApiException(409, "EXECUTION_ENGINE_RETIRED", "历史耐久执行引擎已退役，请使用 V1 写作入口创建新任务");
+    private boolean isDurableAnswerWithoutSession(
+            boolean routeDurable, ParsedWritingRunStartRequest request) {
+        if (!routeDurable
+                || !(request instanceof ParsedWritingRunStartRequest.LongSerial value)) {
+            return false;
+        }
+        LongSerialStartWritingRunRequest body = value.request();
+        ExecutionRegistry.Operation definition =
+                registry.requireKnownOperation(operationKey(body));
+        return "long_serial".equals(definition.workflow())
+                && "answer_question".equals(definition.operation())
+                && nullable(body.getWritingSessionId()) == null;
+    }
+
+    private static LongSerialStartWritingRunRequest durableRequest(
+            ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return value.request();
+        }
+        throw new IllegalArgumentException("当前请求不是已启用的 V2 长篇操作");
+    }
+
+    private static String operationKey(LongSerialStartWritingRunRequest request) {
+        return "long_serial." + request.getOperation().getValue();
+    }
+
+    private static String operationKey(ShortMediumStartWritingRunRequest request) {
+        return "short_medium." + request.getOperation().getValue();
+    }
+
+    private static String novelId(ParsedWritingRunStartRequest request) {
+        if (request instanceof ParsedWritingRunStartRequest.LongSerial value) {
+            return value.request().getNovelId();
+        }
+        if (request instanceof ParsedWritingRunStartRequest.ShortMedium value) {
+            return value.request().getNovelId();
+        }
+        throw new IllegalArgumentException("当前请求没有显式 V2 作品身份");
     }
 
     static String clientRequestId(ParsedWritingRunStartRequest request) {
@@ -380,12 +552,33 @@ final class RoutingWritingRunStarter implements WritingRunStarter {
                 "当前写作会话已有未完成的 Agent 运行");
     }
 
+    private static ApiException agentUnavailable() {
+        return new ApiException(
+                503,
+                "DURABLE_AGENT_EXECUTION_UNAVAILABLE",
+                "耐久 Agent 执行器当前不可用");
+    }
+
+    private static ApiException writingSessionRequired() {
+        return new ApiException(
+                409,
+                "WRITING_SESSION_REQUIRED",
+                "长篇问答必须绑定写作会话");
+    }
+
     private static <T> T nullable(JsonNullable<T> value) {
         return value != null && value.isPresent() ? value.orElse(null) : null;
     }
 
     private static MutationTarget mutationTarget(String type, String id) {
         return new MutationTarget("chapter".equals(type) ? "chapter_content" : type, id);
+    }
+
+    private ShortMediumDurableRunStarter requireShortMediumDurable() {
+        if (shortMediumDurable == null) {
+            throw new IllegalStateException("中短篇 V2 启动器未装配");
+        }
+        return shortMediumDurable;
     }
 
     private static boolean isShortMedium(ParsedWritingRunStartRequest request) {

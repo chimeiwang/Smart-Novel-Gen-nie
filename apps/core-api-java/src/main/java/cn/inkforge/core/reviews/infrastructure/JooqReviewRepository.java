@@ -13,6 +13,7 @@ import static cn.inkforge.core.db.generated.Tables.WORKFLOWRUN;
 
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineRequest;
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineResponse;
+import cn.inkforge.contracts.api.ArtifactDecisionAcceptedResponse;
 import cn.inkforge.contracts.api.ArtifactDecisionPublicResponse;
 import cn.inkforge.contracts.api.ArtifactEvaluationResponse;
 import cn.inkforge.contracts.api.CreateArtifactRequest;
@@ -41,7 +42,7 @@ import cn.inkforge.core.reviews.domain.ReviewArtifactRules;
 import cn.inkforge.core.reviews.domain.ReviewArtifactSummary;
 import cn.inkforge.core.reviews.domain.SelectionMaterialization;
 import cn.inkforge.core.reviews.domain.SelectionSource;
-import cn.inkforge.core.workflows.catalog.HistoricalExecutionTypes;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
@@ -135,7 +136,7 @@ final class JooqReviewRepository implements ReviewRepository {
             Clock clock,
             ObjectMapper json,
             FormalArtifactWriter formalWriter,
-            HistoricalExecutionTypes registry) {
+            ExecutionRegistry registry) {
         this(database, ids, clock, json, formalWriter, registry, true);
     }
 
@@ -145,7 +146,7 @@ final class JooqReviewRepository implements ReviewRepository {
             Clock clock,
             ObjectMapper json,
             FormalArtifactWriter formalWriter,
-            HistoricalExecutionTypes registry,
+            ExecutionRegistry registry,
             boolean durableAgentSchemaReady) {
         this(database, ids, clock, json, formalWriter, registry, durableAgentSchemaReady,
                 WorkflowExecutionContextReader.frozenBusinessPlansOnly());
@@ -157,7 +158,7 @@ final class JooqReviewRepository implements ReviewRepository {
             Clock clock,
             ObjectMapper json,
             FormalArtifactWriter formalWriter,
-            HistoricalExecutionTypes registry,
+            ExecutionRegistry registry,
             boolean durableAgentSchemaReady,
             WorkflowExecutionContextReader executionContexts) {
         this.database = Objects.requireNonNull(database);

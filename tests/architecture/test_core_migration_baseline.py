@@ -35,8 +35,8 @@ def test_canonical_openapi_is_java_owned_and_complete() -> None:
     document = _json(CANONICAL_OPENAPI)
     assert document["openapi"] == "3.0.3"
     assert document["x-inkforge-source-contract"] == "canonical-java"
-    assert len(document["paths"]) == 167
-    assert _operation_count(document) == 208
+    assert len(document["paths"]) == 166
+    assert _operation_count(document) == 207
     assert all(
         "x-inkforge-exposure" in operation
         for path_item in document["paths"].values()
@@ -99,29 +99,38 @@ def test_route_inventory_and_internal_projection_are_language_neutral() -> None:
     internal = _json(INTERNAL_ENDPOINTS)
     inventory = _json(ROUTE_INVENTORY)
     assert internal["schemaVersion"] == "core-internal-endpoints/2.0"
-    assert len(internal["endpoints"]) == 25
+    assert len(internal["endpoints"]) == 24
     assert all(item["exposure"] == "internal" for item in internal["endpoints"])
     assert inventory["schemaVersion"] == "core-route-inventory/2.0"
-    assert len(inventory["routes"]) == 208
+    assert len(inventory["routes"]) == 207
     assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 182
-    assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 25
+    assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 24
     assert sum(item["exposure"] == "provider_media" for item in inventory["routes"]) == 1
-    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 208
+    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 207
     forbidden = {"baselineCommit", "endpointModule", "sourceFile", "sourceLine", "pythonTests"}
     assert not forbidden.intersection(inventory)
     assert all(not forbidden.intersection(item) for item in inventory["routes"])
     assert all(item["operationId"] for item in inventory["routes"])
 
 
-def test_retired_callbacks_are_absent_and_episode_tasks_are_isolated() -> None:
-    document = _json(CANONICAL_OPENAPI)
-    assert "/api/v1/writing/runs/{task_id}/clarification" not in document["paths"]
-    for path in document["paths"]:
-        if path.startswith("/internal/v1/workflow-runs/"):
-            assert path.endswith("/billing-reconciliation")
-    public = _json(PUBLIC_OPENAPI)
-    assert "/api/v1/video/episodes/{episodeId}/tasks/{taskId}/cancel" in public["paths"]
-    assert not any("/internal/" in path for path in public["paths"])
+def test_clarification_route_keeps_strict_public_contract() -> None:
+    path = "/api/v1/writing/runs/{task_id}/clarification"
+    for document in (_json(PUBLIC_OPENAPI),):
+        operation = document["paths"][path]["post"]
+        assert operation["operationId"] == (
+            "clarify_writing_run_api_v1_writing_runs__task_id__clarification_post"
+        )
+        assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ClarifyWritingRunRequest"
+        }
+        assert operation["responses"]["202"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+        }
+        request = document["components"]["schemas"]["ClarifyWritingRunRequest"]
+        assert request["additionalProperties"] is False
+        assert set(request["required"]) == {
+            "clientRequestId", "expectedRevision", "decisionStepId", "userMessage"
+        }
 
 
 def test_cross_language_fixtures_are_present_and_read_only() -> None:

@@ -10,6 +10,7 @@ import cn.inkforge.contracts.api.WritingRunStartResponse;
 import cn.inkforge.contracts.api.WritingRunStatusPublicResponse;
 import cn.inkforge.core.generated.model.WritingRunStartBody;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,7 @@ public final class WritingRunService {
     private final WritingRunQueryRepository queries;
     private final WritingRunCommandDispatcher dispatcher;
     private final EngineIdentityProbe engineIdentities;
+    private final WorkflowRunCancellationService workflowCancellations;
 
     public WritingRunService(
             WritingRunStartRequestParser parser,
@@ -37,7 +39,8 @@ public final class WritingRunService {
                 commands,
                 queries,
                 dispatcher,
-                EngineIdentityProbe.v1Only());
+                EngineIdentityProbe.v1Only(),
+                null);
     }
 
     public WritingRunService(
@@ -52,7 +55,8 @@ public final class WritingRunService {
                 commands,
                 queries,
                 dispatcher,
-                EngineIdentityProbe.v1Only());
+                EngineIdentityProbe.v1Only(),
+                null);
     }
 
     public WritingRunService(
@@ -61,13 +65,15 @@ public final class WritingRunService {
             WritingCommandRepository commands,
             WritingRunQueryRepository queries,
             WritingRunCommandDispatcher dispatcher,
-            EngineIdentityProbe engineIdentities) {
+            EngineIdentityProbe engineIdentities,
+            WorkflowRunCancellationService workflowCancellations) {
         this.parser = Objects.requireNonNull(parser);
         this.starter = Objects.requireNonNull(starter);
         this.commands = Objects.requireNonNull(commands);
         this.queries = Objects.requireNonNull(queries);
         this.dispatcher = Objects.requireNonNull(dispatcher);
         this.engineIdentities = Objects.requireNonNull(engineIdentities);
+        this.workflowCancellations = workflowCancellations;
     }
 
     public WritingRunStartResponse start(String userId, WritingRunStartBody body) {
@@ -94,8 +100,14 @@ public final class WritingRunService {
             String userId, String taskId, CancelWritingRunRequest request) {
         if (engineIdentities.probe(userId, taskId)
                 == EngineIdentityProbe.EngineIdentity.V2) {
-            throw new ApiException(409, "EXECUTION_ENGINE_RETIRED",
-                    "历史执行引擎已退役；旧运行只读，未决账务继续保留，请创建 V1 新任务");
+            if (workflowCancellations == null) {
+                throw new ApiException(
+                        503,
+                        "WORKFLOW_CANCELLATION_UNAVAILABLE",
+                        "耐久 Workflow 取消暂时不可用");
+            }
+            workflowCancellations.cancel(userId, taskId, request.getClientRequestId());
+            return (CancelWritingRunPublicResponse) queries.getPublic(userId, taskId);
         }
         CancelWritingRunResponse response = commands.cancel(userId, taskId, request);
         if (response.getCommandStatus() == CancelWritingRunResponse.CommandStatusEnum.PENDING) {

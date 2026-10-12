@@ -103,7 +103,7 @@ class LongWorkflowMutationsTest {
     }
 
     @Test
-    void 自然输入迁至V1并拒绝历史澄清续跑() {
+    void 自然新消息与澄清回答使用独立请求形状并保留原文() {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);
         String natural = """
@@ -112,20 +112,18 @@ class LongWorkflowMutationsTest {
                  "userInstruction":"  请先解释。\\r\\n  ","targetWordCount":4000}
                 """;
         ObjectNode expected = (ObjectNode) json.readTree(natural);
-        expected.remove("inputMode");
-        expected.set("userMessage", expected.remove("userInstruction"));
-        expected.putArray("selectedAgents");
+        expected.put("workflow", "long_serial");
         assertJsonRequest(application, api, "long.agent.start", natural,
                 "POST", "/api/v1/writing/runs", expected.toString());
         String clarification = """
                 {"inputMode":"clarification","taskId":"run/1","clientRequestId":"clarify-request-0001",
                  "expectedRevision":3,"decisionStepId":"decision-1","userMessage":"  只问答。\\r\\n  "}
                 """;
-        api.calls.clear();
-        var result = run(application, "long.task.resume", clarification);
-        assertThat(result.exit()).isEqualTo(2);
-        assertThat(result.stdout()).contains("ENGINE_RETIRED");
-        assertThat(api.calls).isEmpty();
+        ObjectNode answer = (ObjectNode) json.readTree(clarification);
+        answer.remove("inputMode");
+        answer.remove("taskId");
+        assertJsonRequest(application, api, "long.task.resume", clarification,
+                "POST", "/api/v1/writing/runs/run%2F1/clarification", answer.toString());
     }
 
     @Test

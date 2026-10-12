@@ -7,6 +7,7 @@ import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.workflows.application.WorkflowBillingReconciliationCommand;
 import cn.inkforge.core.workflows.application.WorkflowBillingReconciliationRepository;
 import cn.inkforge.core.workflows.application.WorkflowBillingReconciliationResult;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
 import cn.inkforge.core.workflows.domain.WorkflowUsageStatus;
 import java.time.Clock;
@@ -40,12 +41,13 @@ final class JooqWorkflowBillingReconciliationRepository
             CoreDatabase database,
             CuidV1Generator ids,
             Clock clock,
-            ObjectMapper json) {
+            ObjectMapper json,
+            ExecutionRegistry registry) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
-        this.billing = new WorkflowBillingCoordinator(json);
+        this.billing = new WorkflowBillingCoordinator(ids, json, registry);
     }
 
     /** 在单事务内审计未知用量并选择精确结算或释放预留，不改写 Run 终态。 */

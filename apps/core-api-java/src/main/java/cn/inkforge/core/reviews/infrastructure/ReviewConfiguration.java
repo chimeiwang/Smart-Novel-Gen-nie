@@ -16,6 +16,7 @@ import cn.inkforge.core.reviews.application.ChapterPlanEvidenceReader;
 import cn.inkforge.core.reviews.application.ChapterWritingEvidenceReader;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.ReviewRepository;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
 import java.time.Clock;
 import java.util.List;
@@ -96,11 +97,20 @@ class ReviewConfiguration {
             Clock coreClock,
             ObjectMapper objectMapper,
             FormalArtifactWriter formalWriter,
+            ObjectProvider<ExecutionRegistry> workflowExecutionRegistries,
             ObjectProvider<WorkflowExecutionContextReader> workflowExecutionContexts,
             CoreSettings settings) {
-        WorkflowExecutionContextReader executionContexts = settings.historicalWorkflowSchemaReady()
+        ExecutionRegistry workflowExecutionRegistry =
+                settings.durableAgentExecutionSchemaReady()
+                        ? workflowExecutionRegistries.getIfAvailable()
+                        : null;
+        if (settings.durableAgentExecutionSchemaReady()
+                && workflowExecutionRegistry == null) {
+            throw new IllegalStateException("耐久 Agent 数据库结构已就绪但执行 Registry 未装配");
+        }
+        WorkflowExecutionContextReader executionContexts = settings.durableAgentExecutionSchemaReady()
                 ? workflowExecutionContexts.getIfAvailable() : null;
-        if (settings.historicalWorkflowSchemaReady() && executionContexts == null) {
+        if (settings.durableAgentExecutionSchemaReady() && executionContexts == null) {
             throw new IllegalStateException("耐久 Agent 数据库结构已就绪但执行上下文 Reader 未装配");
         }
         return new JooqReviewRepository(
@@ -109,7 +119,7 @@ class ReviewConfiguration {
                 coreClock,
                 objectMapper,
                 formalWriter,
-                null,
-                settings.historicalWorkflowSchemaReady(), executionContexts);
+                workflowExecutionRegistry,
+                settings.durableAgentExecutionSchemaReady(), executionContexts);
     }
 }

@@ -26,22 +26,24 @@
 本文档不代表某次生产部署已经验收成功。除代码明确强制的生产开关外，是否已经发布到线上仍应以当次
 部署记录和真实环境验收为准。发生冲突时，按 `DOCS.md` 的项目事实优先级处理。
 
-当前代码统一使用 V1，已移除旧执行引擎及其部署依赖；作家提示词加入人物知识、信息增量、场景作用、动作细节、
-因果铺垫和有效内容保留原则。Episode 剧本和分镜迁入普通队列。历史来源、候选与账务保留，生产视频仍关闭。
-该说明不代表本次已上线；发布及业务验收见本次审计，设计边界见[退役规格](../specs/2026-10-11-v1-writer-and-execution-retirement.md)。
+当前耐久 Agent 生产已完成 V2 迁移、`8a1324c` 部署、真实 canary 与最终全量门禁，已开放业务的新请求全量使用 V2。
+配置为 `schemaReady=true / route=all / V1 fresh=false`，用户／小说 allowlist 已清空，生产视频仍关闭。
+小说成果保全，9 条满 7 天的旧已发布通知单列核验；当次 21 项 Operation 验收是历史发布证据，不等于当前 23 项 Catalog 全部生产开放，也不宣称全部旧行未变。
+现场证据见 `docs/audits/2026-09-06-durable-agent-release-preflight.md`。
 
 当前可量化基线：
 
 | 项目 | 当前数量 | 口径 |
 | --- | ---: | --- |
 | Web 路由页面 | 9 | Next.js `page.tsx`；另有 1 个根布局 |
-| Core 公共 API | 141 个路径、182 个操作 | 当前运行时 OpenAPI；其中视频为 57 个路径、68 个操作 |
-| Core 内部操作 | 25 | 不进入公共 OpenAPI 的 `/internal/v1/**`；旧章节视频内部路由已退出 |
+| Core 公共 API | 141 个路径、182 个操作 | 当前运行时 OpenAPI；其中视频为 56 个路径、67 个操作 |
+| Core 内部操作 | 24 | 不进入公共 OpenAPI 的 `/internal/v1/**`；旧章节视频内部路由已退出 |
 | CLI 命令 | 152 | 普通 Java CLI 当前注册表；其中视频 67 个命令 |
 | 长篇核心 Agent | 5 | 设定、剧情、写作、校验、编辑 |
 | 长篇 CreativeOperation | 10 | 不含只为历史解析保留的 `sync_lore` |
 | 中短篇显式 Agent 操作 | 4 | 蓝图、正文、选区、全文检查 |
 | Episode 视频 Agent 操作 | 4 | 单集剧本起草／修订、分镜起草／限定范围修订 |
+| 仓内 Durable Agent V2 Catalog | 23 | 19 项既有业务操作、4 项 Episode 视频操作；旧章节视频定义已从活动 Catalog 删除 |
 | 开发结构契约 | 104 张表、22 个枚举 | 当前 `schema-contract.json`；包含尚未在服务器物理退役的旧表投影 |
 
 常规 pre-Durable 开发结构契约规范指纹为
@@ -118,8 +120,9 @@ InkForge 当前是一套面向中文小说作者的桌面优先创作工作台�
 中短篇的蓝图必须先形成已确认版本，才能作为正文生成的权威来源。工作稿存在未提交修改时，不能启动
 依赖干净版本的 Agent 操作。选区修改按 Unicode 码点范围和 SHA-256 绑定来源，选区外内容必须逐字不变。
 
-四项中短篇操作使用现有串行队列和完整检查点。生成完成只产生待采用版本，仍须预览、确认和采用；
-全文检查只返回报告。
+四项 V2 已完成仓内接线和本地独立 Java Core/Python Agent、受控 Fake Provider 验收。正文每段由独立耐久
+Step 执行并保留完整前缀；生成 Run 完成只产生待采用版本，仍须原预览/确认/采用流程；全文检查只返回完整
+报告。该结果不代表真实供应商或生产已验收，详见 `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
 
 ### 5.2 长篇连载 `long_serial`
 
@@ -390,15 +393,29 @@ Core 和 Agent 草案链支持伏笔列表、创建、更新和删除。当前 W
 - 模型响应被截断、内容过滤或完成原因异常时任务失败，不保存半截画像；
 - CLI 只支持把现有文风应用到小说或清除，不支持文风资产的创建、上传、画像、分节编辑和删除。
 
-文风画像使用 StylePortraitTask 与普通队列，完整参考文件在受理时冻结。整套五节串行，单节重做只处理目标节；
-模型返回纯文本，整套完成后统一物化 WritingStyle。历史任务继续可查询。
+当前源码的 V2 文风画像使用用户级 Run（`novelId=null`），受理时冻结完整参考文件。整套五节串行、单节重做
+只处理目标节，模型只返回纯文本；Core 沿原业务直接物化 WritingStyle，整套最后一次性写入，不增加草案采用。
+历史 V1 StylePortraitTask 与恢复路径保留，新 V2 不建旧任务影子行，原任务查询双读。参考增删与人工编辑不新增
+限制。Agent/Core、全仓门禁及隔离独立进程验证均通过，结果见
+`docs/specs/2026-09-05-durable-style-portrait.md` 最终记录为准，不代表生产、固定 CLI 或活动 Skills 已更新。
 
 ### 8.8 长篇 AI 会话与 Agent
 
-写作、质量、文风、RAG 与中短篇统一进入现有队列及领域服务。Episode 四项操作冻结来源与 revision，
-只生成候选，采用到工作稿后仍须独立确认正式版本；局部修订由 Core 保留范围外内容。
-旧引擎 Catalog、resolver、Step 调度与澄清入口已删除。自然输入由 V1 规划流程识别，未识别时回退问答。
-新作家能力只改变静态提示词，不增加 Agent、模型轮次或检测器调用。
+当前仓内 Durable Agent V2 Catalog 共 23 项：19 项覆盖既有长篇／中短篇／质量／文风／RAG 能力，4 项覆盖
+Episode 剧本起草／修订与分镜起草／限定范围修订。旧章节视频定义已从 Catalog、公共／内部路由和后台运行入口删除。
+Episode 视频 Run 冻结完整来源和 revision，完成只物化候选，仍须作者采用
+到工作稿并另行确认正式版本；分镜限定范围修订由 Core 合并保留未选镜头，模型不能全量覆盖。
+
+这些数字表示当前仓内契约与开发实现，不代表真实供应商或生产开放。新 Episode 视频操作继续受视频门禁、
+同小说互斥、预算、取消、幂等和完整 Evidence 约束；旧章节视频工作流不能再创建或调度。
+长篇结构化五项的具体证据见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
+
+一致性终检保留原质量检查与 CLI 命令，完整报告、失败和取消由 Core 投影；一次格式纠正为独立耐久 Step，
+不增加质量阈值或作者操作限制。具体验收见 `docs/specs/2026-09-05-durable-consistency-quality.md`。
+
+自然新请求使用 resolver v3，冻结十项无选区操作及默认 scope：设定两项/大纲两项为 novel，伏笔和原章节五项
+为当前 chapter；节点等不匹配范围须澄清或走显式入口，不让模型猜 ID。历史 resolver v1/v2、selection v1
+和原三项/五项授权保持不变。公共请求始终保留 chapter 锚点，不新增聚合 target。
 
 #### 五个核心 Agent
 
@@ -434,10 +451,10 @@ Core 和 Agent 草案链支持伏笔列表、创建、更新和删除。当前 W
 - 启动、查询、恢复和取消写作任务；
 - SSE 流式展示 Operation 分类、Agent 状态、工具摘要、文本块、草案和终态；
 - 按 `Last-Event-ID` 短期重放，断流后从 PostgreSQL 任务和草案状态恢复；
-- 写作任务先写入 PostgreSQL 持久命令再投递 Redis；Episode 以业务 Run 和完整检查点恢复；
+- V1 任务先写入 PostgreSQL 持久命令再投递 Redis；V2 以 WorkflowRun/Step 和冻结 Evidence 接续执行；
 - 同一 `clientRequestId` 返回同一命令，不重复创建任务；
 - V1 兼容入口可用 `@设定`、`@剧情`、`@写作`、`@校验`、`@编辑` 指定默认主责方向；
-- 无法稳定识别时回退问答；已退役的同 Run 澄清入口返回明确错误；
+- V1 无法稳定识别时回退问答；V2 自然入口必须澄清或明确失败，不默认为问答；
 - 正文和大纲支持来源绑定的选区改写，请求不把 `selectedText` 当作权威来源。
 
 当前限制：
@@ -538,7 +555,7 @@ Episode 视频 P0～P4 的仓内实现与本地隔离验收已经完成：新生
 - Episode 是项目下的稳定身份；改名、调序和更换来源不改变 episodeId，集号只承担展示顺序；
 - 一集可选择一个或多个章节范围，一章也可被多个 Episode 使用；Core 分别冻结章节身份、原文、Unicode 范围和哈希；
 - 剧本工作稿保存概要、稳定 sceneId／lineId、动作、对白、旁白、来源绑定与承接依据，使用 revision CAS 自动保存；
-- AI 起草和修订使用独立普通队列任务，只生成可恢复候选；采用候选只更新工作稿，正式确认是另一项作者操作；
+- AI 起草和修订使用独立 V2 Run，只生成可恢复候选；采用候选只更新工作稿，正式确认是另一项作者操作；
 - 正式剧本版本、来源集合和跨集依赖不可变；后续集必须引用前集的确切正式版本、节点、状态 key 与叙事时间；
 - 小说原文更新只提示新来源，作者选择同步后产生新的来源集合和工作稿，不重写旧快照。
 
@@ -636,7 +653,7 @@ CLI 的产品规则：
 `POST /api/v1/writing/sessions`，只创建指定小说／章节的写作会话，不调用模型或修改小说成果。
 输入为 `novelId/chapterId` 和可选 `title/profile`；网络结果不确定时先 list/get 核对，不自动重试。
 普通命令在当时由 125 增为 126；此后 Episode 视频链补齐到当前 152 个普通命令。当前公共 Core 为 182 个操作、
-内部为 25 个操作；两份 Operator 仍为 45 个命令，视频命令没有自动进入其白名单。
+内部为 24 个操作；两份 Operator 仍为 45 个命令，视频命令没有自动进入其白名单。
 
 中短篇 `short.agent.watch` 已适配 V1/V2：V2 事件只用于观察，断流或终态后 GET 同一 Run，生成成功按精确
 `candidateVersionId` 进入原版本确认流程，检查成功读取完整 `checkReport.text`。命令、启动参数和 Operator
@@ -663,16 +680,38 @@ schemaVersion 5，并保留固定 origin/profile、绑定用户名和既有 Keyc
 Java CLI 原生支持 macOS Keychain 与 Windows Credential Manager，均不回退到明文；Windows 实机验收不属于
 本次 macOS 入口切换，Linux 仍不是受支持的生产凭据平台。Python CLI 源码及跨语言测试继续保留为契约对照，
 不作为新版 macOS Skill 的业务入口。生产账号登录与 `auth.whoami` 已通过，没有导出令牌；新固定包已用于
-指定隔离小说 canary。历史 `8a1324c` 发布记录不代表当前路由；本机入口切换不自动部署服务器，也不扩大
+指定隔离小说 canary。生产 `8a1324c` 已完成验收与 `route=all` 切换；本机入口切换不自动部署服务器，也不扩大
 Operator 的45命令／三种 Operation。当前本地临时开发验收服务已停止，不宣称本地服务全量开放。
 生产 Operator 当前只支持无认证 HTTP 代理；TLS、SOCKS 或带认证代理明确拒绝，不会自动改为直连，
 具体环境变量规则见 Java CLI 文档。本地回环始终直连。
 
-普通 CLI 保留十二种显式长篇操作、草案决定与来源绑定的选区参数。`long.agent.start` 的自然输入映射为
-V1 `userMessage` 请求，完整保留原文；`inputMode=clarification` 返回 `ENGINE_RETIRED`，引导用完整要求新建任务。
-Operator 白名单不因底层能力扩大。当前源码、已安装 JAR、活动 Skill 与服务器版本分别验收。
+当前工作分支的正文写作 V2 接入沿用 `long.agent.start` 与草案决定命令，不新增 CLI 命令。
+`long.artifact.approve` 对 `write_chapter`、`rewrite_scene` 的现有章节正文候选开放 `editedContent` / `editedContentFile`；
+规划不得提交编辑字段，选区只接受 `editedReplacement`。源码变更、已安装固定 JAR 和服务器开放状态分别验收，
+本轮进度及 Skill 更新示例见 `docs/specs/2026-09-04-durable-chapter-writing.md` 和
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`。
 
-完整命令与字段见 [Java CLI 文档](../../tools/inkforge-cli-java/README.md)，注册表是命令存在性的权威。
+2026-09-05 分支继续接入只读章节审阅、完整场景改写、总纲/节点精确选区改写。审阅完成结果由
+`long.task.get/watch` 的 reviewReport 完整读取，显式调用无会话也可用；两类改写仍须确认候选后采用。
+自然入口新增审阅和场景改写，大纲选区必须显式冻结来源。仓内验证进度见
+`docs/specs/2026-09-05-durable-review-and-rewrites.md`；该实现阶段当时未更新本机固定包或部署服务器，当前状态见本文开头。
+
+同日结构化接线又使普通 Java/Python 对照 CLI 的 `long.agent.start` 接受 create_lore、revise_lore、
+create_outline、revise_outline、manage_foreshadowing，并补回此前遗漏的 rewrite_scene 显式白名单；新增的是
+六个可选 operation 值，不是命令或参数。设定两项/创建大纲显式 scope 为 novel，修改大纲另许 outline_node，
+伏笔另许当前 chapter；场景改写仍为当前 chapter。结构化候选保留 selectedUpdateRefs 部分采用，自动返工不
+替代作者确认。该阶段公共 API 为152、普通 CLI 为125、Operator为45命令／三操作；本批未更新固定 JAR、
+活动 Skills 或服务器。范围、自然十项和后续 Skills 更新要求见结构化资料规格与 Operator Skill 更新契约。
+
+完整 152 个命令及字段见 `tools/inkforge-cli/README.md`，Java 构建与 Skill 入口见
+`tools/inkforge-cli-java/README.md`，注册表是命令存在性的权威。
+
+自然入口在当前分支复用 `long.agent.start` 的 `inputMode=natural` 和 `long.task.resume` 的
+`inputMode=clarification`，不新增命令。Web 普通新消息新建 Run，澄清只回答同一 Run 的当前问题，
+草案返工仍走带候选 revision 的决定接口；旧 V1 恢复保留为明确动作。澄清 watcher 输出完整问题和
+`decisionStepId/revision`，不虚构 Artifact。两份受限 Operator 继续拒绝这两种输入模式，45 命令及三种显式
+Operation 不变；该实现阶段当时未更新已安装固定 JAR 或 Skill，也未部署服务器。后续安装与生产进度见本文开头；
+源码、完整跨进程验收与生产开放必须分别判断，实施状态以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准。
 
 ## 11. 接口与数据追溯
 
@@ -685,7 +724,7 @@ Operator 白名单不因底层能力扩大。当前源码、已安装 JAR、活�
 | `auth` | 6 | 注册、登录、登出、当前用户、手机号发码与核验 |
 | `health` | 2 | 存活和就绪 |
 | 中短篇版本 | 7 | 预览、提交、列表、Diff、详情、采用、恢复 |
-| 写作会话 | 12 | 会话、消息、任务、SSE、恢复和取消 |
+| 写作会话 | 13 | 会话、消息、任务、SSE、澄清回答、恢复和取消 |
 | 参考资料 | 6 | CRUD、重建索引和向量查询 |
 | 大纲 | 10 | 文本大纲、剧情进度、大纲节点和伏笔 |
 | 小说 | 10 | 列表、创建、详情、简介、工作区聚合和文风应用 |
@@ -703,13 +742,12 @@ Operator 白名单不因底层能力扩大。当前源码、已安装 JAR、活�
 | `VideoEpisodeRenders` | 4 | Episode 原生渲染任务、重试和 Take 内容 |
 | `VideoEpisodePostProduction` | 11 | 粗剪、声音字幕和导出 |
 | `VideoProduction` | 19 | 分镜、制作基线、Take 候选与采用 |
-| 剧集任务 | 1 | Episode 任务取消与 revision CAS |
-| **合计** | **182** | 141 个路径；其中视频 57 个路径、68 个操作 |
+| **合计** | **182** | 141 个路径；其中视频 56 个路径、67 个操作 |
 
 ### 11.2 Core 内部操作
 
-当前 25 个内部操作覆盖质量检查、参考资料索引、文风画像、模型授权与计费、Agent 工具网关、V1 写作兼容、
-历史账务对账、草案复审及 Episode 进度、检查点和候选回调。旧 `/internal/v1/video/adaptations/**` 和
+当前 24 个内部操作覆盖质量检查、参考资料索引、文风画像、模型授权与计费、Agent 工具网关、V1 写作兼容、
+V2 耐久 Workflow 回调、草案复审及 Episode 剧本／分镜候选物化。旧 `/internal/v1/video/adaptations/**` 和
 `/internal/v1/video/scenes/**` 路由已经移除，旧视频后台也不再通过内部接口创建或收敛任务。
 它们不进入公共 OpenAPI；Java Core 仍须满足当前 Python Agent 的共享契约和服务身份要求。
 
@@ -731,7 +769,7 @@ Operator 白名单不因底层能力扩大。当前源码、已安装 JAR、活�
 ### 12.1 Core 与 Agent 边界
 
 - 浏览器只访问 `/api/v1/**`；
-- 25 个 Core 内部操作覆盖质量、RAG、文风、计费、工具网关、写作、草案复审和 Episode 普通任务回调；
+- 24 个 Core 内部操作覆盖质量、RAG、文风、模型授权与计费、Agent 工具网关、V1 写作兼容、V2 Step、草案复审和 Episode 剧本／分镜回调；
 - 内部请求同时校验直连网段、Ed25519 服务身份、请求体绑定、短有效期和重放保护；
 - Agent Service 不接收 `DATABASE_URL`，不加入数据网络，不直接写小说数据；
 - Nginx 对公网阻断 `/internal/**`。
@@ -760,7 +798,7 @@ Operator 白名单不因底层能力扩大。当前源码、已安装 JAR、活�
 - 2 核 2 GB 是当前默认部署预算，每个 Python 服务一个 worker；
 - 发布在 Runner 预构建镜像，服务器不现场构建；
 - 发布失败时按经验证的上一组不可变镜像恢复 Web、Core 和 Agent，回滚成功仍表示本次发布失败；当前正式库
-  已有历史运行数据，回滚须保留来源及账务兼容，并使用对应编排；禁止 DDL rollback 和 Python Core 回滚；
+  已有 V2 Run，只允许 V2-aware 兼容组合，禁止 DDL rollback 和 V1-only Python Core 镜像回滚；
 - 应用启动不自动建表、删表或迁移；schema guard 只读核对结构；
 - 只有用户明确批准的具名迁移可以在备份、隔离验证和门禁下执行。
 

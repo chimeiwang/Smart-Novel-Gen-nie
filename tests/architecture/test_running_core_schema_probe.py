@@ -85,8 +85,6 @@ if arguments[:1] == ["inspect"]:
             "JAVA_TOOL_OPTIONS=-Xmx176m -Dsecret=service-jvm-must-not-leak",
         ]},
     }
-    if scenario == "historical_legacy":
-        document["Config"]["Env"].append("DURABLE_AGENT_EXECUTION_SCHEMA_READY=true")
     if scenario == "stopped":
         document["State"]["Running"] = False
     if scenario == "paused":
@@ -127,11 +125,9 @@ if arguments[:1] == ["run"]:
     env_path = Path(value("--env-file"))
     lines = env_path.read_text().splitlines()
     environment = dict(line.split("=", 1) for line in lines)
-    expected = {"DATABASE_URL", "VIDEO_PREVIEW_ENABLED", "PHONE_AUTH_ENABLED",
-                "PHONE_AUTH_SEND_ENABLED", "HISTORICAL_WORKFLOW_SCHEMA_READY"}
-    if scenario == "historical_legacy":
-        expected.add("DURABLE_AGENT_EXECUTION_SCHEMA_READY")
-    assert set(environment) == expected
+    assert set(environment) == {
+        "DATABASE_URL", "VIDEO_PREVIEW_ENABLED", "PHONE_AUTH_ENABLED", "PHONE_AUTH_SEND_ENABLED"
+    }
     assert "schema-probe-password-must-not-leak" in environment["DATABASE_URL"]
     if os.name != "nt":
         # Windows 不保留 Unix 执行位；真实权限由脚本创建时的 chmod 负责，
@@ -406,11 +402,3 @@ def test_入口只接受完整容器ID和唯一兼容参数(tmp_path: Path, argu
     assert result.returncode == 2
     assert result.stdout == ""
     assert calls == []
-
-
-def test_历史结构开关从旧生产配置继承且保留旧镜像读取能力(tmp_path: Path) -> None:
-    result, _, state = run_probe(tmp_path, "historical_legacy")
-    assert result.returncode == 0, result.stderr
-    flags = json.loads((state / "environment-check.json").read_text())["flags"]
-    assert flags["HISTORICAL_WORKFLOW_SCHEMA_READY"] == "true"
-    assert flags["DURABLE_AGENT_EXECUTION_SCHEMA_READY"] == "true"

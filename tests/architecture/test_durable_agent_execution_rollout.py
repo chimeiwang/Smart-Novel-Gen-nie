@@ -20,6 +20,8 @@ from tests.architecture.durable_agent_execution_fixtures import (
 
 ROOT = Path(__file__).parents[2]
 HELPER = ROOT / "scripts" / "durable-agent-execution-migration.sh"
+ROLLOUT_GATE = ROOT / "scripts" / "durable-agent-v2-rollout-gate.sh"
+IMAGE_VERIFIER = ROOT / "scripts" / "verify-durable-agent-v2-image.sh"
 POSTGRES_QUARANTINE = ROOT / "scripts" / "prepare-postgres-restore-quarantine.sh"
 FORWARD = ROOT / "scripts" / "migrations" / "20260831_durable_agent_execution.sql"
 ROLLBACK = ROOT / "scripts" / "migrations" / "20260831_durable_agent_execution.rollback.sql"
@@ -750,6 +752,11 @@ def test_named_helper_pins_sql_contracts_and_never_sources_env() -> None:
     assert 'pg_dump "$raw_database_url"' not in source
     assert 'PGOPTIONS="$pg_options -c inkforge' not in source
     assert "生产 GUC 只进入 0600 临时 SQL" in source
+    gate_source = ROLLOUT_GATE.read_text(encoding="utf-8")
+    assert 'sh "$migration_helper" verify-drain' in gate_source
+    route_off_case = gate_source.split("  route-off-drain)", 1)[1].split("  ddl-rollback)", 1)[0]
+    assert "verify-drain" not in route_off_case
+    assert "require_runtime_route_off" in gate_source
 
 
 def test_status_uses_private_pgpass_without_leaking_credentials(tmp_path: Path) -> None:
@@ -1545,14 +1552,290 @@ def test_contract_export_projection_matches_frozen_structural_fingerprints(
     assert hashlib.sha256(canonical.encode()).hexdigest() == expected_fingerprint
 
 
+def _run_rollout_gate(
+    tmp_path: Path,
+    *,
+    stage: str,
+    route_mode: str,
+    agent_manifest_fingerprint: str,
+    migration_state: str = "migrated-empty-v2",
+    active_v2_run_count: int = 0,
+    running_core_route_mode: str = "off",
+    running_core_v1_fresh_starts: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    app_dir = tmp_path / "app"
+    bin_dir = tmp_path / "bin"
+    (app_dir / "infra").mkdir(parents=True)
+    (app_dir / "scripts").mkdir(parents=True)
+    (app_dir / "contracts" / "agent-execution").mkdir(parents=True)
+    bin_dir.mkdir()
+    _write_sha256sum_wrapper(bin_dir / "sha256sum")
+    _write_python_wrapper(bin_dir / "python3")
+    bash_env = tmp_path / "bash-env"
+    _write_sha256sum_bash_env(bash_env, bin_dir / "sha256sum", bin_dir / "python3")
+    drain_stage = stage in {
+        "all",
+        "initialize-drain-indexes",
+        "drain-status",
+        "verify-drain",
+        "route-off-drain",
+        "ddl-rollback",
+    }
+    v1_fresh_starts = "false" if drain_stage else "true"
+    if running_core_v1_fresh_starts is None:
+        running_core_v1_fresh_starts = v1_fresh_starts
+    (app_dir / "infra" / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    (app_dir / ".env").write_text(
+        "DURABLE_AGENT_EXECUTION_SCHEMA_READY=true\n"
+        f"DURABLE_AGENT_EXECUTION_ROUTE_MODE={route_mode}\n"
+        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST=user-canary\n"
+        "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST=novel-canary\n"
+        f"V1_FRESH_AGENT_STARTS_ENABLED={v1_fresh_starts}\n",
+        encoding="utf-8",
+    )
+    shutil.copy2(
+        ROOT / "contracts" / "agent-execution" / "manifest.json",
+        app_dir / "contracts" / "agent-execution" / "manifest.json",
+    )
+    _write_schema_probe_stub(app_dir)
+    _write_executable(
+        app_dir / "scripts" / "durable-agent-execution-migration.sh",
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "  status) printf '%s\\n' \"$FAKE_MIGRATION_STATE\" ;;\n"
+        "  active-v2-count) printf '%s\\n' \"$FAKE_ACTIVE_V2_RUN_COUNT\" ;;\n"
+        "  initialize-drain-indexes) printf 'drain-indexes-ready:"
+        "v1=initialized:v2=initialized\\n' ;;\n"
+        "  drain-status|verify-drain) printf '%s\\n' \"$FAKE_DRAIN_REPORT\" ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+    )
+    _write_executable(
+        app_dir / "scripts" / "verify-durable-agent-v2-image.sh",
+        "#!/bin/sh\n"
+        '[ "$1" = "agent" ] || exit 2\n'
+        "printf 'v2-aware-image-ok:agent:%s\\n' \"$FAKE_AGENT_MANIFEST\"\n",
+    )
+    _write_executable(
+        bin_dir / "docker",
+        "#!/bin/sh\n"
+        'case " $* " in\n'
+        "  *' compose version '*) exit 0 ;;\n"
+        "  *' compose '*' ps -q agent-service '*) printf 'agent-container\\n' ;;\n"
+        "  *' compose '*' ps -q core-api '*) printf '%064d\\n' 1 ;;\n"
+        '  *" exec -T core-api /bin/sh -ec "*"V1FreshAgentStartGate.class"*)\n'
+        '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "off" ] '
+        '&& [ "$FAKE_RUNNING_CORE_V1_FRESH_STARTS" = "false" ] ;;\n'
+        '  *" exec -T core-api /bin/sh -ec "*" = all"*)\n'
+        '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "all" ] '
+        '&& [ "$FAKE_RUNNING_CORE_V1_FRESH_STARTS" = "false" ] ;;\n'
+        '  *" exec -T core-api /bin/sh -ec "*"DURABLE_AGENT_EXECUTION_ROUTE_MODE"*)\n'
+        '    [ "$FAKE_RUNNING_CORE_ROUTE_MODE" = "off" ] ;;\n'
+        "  *' compose '*' exec -T core-api '*) exit 0 ;;\n"
+        "  *' compose '*' exec -T agent-service '*) exit 0 ;;\n"
+        "  *' compose '*' exec -T execution-redis '*' INFO persistence '*) "
+        "printf 'aof_enabled:1\\naof_last_write_status:ok\\n' ;;\n"
+        "  *' compose '*' exec -T execution-redis '*' EXISTS '*) printf '0\\n' ;;\n"
+        "  *' compose '*' exec -T execution-redis '*' INFO stats '*) "
+        "printf 'evicted_keys:0\\n' ;;\n"
+        "  *' redis '*' GET inkforge:runs:drain:index-version '*) "
+        "printf '1\\n' ;;\n"
+        "  *' execution-redis '*' GET inkforge:executions:drain:index-version '*) "
+        "printf '1\\n' ;;\n"
+        "  *' inspect --format '*'agent-container'*) "
+        "printf 'sha256:%s\\n' \"$FAKE_AGENT_IMAGE_DIGEST\" ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "BASH_ENV": _posix_path(bash_env),
+        "APP_DIR": _posix_path(app_dir),
+        "DURABLE_AGENT_MIGRATION_ENV_FILE": _posix_path(app_dir / ".env"),
+        "FAKE_AGENT_MANIFEST": agent_manifest_fingerprint,
+        "FAKE_AGENT_IMAGE_DIGEST": "c" * 64,
+        "FAKE_MIGRATION_STATE": migration_state,
+        "FAKE_ACTIVE_V2_RUN_COUNT": str(active_v2_run_count),
+        "FAKE_DRAIN_REPORT": (
+            '{"schema":"inkforge.durable-agent-joint-drain",'
+            '"schemaVersion":"2","v1DrainZero":true,"v2Converged":true}'
+        ),
+        "FAKE_RUNNING_CORE_ROUTE_MODE": running_core_route_mode,
+        "FAKE_RUNNING_CORE_V1_FRESH_STARTS": running_core_v1_fresh_starts,
+    }
+    return subprocess.run(  # noqa: S603 - 仅执行仓库固定脚本与测试夹具
+        [POSIX_SHELL, str(ROLLOUT_GATE), stage, "novelwriter"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
 
 
+def test_rollout_gate_requires_exact_manifest_for_allowlist_and_terminal_runs_for_route_off(
+    tmp_path: Path,
+) -> None:
+    expected = _execution_manifest_fingerprint(
+        ROOT / "contracts" / "agent-execution" / "manifest.json"
+    )
+    same_manifest = _run_rollout_gate(
+        tmp_path / "same",
+        stage="allowlist",
+        route_mode="allowlist",
+        agent_manifest_fingerprint=expected,
+    )
+    older_manifest = _run_rollout_gate(
+        tmp_path / "older",
+        stage="allowlist",
+        route_mode="allowlist",
+        agent_manifest_fingerprint="b" * 64,
+    )
+    route_off_terminal = _run_rollout_gate(
+        tmp_path / "route-off-terminal",
+        stage="route-off-drain",
+        route_mode="off",
+        agent_manifest_fingerprint="b" * 64,
+        migration_state="migrated-with-v2",
+        active_v2_run_count=0,
+    )
+    route_off_active = _run_rollout_gate(
+        tmp_path / "route-off-active",
+        stage="route-off-drain",
+        route_mode="off",
+        agent_manifest_fingerprint="b" * 64,
+        migration_state="migrated-with-v2",
+        active_v2_run_count=2,
+    )
+    route_off_runtime_allowlist = _run_rollout_gate(
+        tmp_path / "route-off-runtime-allowlist",
+        stage="route-off-drain",
+        route_mode="off",
+        agent_manifest_fingerprint="b" * 64,
+        migration_state="migrated-with-v2",
+        active_v2_run_count=0,
+        running_core_route_mode="allowlist",
+    )
+
+    assert same_manifest.returncode == 0, same_manifest.stderr
+    assert older_manifest.returncode != 0
+    assert "冻结 execution manifest 不一致" in older_manifest.stderr
+    assert route_off_terminal.returncode == 0, route_off_terminal.stderr
+    assert route_off_active.returncode != 0
+    assert "仍有 V2 非终态 Run" in route_off_active.stderr
+    assert route_off_runtime_allowlist.returncode != 0
+    assert "V1/V2 新建入口同时关闭" in route_off_runtime_allowlist.stderr
 
 
+def test_rollout_gate_exposes_separate_drain_status_and_verify_actions(
+    tmp_path: Path,
+) -> None:
+    expected = _execution_manifest_fingerprint(
+        ROOT / "contracts" / "agent-execution" / "manifest.json"
+    )
+    status_while_allowlist = _run_rollout_gate(
+        tmp_path / "status",
+        stage="drain-status",
+        route_mode="allowlist",
+        agent_manifest_fingerprint=expected,
+        migration_state="migrated-with-v2",
+    )
+    verified_off = _run_rollout_gate(
+        tmp_path / "verify-off",
+        stage="verify-drain",
+        route_mode="off",
+        agent_manifest_fingerprint=expected,
+        migration_state="migrated-with-v2",
+    )
+    rejected_allowlist = _run_rollout_gate(
+        tmp_path / "verify-allowlist",
+        stage="verify-drain",
+        route_mode="allowlist",
+        agent_manifest_fingerprint=expected,
+        migration_state="migrated-with-v2",
+    )
+
+    assert status_while_allowlist.returncode != 0
+    assert "V1 fresh start" in status_while_allowlist.stderr
+    assert verified_off.returncode == 0, verified_off.stderr
+    assert json.loads(verified_off.stdout)["v2Converged"] is True
+    assert rejected_allowlist.returncode != 0
+    assert "schemaReady/route" in rejected_allowlist.stderr
 
 
+def test_rollout_all_requires_existing_v2_closed_v1_and_exact_manifest(tmp_path: Path) -> None:
+    expected = _execution_manifest_fingerprint(
+        ROOT / "contracts" / "agent-execution" / "manifest.json"
+    )
+    accepted = _run_rollout_gate(
+        tmp_path / "accepted",
+        stage="all",
+        route_mode="all",
+        migration_state="migrated-with-v2",
+        agent_manifest_fingerprint=expected,
+        running_core_route_mode="all",
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert "gate-ok:all:migrated-with-v2" in accepted.stdout
+    empty = _run_rollout_gate(
+        tmp_path / "empty",
+        stage="all",
+        route_mode="all",
+        agent_manifest_fingerprint=expected,
+        running_core_route_mode="all",
+    )
+    assert empty.returncode != 0
+    assert "不能直接从空 V2 开启" in empty.stderr
+    open_v1 = _run_rollout_gate(
+        tmp_path / "v1-open",
+        stage="all",
+        route_mode="all",
+        migration_state="migrated-with-v2",
+        agent_manifest_fingerprint=expected,
+        running_core_route_mode="all",
+        running_core_v1_fresh_starts="true",
+    )
+    assert open_v1.returncode != 0
+    assert "仍开放 V1 新建入口" in open_v1.stderr
+    mismatch = _run_rollout_gate(
+        tmp_path / "mismatch",
+        stage="all",
+        route_mode="all",
+        migration_state="migrated-with-v2",
+        agent_manifest_fingerprint="b" * 64,
+        running_core_route_mode="all",
+    )
+    assert mismatch.returncode != 0
+    assert "冻结 execution manifest 不一致" in mismatch.stderr
 
 
+def test_rollout_gate_freezes_the_staged_route_matrix() -> None:
+    source = ROLLOUT_GATE.read_text(encoding="utf-8")
+
+    for stage in (
+        "pre-contract",
+        "post-contract-route-off",
+        "schema-ready-route-off",
+        "initialize-drain-indexes",
+        "allowlist",
+        "route-off-drain",
+        "ddl-rollback",
+    ):
+        assert stage in source
+    assert "schemaReady=false" not in source  # 配置使用正式环境变量名，不靠自然语言解析。
+    assert "DURABLE_AGENT_EXECUTION_SCHEMA_READY" in source
+    assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE" in source
+    assert "V1_FRESH_AGENT_STARTS_ENABLED" in source
+    assert "verify-running-core-schema.sh" in source
+    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" not in source
+    assert "restore:quarantine" in source
+    assert "evicted_keys" in source
+    assert "verify-durable-agent-v2-image.sh" in source
+    assert "require_release_execution_manifest" in source
+    assert "require_route_off_execution_manifest" in source
+    assert "current_agent_manifest_fingerprint" in source
 
 
 def test_postgres_restore_has_named_quarantine_step_but_no_restore_command() -> None:
@@ -1822,8 +2105,90 @@ def test_postgres_restore_quarantine_requires_route_off_and_stopped_dispatch(
     assert expected_error in result.stderr
 
 
+def test_image_verifier_runs_without_network_secrets_or_volumes() -> None:
+    source = IMAGE_VERIFIER.read_text(encoding="utf-8")
+
+    assert source.count("--network none") == 2
+    assert source.count("--read-only") == 2
+    assert "--env" not in source
+    assert "--mount" not in source
+    assert "RoutingWritingRunStarter.class" in source
+    assert "V1FreshAgentStartGate.class" in source
+    assert "WorkflowsController.class" in source
+    assert "load_execution_registry" in source
+    assert "manifest_fingerprint" in source
 
 
+def test_agent_image_verifier_requires_exact_offline_manifest_fingerprint(
+    tmp_path: Path,
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    actual = "a" * 64
+    _write_executable(
+        bin_dir / "docker",
+        "#!/bin/sh\n"
+        'printf \'%s\\n\' "$*" >> "$FAKE_DOCKER_LOG"\n'
+        'case " $* " in\n'
+        "  *' image inspect '*) exit 0 ;;\n"
+        "  *' run '*) printf '%s\\n' \"$FAKE_MANIFEST_FINGERPRINT\" ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "FAKE_DOCKER_LOG": _posix_path(docker_log),
+        "FAKE_MANIFEST_FINGERPRINT": actual,
+    }
+
+    accepted = subprocess.run(  # noqa: S603 - 仅执行仓库固定脚本与测试夹具
+        [
+            POSIX_SHELL,
+            str(IMAGE_VERIFIER),
+            "agent",
+            "inkforge-agent-service:fixture",
+            actual,
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    rejected = subprocess.run(  # noqa: S603 - 仅执行仓库固定脚本与测试夹具
+        [
+            POSIX_SHELL,
+            str(IMAGE_VERIFIER),
+            "agent",
+            "inkforge-agent-service:fixture",
+            "b" * 64,
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout.strip() == f"v2-aware-image-ok:agent:{actual}"
+    assert rejected.returncode != 0
+    assert "与发布预期不一致" in rejected.stderr
+    run_lines = [
+        line for line in docker_log.read_text(encoding="utf-8").splitlines() if "run " in line
+    ]
+    assert len(run_lines) == 2
+    for line in run_lines:
+        assert "--network none" in line
+        assert "--read-only" in line
+        assert "--cap-drop ALL" in line
+        assert "--mount" not in line
+        assert "--env" not in line
+        assert "load_execution_registry" in line
 
 
 def test_status_query_recognizes_real_postgres14_pre_post_and_partial_shapes(

@@ -17,8 +17,8 @@ import tools.jackson.core.type.TypeReference;
 
 class WorkflowExecutionContextTest {
 
-    private static final HistoricalRegistryFixture REGISTRY = HistoricalRegistryFixture.loadClasspath(HistoricalRegistryFixture.Environment.TEST);
-    private static final IntentExecutionPlanSnapshot INTENT = HistoricalRegistryFixture.freezeIntent(
+    private static final ExecutionRegistry REGISTRY = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+    private static final IntentExecutionPlanSnapshot INTENT = IntentExecutionPlanSnapshot.freeze(
             REGISTRY, List.of("long_serial.answer_question", "long_serial.plan_chapter", "long_serial.write_chapter"));
     private static final WorkflowExecutionContext.RunIdentity NATURAL = new WorkflowExecutionContext.RunIdentity(
             "run-1", "long_serial", null, REGISTRY.catalogVersion(), "chapter-1", "chapter", "chapter-1");
@@ -91,9 +91,9 @@ class WorkflowExecutionContextTest {
     @ParameterizedTest
     @ValueSource(strings = {"create_lore", "revise_lore", "create_outline", "revise_outline", "manage_foreshadowing"})
     void 新选择按冻结操作恢复范围而保留公共章节锚点(String operation) {
-        HistoricalRegistryFixture registry = HistoricalRegistryFixtureFixtures.structuredOperationEnabled(
-                HistoricalRegistryFixture.Environment.TEST, "long_serial." + operation);
-        IntentExecutionPlanSnapshot intent = HistoricalRegistryFixture.freezeIntent(registry, List.of("long_serial." + operation));
+        ExecutionRegistry registry = ExecutionRegistryFixtures.structuredOperationEnabled(
+                ExecutionRegistry.Environment.TEST, "long_serial." + operation);
+        IntentExecutionPlanSnapshot intent = IntentExecutionPlanSnapshot.freeze(registry, List.of("long_serial." + operation));
         String scope = "manage_foreshadowing".equals(operation) ? "chapter" : "novel";
         var selection = new WorkflowIntentSelection("run-1", "long_serial." + operation,
                 intent.requireOperationPlan("long_serial." + operation).sha256(), "resolver-1", "a".repeat(64),

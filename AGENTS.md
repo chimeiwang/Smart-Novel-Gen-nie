@@ -22,7 +22,7 @@
 | 前端 UI | [DESIGN.md](DESIGN.md) |
 | Agent、写作流程、草案审核 | [Agent 指导](apps/agent-service/AGENTS.md)、[AI 写作](docs/requirements/03-ai-writing-and-agents.md)、[审核与工作流](docs/requirements/04-review-quality-and-workflow.md) |
 | Java Core、CLI 迁移、兼容基线或部署切换 | [Java 替换规格](docs/specs/2026-08-24-core-java-replacement.md)、[替换计划](docs/plans/2026-08-24-core-java-tdd-replacement.md)、[技术栈](docs/architecture-decisions/001-core-java-stack.md)、[契约](docs/architecture-decisions/002-core-java-contract-first.md)、[单切](docs/architecture-decisions/003-core-java-single-cutover.md)决策 |
-| 数据库、数据迁移、旧执行清理、生产开关或回滚 | [数据变更授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)及对应具名 spec、[运维需求](docs/requirements/05-auth-billing-and-ops.md)；引擎退役及回滚另读 [退役发布手册](docs/ENGINE_RETIREMENT_ROLLOUT.md) |
+| 数据库、数据迁移、旧执行清理、生产开关或回滚 | [数据变更授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)及对应具名 spec、[运维需求](docs/requirements/05-auth-billing-and-ops.md)；耐久执行另读 [V2 运维手册](docs/DURABLE_AGENT_V2_ROLLOUT.md) |
 | CLI／Operator Skill | [Java CLI 文档](tools/inkforge-cli-java/README.md)、[Operator 更新契约](docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md)；底层命令能力不自动扩大 Skill 白名单 |
 
 ## 服务与接口边界
@@ -31,7 +31,7 @@
 - `apps/core-api-java` 独占 PostgreSQL、浏览器认证、归属校验、业务规则、ReviewArtifact、计费和 SSE。
   Core 与 CLI 只保留 Java 实现；生产只运行一个 Core，不双 Core、不双写。
 - `apps/agent-service` 负责 LangGraph、模型、工具循环和运行队列；只能通过 Core 内部工具网关读写业务数据，
-  禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。运行使用普通队列，Redis 可重建；历史执行来源和账务由 Core 保留。
+  禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。V2 单 Step 使用独立持久 execution Redis，普通队列／认证 Redis 可重建。
 - Core 与 Agent 使用 `packages/service-contracts` 的版本化 Pydantic 契约及 `packages/service-auth` 的 Ed25519 服务身份。
   `/internal/v1/**` 同时校验直接对端网段和服务令牌，不得信任转发头决定内部身份。
 - 浏览器和 CLI 只访问 Core 公共 `/api/v1/**`，不得访问内部接口；Nginx 是唯一公网入口。
@@ -66,8 +66,8 @@
 - 迁移前备份并在隔离 PostgreSQL 验证，完成后从真实目标库重新导出
   Java Core 的 `src/main/resources/db/` 中对应 pre／post Durable V2 结构契约并复验精确一致；
   使用 Java `inkforge-schema-export` 导出，未获批变更只能只读核对契约。
-- 当前正式库已有 V2 Run，永久禁止 DDL rollback；应用回滚必须保留历史来源与账务兼容能力，
-  并使用切换前冻结的镜像及编排恢复点，不得使用 Python Core 或丢失依赖的旧 Agent 组合。不得物理删除会断开小说成果来源的 Task／Command 或候选。
+- 当前正式库已有 V2 Run，永久禁止 DDL rollback；应用回滚必须保留 V2 查询与收敛能力，
+  不得使用 V1-only Python Core 或不兼容的旧 Agent 镜像。不得物理删除会断开小说成果来源的 Task／Command 或候选。
 - 生产必须保持 `VIDEO_PREVIEW_ENABLED=false`，拒绝视频调度和真实 Seedance；开发结构授权不等于生产迁移或功能开放。
   视频任务先核对[授权清单](docs/DATA_CHANGE_AUTHORIZATIONS.md)中链接的有效规格与暂停状态，不能凭历史摘要恢复实施或真实调用。
 - 部署按[运维需求](docs/requirements/05-auth-billing-and-ops.md)及对应手册执行；普通应用部署不得自动执行 Durable Agent V2 DDL。

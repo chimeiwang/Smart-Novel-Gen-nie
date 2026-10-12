@@ -135,7 +135,7 @@ final class LongTaskCommands {
         return post(context, "/api/v1/writing/runs", body);
     }
 
-    /** 恢复现有任务；已退役的澄清入口只返回明确错误。 */
+    /** 区分旧任务恢复与 V2 澄清回答，并发送对应公共命令。 */
     private static CommandResult resume(CommandContext context, ObjectNode payload) {
         if (payload.has("inputMode")) return clarify(context, payload);
         MutationPayloads.requireFields(
@@ -168,13 +168,13 @@ final class LongTaskCommands {
                 Set.of("inputMode", "clientRequestId", "novelId", "chapterId", "writingSessionId", "userInstruction"),
                 Set.of("targetWordCount"));
         ObjectNode body = context.dependencies().json().createObjectNode();
-        // 自然输入直接进入现有规划 Agent，保留完整原文和稳定请求身份。
-        body.putArray("selectedAgents");
+        body.put("inputMode", "natural");
+        body.put("workflow", "long_serial");
         body.put("clientRequestId", MutationPayloads.clientRequestId(payload, 128));
         for (String field : Set.of("novelId", "chapterId", "writingSessionId")) {
             body.put(field, MutationPayloads.requireString(payload, field));
         }
-        body.put("userMessage", completeMessage(payload, "userInstruction"));
+        body.put("userInstruction", completeMessage(payload, "userInstruction"));
         if (payload.has("targetWordCount")) {
             JsonNode count = payload.get("targetWordCount");
             if (!count.isIntegralNumber() || count.bigIntegerValue().signum() <= 0
@@ -192,8 +192,17 @@ final class LongTaskCommands {
         }
         MutationPayloads.requireFields(payload, Set.of("inputMode", "taskId", "clientRequestId",
                 "expectedRevision", "decisionStepId", "userMessage"));
-        completeMessage(payload, "userMessage");
-        throw new CliInputException("ENGINE_RETIRED", "历史澄清执行器已退役，请以完整要求创建新的 V1 任务");
+        JsonNode revision = payload.get("expectedRevision");
+        if (!revision.isIntegralNumber() || revision.bigIntegerValue().signum() <= 0) {
+            throw new CliInputException("INVALID_REVISION", "expectedRevision 必须是正整数");
+        }
+        ObjectNode body = context.dependencies().json().createObjectNode();
+        body.put("clientRequestId", MutationPayloads.clientRequestId(payload, 128));
+        body.set("expectedRevision", revision.deepCopy());
+        body.put("decisionStepId", MutationPayloads.requireString(payload, "decisionStepId"));
+        body.put("userMessage", completeMessage(payload, "userMessage"));
+        return post(context, "/api/v1/writing/runs/"
+                + Payloads.segment(MutationPayloads.requireString(payload, "taskId")) + "/clarification", body);
     }
 
     private static String completeMessage(ObjectNode payload, String field) {

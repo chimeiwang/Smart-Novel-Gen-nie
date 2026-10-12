@@ -1,7 +1,5 @@
 # 耐久 Agent V2 数据库迁移与分阶段发布 Runbook
 
-> 状态：历史归档。V2 引擎按 2026-10-11 规格退役；本文的 rollout gate、manifest 和新建引擎步骤不再可执行。当前发布见[退役手册](ENGINE_RETIREMENT_ROLLOUT.md)。历史结构、来源及账务仍保留，永久禁止 DDL rollback。
-
 状态：个人项目人工迁移与 canary 手册。2026-09-07 已在真实服务器开发库完成两次 forward、
 空 V2 rollback 和再次 forward，完成结构导出／复验及小说成果保全验证；真实开发canary和取消修复后全零drain已通过。
 正式库已完成48条旧执行保全退出、两次幂等forward及75表contract复验，并已存在V2事实。

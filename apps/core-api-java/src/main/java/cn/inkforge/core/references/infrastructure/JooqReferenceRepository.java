@@ -17,6 +17,8 @@ import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.patch.PatchField;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.references.application.ReferenceRepository;
+import cn.inkforge.core.references.application.RagIndexRunStarter;
+import cn.inkforge.core.references.application.RagIndexRegistrationUnavailable;
 import cn.inkforge.core.references.application.RagSubmissionException;
 import cn.inkforge.core.references.domain.RagDispatchRecord;
 import cn.inkforge.core.references.domain.RagDispatchStatus;
@@ -37,6 +39,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
@@ -81,18 +84,20 @@ final class JooqReferenceRepository implements ReferenceRepository {
     private final Clock clock;
     private final boolean durableSchemaReady;
     private final ObjectMapper json;
+    private final Supplier<RagIndexRunStarter> starters;
 
     JooqReferenceRepository(CoreDatabase database, CuidV1Generator ids, Clock clock) {
-        this(database, ids, clock, false, new ObjectMapper());
+        this(database, ids, clock, false, new ObjectMapper(), () -> null);
     }
 
     JooqReferenceRepository(CoreDatabase database, CuidV1Generator ids, Clock clock,
-            boolean durableSchemaReady, ObjectMapper json) {
+            boolean durableSchemaReady, ObjectMapper json, Supplier<RagIndexRunStarter> starters) {
         this.database = Objects.requireNonNull(database);
         this.ids = Objects.requireNonNull(ids);
         this.clock = Objects.requireNonNull(clock);
         this.durableSchemaReady = durableSchemaReady;
         this.json = Objects.requireNonNull(json);
+        this.starters = Objects.requireNonNull(starters);
     }
 
     @Override
@@ -663,7 +668,18 @@ final class JooqReferenceRepository implements ReferenceRepository {
             document.store();
             return;
         }
-
+        RagIndexRunStarter starter = starters.get();
+        if (starter != null) {
+            try {
+                starter.bindNewGeneration(transaction, userId, reference.getNovelid(), reference.getId(),
+                        content, document.getContenthash(), DatabaseTimestamp.api(document.getUpdatedat()));
+            } catch (RagIndexRegistrationUnavailable exception) {
+                // 该精确异常仅发生在任何 Run 写入前；SQL 或登记中途错误绝不能被吞掉。
+                document.setStatus(Ragdocumentstatus.failed);
+                document.setErrormessage(REGISTRATION_UNAVAILABLE);
+                document.store();
+            }
+        }
     }
 
     private void lockUserBeforeNovel(DSLContext transaction, String userId) {

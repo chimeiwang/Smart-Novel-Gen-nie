@@ -78,7 +78,7 @@ final class JooqQualityRepository implements QualityRepository {
     private final Clock clock;
     private final ObjectMapper json;
     private final CommandIdempotencyStore idempotency;
-    private final HistoricalQualitySourceReader durableCompletion;
+    private final JooqWorkflowQualityCompletion durableCompletion;
 
     JooqQualityRepository(
             CoreDatabase database,
@@ -95,7 +95,7 @@ final class JooqQualityRepository implements QualityRepository {
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
         this.idempotency = new CommandIdempotencyStore(json, durableSchemaReady);
-        this.durableCompletion = durableSchemaReady ? new HistoricalQualitySourceReader(database, clock, json) : null;
+        this.durableCompletion = durableSchemaReady ? new JooqWorkflowQualityCompletion(database, clock, json) : null;
     }
 
     @Override
@@ -553,7 +553,7 @@ final class JooqQualityRepository implements QualityRepository {
         // Chapter/Check 已被调用方锁定；失效旧 Run 的取消尾项不再阻止重新送审和原人工状态操作。
         List<WorkflowrunRecord> durable = transaction.selectFrom(WORKFLOWRUN)
                 .where(WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
-                        WORKFLOWRUN.SOURCETYPE.eq(HistoricalQualitySourceReader.SOURCE_TYPE),
+                        WORKFLOWRUN.SOURCETYPE.eq(JooqWorkflowQualityCompletion.SOURCE_TYPE),
                         WORKFLOWRUN.SOURCEID.eq(checkId), WORKFLOWRUN.STATUS.in(ACTIVE_RUN_STATUSES))
                 .orderBy(WORKFLOWRUN.CREATEDAT.asc(), WORKFLOWRUN.ID.asc()).fetch();
         return durable.stream().filter(run -> !durableCompletion.isInvalidatedWithoutLocks(transaction, run.getId()))
@@ -601,7 +601,7 @@ final class JooqQualityRepository implements QualityRepository {
                 .from(WORKFLOWRUN)
                 .where(
                         WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
-                        WORKFLOWRUN.SOURCETYPE.in("quality_check", HistoricalQualitySourceReader.SOURCE_TYPE),
+                        WORKFLOWRUN.SOURCETYPE.in("quality_check", JooqWorkflowQualityCompletion.SOURCE_TYPE),
                         WORKFLOWRUN.SOURCEID.eq(run.getSourceid()))
                 .orderBy(WORKFLOWRUN.CREATEDAT.desc(), WORKFLOWRUN.ID.desc())
                 .limit(1)

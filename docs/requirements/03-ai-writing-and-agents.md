@@ -2,7 +2,11 @@
 
 ## 8 月 29 日写作流程兼容回退
 
-当前新任务统一走 V1 LangGraph、普通队列和 Core 工具网关。2026-10-11 的[退役规格](../specs/2026-10-11-v1-writer-and-execution-retirement.md)取代此前继续装配耐久执行引擎的选择；正文、大纲、版本、来源和账务继续保全。旧运行可查询，历史候选可按原来源采用或丢弃；旧引擎返工、澄清和取消不再执行。当前仓库实现不自动证明生产已经部署，发布状态进入审计。
+用户于 2026-09-13 要求恢复 LangGraph 自主读取资料的写作流程，生产亦在范围内，正文和大纲必须保全。
+按[兼容回退规格](../specs/2026-09-13-langgraph-aug29-compatible-rollback.md)，写作页面恢复旧输入与图状态观察；
+`schemaReady=true / route=off / V1fresh=true` 时新写作走 V1 LangGraph，仍通过 Core 工具网关读取和提交候选。
+V2-aware 后台、现有数据库及历史引擎身份保留；本次不是原始旧镜像直接部署。实际开放状态见
+[执行审计](../audits/2026-09-13-langgraph-compatible-rollback.md)，以下 V2 能力描述不自动代表新任务路由。
 
 ## Java Core 与独立 Python Agent
 
@@ -13,17 +17,41 @@ Core HTTP 契约由 `contracts/core/openapi.json` 维护，Agent 仍使用自身
 
 ## 长篇 Episode 视频 Agent 与生成任务
 
-活动视频主链以独立 `VideoEpisode` 为身份，章节只作为一个或多个不可变来源快照。旧章节改编、逐镜提示词与 VideoScene 任务不重新开放。
+活动视频主链以独立 `VideoEpisode` 为身份，章节只作为一个或多个不可变来源快照。旧
+`VideoChapterAdaptation`、`VideoAdaptationTask`、`chapter_cinematic_adaptation_v2` 和
+`chapter_shot_prompt_v2` 已从公共／内部路由、活动 Catalog、dispatcher 与 Agent handler 退出，不能再创建或调度。
+服务器尚未执行物理退役迁移，因此旧表和类型只作为未装配结构投影暂留。
 
-四项业务为 `episode_script_generate`、`episode_script_revise`、`episode_storyboard_generate`、`episode_storyboard_revise`。Core 冻结完整来源、基础版本、revision、修改范围、视觉依据与内容哈希，形成普通业务任务；`WorkflowRun(engineVersion=1)` 仅保存业务状态，实际来源中首个现存章节作为归属锚点，Episode 仍是模型目标。不可变 Evidence 是来源记录，不创建模型 Step 或依赖执行 Catalog、execution journal。
+当前 Durable Agent V2 Catalog 共 23 项，其中视频只包含 4 项：
 
-任务通过普通 `kind=video` 队列执行现有 LangGraph 生成、审阅与最多一次返工。完整检查点由 Core 保存，已完成结果恢复时不重调模型；已开始但结果未知的供应商调用明确失败并保留诊断，不能自动重复请求。Agent 每次模型调用使用既有 Core 授权与用量回报。
+- `episode_script_generate`：依据精确 Episode、来源集合、创作意图和工作稿 revision 生成剧本候选；
+- `episode_script_revise`：只修改声明的稳定 sceneId／lineId 范围，由 Core 合并保留范围外内容；
+- `episode_storyboard_generate`：从确切正式剧本生成带稳定 shot 身份意图的分镜候选；
+- `episode_storyboard_revise`：只修改声明的稳定 shotId，复制、替换、拆分和合并由 Core 校验 lineage 并分配新身份。
 
-Core 重新校验来源哈希、工作稿版本与局部修订范围，只生成完整待审候选。候选采用、正式剧本／分镜确认和制作基线是独立作者决定；局部修订保留范围外内容。回调使用 Ed25519 服务身份绑定任务、小说、路径和正文。取消使用稳定命令标识及当前 revision，迟到成功不能覆盖取消。
+四项操作都只运行于 V2 单 Step 边界。Core 在受理时冻结完整来源、基础版本、revision、修改范围、视觉依据和内容哈希，
+以 Workflow Evidence 持久化；Agent 只读取该 Evidence，不能连接 PostgreSQL、重新读取可变小说资料或直接写正式视频事实。
+Run 完成只表示候选已持久化到 `ReviewArtifact`，不表示作者采用或正式版本已经切换。
 
-生产保持 `VIDEO_PREVIEW_ENABLED=false`，不得调度视频或真实 Seedance。
+模型输出使用视频专属闭合 Schema。Core 校验稳定 ID、节点归属、来源范围、顺序和限定修改范围；模型声称“未修改其他
+内容”不能代替合并校验。作者采用候选只更新带 revision CAS 的工作稿；正式剧本和正式分镜分别通过独立人工确认创建
+不可变版本。取消、重启、重复回调和结果恢复沿用 Core 权威 V2 Run、Step、Evidence、Event 与 BillingReservation，
+不得复活 `VideoAdaptationTask` 作为第二份任务状态。
 
-现有结构要求普通任务绑定真实章节归属。若冻结来源集合中的章节全部已删除，新任务明确要求重新选择有效来源；不随机绑定无关章节，已有不可变快照和候选仍保留。
+逐镜视频渲染不属于 Agent Catalog。Core 从确切 `VideoProductionBaselineShot` 创建耐久 Episode RenderTask，
+只把冻结的供应商中立请求交给短 submit／query 网关。当前输入为 `video-production-shot-input/1.2`：Canon 和关键帧
+同时冻结 `rightsStatus=confirmed`、规范 UTC `lockedAt`、素材身份、MIME 与哈希，执行前再次同数据库权威事实核对。
+`1.0`／`1.1` 只允许历史 simulated 读取，live 必须失败关闭并要求新建基线。
+
+Seedance 2.5 真实 POST／GET 只位于 Provider 的 `_create_live_task()`／`_query_live_task()`。默认
+`SEEDANCE_EXECUTION_MODE=simulated` 不访问供应商，Core 生成并归档带 `simulated_placeholder` 标记的可播放 MP4。
+提交调用开始后的连接异常、空响应或缺少 provider task ID 一律进入 `submission_unknown`；普通重试和同镜新任务绕过
+被禁止。明确拒绝才进入可受控重试状态。供应商 URL 只用于当次受控归档，不持久化为播放事实；归档和 ffprobe 成功后
+才创建不可变 Take。
+
+关键帧、Take 采用、粗剪、声音字幕与整集导出均由 Core 持有，不新增媒体 Agent。FFmpeg 不经过模型运行时，Agent
+不得读取受控素材目录。真实 Seedance、商业计费和生产视频开关继续关闭；未来图片生成或 TTS 只能作为受素材权利、
+锁定、版本和人工确认约束的新生产器接入。
 
 ## 长篇选区改写契约
 
@@ -31,9 +59,115 @@ Core 重新校验来源哈希、工作稿版本与局部修订范围，只生成
 
 选区 Agent 产物仍必须走 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用`。Agent 只生成 replacement，Core 在应用时再次校验来源绑定、范围和 hash，并保持选区外正文不变；CLI 不得绕过 Artifact 直接写入章节或大纲。普通 `plan_chapter` Beat Plan 与全文 `write_chapter`/`rewrite_scene` 草案继续使用原有完整草案语义。
 
+## V2 章节规划接入
+
+2026-09-04 工作分支已实现 `long_serial.plan_chapter` 的 Core-owned V2 执行链，并通过本地隔离 Fake 验收，尚未部署生产。
+公共操作、章节 target/scope 和 CLI 命令不变；V2 路由命中时才使用以下机制，不能把本段解释为其余 Operation
+已经迁移或 V1 已退役：
+
+- Core 冻结章节目标、大纲路径、剧情/章节进展、相关设定和伏笔、已批准计划及明确的缺失来源；不把全文 workspace
+  交给模型。生成、编辑复审和返工使用同一 Evidence，不重新读取可变资料。
+- Agent 的 `plot.chapter_plan.v1` 单 Step 只返回结构化计划；程序派生节拍顺序、数量和哈希。
+  `reviewer.chapter_plan_editorial.v1` 使用规划专用提示与 rubric，复审结果由 Core 保存。
+- Core 决定是否创建最多一次自动完整返工和再次复审；每次均为独立耐久模型 Step，不进入 LangGraph 或工具循环。
+  作者显式返工也创建新候选 revision，不能覆写旧候选。
+- 模型完成后只产生 `beat_plan` ReviewArtifact，作者确认后由 Core 同事务写入正式计划及 SceneBeat；不修改正文。
+  用公共 Run 的 `engineVersion/status/activeSteps/artifact` 观察，`waiting_user` 不等于已应用。
+
+具体阶段证据及 CLI/Skill 更新说明见 `docs/specs/2026-09-04-durable-chapter-planning.md`。
+
+## V2 正文写作接入
+
+2026-09-04 当前工作分支继续实施 `long_serial.write_chapter`，验证进度以
+`docs/specs/2026-09-04-durable-chapter-writing.md` 为准；服务器尚未部署或开放该链路。
+普通写作仅作用于现有章节，沿用公共 Operation、target/scope 和 CLI 命令，不自动新建下一章。
+
+- Core 冻结完整目标正文、章节目标、已批准计划/节拍、相关资料和已选文风画像；相邻章节仅选取元数据，
+  不截断邻章正文冒充摘要。生成、双复审、返工使用同一不可变 Evidence。
+- Writer 只输出完整 summary/content，程序派生哈希与字数；两位 Reviewer 分别核对正文一致性和编辑质量。
+  每次调用与累计 Run 均有冻结预算，过长来源或不完整输出明确失败，不以截断掩盖。
+  正文写作新 Run 的生成与双复审保留已上线 v3 预算：每 Step 的输入、冷缓存输入、总输出、推理、可见输出
+  上限均为 100,000，Run 五项累计上限均为 600,000。分项是独立上限，实际总输出仍受共同上限约束，
+  复审保持关闭推理。旧 v1/v2 冻结预算与其他操作额度不变；兼容保全见
+  [Java-only 发布规格](../specs/2026-09-12-java-only-core-contract-and-python-retirement.md)。
+- 正文写作与场景改写的新计划保留已上线的 Reviewer v2 提示词：有任意级别问题时返回 issues_found，
+  pass/cannot_assess 必须配空 findings；证据引用复制冻结项 id/哈希，必需范围无定位时显式填 null。
+  输出 Schema 和复审编排不变，旧 v1 Profile/Prompt 继续支持精确首次派发和恢复，不增加模型纠正调用。
+- 两位 Reviewer 一致发现高置信局部问题时，Core 最多自动修改一次：全部有可唯一定位且无冲突的结构化 patch
+  时执行零模型局部替换；全部无 patch 时可完整返工。混合、冲突、结构问题或第二轮问题保留给作者。
+  自动修改后必须再次双复审，正式正文仍不变化。
+- 作者普通或编辑批准后 Core 才应用全文，并使旧质量结果失效。该动作不更新章节进展、剧情进展、
+  故事进展、Beat Plan、设定、大纲或伏笔，不自动送审或完成章节。
+
+## V2 整章审阅与改写接入
+
+2026-09-05 工作分支继续迁移既有 review_chapter、rewrite_scene、rewrite_outline_selection，验收进度以
+`docs/specs/2026-09-05-durable-review-and-rewrites.md` 为准。
+
+- 整章审阅是一次编辑生成的完整只读报告，无候选复审、Artifact 或质量状态写入。显式请求会话可空，
+  V2 Run 完成后通过 reviewReport 读取全文；有会话时另保存唯一编辑消息。
+- 场景改写依据完整章节和用户指令生成整章候选，沿用正文双复审、一次自动修改和作者确认；
+  不新增程序场景边界，不覆盖进展、计划或设定。
+- 大纲选区冻结总纲/节点真实行 ID、版本、全文/选区哈希和码点范围，单编辑复审；明确局部问题可完整
+  返工一次，剩余问题交作者。正式采用只拼接原选区外文本与 replacement，不改变节点结构或章节。
+- 该审阅/改写切片最初将自然请求扩为问答、规划、正文、审阅、场景改写五项，使用 v2 意图提示词读取冻结列表；
+  后续结构化接线已改用 v3 的十项授权，见下节。
+  已冻结的三项或五项计划保留各自原解析器及哈希，不在恢复时换用新提示词。大纲选区继续显式绑定来源，
+  不能由意图解析器猜测选区。
+
+## V2 设定、大纲与伏笔迁移进度
+
+2026-09-05 工作分支已接通结构化候选的 Core 生成回调、完整差异展示、精确修订读取及作者决定事务。
+涉及既有 create_lore、revise_lore、create_outline、revise_outline、manage_foreshadowing 五项，不新增业务操作。
+生成及专用 Reviewer 的单 Step 已接入现有执行器并通过定向验证；仅消费完整冻结来源，返回严格原始候选
+与程序派生哈希，不运行工具循环。缺少完整来源时，新生成器可请求本次冻结名录中的必要资料；Core 在同 Run
+补齐新版本来源并接续生成，不覆盖旧快照，不扩大原模型调用额度。重复请求、无新增来源或来源冲突都有明确收敛。
+完整迁移进度见 `docs/specs/2026-09-05-durable-structured-agent-updates.md`。
+
+五项显式/自然入口、最多一次自动完整返工及作者采用已接通，该阶段使仓内 Catalog 达到 12/21；随后中短篇
+四项接线与本地验收达到 16/21，一致性终检阶段达到 17/21，文风画像达到 18/21；加入 RAG 接线后 Catalog 为 19/21，
+自然入口仍支持十项无选区操作。2026-09-06 开发视频两项补齐接线并通过隔离跨进程与全仓验收后达到 21/21，
+具体证据以 `docs/specs/2026-09-06-durable-video-model-workflows.md` 为准，不代表真实供应商或生产已验收。
+RAG 最终门禁以独立规格为准。五项已通过真实 Spring 公共 HTTP、隔离 PostgreSQL 和确定性模型回调的
+启动到采用集成验证；这不是实际 Python Agent、真实供应商或生产验收，本批全量门禁以规格最终记录为准。
+显式 scope：create_lore/revise_lore/create_outline 为 novel，revise_outline 为 novel 或 outline_node，
+manage_foreshadowing 为 novel 或当前 chapter。公共 target 保持原章节锚点，scope 不取消既有跨分区候选能力。
+生成及复审完整保存候选；高置信局部问题最多自动完整返工一次，其他问题和额度不足交作者；业务最多四次模型调用。
+现有 V1 业务、前序七项 V2 及 Operator 三操作白名单不变，本批没有更新固定 JAR、活动 Skills 或部署服务器。
+Agent 不直接暴露给 CLI，全部生成和审核仍经 Core 公共入口组织，正式写入只由作者确认后的 Core 执行。
+
+一致性终检保留原质量 API、五维报告与一次格式纠正，V2 只消费完整冻结的 `quality_context`。正常调用和纠正
+分别为独立 Step，共用原来源且各自授权、结算、重放；纠正不回放坏参数。Core 更新原检查项，`revise` 仍为
+已完成报告，不新增 Reviewer、候选或写作限制。原可选 taskId 兼容同归属 V1 Task 与 V2 写作 Run，
+CLI 继续 `long.quality.*`，不新增参数或直接访问 Agent。实现及验收见
+`docs/specs/2026-09-05-durable-consistency-quality.md`，固定安装与生产状态分别核对。
+
+资料后台索引使用独立 embedding 适配，每批一个耐久 Step，不运行模型工具循环。Core 冻结原文和索引
+代次，各批复用同一来源、模型与端点身份，完整索引只在最后一次性发布；不重复调用已完成批次。用户积分
+不扣费，缺失用量不伪造；查询 embedding 不在这次迁移范围。CLI 资料命令及接口保持原状，验收证据见
+`docs/specs/2026-09-05-durable-rag-embedding.md`。
+
+## V2 文风画像迁移进度
+
+`style.portrait` 使用用户级 Run，显式 `novelId=null`，不伪造小说身份。Core 受理时完整冻结 ready 参考文件为
+`style_portrait_context`，后续各节复用同一来源，不向 Agent 传路径。`style.portrait.v2` 按创作方法、独特标记、
+生成风格、表达特征、风格特质五节固定串行；单节重做只执行目标节。模型沿纯文本路线、关闭 thinking，不带工具、
+结构化输出或 Reviewer。Step 保存完整原始回复；Core 保留原 Python 去空白语义，整套全部完成才一次性写入
+WritingStyle，单节只更新目标字段及原汇总，不新增 ReviewArtifact 或用户采用流程。
+
+V1 StylePortraitTask 与旧恢复继续保留；新 V2 只使用 WorkflowRun/Step，不创建旧任务影子行，原任务查询双读。
+参考增删和手工编辑仍允许；删除文风后原耐久取消路径收敛，迟到结果不能重建文风。原公共入口和 CLI 范围不变。
+Agent/Core、全仓门禁与隔离独立进程验证均通过，结果见
+`docs/specs/2026-09-05-durable-style-portrait.md` 最终记录为准，不宣称真实供应商、生产或固定安装已生效。
+
 ## 目标
 
 为作者提供可持续的 AI 创作协作能力。系统需要把用户的自然语言请求识别为创作操作，选择主责 Agent 执行，并通过流式事件把过程、草案和用户确认状态展示给前端。
+
+2026-09-04 工作分支已完成自然入口、同 Run 澄清与普通 Web/CLI 接线的本地隔离验收，目标环境命中 V2
+路由时使用冻结意图计划。V1 兼容入口仍保留，服务器尚未切换该能力。详细结果见
+`docs/specs/2026-09-04-durable-natural-language-entry.md`；2026-09-05 审阅和改写的后续迁移进度见
+`docs/specs/2026-09-05-durable-review-and-rewrites.md`，不得把部分操作的本地验收解释为全部迁移完成。
 
 ## 核心 Agent
 
@@ -49,12 +183,28 @@ Core 重新校验来源哈希、工作稿版本与局部修订范围，只生成
 
 ## 中短篇专用执行链
 
-中短篇四项专用操作走普通队列，Core 冻结来源及基础版本，Agent 保存完整分段检查点；生成结果形成唯一待审版本，全文检查只返回报告，不创建 Reviewer 或正式内容。采用继续校验完整 Diff、confirmationHash 和稳定 clientRequestId。
+`short_medium` 不进入长篇 CreativeOperation 的多 Agent 自动评审链。公开入口只接受
+`generate_outline`、`generate_manuscript`、`replace_selection`、`full_check` 四种显式操作，
+并由 Core 从权威来源素材、基础版本和引用的已应用蓝图组装不可变运行快照。浏览器和 CLI 不能提交
+正文、来源文本或目标字数来替代服务端事实。
 
-## 作家编辑原则
+- 6000 到 15000 字正文允许一次模型生成；更长正文按蓝图顺序串行分段，禁止并行拼接。
+- 每次文档操作只产生一个待用户采用的候选版本，不自动采用，也不自动启动下一阶段。
+- 选区修改使用 Unicode 码点范围和选区 SHA-256 绑定基础版本；Agent 只返回 replacement，
+  Core 确定性拼接并验证选区外内容逐字不变。
+- 全文检查只返回报告，不创建候选版本。
+- 模型提示必须使用创建任务时的不可变快照，不能用运行中的可变工作区上下文替换蓝图或正文。
 
-作家 Agent 在初稿和返工中同时遵守六项编辑原则：对白符合人物已知信息和当下目的；旁白不重复解释已由动作或对白表达的意思；每场戏带来新的变化；动作服务具体场面；解决办法有依据和铺垫；识别并保留有效对白、细节、人物特点及作品文风。
-提交前把必要调整落实到最终正文，不输出自检过程。该要求只增强现有提示词，不新增 Agent、复审循环或模型调用；不把短句、方言、词语或外部 AI 检测分数作为硬门禁。跨章判断需要实际读取相关章节，不能根据未读取内容推测。
+2026-09-05 四项已接入 Core-owned V2，并通过本地独立 Java Core/Python Agent 与受控 Fake Provider 验收。
+V2 只消费完整冻结的 `short_medium_context` 与已完成段；正文按目标字数确定 1～6 个串行模型 Step，每段
+独立预留、结算和保存完整结果，后段带齐完整前缀。Core 最后写零模型汇总 Step，固定唯一候选/报告引用；
+不创建 V1 WritingTask/WritingRunCommand，不引入长篇 Reviewer 或自动返工。
+
+V2 生成 Run 的 `completed` 与候选的 `awaiting_user` 是两个生命周期，仍通过原版本 preview/adopt 和
+confirmationHash 采用；检查直接以 GET 的 `checkReport.text` 返回完整报告，无 Artifact。Web 和两端 CLI
+按 engineVersion 分流并回读同一 Run，不能从事件猜结果。双段正文的 Agent 重启恢复、每段仅一次实际 Fake
+调用、三类候选幂等采用和检查零候选均已验证；这不是实际供应商或生产验收，也没有更新固定 CLI 包和活动
+Skills。完整证据见 `docs/specs/2026-09-05-durable-short-medium-workflows.md`。
 
 ## 创作操作
 
@@ -77,7 +227,7 @@ Core 重新校验来源哈希、工作稿版本与局部修订范围，只生成
 
 `sync_lore` 已从当前可执行操作中删除。共享类型暂时保留该标识，仅用于解析历史任务快照；前端、关键词路由和分类器不得创建新的同步设定任务。
 
-V1 输入规则：
+旧 V1 兼容规则（不用于 V2 意图解析）：
 
 - 用户使用 @设定、@剧情、@写作、@校验、@编辑 前缀时，系统映射为对应 Agent 的默认 CreativeOperation。
 - 无法稳定识别时，回退为 answer_question。
@@ -170,9 +320,27 @@ flowchart TD
 
 ## 写作请求 API
 
-### 自然请求
+### V2 自然请求与澄清（当前分支本地验收通过，真实环境待验收）
 
-普通自然请求使用 V1 `userMessage/selectedAgents`，进入现有规划 Agent 和 Operation 图；显式操作继续携带目标与范围。CLI 的 `inputMode=natural` 只作为客户端兼容输入，转换为上述 V1 请求，不发送旧引擎自然请求或同 Run 澄清。
+- 普通新消息向 `POST /api/v1/writing/runs` 提交 `inputMode=natural`、`workflow=long_serial`、
+  clientRequestId、novelId、chapterId、writingSessionId、完整 userInstruction 和可选 targetWordCount。
+  不携带 selectedAgents、operation 或模型推测的目标；Core 保留当前章锚点，先创建独立 resolve_intent Step。
+- 新请求由 resolver v3 从冻结的十项授权中选择：原章节问答、规划、正文、审阅、场景改写与管理伏笔默认当前
+  chapter scope；新建/修改设定、创建/修改大纲默认 novel scope。范围及说明随 availableOperations 冻结，
+  明确节点或其他不匹配范围必须澄清或使用既有显式入口，不让模型猜 scope/ID。两类选区仍需显式绑定来源。
+  解析完成后在同一个 Run 内冻结业务来源并接续执行，不改写 Run 初始请求或 operation 列。
+- 新 selection v2 沿用原字段并保留章节 target；准备、恢复和复审共用冻结 scope。历史 resolver v1/v2、
+  selection v1、原三项/五项授权及预算保持，不因当前目录增加操作而扩大旧 Run。
+- `waiting_user` 必须区分澄清与待审草案。澄清问题通过快照的 clarification 恢复，回答使用
+  `POST /api/v1/writing/runs/{runId}/clarification`，绑定 clientRequestId、expectedRevision、
+  decisionStepId 和完整 userMessage。同一回答幂等重放受理时的快照；最多两次回答后仍不能确定意图则失败。
+- 普通下一条消息不能因存在旧 taskId 而自动恢复旧任务。只有明确回答当前澄清、处理既有草案或显式恢复
+  V1 历史任务才续接原任务。自然分支不可用时明确拒绝，不暗中回落 V1 或猜成问答。
+- V2 不创建 WritingTask/WritingRunCommand，命令兼容字段固定为 null；模型 Step、问题、回答、选择、
+  消息、事件和计费由 Core 持久化。CLI 只访问这些公共 Core 接口，不直接连接 Agent。
+
+以上接线的验证、部署及实际安装状态以 `docs/specs/2026-09-04-durable-natural-language-entry.md` 为准。
+下面的启动、恢复、持久命令与旧事件说明描述保留的 V1 路径，不能套用于 V2 自然请求。
 
 ### 启动写作 workflow
 
@@ -349,7 +517,7 @@ observer，但只有 observer 与运行 context 都存在时才写区块，并�
 任何日志都不得记录 `grantToken`；Provider 在返回可靠 usage 前失败时不伪造 token。
 
 供应商请求失败时，DeepSeek、通用 OpenAI-compatible、Embedding 与 Responses 适配器完整保存脱敏的 HTTP 错误响应及异常
-因果链。V1 在原任务的 `model_failure` 帧正文与服务日志中记录，完整失败诊断进入服务日志和人工日志，不进入产品回复。
+因果链。V1 在原任务的 `model_failure` 帧正文与服务日志中记录，V2 只按 run/step 记录服务日志。
 该详情不进入公共任务状态、业务回调或用户聊天，也不改变模型调用次数、计费及重试决定；正常请求、
 成功模型回复和推理不另行复制。HTTP 200 中的无效 JSON、usage、工具参数和结构化输出也保存完整失败内容、
 预期 Schema、全部校验原因和异常链；V1 在计费回报之前先写独立失败帧，授权、grant、回报及工具执行失败
@@ -366,14 +534,15 @@ DeepSeek 工具 arguments 必须拒绝重复 JSON 键和非有限数，不能经
 
 普通章节存在一个局部例外：`write_chapter` / `rewrite_scene` 的 primary/reviser 若已经成功纠正过纯读取工具包，
 后续 `begin_artifact_output` 的 Pydantic 参数失败可再纠正一次，每次 AgentRuntime 执行最多两次。
-纠正响应再次失败立即终止，选区、复审和质量检查 不扩充预算。正文提交提示只要求
+纠正响应再次失败立即终止，选区、复审、质量检查和 V2 单 Step 不扩充预算。正文提交提示只要求
 `kind=chapter_draft`、summary 和完整非空 content；缺正文、空正文及选区字段冲突使用稳定错误分类，
 纠正提示只携带脱敏诊断和固定指令。详见 [临时修补规格](../specs/2026-09-28-chapter-artifact-protocol-hotfix.md)，
 本地实现不代表已经部署生产。
 
 定位及复审组合的跨字段错误使用稳定分类与服务端固定说明。大纲定位纠正明确要求 `node_id` 或
 `node_title`，尚无真实节点时可先读取大纲索引；不编造身份，不回放坏参数。普通产物的操作范围错误
-也在同轮预检内进入原有纠正流程，整轮失败仍不执行任何工具。上述改动保留原纠正预算与独立计费，详见[工具契约整改规格](../specs/2026-09-30-tool-contract-and-runtime-diagnostics.md)。
+也在同轮预检内进入原有纠正流程，整轮失败仍不执行任何工具。上述改动保留原纠正预算、独立计费和
+V2 单 Step 协议，详见[工具契约整改规格](../specs/2026-09-30-tool-contract-and-runtime-diagnostics.md)。
 
 上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 和 2026-08-23
 明确批准的两个 `TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL
@@ -407,7 +576,7 @@ DeepSeek 工具 arguments 必须拒绝重复 JSON 键和非有限数，不能经
 - 人工模型日志按 v2 长度分帧保存；Core 成功接受 usage report 后形成的 billable 模型调用区块，可用
   计费 `requestId` 与 `TokenUsage` 对账，report 失败不形成该次区块。日志正文不参与结构解析，旧版
   原文处于未验证边界，残缺尾部隔离后才恢复追加，完整输入输出不截断。
-- V1 写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列；V1 文风画像仍以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实。普通 Redis 不替代数据库执行或业务状态，Agent 通过签名回调交付结果，正式文风仅由 Core 物化。
+- V1 写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列；V1 文风画像仍以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实。新 V2 文风画像使用 WorkflowRun/Step，不创建 StylePortraitTask 影子行，原公开查询双读；普通 Redis 不替代数据库执行或业务状态，V2 独立 execution journal 只持有调用边界和待送达终态。Agent 通过签名回调交付结果，正式文风仅由 Core 物化。
 - 草案进入等待用户确认时，Agent Service 使用下一个连续序号直接保存稳定快照，不再先直发等待事件；Core 在保存快照的同一事务中创建 `artifact_awaiting_user_approval` Outbox。后续 resume/artifact_decision 命令会在自身事务内作废尚未发布的旧 waiting，Publisher 遇到 waiting 序号竞争时也会再次核对并转为 superseded。长篇 completed/error 稳定 checkpoint 只保存图内终态，数据库任务和命令保持非终态，直到 complete/fail 与 terminal Outbox 在同一事务收敛。SSE 只重放 published 边界事件，跳过 superseded，并在 pending/delivering/blocked 边界前保留原游标等待；同时发送不带游标的 PostgreSQL `run_outcome` 控制帧。客户端在建连或断流后重新读取 outcome，只按 `streamShouldClose` 收敛生命周期，legacy 事件只承担展示兼容且不能直接恢复可操作草案；非 waiting_user 终态按任务清理临时草案入口并使较早的在途读取失效，相同 succeeded outcome 的完成副作用按任务、命令和结果只执行一次。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent 队列消费者已在单进程内提供默认三个执行槽，不同 `novelId` 可并行、同一 `novelId` 只执行一个 job，每个 claim 独立续租；共享 `ModelRuntime` 同时把普通 Agent、Reviewer、中短篇、质量和画像的模型调用总数限制为三个。消费槽致命错误会立即停止新领取并使 readiness 失败，其他已领取任务排空后由监督器重启；配置 1 保留串行回退路径。

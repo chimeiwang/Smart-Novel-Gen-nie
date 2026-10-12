@@ -8,7 +8,7 @@ import cn.inkforge.core.references.infrastructure.ReferenceRepositoryTestFactory
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
 import cn.inkforge.core.reviews.application.ReviewRepository;
 import cn.inkforge.core.workflows.application.WorkflowStructuredCandidatePreparation;
-import cn.inkforge.core.workflows.catalog.HistoricalRegistryFixture;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
@@ -23,30 +23,30 @@ public final class AgentUpdatesReviewTestSupport {
         return new ReviewConfiguration().structuredCandidatePreparation(json);
     }
 
-    public static ReviewRepository repository(CoreDatabase database, CuidV1Generator ids, Clock clock, ObjectMapper json, HistoricalRegistryFixture registry) {
+    public static ReviewRepository repository(CoreDatabase database, CuidV1Generator ids, Clock clock, ObjectMapper json, ExecutionRegistry registry) {
         var writer = new AgentUpdatesExecutor(new JooqLoreRepository(database, ids, clock), new JooqOutlineRepository(database, ids, clock),
                 ReferenceRepositoryTestFactory.create(database, ids, clock), ids, false);
         return new JooqReviewRepository(database, ids, clock, json, new JooqFormalArtifactWriter(database, ids, clock, json, writer), registry, true);
     }
 
-    public static HistoricalRegistryFixture.ResolvedOperation operation(HistoricalRegistryFixture registry, ObjectMapper json, String name) {
+    public static ExecutionRegistry.ResolvedOperation operation(ExecutionRegistry registry, ObjectMapper json, String name) {
         var base = registry.resolve("long_serial.plan_chapter", false);
         var old = base.operation();
-        HistoricalRegistryFixture.OutputSchema schema = null;
+        ExecutionRegistry.OutputSchema schema = null;
         try (var stream = AgentUpdatesReviewTestSupport.class.getResourceAsStream("/agent-execution/output-schema-registry.v1.json")) {
             Map<String, Object> document = json.readValue(stream, new TypeReference<>() {});
             for (Object raw : (List<?>) document.get("schemas")) {
-                if ("output.agent_updates.v2".equals(((Map<?, ?>) raw).get("key"))) schema = json.convertValue(raw, HistoricalRegistryFixture.OutputSchema.class);
+                if ("output.agent_updates.v2".equals(((Map<?, ?>) raw).get("key"))) schema = json.convertValue(raw, ExecutionRegistry.OutputSchema.class);
             }
         } catch (java.io.IOException error) { throw new IllegalStateException("测试输出契约读取失败", error); }
         if (schema == null) throw new IllegalStateException("测试输出契约缺失");
         var review = old.reviewPolicy();
-        var policy = new HistoricalRegistryFixture.ReviewPolicy(review.profile(), review.mode(), review.reviewerProfiles(), review.reviewerStepBudgetProfiles(),
+        var policy = new ExecutionRegistry.ReviewPolicy(review.profile(), review.mode(), review.reviewerProfiles(), review.reviewerStepBudgetProfiles(),
                 review.reviewerOutputSchema(), review.rubricVersion(), review.evidencePolicy(), review.lane(), "review.merge_all_pass_else_author.v1",
                 review.maxAutomaticRevisions(), review.onUnavailable());
-        var operation = new HistoricalRegistryFixture.Operation("long_serial." + name, "long_serial", name, List.of("novel"), List.of("novel"),
+        var operation = new ExecutionRegistry.Operation("long_serial." + name, "long_serial", name, List.of("novel"), List.of("novel"),
                 true, false, true, old.lane(), old.evidencePolicy(), old.generatorProfile(), old.generatorStepBudgetProfile(), schema.key(),
                 old.deterministicValidators(), policy, "apply.agent_updates.v1", old.runBudget());
-        return new HistoricalRegistryFixture.ResolvedOperation(operation, base.generatorProfile(), base.generatorStepBudget(), schema, base.reviewers(), base.reviewerOutputSchema());
+        return new ExecutionRegistry.ResolvedOperation(operation, base.generatorProfile(), base.generatorStepBudget(), schema, base.reviewers(), base.reviewerOutputSchema());
     }
 }

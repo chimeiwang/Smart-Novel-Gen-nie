@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from itertools import count
@@ -25,12 +25,24 @@ from ..providers.base import (
     ProviderProtocolError,
     ProviderTransportError,
 )
+from ..providers.embeddings import (
+    EmbeddingIdentity,
+    EmbeddingRequest,
+    EmbeddingResult,
+    ExecutionEmbeddingProvider,
+)
 from ..providers.error_details import (
     FailureDiagnostic,
     ProviderErrorDetails,
     capture_failure_diagnostic,
     capture_provider_error_details,
     log_failure_diagnostic,
+)
+from ..providers.video_responses import (
+    ExecutionResponsesProvider,
+    VideoResponsesIdentity,
+    VideoResponsesRequest,
+    VideoResponsesResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -246,10 +258,14 @@ class ModelRuntime:
         billing: BillingPort | None = None,
         observer: ModelCallObserver | None = None,
         max_concurrency: int = 1,
+        embedding_provider: ExecutionEmbeddingProvider | None = None,
+        responses_provider: ExecutionResponsesProvider | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("模型调用并发数必须为正整数")
         self._provider = provider
+        self._embedding_provider = embedding_provider
+        self._responses_provider = responses_provider
         self._billing = billing
         self._observer = observer
         self._max_concurrency = max_concurrency
@@ -298,6 +314,14 @@ class ModelRuntime:
 
         checker = getattr(self._provider, "supports_structured_output", None)
         return bool(checker(route)) if callable(checker) else False
+
+    def execution_identity(self, route: ModelStructuredOutputRoute) -> tuple[str, str]:
+        """仅路由特有的真实 Provider 覆写部署分类，其余沿用历史身份。"""
+        resolver = getattr(self._provider, "execution_identity", None)
+        if callable(resolver):
+            endpoint, capability = resolver(route)
+            return str(endpoint), str(capability)
+        return self.endpoint_profile, self.capability_version
 
     async def run_turn(
         self,
@@ -403,6 +427,74 @@ class ModelRuntime:
                 provider_response_id=result.providerResponseId,
                 billing_request_id=billing_request_id,
             )
+
+    async def run_execution_turn(
+        self,
+        request: ModelTurnRequest,
+        *,
+        before_provider: Callable[[], Awaitable[int]],
+        lane: ModelLane,
+        reviewer: bool = False,
+        provider_timeout_seconds: float | None = None,
+    ) -> tuple[int, ModelTurnResult]:
+        """执行一个 V2 Step 的供应商调用，并与 V1 共用同一全局并发门。
+
+        V2 的预算预留、用量结算与日志边界由 Core WorkflowStep 和结构化终报承担，
+        因此这里不进入 V1 的 billing/observer 流程，也不进入 Agent 工具循环。
+        """
+
+        async with self._limiter.acquire(lane, reviewer=reviewer):
+            attempt = await before_provider()
+            if provider_timeout_seconds is None:
+                return attempt, await self._provider.complete_turn(request)
+            async with asyncio.timeout(provider_timeout_seconds):
+                return attempt, await self._provider.complete_turn(request)
+
+    @property
+    def embedding_identity(self) -> EmbeddingIdentity | None:
+        return None if self._embedding_provider is None else self._embedding_provider.identity
+
+    async def run_execution_embedding(
+        self,
+        request: EmbeddingRequest,
+        *,
+        before_provider: Callable[[], Awaitable[int]],
+        lane: ModelLane,
+        provider_timeout_seconds: float | None = None,
+    ) -> tuple[int, EmbeddingResult]:
+        """独立 embedding 单次 HTTP 与聊天共用原同一个并发门，计费由 Core 决定。"""
+        provider = self._embedding_provider
+        if provider is None:
+            raise ValueError("独立索引供应商未配置")
+        async with self._limiter.acquire(lane, reviewer=False):
+            attempt = await before_provider()
+            if provider_timeout_seconds is None:
+                return attempt, await provider.embed_batch(request)
+            async with asyncio.timeout(provider_timeout_seconds):
+                return attempt, await provider.embed_batch(request)
+
+    @property
+    def responses_identity(self) -> VideoResponsesIdentity | None:
+        return None if self._responses_provider is None else self._responses_provider.identity
+
+    async def run_execution_responses(
+        self,
+        request: VideoResponsesRequest,
+        *,
+        before_provider: Callable[[], Awaitable[int]],
+        lane: ModelLane,
+        provider_timeout_seconds: float | None = None,
+    ) -> tuple[int, VideoResponsesResult]:
+        """视频 V2 与聊天/embedding 共用同一个并发门，账务仅由 Core Step 收敛。"""
+        provider = self._responses_provider
+        if provider is None:
+            raise ValueError("独立视频 Responses 供应商未配置")
+        async with self._limiter.acquire(lane, reviewer=False):
+            attempt = await before_provider()
+            if provider_timeout_seconds is None:
+                return attempt, await provider.complete_responses(request)
+            async with asyncio.timeout(provider_timeout_seconds):
+                return attempt, await provider.complete_responses(request)
 
     async def _run_turn_limited(
         self,

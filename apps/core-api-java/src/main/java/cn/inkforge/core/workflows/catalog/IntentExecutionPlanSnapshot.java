@@ -65,7 +65,7 @@ public final class IntentExecutionPlanSnapshot {
     private final String executionManifestFingerprint;
     private final ExecutionPlanSnapshot.Step resolver;
     private final List<ExecutionPlanSnapshot> operationPlans;
-    private final HistoricalExecutionTypes.RunBudget runBudget;
+    private final ExecutionRegistry.RunBudget runBudget;
     private final String sha256;
     private final Map<String, Object> stored;
 
@@ -74,7 +74,7 @@ public final class IntentExecutionPlanSnapshot {
             String executionManifestFingerprint,
             ExecutionPlanSnapshot.Step resolver,
             List<ExecutionPlanSnapshot> operationPlans,
-            HistoricalExecutionTypes.RunBudget expectedBudget,
+            ExecutionRegistry.RunBudget expectedBudget,
             String expectedSha256) {
         this.operationCatalogVersion = nonBlank(operationCatalogVersion, "Operation Catalog 版本");
         this.executionManifestFingerprint = requireSha256(executionManifestFingerprint, "Manifest fingerprint");
@@ -107,10 +107,23 @@ public final class IntentExecutionPlanSnapshot {
                 "plan", frozenPlan);
     }
 
-    /** 由不可变构件还原历史快照，不读取当前运行目录。 */
-    public static IntentExecutionPlanSnapshot freezeHistorical(String catalogVersion, String manifestFingerprint,
-            ExecutionPlanSnapshot.Step resolver, List<ExecutionPlanSnapshot> plans) {
-        return new IntentExecutionPlanSnapshot(catalogVersion, manifestFingerprint, resolver, plans, null, null);
+    /** 授权列表由 Core 业务入口给出；不补齐、丢弃或猜测任何未授权操作。 */
+    public static IntentExecutionPlanSnapshot freeze(
+            ExecutionRegistry registry, List<String> authorizedOperationKeys) {
+        Objects.requireNonNull(registry, "Registry 不能为空");
+        requireOperationKeys(authorizedOperationKeys, true);
+        ExecutionRegistry.ResolvedSystemPurpose resolved = registry.resolveSystemPurpose("resolve_intent");
+        if (!resolved.purpose().workflows().contains(WORKFLOW)
+                || !resolved.purpose().parentOperations().isEmpty()) {
+            throw invalid("自然入口解析器未授权无父业务操作的 long_serial 用途");
+        }
+        List<ExecutionPlanSnapshot> plans = authorizedOperationKeys.stream()
+                .map(key -> registry.freezePlan(key, false)).toList();
+        ExecutionPlanSnapshot.Step resolver = ExecutionPlanSnapshot.freezeSystemPurpose(resolved);
+        requireCurrentResolver(resolver);
+        return new IntentExecutionPlanSnapshot(
+                registry.catalogVersion(), registry.manifestFingerprint(),
+                resolver, plans, null, null);
     }
 
     /** 只验证持久化的冻结事实，不要求当前部署仍保有同一份 Registry。 */
@@ -148,7 +161,7 @@ public final class IntentExecutionPlanSnapshot {
     public List<ExecutionPlanSnapshot> operationPlans() { return operationPlans; }
     public int maxClarifications() { return MAX_CLARIFICATIONS; }
     public int maxResolverSteps() { return MAX_RESOLVER_STEPS; }
-    public HistoricalExecutionTypes.RunBudget runBudget() { return runBudget; }
+    public ExecutionRegistry.RunBudget runBudget() { return runBudget; }
     public Map<String, Object> runBudgetStored() { return ExecutionPlanSnapshot.runBudgetMap(runBudget); }
     public String sha256() { return sha256; }
     public Map<String, Object> stored() { return stored; }
@@ -251,21 +264,21 @@ public final class IntentExecutionPlanSnapshot {
         }
     }
 
-    private static HistoricalExecutionTypes.RunBudget totalBudget(
+    private static ExecutionRegistry.RunBudget totalBudget(
             List<ExecutionPlanSnapshot> plans, WorkflowStepBudget resolver) {
         try {
-            HistoricalExecutionTypes.RunBudget result = new HistoricalExecutionTypes.RunBudget(
+            ExecutionRegistry.RunBudget result = new ExecutionRegistry.RunBudget(
                     RUN_BUDGET_PROFILE,
-                    Math.toIntExact(total(plans, HistoricalExecutionTypes.RunBudget::maxModelCalls, resolver.maxModelCalls())),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxInputTokens, resolver.maxInputTokens()),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxPromptCacheMissTokens, resolver.maxPromptCacheMissTokens()),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxCompletionTokens, resolver.maxCompletionTokens()),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxReasoningTokens, resolver.maxReasoningTokens()),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxVisibleOutputTokens, resolver.maxVisibleOutputTokens()),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxCostMicros, resolver.maxCostMicros()),
-                    total(plans, HistoricalExecutionTypes.RunBudget::maxWallClockSeconds, resolver.maxWallClockSeconds()),
-                    Math.toIntExact(Math.max(maximum(plans, HistoricalExecutionTypes.RunBudget::maxProviderRetriesPerStep), resolver.maxProviderRetries())),
-                    Math.toIntExact(total(plans, HistoricalExecutionTypes.RunBudget::maxProtocolCorrectionSteps, resolver.maxProtocolCorrections())));
+                    Math.toIntExact(total(plans, ExecutionRegistry.RunBudget::maxModelCalls, resolver.maxModelCalls())),
+                    total(plans, ExecutionRegistry.RunBudget::maxInputTokens, resolver.maxInputTokens()),
+                    total(plans, ExecutionRegistry.RunBudget::maxPromptCacheMissTokens, resolver.maxPromptCacheMissTokens()),
+                    total(plans, ExecutionRegistry.RunBudget::maxCompletionTokens, resolver.maxCompletionTokens()),
+                    total(plans, ExecutionRegistry.RunBudget::maxReasoningTokens, resolver.maxReasoningTokens()),
+                    total(plans, ExecutionRegistry.RunBudget::maxVisibleOutputTokens, resolver.maxVisibleOutputTokens()),
+                    total(plans, ExecutionRegistry.RunBudget::maxCostMicros, resolver.maxCostMicros()),
+                    total(plans, ExecutionRegistry.RunBudget::maxWallClockSeconds, resolver.maxWallClockSeconds()),
+                    Math.toIntExact(Math.max(maximum(plans, ExecutionRegistry.RunBudget::maxProviderRetriesPerStep), resolver.maxProviderRetries())),
+                    Math.toIntExact(total(plans, ExecutionRegistry.RunBudget::maxProtocolCorrectionSteps, resolver.maxProtocolCorrections())));
             result.toDomain().requireStepFits(resolver);
             return result;
         } catch (ArithmeticException | IllegalArgumentException exception) {
@@ -273,11 +286,11 @@ public final class IntentExecutionPlanSnapshot {
         }
     }
 
-    private static long total(List<ExecutionPlanSnapshot> plans, ToLongFunction<HistoricalExecutionTypes.RunBudget> field, long resolver) {
+    private static long total(List<ExecutionPlanSnapshot> plans, ToLongFunction<ExecutionRegistry.RunBudget> field, long resolver) {
         return Math.addExact(maximum(plans, field), Math.multiplyExact(MAX_RESOLVER_STEPS, resolver));
     }
 
-    private static long maximum(List<ExecutionPlanSnapshot> plans, ToLongFunction<HistoricalExecutionTypes.RunBudget> field) {
+    private static long maximum(List<ExecutionPlanSnapshot> plans, ToLongFunction<ExecutionRegistry.RunBudget> field) {
         return plans.stream().map(ExecutionPlanSnapshot::runBudget).mapToLong(field).max().orElseThrow();
     }
 

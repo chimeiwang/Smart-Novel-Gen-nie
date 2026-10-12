@@ -11,15 +11,6 @@ from .agent_updates import (
     materialize_agent_updates_evidence_request,
     materialize_agent_updates_output,
 )
-from .content import (
-    canonical_content_sha256 as canonical_execution_sha256,
-)
-from .content import (
-    canonical_json_bytes as canonical_execution_json_bytes,
-)
-from .content import (
-    count_chapter_text_length as count_chapter_text_length,
-)
 from .events import (
     AgentEvent,
     CallbackReceipt,
@@ -89,6 +80,9 @@ from .execution import (
     StepBudget,
     StepUsage,
     calculate_resolved_model_fingerprint,
+    canonical_execution_json_bytes,
+    canonical_execution_sha256,
+    count_chapter_text_length,
     execution_callback_path,
     materialize_chapter_draft_output,
     materialize_chapter_plan_output,

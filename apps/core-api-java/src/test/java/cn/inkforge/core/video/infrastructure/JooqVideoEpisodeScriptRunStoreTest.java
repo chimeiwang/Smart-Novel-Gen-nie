@@ -8,6 +8,9 @@ import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.db.PostgresConnectionSettings;
 import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.infrastructure.JooqWorkflowStartRepository;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,7 +47,6 @@ class JooqVideoEpisodeScriptRunStoreTest {
     private static CoreDatabase database;
     private static JooqVideoEpisodeRepository episodes;
     private static JooqVideoEpisodeScriptRunStore runs;
-    private static VideoEpisodeTaskCoordinator tasks;
 
     private String userId;
     private String novelId;
@@ -77,14 +79,19 @@ class JooqVideoEpisodeScriptRunStoreTest {
         Clock clock = Clock.systemUTC();
         CuidV1Generator ids = new CuidV1Generator(clock);
         episodes = new JooqVideoEpisodeRepository(database, ids, clock, JSON);
+        var registry = ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        var workflows = new DurableWorkflowService(
+                new JooqWorkflowStartRepository(database, ids, clock, JSON));
         CoreSettings settings = CoreSettings.from(Map.of(
                 "ENVIRONMENT", "test",
-                                                                "VIDEO_PREVIEW_ENABLED", "true",
+                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all",
+                "V1_FRESH_AGENT_STARTS_ENABLED", "false",
+                "VIDEO_PREVIEW_ENABLED", "true",
                 "VIDEO_DISPATCH_ENABLED", "true",
                 "VIDEO_DISPATCH_NAMESPACE", "episode-script-test"));
-        tasks = new VideoEpisodeTaskCoordinator(database,ids,JSON,settings,()->null,episodes,
-                new JooqVideoEpisodeStoryboardCandidateRepository(database,ids,clock,JSON));
-        runs = new JooqVideoEpisodeScriptRunStore(database, ids, settings, tasks, JSON);
+        runs = new JooqVideoEpisodeScriptRunStore(
+                database, ids, settings, registry, () -> workflows, JSON);
     }
 
     @AfterAll
@@ -152,9 +159,6 @@ class JooqVideoEpisodeScriptRunStoreTest {
         ObjectNode replayed = runs.start(userId, episodeId, request);
 
         assertThat(replayed).isEqualTo(started);
-        database.dsl().execute("UPDATE \"VideoEpisodeCommand\" SET \"resultJson\"=(\"resultJson\"::jsonb-'revision')::text WHERE \"actorUserId\"=? AND \"clientRequestId\"=?",
-                userId,request.path("clientRequestId").asText());
-        assertThat(runs.start(userId,episodeId,request).path("revision").asInt()).isEqualTo(1);
         assertThat(started.path("status").asText()).isEqualTo("pending");
         String runId = started.path("runId").asText();
         JsonNode context = JSON.readTree(database.dsl().fetchOne(
@@ -197,111 +201,6 @@ class JooqVideoEpisodeScriptRunStoreTest {
         assertCode(
                 () -> runs.start(userId, episodeId, request),
                 "VIDEO_EPISODE_CLIENT_REQUEST_REUSED");
-    }
-
-    @Test
-    void 完整检查点形成唯一候选并经作者采用到工作稿() {
-        String episodeId=episode("普通队列闭环").path("id").asText();
-        episodes.createSourceSet(userId,episodeId,sourceRequest(1));
-        String runId=runs.start(userId,episodeId,runRequest(2,"episode_script_generate",List.of(),"改编")).path("runId").asText();
-        ObjectNode candidate=document("交信");
-        ObjectNode review=object("decision","pass","summary","完整审阅","requiredChanges",List.of(),"findings",List.of());
-        ObjectNode state=object("phase","generate_started","cycle",0,"candidate",null,"review",null);
-        tasks.checkpoint(userId,novelId,runId,state);
-        state.put("phase","review");state.set("candidate",candidate);tasks.checkpoint(userId,novelId,runId,state);
-        state.put("phase","review_started");tasks.checkpoint(userId,novelId,runId,state);
-        state.put("phase","complete");state.set("review",review);tasks.checkpoint(userId,novelId,runId,state);
-        ObjectNode result=object("candidate",candidate,"review",review);
-        tasks.complete(userId,novelId,runId,result);tasks.complete(userId,novelId,runId,result);
-        ObjectNode completed=runs.get(userId,episodeId,runId);
-        assertThat(completed.path("status").asText()).isEqualTo("completed");
-        assertThat(database.dsl().fetchOne("SELECT count(*) n FROM \"ReviewArtifact\" WHERE \"workflowRunId\"=?",runId).get("n",Integer.class)).isEqualTo(1);
-        ObjectNode adopted=episodes.adoptCandidate(userId,episodeId,completed.path("artifactId").asText(),
-                object("clientRequestId",key(),"expectedArtifactRevision",1,"expectedDraftRevision",2));
-        assertThat(adopted.path("revision").asInt()).isEqualTo(3);
-        assertThat(adopted.path("document").path("scenes").get(0).path("lines").get(0).path("text").asText()).isEqualTo("交信");
-        assertThat(episodes.listVersions(userId,episodeId).path("versions")).isEmpty();
-    }
-
-    @Test
-    void 局部修订只更新冻结选中场次并保留其他场次() {
-        String episodeId=episode("局部闭环").path("id").asText();
-        String sourceSet=episodes.createSourceSet(userId,episodeId,sourceRequest(1)).path("id").asText();
-        ObjectNode draft=document("原句");
-        ObjectNode second=(ObjectNode)draft.path("scenes").get(0).deepCopy();
-        second.put("tempKey","scene-second");((ObjectNode)second.path("lines").get(0)).put("tempKey","line-second");
-        ((ObjectNode)second.path("lines").get(0)).put("text","范围外原句");
-        ((tools.jackson.databind.node.ArrayNode)draft.path("scenes")).add(second);
-        ObjectNode saved=episodes.saveDraft(userId,episodeId,object("clientRequestId",key(),"expectedRevision",2,
-                "sourceSetVersionId",sourceSet,"baseScriptVersionId",null,"document",draft));
-        ObjectNode first=(ObjectNode)saved.path("document").path("scenes").get(0).deepCopy();
-        String selected=first.path("id").asText();
-        ((ObjectNode)first.path("lines").get(0)).put("text","局部修改句");
-        ObjectNode candidate=object("scenes",List.of(first));
-        String runId=runs.start(userId,episodeId,runRequest(3,"episode_script_revise",List.of(selected),"只修改首场")).path("runId").asText();
-        ObjectNode review=object("decision","pass","summary","范围正确","requiredChanges",List.of(),"findings",List.of());
-        ObjectNode state=object("phase","generate_started","cycle",0,"candidate",null,"review",null);
-        tasks.checkpoint(userId,novelId,runId,state);
-        state.put("phase","review");state.set("candidate",candidate);tasks.checkpoint(userId,novelId,runId,state);
-        state.put("phase","review_started");tasks.checkpoint(userId,novelId,runId,state);
-        state.put("phase","complete");state.set("review",review);tasks.checkpoint(userId,novelId,runId,state);
-        tasks.complete(userId,novelId,runId,object("candidate",candidate,"review",review));
-        ObjectNode completed=runs.get(userId,episodeId,runId);
-        assertThat(completed.path("status").asText()).isEqualTo("completed");
-        ObjectNode adopted=episodes.adoptCandidate(userId,episodeId,completed.path("artifactId").asText(),
-                object("clientRequestId",key(),"expectedArtifactRevision",1,"expectedDraftRevision",3));
-        assertThat(adopted.path("document").path("scenes").get(1)).isEqualTo(saved.path("document").path("scenes").get(1));
-        assertThat(adopted.path("document").path("scenes").get(0).path("lines").get(0).path("text").asText()).isEqualTo("局部修改句");
-    }
-
-    @Test
-    void 普通任务使用真实来源章且检查点取消与迟到回调保持幂等() {
-        String episodeId=episode("普通队列").path("id").asText();
-        episodes.createSourceSet(userId,episodeId,sourceRequest(1));
-        ObjectNode started=runs.start(userId,episodeId,runRequest(2,"episode_script_generate",List.of(),"改编"));
-        String runId=started.path("runId").asText();
-        var row=database.dsl().fetchOne("SELECT * FROM \"WorkflowRun\" WHERE id=?",runId);
-        assertThat(row.get("engineVersion",Integer.class)).isEqualTo(1);
-        assertThat(row.get("chapterId",String.class)).isEqualTo(chapterId);
-        assertThat(database.dsl().fetchOne("SELECT count(*) n FROM \"WorkflowStep\" WHERE \"runId\"=?",runId).get("n",Integer.class)).isZero();
-        ObjectNode checkpoint=object("phase","review","cycle",0,"candidate",object("scenes",List.of()),"review",null);
-        tasks.checkpoint(userId,novelId,runId,object("phase","generate_started","cycle",0,"candidate",null,"review",null));
-        tasks.checkpoint(userId,novelId,runId,checkpoint);
-        assertThat(tasks.progress(userId,novelId,runId).path("checkpoint")).isEqualTo(checkpoint);
-        tasks.checkpoint(userId,novelId,runId,checkpoint);
-        assertThat(runs.get(userId,episodeId,runId).path("revision").asInt()).isEqualTo(3);
-        assertCode(() -> tasks.checkpoint(userId,novelId,runId,
-                object("phase","generate","cycle",0,"candidate",null,"review",null)),
-                "VIDEO_EPISODE_CHECKPOINT_CONFLICT");
-        String cancelKey=key();
-        ObjectNode cancelled=tasks.cancel(userId,episodeId,runId,cancelKey,3);
-        assertThat(cancelled.path("revision").asInt()).isEqualTo(4);
-        assertThat(tasks.cancel(userId,episodeId,runId,cancelKey,3)).isEqualTo(cancelled);
-        assertThat(runs.get(userId,episodeId,runId).path("status").asText()).isEqualTo("running");
-        assertThat(tasks.progress(userId,novelId,runId).path("status").asText()).isEqualTo("cancelled");
-        assertCode(() -> tasks.checkpoint(userId,novelId,runId,
-                object("phase","review_started","cycle",0,"candidate",checkpoint.path("candidate"),"review",null)),
-                "VIDEO_EPISODE_TASK_CANCELLED");
-        assertThat(tasks.progress(userId,novelId,runId).path("checkpoint")).isEqualTo(checkpoint);
-        tasks.complete(userId,novelId,runId,object("candidate",object(),"review",object()));
-        assertThat(runs.get(userId,episodeId,runId).path("status").asText()).isEqualTo("cancelled");
-        tasks.fail(userId,novelId,runId,"LATE_ERROR","迟到失败",false);
-        assertThat(runs.get(userId,episodeId,runId).path("status").asText()).isEqualTo("cancelled");
-    }
-
-    @Test
-    void 剧本与分镜审阅分别遵守现有业务协议的数量上限() {
-        Map<String,Object> thirty=Map.of("decision","revise","summary","分镜逐镜意见",
-                "requiredChanges",java.util.Collections.nCopies(30,"明确修改"),
-                "findings",java.util.Collections.nCopies(200,Map.of("description","完整问题")));
-        tasks.requireReview("video_episode_storyboard",thirty);
-        assertCode(() -> tasks.requireReview("video_episode_script",thirty),"VIDEO_EPISODE_TASK_INVALID");
-        Map<String,Object> tooManyChanges=new java.util.LinkedHashMap<>(thirty);
-        tooManyChanges.put("requiredChanges",java.util.Collections.nCopies(31,"明确修改"));
-        assertCode(() -> tasks.requireReview("video_episode_storyboard",tooManyChanges),"VIDEO_EPISODE_TASK_INVALID");
-        Map<String,Object> tooManyFindings=new java.util.LinkedHashMap<>(thirty);
-        tooManyFindings.put("findings",java.util.Collections.nCopies(201,Map.of("description","完整问题")));
-        assertCode(() -> tasks.requireReview("video_episode_storyboard",tooManyFindings),"VIDEO_EPISODE_TASK_INVALID");
     }
 
     @Test

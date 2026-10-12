@@ -12,6 +12,13 @@ from inkforge_service_auth import RedisReplayStore
 
 from .clients.core import CoreBillingGateway, CoreServiceClient
 from .config import Settings, create_testing_settings
+from .execution import load_execution_registry
+from .execution.callbacks import ExecutionCallbackClient
+from .execution.executor import StatelessExecutionStepExecutor
+from .execution.journal import AsyncJournalRedis, RedisExecutionJournal
+from .execution.replayer import TerminalCallbackReplayer
+from .execution.router import router as execution_router
+from .execution.service import ExecutionService
 from .graph.parent_graph import ParentGraphDependencies, build_parent_graph
 from .jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
 from .jobs.portrait import ModelPortraitGenerator, PortraitJobHandler
@@ -22,16 +29,17 @@ from .jobs.short_medium import (
     ShortMediumWritingJobHandler,
     WritingJobDispatcher,
 )
-from .jobs.video_episode import EpisodeJobHandler
 from .jobs.writing import WritingJobHandler
 from .observability import HumanWorkflowLog, WorkflowModelObserver
 from .observability.router import router as debug_router
 from .operations.definitions import validate_public_operation_definitions
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
+from .providers.embeddings import OpenAIExecutionEmbeddingProvider
 from .providers.seedance import SeedanceProvider
 from .providers.seedance_router import router as seedance_router
 from .providers.selector import create_model_provider
+from .providers.video_responses import DeepSeekVideoResponsesProvider, ExecutionResponsesProvider
 from .queue.cancellation import RedisRunCancellation
 from .queue.consumer import JobHandler, QueueConsumer
 from .queue.repository import JobKind, RedisRunQueue
@@ -63,17 +71,25 @@ def create_app(
     core_request_verifier: CoreRequestVerifier | None = None,
     queue_consumer: ConsumerPort | None = None,
     workflow_log: HumanWorkflowLog | None = None,
+    execution_service: ExecutionService | None = None,
+    execution_redis: AsyncJournalRedis | None = None,
     model_provider: ModelProvider | None = None,
+    responses_provider: ExecutionResponsesProvider | None = None,
 ) -> FastAPI:
     validate_public_operation_definitions()
     loaded_settings = settings or (create_testing_settings() if testing else Settings())
+    execution_registry = load_execution_registry(
+        environment=loaded_settings.environment
+    ).with_rag_embedding_config(
+        loaded_settings.rag_embedding_model, loaded_settings.rag_embedding_base_url
+    )
     provider: ModelProvider | None = model_provider
     provider_error: str | None = None
-    if model_provider is not None:
+    if model_provider is not None or responses_provider is not None:
         if (
             loaded_settings.environment != "test"
-            or loaded_settings.e2e_model_control_url is None
-            or loaded_settings.e2e_model_control_token is None
+            or loaded_settings.e2e_execution_control_url is None
+            or loaded_settings.e2e_execution_control_token is None
         ):
             raise ValueError("外部 ModelProvider 注入只允许受双门禁的 E2E 测试")
     if model_provider is None:
@@ -81,6 +97,18 @@ def create_app(
             provider = create_model_provider(loaded_settings)
         except ValueError as exc:
             provider_error = str(exc)
+    video_responses = responses_provider
+    if (
+        video_responses is None
+        and loaded_settings.environment != "production"
+        and loaded_settings.model_provider != "fake"
+    ):
+        try:
+            video_responses = DeepSeekVideoResponsesProvider(loaded_settings)
+        except ValueError:
+            # 视频为独立可选能力；未配置不得让前 19 项模型路径装配失败。
+            video_responses = None
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         consumer = cast(ConsumerPort | None, getattr(app.state, "queue_consumer", None))
@@ -95,13 +123,47 @@ def create_app(
         )
         if supervisor is not None:
             supervisor.start()
+        v2_execution = cast(
+            ExecutionService | None,
+            getattr(app.state, "execution_service", None),
+        )
+        replayer = cast(
+            TerminalCallbackReplayer | None,
+            getattr(v2_execution, "callback_replayer", None),
+        )
+        replayer_supervisor = (
+            CoroutineSupervisor(
+                name="execution_callback_replayer",
+                coroutine_factory=replayer.run,
+                request_stop=replayer.request_stop,
+            )
+            if replayer is not None
+            else None
+        )
+        if replayer_supervisor is not None:
+            install_background_gate = getattr(
+                v2_execution,
+                "set_background_health_check",
+                None,
+            )
+            if callable(install_background_gate):
+                install_background_gate(replayer_supervisor.is_ready)
+            replayer_supervisor.start()
         app.state.consumer_supervisor = supervisor
         app.state.consumer_task = supervisor.task if supervisor is not None else None
+        app.state.execution_replayer_supervisor = replayer_supervisor
+        app.state.execution_replayer_task = (
+            replayer_supervisor.task if replayer_supervisor is not None else None
+        )
         try:
             yield
         finally:
             if supervisor is not None:
                 await supervisor.stop()
+            if v2_execution is not None:
+                await v2_execution.close()
+            if replayer_supervisor is not None:
+                await replayer_supervisor.stop()
             core_http = cast(
                 httpx.AsyncClient | None,
                 getattr(app.state, "core_http", None),
@@ -114,6 +176,9 @@ def create_app(
             )
             if embedding_http is not None:
                 await embedding_http.aclose()
+            responses_close = getattr(app.state.video_responses_provider, "aclose", None)
+            if responses_close is not None:
+                await responses_close()
             provider = cast(ModelProvider | None, getattr(app.state, "model_provider", None))
             provider_close = getattr(provider, "aclose", None)
             if provider_close is not None:
@@ -121,6 +186,11 @@ def create_app(
             redis = getattr(app.state, "redis", None)
             if redis is not None:
                 await redis.aclose()
+            execution_redis_client = getattr(app.state, "execution_redis", None)
+            if execution_redis_client is not None and execution_redis_client is not redis:
+                close_execution_redis = getattr(execution_redis_client, "aclose", None)
+                if close_execution_redis is not None:
+                    await close_execution_redis()
 
     app = FastAPI(
         title="InkForge 智能体服务",
@@ -131,8 +201,10 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = loaded_settings
+    app.state.execution_registry = execution_registry
     app.state.workflow_log = workflow_log
     app.state.model_provider = provider
+    app.state.video_responses_provider = video_responses
     app.state.seedance_provider = SeedanceProvider(
         api_key=loaded_settings.seedance_api_key,
         base_url=loaded_settings.seedance_base_url,
@@ -142,6 +214,7 @@ def create_app(
     app.state.model_runtime = (
         ModelRuntime(
             provider,
+            responses_provider=video_responses,
             max_concurrency=loaded_settings.agent_max_concurrency,
         )
         if provider is not None
@@ -153,8 +226,12 @@ def create_app(
     app.state.queue_consumer = queue_consumer
     app.state.consumer_supervisor = None
     app.state.consumer_task = None
+    app.state.execution_replayer_supervisor = None
+    app.state.execution_replayer_task = None
     app.state.embedding_provider = None
     app.state.runtime_error = None
+    app.state.execution_service = execution_service
+    app.state.execution_redis = execution_redis
     if not testing:
         _configure_runtime(app, loaded_settings)
 
@@ -167,6 +244,13 @@ def create_app(
         checks = {
             "model_provider": "ok" if app.state.model_provider is not None else "failed",
         }
+        execution_health = None
+        v2_execution = cast(
+            ExecutionService | None,
+            getattr(app.state, "execution_service", None),
+        )
+        if v2_execution is not None:
+            execution_health = await v2_execution.health()
         if loaded_settings.environment == "production":
             checks.update(
                 {
@@ -187,10 +271,39 @@ def create_app(
                     ),
                 }
             )
+            if not testing or v2_execution is not None:
+                checks["execution_journal"] = (
+                    "ok" if execution_health is not None and execution_health.ready else "failed"
+                )
             if not testing:
-                checks["redis"] = "ok" if await _redis_is_reachable(
-                    getattr(app.state, "redis", None)
-                ) else "failed"
+                ordinary_redis_ok = await _redis_is_reachable(getattr(app.state, "redis", None))
+                checks.update(
+                    {
+                        "redis": "ok" if ordinary_redis_ok else "failed",
+                        "execution_redis": (
+                            "ok"
+                            if execution_health is not None and execution_health.journal_connected
+                            else "failed"
+                        ),
+                        "execution_journal_persistence": (
+                            "ok"
+                            if execution_health is not None
+                            and execution_health.journal_persistence_ok
+                            and not execution_health.journal_quarantined
+                            else "failed"
+                        ),
+                    }
+                )
+            replayer_supervisor = cast(
+                CoroutineSupervisor | None,
+                getattr(app.state, "execution_replayer_supervisor", None),
+            )
+            if not testing or replayer_supervisor is not None:
+                checks["execution_callback_replayer"] = (
+                    "ok"
+                    if replayer_supervisor is not None and replayer_supervisor.is_ready()
+                    else "failed"
+                )
             if loaded_settings.rag_index_enabled:
                 checks["rag_indexer"] = (
                     "ok" if app.state.embedding_provider is not None else "failed"
@@ -199,6 +312,8 @@ def create_app(
         content: dict[str, object] = {
             "status": "ready" if ready else "not_ready",
             "checks": checks,
+            # 只暴露 canonical manifest 摘要，不暴露合同路径、Profile 内容或供应商凭据。
+            "executionManifestFingerprint": execution_registry.manifest_fingerprint,
         }
         if checks.get("queue_consumer") == "failed":
             supervisor = cast(
@@ -214,12 +329,46 @@ def create_app(
                 or _consumer_health_error_code(app.state.queue_consumer)
                 or "BACKGROUND_TASK_NOT_RUNNING"
             }
+        if checks.get("execution_callback_replayer") == "failed":
+            replayer_supervisor = cast(
+                CoroutineSupervisor | None,
+                getattr(app.state, "execution_replayer_supervisor", None),
+            )
+            background_tasks = cast(
+                dict[str, object],
+                content.setdefault("backgroundTasks", {}),
+            )
+            background_tasks["execution_callback_replayer"] = (
+                replayer_supervisor.error_code
+                if replayer_supervisor is not None
+                else "BACKGROUND_TASK_NOT_REGISTERED"
+            )
+        if execution_health is not None:
+            content["executionCallbacks"] = {
+                "pending": execution_health.callback_pending,
+                "rejected": execution_health.callback_rejected,
+                "errorCode": execution_health.error_code,
+            }
+            content["executionAdmission"] = {
+                "active": execution_health.admission_active,
+                "capacity": execution_health.admission_capacity,
+                "saturated": execution_health.admission_saturated,
+            }
+            content["executionJournal"] = {
+                "connected": execution_health.journal_connected,
+                "persistenceOk": execution_health.journal_persistence_ok,
+                "restoreQuarantined": execution_health.journal_quarantined,
+                "usedMemoryBytes": execution_health.journal_used_memory_bytes,
+                "maxmemoryBytes": execution_health.journal_maxmemory_bytes,
+                "evictedKeys": execution_health.journal_evicted_keys,
+            }
         return JSONResponse(
             status_code=200 if ready else 503,
             content=content,
         )
 
     install_service_auth_error_handler(app)
+    app.include_router(execution_router)
     app.include_router(runs_router)
     app.include_router(seedance_router)
     app.include_router(debug_router)
@@ -228,6 +377,7 @@ def create_app(
 
 def _configure_runtime(app: FastAPI, settings: Settings) -> None:
     try:
+        settings.validate_execution_redis_configuration()
         workflow_log = cast(HumanWorkflowLog | None, app.state.workflow_log)
         if workflow_log is None:
             workflow_log = HumanWorkflowLog(settings.workflow_human_log_dir)
@@ -244,6 +394,18 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 socket_timeout=5.0,
             )
             app.state.redis = redis
+        execution_redis = getattr(app.state, "execution_redis", None)
+        if execution_redis is None and settings.execution_redis_url is not None:
+            from redis.asyncio import Redis
+
+            execution_redis = Redis.from_url(
+                settings.execution_redis_url.get_secret_value(),
+                decode_responses=False,
+                max_connections=4,
+                socket_connect_timeout=2.0,
+                socket_timeout=5.0,
+            )
+            app.state.execution_redis = execution_redis
         if app.state.run_queue is None and redis is not None:
             app.state.run_queue = RedisRunQueue(
                 redis,
@@ -275,6 +437,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
             queue = cast(RedisRunQueue | None, app.state.run_queue)
             if provider is not None and queue is not None and app.state.queue_consumer is None:
                 embedding_provider: OpenAIEmbeddingProvider | None = None
+                execution_embedding_provider: OpenAIExecutionEmbeddingProvider | None = None
                 if (
                     settings.rag_embedding_api_key is not None
                     and settings.rag_embedding_base_url
@@ -297,9 +460,17 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         embedding_http,
                         model=settings.rag_embedding_model,
                     )
+                    if settings.rag_index_enabled:
+                        execution_embedding_provider = OpenAIExecutionEmbeddingProvider(
+                            embedding_http,
+                            model=settings.rag_embedding_model,
+                            base_url=settings.rag_embedding_base_url,
+                        )
                 app.state.embedding_provider = embedding_provider
                 model_runtime = ModelRuntime(
                     provider,
+                    embedding_provider=execution_embedding_provider,
+                    responses_provider=app.state.video_responses_provider,
                     billing=CoreBillingGateway(core),
                     observer=WorkflowModelObserver(workflow_log),
                     max_concurrency=settings.agent_max_concurrency,
@@ -346,10 +517,6 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 )
                 app.state.model_runtime = model_runtime
                 handlers: dict[JobKind, JobHandler] = {"writing": writing}
-                handlers["video"] = EpisodeJobHandler(
-                    core, model_runtime, max_output_tokens=settings.model_max_output_tokens,
-                    workflow_log=workflow_log,
-                )
                 handlers["portrait"] = PortraitJobHandler(
                     core,
                     ModelPortraitGenerator(
@@ -369,6 +536,29 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     queue,
                     handlers,
                     max_concurrency=settings.agent_max_concurrency,
+                )
+            if (
+                app.state.execution_service is None
+                and execution_redis is not None
+                and provider is not None
+            ):
+                model_runtime = cast(ModelRuntime, app.state.model_runtime)
+                journal = RedisExecutionJournal(
+                    cast(AsyncJournalRedis, execution_redis),
+                    retention=timedelta(hours=settings.execution_terminal_retention_hours),
+                    require_durability=settings.environment == "production",
+                )
+                app.state.execution_service = ExecutionService(
+                    journal=journal,
+                    registry=app.state.execution_registry,
+                    executor=StatelessExecutionStepExecutor(
+                        model_runtime,
+                        embedding=model_runtime,
+                        responses=model_runtime,
+                        max_output_tokens=settings.model_max_output_tokens,
+                    ),
+                    callbacks=ExecutionCallbackClient(core_http, signer),
+                    max_active_executions=settings.agent_max_concurrency,
                 )
     except (OSError, ValueError) as exc:
         app.state.runtime_error = str(exc)

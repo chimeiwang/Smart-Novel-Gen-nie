@@ -10,16 +10,6 @@ import org.junit.jupiter.api.Test;
 class CoreSettingsTest {
 
     @Test
-    void 历史结构开关优先新名称且兼容旧环境变量() {
-        assertThat(CoreSettings.from(Map.of("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true"))
-                .historicalWorkflowSchemaReady()).isTrue();
-        assertThat(CoreSettings.from(Map.of("HISTORICAL_WORKFLOW_SCHEMA_READY", "false",
-                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true")).historicalWorkflowSchemaReady()).isFalse();
-        assertThat(CoreSettings.from(Map.of("HISTORICAL_WORKFLOW_SCHEMA_READY", "true",
-                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "false")).historicalWorkflowSchemaReady()).isTrue();
-    }
-
-    @Test
     void 视频默认模拟且真实执行模式必须显式配置() {
         assertThat(CoreSettings.from(Map.of()).seedanceExecutionMode()).isEqualTo("simulated");
         assertThat(CoreSettings.from(Map.of("SEEDANCE_ENABLED", "true"))
@@ -54,9 +44,12 @@ class CoreSettingsTest {
         assertThat(settings.phoneAuthEnabled()).isFalse();
         assertThat(settings.phoneAuthSendEnabled()).isFalse();
         assertThat(settings.usernameRegistrationEnabled()).isTrue();
-        assertThat(settings.historicalWorkflowSchemaReady()).isFalse();
+        assertThat(settings.durableAgentRouteMode())
+                .isEqualTo(CoreSettings.DurableAgentRouteMode.OFF);
+        assertThat(settings.durableAgentExecutionSchemaReady()).isFalse();
         assertThat(settings.v1FreshAgentStartsEnabled()).isTrue();
         assertThat(settings.agentMaxConcurrency()).isEqualTo(3);
+        assertThat(settings.routesNewDurableAgentRun("user-1", "novel-1")).isFalse();
     }
 
     @Test
@@ -161,7 +154,75 @@ class CoreSettingsTest {
         assertThat(settings.ragIndexEnabled()).isTrue();
     }
 
+    @Test
+    void 耐久Agent关闭与精确白名单仍保持原范围() {
+        CoreSettings allowlist = CoreSettings.from(Map.of(
+                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1,user-2",
+                "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "novel-1"));
 
+        assertThat(allowlist.routesNewDurableAgentRun("user-1", "novel-1")).isTrue();
+        assertThat(allowlist.routesNewDurableAgentRun("user-1", "novel-x")).isFalse();
+        assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-1")).isFalse();
+        assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-x")).isFalse();
+        assertThat(allowlist.routesNewDurableAgentRun("user-1", null)).isFalse();
+        assertThat(allowlist.routesNewUserScopedDurableAgentRun("user-1")).isTrue();
+        assertThat(allowlist.routesNewUserScopedDurableAgentRun("user-x")).isFalse();
+        assertThat(allowlist.routesNewUserScopedDurableAgentRun(null)).isFalse();
+        assertThat(CoreSettings.from(Map.of()).routesNewUserScopedDurableAgentRun("user-1"))
+                .isFalse();
+        assertThat(CoreSettings.from(Map.of("DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true"))
+                        .routesNewUserScopedDurableAgentRun("user-1"))
+                .isFalse();
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "unknown")))
+                .hasMessageContaining("off、allowlist 或 all");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist")))
+                .hasMessageContaining("同时配置");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1")))
+                .hasMessageContaining("同时配置");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "bad id")))
+                .hasMessageContaining("无效 ID");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
+                .hasMessageContaining("数据库结构未就绪");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1",
+                        "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "novel-1")))
+                .hasMessageContaining("数据库结构未就绪");
+    }
+
+    @Test
+    void 耐久Agent全量要求新结构和关闭V1且不路由无归属请求() {
+        CoreSettings all = CoreSettings.from(Map.of(
+                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all",
+                "V1_FRESH_AGENT_STARTS_ENABLED", "false"));
+        assertThat(all.routesNewDurableAgentRun("user-new", "novel-old")).isTrue();
+        assertThat(all.routesNewUserScopedDurableAgentRun("user-new")).isTrue();
+        assertThat(all.routesNewDurableAgentRun(null, "novel-old")).isFalse();
+        assertThat(all.routesNewDurableAgentRun(" ", "novel-old")).isFalse();
+        assertThat(all.routesNewDurableAgentRun("user-new", null)).isFalse();
+        assertThat(all.routesNewDurableAgentRun("user-new", " ")).isFalse();
+        assertThat(all.routesNewUserScopedDurableAgentRun(null)).isFalse();
+        assertThat(all.routesNewUserScopedDurableAgentRun(" ")).isFalse();
+        assertThat(all.v1FreshAgentStartsEnabled()).isFalse();
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
+                .hasMessageContaining("必须关闭 V1 新建入口");
+    }
 
     @Test
     void V1新建入口门禁默认兼容且只能显式关闭() {

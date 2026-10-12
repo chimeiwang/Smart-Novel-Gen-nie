@@ -2,20 +2,33 @@ package cn.inkforge.core.workflows.infrastructure;
 
 import cn.inkforge.core.billing.domain.BillingPricing;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.platform.id.CuidV1Generator;
+import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException;
+import cn.inkforge.core.workflows.application.WorkflowExecutionContextReader;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.catalog.WorkflowExecutionContext;
+import cn.inkforge.core.workflows.domain.WorkflowBudgetExceededException;
 import cn.inkforge.core.workflows.domain.WorkflowResolvedModel;
+import cn.inkforge.core.workflows.domain.WorkflowRunBudget;
+import cn.inkforge.core.workflows.domain.WorkflowRunBudgetCharge;
+import cn.inkforge.core.workflows.domain.WorkflowStepBudget;
 import cn.inkforge.core.workflows.domain.WorkflowStepUsage;
 import cn.inkforge.core.workflows.domain.WorkflowUsageStatus;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.jooq.DSLContext;
 import org.jooq.Record;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 仅按冻结价格读取历史预留并计算对账金额；不再创建预留或执行模型调用。
+ * V2 Step 的积分预留、Run 累计预算和终报结算。
  *
  * <p>所有同时触及 V2 工作流与余额的事务固定按 Run → Step → BillingReservation → User 取行锁。V1
  * 计费只锁 User，随后用 MVCC 聚合 reservation 而不锁 Run/Step/Reservation 行，因此不存在反向 User → Run
@@ -31,10 +44,589 @@ final class WorkflowBillingCoordinator {
     private static final List<String> TERMINAL_STEP_STATUSES =
             List.of("completed", "failed", "skipped");
 
+    private final CuidV1Generator ids;
     private final ObjectMapper json;
+    private final ExecutionRegistry registry;
+    private final WorkflowExecutionContextReader executionContexts;
 
-    WorkflowBillingCoordinator(ObjectMapper json) {
+    WorkflowBillingCoordinator(
+            CuidV1Generator ids, ObjectMapper json, ExecutionRegistry registry) {
+        this(ids, json, registry, new JooqWorkflowExecutionContextReader(json));
+    }
+
+    WorkflowBillingCoordinator(CuidV1Generator ids, ObjectMapper json, ExecutionRegistry registry,
+            WorkflowExecutionContextReader executionContexts) {
+        this.ids = Objects.requireNonNull(ids);
         this.json = Objects.requireNonNull(json);
+        this.registry = Objects.requireNonNull(registry);
+        this.executionContexts = Objects.requireNonNull(executionContexts);
+    }
+
+    void reserve(
+            DSLContext transaction,
+            String runId,
+            String stepId,
+            WorkflowResolvedModel resolved,
+            LocalDateTime now) {
+        Objects.requireNonNull(transaction);
+        Objects.requireNonNull(resolved);
+        ExecutionRegistry.AuthorizedDeployment deployment = authorizeReservation(resolved);
+        Record run = transaction.fetchOne(
+                """
+                SELECT id, "userId", "novelId", "chapterId", "targetType", "targetId", workflow, operation,
+                       "operationCatalogVersion", "modelPolicyJson", status::text AS status, "budgetJson",
+                       "cancelRequestedAt"
+                FROM public."WorkflowRun"
+                WHERE id = ? AND "engineVersion" = 2
+                FOR UPDATE
+                """,
+                runId);
+        Record step = transaction.fetchOne(
+                """
+                SELECT id, "runId", status::text AS status, purpose, lane, "modelProfile", "modelProfileVersion",
+                       "outputSchema", "outputSchemaVersion",
+                       "budgetJson", "resolvedModelJson"
+                FROM public."WorkflowStep"
+                WHERE id = ? AND "runId" = ?
+                FOR UPDATE
+                """,
+                stepId,
+                runId);
+        if (run == null || step == null) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_BILLING_SCOPE_INVALID");
+        }
+        if (isTerminalRun(run.get("status", String.class))
+                || TERMINAL_STEP_STATUSES.contains(step.get("status", String.class))) {
+            return;
+        }
+        if (run.get("cancelRequestedAt", LocalDateTime.class) != null) {
+            throw new WorkflowExecutionRejectedException("RUN_CANCELLED");
+        }
+        WorkflowExecutionContext context = executionContexts.load(transaction, new WorkflowExecutionContext.RunIdentity(
+                runId, run.get("workflow", String.class), run.get("operation", String.class), run.get("operationCatalogVersion", String.class),
+                run.get("chapterId", String.class), run.get("targetType", String.class), run.get("targetId", String.class)),
+                readObject(run.get("modelPolicyJson", String.class)));
+        var frozenStep = context.requireStep(step.get("purpose", String.class), step.get("lane", String.class),
+                step.get("modelProfile", String.class), Integer.parseInt(step.get("modelProfileVersion", String.class)),
+                step.get("outputSchema", String.class), Integer.parseInt(step.get("outputSchemaVersion", String.class)),
+                readObject(step.get("budgetJson", String.class)));
+        resolved.requireAuthorizedBy(frozenStep.modelProfile().toDomain());
+        Map<String, Object> resolvedMap = WorkflowCallbackValues.resolvedModelMap(resolved);
+        String frozenResolved = step.get("resolvedModelJson", String.class);
+        if (frozenResolved == null || !readObject(frozenResolved).equals(resolvedMap)) {
+            throw new WorkflowExecutionRejectedException("MODEL_DEPLOYMENT_NOT_AUTHORIZED");
+        }
+
+        if ("rag".equals(run.get("workflow", String.class)) && "embedding".equals(run.get("operation", String.class))) {
+            // 同一索引的所有向量必须属于同一模型空间；配置更新不能在后续批次偷偷换模型或端点。
+            Record first = transaction.fetchOne("""
+                    SELECT "resolvedModelJson" FROM public."WorkflowStep"
+                    WHERE "runId" = ? AND id <> ? AND purpose = 'generation' AND status = 'completed'
+                    ORDER BY ordinal, id LIMIT 1
+                    """, runId, stepId);
+            if (first != null && (first.get("resolvedModelJson", String.class) == null
+                    || !readObject(first.get("resolvedModelJson", String.class)).equals(resolvedMap))) {
+                throw new WorkflowExecutionRejectedException("MODEL_DEPLOYMENT_NOT_AUTHORIZED");
+            }
+        }
+
+        Record existing = lockReservation(transaction, stepId);
+        Map<String, Object> pricing = pricingSnapshot(resolvedMap, deployment);
+        WorkflowStepBudget stepBudget = frozenStep.stepBudget().budget();
+        long reservedMicros = deployment.billable()
+                ? worstCreditCharge(stepBudget, pricing)
+                : 0L;
+        if (existing != null) {
+            requireSameReservation(
+                    existing, run, step, deployment.pricingVersion(), pricing, reservedMicros);
+            return;
+        }
+
+        requireRunBudget(transaction, run, stepId, context);
+        String userId = run.get("userId", String.class);
+        Record user = transaction.fetchOne(
+                """
+                SELECT id, "creditBalanceMicros"
+                FROM public."User"
+                WHERE id = ?
+                FOR UPDATE
+                """,
+                userId);
+        if (user == null) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_BILLING_SCOPE_INVALID");
+        }
+        long outstanding = outstandingReservations(transaction, userId);
+        long balance = user.get("creditBalanceMicros", Long.class);
+        if (reservedMicros > Math.subtractExact(balance, outstanding)) {
+            throw new WorkflowExecutionRejectedException("INSUFFICIENT_CREDITS");
+        }
+        transaction.execute(
+                """
+                INSERT INTO public."WorkflowBillingReservation" (
+                  id, "runId", "stepId", "userId", "requestId", "pricingVersion",
+                  "pricingJson", "reservedMicros", "chargedMicros", status,
+                  "createdAt", "updatedAt"
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'reserved', ?, ?)
+                """,
+                ids.next(),
+                runId,
+                stepId,
+                userId,
+                ids.next(),
+                deployment.pricingVersion(),
+                json.writeValueAsString(pricing),
+                reservedMicros,
+                now,
+                now);
+    }
+
+    /** waiting_provider 必须看到 preparing 原子门已经建立的有效预留。 */
+    void requireProviderGate(DSLContext transaction, String runId, String stepId) {
+        Record value = transaction.fetchOne(
+                """
+                SELECT reservation.status, reservation."pricingVersion", reservation."pricingJson",
+                       step."resolvedModelJson", run."cancelRequestedAt"
+                FROM public."WorkflowRun" AS run
+                JOIN public."WorkflowStep" AS step ON step."runId" = run.id
+                LEFT JOIN public."WorkflowBillingReservation" AS reservation
+                  ON reservation."stepId" = step.id AND reservation."runId" = run.id
+                WHERE run.id = ? AND step.id = ? AND run."engineVersion" = 2
+                """,
+                runId,
+                stepId);
+        if (value == null) {
+            throw new ApiException(409, "WORKFLOW_BILLING_SCOPE_INVALID", "Workflow 计费范围无效");
+        }
+        if (value.get("cancelRequestedAt", LocalDateTime.class) != null) {
+            throw new ApiException(409, "WORKFLOW_CANCEL_PENDING", "Workflow Run 正在停止");
+        }
+        if (value.get("status", String.class) == null
+                || value.get("resolvedModelJson", String.class) == null) {
+            // preparing 尚未完成或事务仍在提交时必须重试，不能放行无预留 Provider。
+            throw new ApiException(
+                    503,
+                    "WORKFLOW_BILLING_RESERVATION_PENDING",
+                    "Workflow 模型预留尚未完成");
+        }
+        if (!"reserved".equals(value.get("status", String.class))) {
+            throw new ApiException(409, "WORKFLOW_BILLING_RESERVATION_INVALID", "Workflow 模型预留不可用");
+        }
+        Map<String, Object> pricing = readObject(value.get("pricingJson", String.class));
+        Map<String, Object> resolved = readObject(value.get("resolvedModelJson", String.class));
+        if (!resolved.equals(object(pricing.get("resolvedModel"), "resolvedModel"))) {
+            throw new WorkflowExecutionRejectedException("MODEL_DEPLOYMENT_NOT_AUTHORIZED");
+        }
+        String pricingVersion = value.get("pricingVersion", String.class);
+        requireSupportedPricing(pricingVersion);
+        boolean billable = bool(pricing, "billable");
+        if (!frozenPricingSnapshot(resolved, pricingVersion, billable).equals(pricing)) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_BILLING_PRICING_DRIFT");
+        }
+    }
+
+    /**
+     * matching-fence 终报是唯一能在 running 后证明 providerAttempts=0 的事实；否则未知字段保留预留待对账。
+     */
+    WorkflowStepUsage settleTerminal(
+            DSLContext transaction,
+            String runId,
+            String stepId,
+            WorkflowStepUsage usage,
+            LocalDateTime now) {
+        Objects.requireNonNull(usage);
+        if (usage.providerAttempts() == 0
+                && (usage.usageStatus() != WorkflowUsageStatus.UNKNOWN
+                        || usage.protocolCorrections() != 0
+                        || hasKnownProviderUsage(usage))) {
+            throw new ApiException(
+                    409,
+                    "WORKFLOW_USAGE_ATTEMPT_MISMATCH",
+                    "零供应商尝试不能携带供应商用量或协议纠正");
+        }
+        Record reservation = lockReservation(transaction, stepId);
+        if (reservation == null) {
+            if (usage.providerAttempts() == 0) return usage;
+            throw new ApiException(
+                    409,
+                    "WORKFLOW_BILLING_RESERVATION_MISSING",
+                    "已调用模型的 Workflow Step 缺少计费预留");
+        }
+        requireReservationScope(reservation, runId, stepId);
+        validateFrozenPricing(reservation);
+        String status = reservation.get("status", String.class);
+        if (!"reserved".equals(status)) {
+            throw new ApiException(
+                    409,
+                    "WORKFLOW_BILLING_RESERVATION_TERMINAL",
+                    "Workflow Step 的计费预留已经结算");
+        }
+        String usageJson = json.writeValueAsString(WorkflowCallbackValues.usageMap(usage));
+        if (usage.providerAttempts() == 0) {
+            if (hasKnownProviderUsage(usage)) {
+                throw new ApiException(
+                        409,
+                        "WORKFLOW_USAGE_ATTEMPT_MISMATCH",
+                        "零供应商尝试不能携带供应商用量");
+            }
+            transaction.execute(
+                    """
+                    UPDATE public."WorkflowBillingReservation"
+                    SET status = 'released', "chargedMicros" = 0, "usageJson" = ?,
+                        "settledAt" = ?, "updatedAt" = ?
+                    WHERE id = ? AND status = 'reserved'
+                    """,
+                    usageJson,
+                    now,
+                    now,
+                    reservation.get("id", String.class));
+            return usage;
+        }
+        if (!hasExactCreditUsage(usage)) {
+            markReconciliation(transaction, reservation, usageJson, now);
+            return usage;
+        }
+        settleExact(transaction, reservation, usage, usageJson, now);
+        return usage;
+    }
+
+    /** pending Step 尚未进入执行器时取消，或确定性提交拒绝，才能无条件释放。 */
+    void releaseUnstarted(
+            DSLContext transaction, String runId, String stepId, LocalDateTime now) {
+        releaseProvenNoProviderAttempt(
+                transaction,
+                runId,
+                stepId,
+                new WorkflowStepUsage(
+                        WorkflowUsageStatus.UNKNOWN,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        0,
+                        0),
+                now);
+    }
+
+    /** matching-fence preparing/waiting_provider 的拒绝回执可精确证明尚未调用 Provider。 */
+    void releaseProvenNoProviderAttempt(
+            DSLContext transaction,
+            String runId,
+            String stepId,
+            WorkflowStepUsage usage,
+            LocalDateTime now) {
+        if (usage.providerAttempts() != 0 || hasKnownProviderUsage(usage)) {
+            throw new IllegalArgumentException("只有明确零 Provider attempt 才能释放预留");
+        }
+        Record reservation = lockReservation(transaction, stepId);
+        if (reservation == null) return;
+        requireReservationScope(reservation, runId, stepId);
+        if (!"reserved".equals(reservation.get("status", String.class))) return;
+        String usageJson = json.writeValueAsString(WorkflowCallbackValues.usageMap(usage));
+        transaction.execute(
+                """
+                UPDATE public."WorkflowBillingReservation"
+                SET status = 'released', "chargedMicros" = 0, "usageJson" = ?,
+                    "settledAt" = ?, "updatedAt" = ?
+                WHERE id = ? AND status = 'reserved'
+                """,
+                usageJson,
+                now,
+                now,
+                reservation.get("id", String.class));
+    }
+
+    /**
+     * running 租约过期只说明 Core 看不到 ACK，不能证明供应商未收到请求；即使最后快照 attempts=0 也保留额度。
+     */
+    void markExpiredRunningForReconciliation(
+            DSLContext transaction,
+            String runId,
+            String stepId,
+            String usageJson,
+            LocalDateTime now) {
+        Record reservation = lockReservation(transaction, stepId);
+        if (reservation == null) {
+            throw new IllegalStateException("running Workflow Step 缺少 BillingReservation");
+        }
+        requireReservationScope(reservation, runId, stepId);
+        if (!"reserved".equals(reservation.get("status", String.class))) return;
+        // 取消收敛器只会传入自己已验证/构造的 JSON 对象；这里再次解析，防止损坏快照污染财务事实。
+        readObject(usageJson);
+        markReconciliation(transaction, reservation, usageJson, now);
+    }
+
+    private void requireRunBudget(DSLContext transaction, Record run, String currentStepId, WorkflowExecutionContext context) {
+        WorkflowRunBudget budget = context.outerRunBudget().toDomain();
+        if (!budget.equals(runBudget(run.get("budgetJson", String.class)))) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_RUN_BUDGET_INVALID");
+        }
+        List<Record> steps = transaction.fetch(
+                """
+                SELECT step.id, step.status::text AS status, step.purpose, step."budgetJson",
+                       step."usageJson", reservation.status AS reservation_status
+                FROM public."WorkflowStep" AS step
+                LEFT JOIN public."WorkflowBillingReservation" AS reservation
+                  ON reservation."stepId" = step.id
+                WHERE step."runId" = ? AND step."budgetJson" IS NOT NULL
+                ORDER BY step.ordinal, step.id
+                """,
+                run.get("id", String.class));
+        List<WorkflowRunBudgetCharge> charges = new ArrayList<>();
+        List<WorkflowRunBudgetCharge> businessCharges = new ArrayList<>();
+        for (Record value : steps) {
+            WorkflowStepBudget stepBudget = stepBudget(value.get("budgetJson", String.class));
+            boolean correction = "protocol_correction".equals(value.get("purpose", String.class));
+            boolean resolver = "resolve_intent".equals(value.get("purpose", String.class));
+            String status = value.get("status", String.class);
+            if ("pending".equals(status) || "running".equals(status)) {
+                addCharge(charges, businessCharges, WorkflowRunBudgetCharge.active(stepBudget, correction), resolver);
+                continue;
+            }
+            String reservationStatus = value.get("reservation_status", String.class);
+            if ("reconciliation_required".equals(reservationStatus)) {
+                addCharge(charges, businessCharges, WorkflowRunBudgetCharge.active(stepBudget, correction), resolver);
+                continue;
+            }
+            String usageJson = value.get("usageJson", String.class);
+            if (usageJson == null) continue;
+            WorkflowStepUsage usage = usage(readObject(usageJson));
+            if (usage.providerAttempts() == 0) {
+                addCharge(charges, businessCharges, new WorkflowRunBudgetCharge(
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        usage.wallTimeMillis(),
+                        correction ? 1 : 0), resolver);
+            } else {
+                addCharge(charges, businessCharges, WorkflowRunBudgetCharge.terminal(stepBudget, usage, correction), resolver);
+            }
+        }
+        if (steps.stream().noneMatch(value -> currentStepId.equals(value.get("id", String.class)))) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_RUN_BUDGET_INVALID");
+        }
+        try {
+            budget.requireWithin(charges);
+            if (context.businessPlan() != null) context.businessPlan().runBudget().toDomain().requireWithin(businessCharges);
+        } catch (WorkflowBudgetExceededException exception) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_RUN_BUDGET_EXCEEDED");
+        }
+    }
+
+    private static void addCharge(List<WorkflowRunBudgetCharge> outer, List<WorkflowRunBudgetCharge> business,
+            WorkflowRunBudgetCharge charge, boolean resolver) {
+        outer.add(charge);
+        if (!resolver) business.add(charge);
+    }
+
+    private void settleExact(
+            DSLContext transaction,
+            Record reservation,
+            WorkflowStepUsage usage,
+            String usageJson,
+            LocalDateTime now) {
+        Map<String, Object> pricing = readObject(reservation.get("pricingJson", String.class));
+        boolean billable = bool(pricing, "billable");
+        WorkflowResolvedModel resolved = resolvedModel(object(pricing.get("resolvedModel"), "resolvedModel"));
+        int promptTokens = Math.toIntExact(usage.inputTokens());
+        int cachedTokens = Math.toIntExact(usage.cachedTokens());
+        int completionTokens = Math.toIntExact(usage.completionTokens());
+        if (cachedTokens > promptTokens) {
+            throw new ApiException(
+                    409,
+                    "WORKFLOW_USAGE_INVALID",
+                    "缓存 token 不能超过输入 token");
+        }
+        int totalTokens = Math.addExact(promptTokens, completionTokens);
+        long charge = billable
+                ? creditCharge(pricing, promptTokens, cachedTokens, completionTokens)
+                : 0L;
+        long reserved = reservation.get("reservedMicros", Long.class);
+        if (charge > reserved) {
+            // 实际供应商用量已经发生，但用户只授权了冻结预留上限。保留完整
+            // usage 并转人工对账；不能自动超扣，也不能拒绝终报导致无限回放。
+            markReconciliation(transaction, reservation, usageJson, now);
+            return;
+        }
+        String requestId = reservation.get("requestId", String.class);
+        Record existingUsage = transaction.fetchOne(
+                """
+                SELECT id, "userId", model, "promptTokens", "cachedTokens",
+                       "promptCacheMissTokens", "completionTokens", "reasoningTokens",
+                       "totalTokens", "agentId", "novelId", "taskId", "runId"
+                FROM public."TokenUsage" WHERE "requestId" = ?
+                """,
+                requestId);
+        if (existingUsage != null) {
+            throw new IllegalStateException("reserved 状态却已存在相同 requestId 的 TokenUsage");
+        }
+        String userId = reservation.get("userId", String.class);
+        Record user = transaction.fetchOne(
+                """
+                SELECT id, "creditBalanceMicros" FROM public."User"
+                WHERE id = ? FOR UPDATE
+                """,
+                userId);
+        if (user == null) throw new IllegalStateException("Workflow 计费用户不存在");
+        long balance = user.get("creditBalanceMicros", Long.class);
+        long balanceAfter = Math.subtractExact(balance, charge);
+        if (balanceAfter < 0) {
+            throw new IllegalStateException("Workflow 已预留积分在结算前被其他链路透支");
+        }
+        Record scope = transaction.fetchOne(
+                """
+                SELECT run."novelId", step."modelProfile"
+                FROM public."WorkflowRun" AS run
+                JOIN public."WorkflowStep" AS step ON step."runId" = run.id
+                WHERE run.id = ? AND step.id = ?
+                """,
+                reservation.get("runId", String.class),
+                reservation.get("stepId", String.class));
+        if (scope == null) throw new IllegalStateException("Workflow 计费范围已丢失");
+        if (charge > 0) {
+            transaction.execute(
+                    """
+                    UPDATE public."User" SET "creditBalanceMicros" = ?
+                    WHERE id = ?
+                    """,
+                    balanceAfter,
+                    userId);
+            transaction.execute(
+                    """
+                    INSERT INTO public."CreditLedger" (
+                      id, "userId", type, "amountMicros", "balanceAfterMicros", model,
+                      "promptTokens", "completionTokens", "cachedTokens", "totalTokens",
+                      "agentId", "novelId", "requestId", note, "createdAt"
+                    ) VALUES (?, ?, 'ai_charge', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ids.next(),
+                    userId,
+                    -charge,
+                    balanceAfter,
+                    resolved.model(),
+                    promptTokens,
+                    completionTokens,
+                    cachedTokens,
+                    totalTokens,
+                    scope.get("modelProfile", String.class),
+                    scope.get("novelId", String.class),
+                    requestId,
+                    "V2 Workflow 模型调用",
+                    now);
+        }
+        transaction.execute(
+                """
+                INSERT INTO public."TokenUsage" (
+                  id, "userId", model, "promptTokens", "completionTokens", "cachedTokens",
+                  "totalTokens", "agentId", "novelId", "createdAt", "requestId",
+                  "taskId", "runId", "promptCacheMissTokens", "reasoningTokens"
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ids.next(),
+                userId,
+                resolved.model(),
+                promptTokens,
+                completionTokens,
+                cachedTokens,
+                totalTokens,
+                scope.get("modelProfile", String.class),
+                scope.get("novelId", String.class),
+                now,
+                requestId,
+                reservation.get("stepId", String.class),
+                reservation.get("runId", String.class),
+                nullableInteger(usage.promptCacheMissTokens()),
+                nullableInteger(usage.reasoningTokens()));
+        transaction.execute(
+                """
+                UPDATE public."WorkflowBillingReservation"
+                SET status = 'settled', "chargedMicros" = ?, "usageJson" = ?,
+                    "settledAt" = ?, "updatedAt" = ?
+                WHERE id = ? AND status = 'reserved'
+                """,
+                charge,
+                usageJson,
+                now,
+                now,
+                reservation.get("id", String.class));
+    }
+
+    private void markReconciliation(
+            DSLContext transaction,
+            Record reservation,
+            String usageJson,
+            LocalDateTime now) {
+        transaction.execute(
+                """
+                UPDATE public."WorkflowBillingReservation"
+                SET status = 'reconciliation_required', "chargedMicros" = 0,
+                    "usageJson" = ?, "settledAt" = NULL, "updatedAt" = ?
+                WHERE id = ? AND status = 'reserved'
+                """,
+                usageJson,
+                now,
+                reservation.get("id", String.class));
+    }
+
+    private Record lockReservation(DSLContext transaction, String stepId) {
+        return transaction.fetchOne(
+                """
+                SELECT reservation.*, run."novelId", step."modelProfile"
+                FROM public."WorkflowBillingReservation" AS reservation
+                JOIN public."WorkflowRun" AS run ON run.id = reservation."runId"
+                JOIN public."WorkflowStep" AS step ON step.id = reservation."stepId"
+                WHERE reservation."stepId" = ?
+                FOR UPDATE OF reservation
+                """,
+                stepId);
+    }
+
+    private static void requireReservationScope(
+            Record reservation, String runId, String stepId) {
+        if (!Objects.equals(reservation.get("runId", String.class), runId)
+                || !Objects.equals(reservation.get("stepId", String.class), stepId)) {
+            throw new ApiException(409, "WORKFLOW_BILLING_SCOPE_INVALID", "Workflow 计费范围无效");
+        }
+    }
+
+    private void requireSameReservation(
+            Record existing,
+            Record run,
+            Record step,
+            String pricingVersion,
+            Map<String, Object> pricing,
+            long reservedMicros) {
+        boolean same = Objects.equals(existing.get("runId", String.class), run.get("id", String.class))
+                && Objects.equals(existing.get("stepId", String.class), step.get("id", String.class))
+                && Objects.equals(existing.get("userId", String.class), run.get("userId", String.class))
+                && pricingVersion.equals(existing.get("pricingVersion", String.class))
+                && existing.get("reservedMicros", Long.class) == reservedMicros
+                && readObject(existing.get("pricingJson", String.class)).equals(pricing);
+        if (!same) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_BILLING_PRICING_DRIFT");
+        }
+        if (!"reserved".equals(existing.get("status", String.class))) {
+            throw new WorkflowExecutionRejectedException("WORKFLOW_BILLING_RESERVATION_TERMINAL");
+        }
+    }
+
+    private ExecutionRegistry.AuthorizedDeployment authorizeReservation(
+            WorkflowResolvedModel resolved) {
+        try {
+            ExecutionRegistry.AuthorizedDeployment deployment =
+                    registry.requireAuthorizedDeployment(resolved);
+            requireSupportedPricing(deployment.pricingVersion());
+            return deployment;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            throw new WorkflowExecutionRejectedException("MODEL_DEPLOYMENT_NOT_AUTHORIZED");
+        }
     }
 
     private void validateFrozenPricing(Record reservation) {
@@ -86,6 +678,13 @@ final class WorkflowBillingCoordinator {
         return usage(readObject(usageJson));
     }
 
+    private static Map<String, Object> pricingSnapshot(
+            Map<String, Object> resolvedModel,
+            ExecutionRegistry.AuthorizedDeployment deployment) {
+        return frozenPricingSnapshot(
+                resolvedModel, deployment.pricingVersion(), deployment.billable());
+    }
+
     private static Map<String, Object> frozenPricingSnapshot(
             Map<String, Object> resolvedModel, String pricingVersion, boolean billable) {
         requireSupportedPricing(pricingVersion);
@@ -114,6 +713,18 @@ final class WorkflowBillingCoordinator {
         }
     }
 
+    private static long worstCreditCharge(
+            WorkflowStepBudget budget, Map<String, Object> pricing) {
+        Map<String, Object> rates = object(pricing.get("rates"), "pricing rates");
+        return Math.addExact(
+                Math.multiplyExact(
+                        budget.maxInputTokens(),
+                        longInteger(rates, "uncachedInputMicrosPerToken")),
+                Math.multiplyExact(
+                        budget.maxCompletionTokens(),
+                        longInteger(rates, "outputMicrosPerToken")));
+    }
+
     private static long creditCharge(
             Map<String, Object> pricing,
             int promptTokens,
@@ -134,10 +745,63 @@ final class WorkflowBillingCoordinator {
                         longInteger(rates, "outputMicrosPerToken")));
     }
 
+    private static long outstandingReservations(DSLContext transaction, String userId) {
+        BigDecimal value = transaction.fetchOne(
+                        """
+                        SELECT COALESCE(sum("reservedMicros"), 0)::numeric AS reserved
+                        FROM public."WorkflowBillingReservation"
+                        WHERE "userId" = ? AND status IN ('reserved', 'reconciliation_required')
+                        """,
+                        userId)
+                .get("reserved", BigDecimal.class);
+        return value.longValueExact();
+    }
+
     private static boolean hasExactCreditUsage(WorkflowStepUsage usage) {
         return usage.inputTokens() != null
                 && usage.cachedTokens() != null
                 && usage.completionTokens() != null;
+    }
+
+    private static boolean hasKnownProviderUsage(WorkflowStepUsage usage) {
+        return usage.inputTokens() != null
+                || usage.cachedTokens() != null
+                || usage.promptCacheMissTokens() != null
+                || usage.completionTokens() != null
+                || usage.reasoningTokens() != null
+                || usage.visibleOutputTokens() != null
+                || usage.costMicros() != null;
+    }
+
+    private WorkflowRunBudget runBudget(String value) {
+        Map<String, Object> budget = readObject(value);
+        return new WorkflowRunBudget(
+                integer(budget, "maxModelCalls"),
+                longInteger(budget, "maxInputTokens"),
+                longInteger(budget, "maxPromptCacheMissTokens"),
+                longInteger(budget, "maxCompletionTokens"),
+                longInteger(budget, "maxReasoningTokens"),
+                longInteger(budget, "maxVisibleOutputTokens"),
+                longInteger(budget, "maxCostMicros"),
+                longInteger(budget, "maxWallClockSeconds"),
+                integer(budget, "maxProviderRetriesPerStep"),
+                integer(budget, "maxProtocolCorrectionSteps"));
+    }
+
+    private WorkflowStepBudget stepBudget(String value) {
+        Map<String, Object> wrapper = readObject(value);
+        Map<String, Object> budget = object(wrapper.get("budget"), "Step budget");
+        return new WorkflowStepBudget(
+                integer(budget, "maxModelCalls"),
+                longInteger(budget, "maxInputTokens"),
+                longInteger(budget, "maxPromptCacheMissTokens"),
+                longInteger(budget, "maxCompletionTokens"),
+                longInteger(budget, "maxReasoningTokens"),
+                longInteger(budget, "maxVisibleOutputTokens"),
+                longInteger(budget, "maxCostMicros"),
+                longInteger(budget, "maxWallClockSeconds"),
+                integer(budget, "maxProviderRetries"),
+                integer(budget, "maxProtocolCorrections"));
     }
 
     private static WorkflowStepUsage usage(Map<String, Object> value) {
@@ -217,4 +881,11 @@ final class WorkflowBillingCoordinator {
         return value.containsKey(key) ? longInteger(value, key) : null;
     }
 
+    private static Integer nullableInteger(Long value) {
+        return value == null ? null : Math.toIntExact(value);
+    }
+
+    private static boolean isTerminalRun(String status) {
+        return List.of("completed", "failed", "cancelled").contains(status);
+    }
 }

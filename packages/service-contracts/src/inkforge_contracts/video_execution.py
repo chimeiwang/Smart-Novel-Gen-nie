@@ -4,8 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
-from .content import ResourceId as ExecutionId
-from .content import Sha256
+from .execution import ExecutionId, Sha256
 from .video_adaptation import (
     ChapterAdaptationPlanCandidate,
     ChapterAdaptationPlanJobPayload,

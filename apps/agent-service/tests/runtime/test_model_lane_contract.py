@@ -12,7 +12,7 @@ def test_every_production_model_runtime_call_declares_lane_explicitly() -> None:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
                 continue
-            if node.func.attr not in {"run_turn"}:
+            if node.func.attr not in {"run_turn", "run_execution_turn"}:
                 continue
             if not any(keyword.arg == "lane" for keyword in node.keywords):
                 missing.append(f"{path.relative_to(source_root)}:{node.lineno}")
